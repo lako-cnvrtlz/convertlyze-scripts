@@ -64,10 +64,9 @@
     var planTextEl = document.querySelector('[data-danke="plan-text"]');
     if (planTextEl) planTextEl.textContent = planInfo.text;
 
-    // ── Elemente einblenden ──
-    document.querySelectorAll('[data-danke="firstname"], [data-danke="plan-text"], #danke-hero').forEach(function(el) {
-  el.style.visibility = 'visible';
-});
+    // ── Wrapper einblenden ──
+    var hero = document.querySelector('#danke-hero');
+    if (hero) hero.style.visibility = 'visible';
 
   } // ← initDankePage schließt hier
 
