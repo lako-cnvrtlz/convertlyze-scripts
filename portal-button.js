@@ -1,7 +1,9 @@
-document.getElementById('portal-btn').addEventListener('click', async () => {
+document.getElementById('portal-btn').addEventListener('click', async (e) => {
+  e.preventDefault()
   console.log('Button geklickt')
-  
-  const member = await memberstack.getMemberJSON()
+
+  const ms = window.$memberstackDom
+  const member = await ms.getMemberJSON()
   console.log('Member:', member)
   
   const token = member?.data?.auth?.tokens?.accessToken
