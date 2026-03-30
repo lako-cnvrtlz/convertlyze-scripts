@@ -76,35 +76,6 @@
     var planTextEl = document.querySelector('[data-danke="plan-text"]');
     if (planTextEl) planTextEl.textContent = planInfo.text;
 
-    // ── PPU: Weiterleitung zum Analyse-Formular ──
-    if (planInfo.isPPU) {
-      var ppuSection   = document.querySelector('[data-danke="ppu-section"]');
-      var aboSection   = document.querySelector('[data-danke="abo-section"]');
-      if (ppuSection) ppuSection.style.display = 'block';
-      if (aboSection) aboSection.style.display = 'none';
-
-      // Nach 3 Sekunden automatisch zum Formular weiterleiten
-      var countdown = document.querySelector('[data-danke="countdown"]');
-      var seconds = 5;
-      if (countdown) {
-        countdown.textContent = seconds;
-        var interval = setInterval(function() {
-          seconds--;
-          countdown.textContent = seconds;
-          if (seconds <= 0) {
-            clearInterval(interval);
-            window.location.href = '/analyse/formular';
-          }
-        }, 1000);
-      }
-    } else {
-      var ppuSection2 = document.querySelector('[data-danke="ppu-section"]');
-      var aboSection2 = document.querySelector('[data-danke="abo-section"]');
-      if (ppuSection2) ppuSection2.style.display = 'none';
-      if (aboSection2) aboSection2.style.display = 'block';
-    }
-  }
-
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initDankePage);
   } else {
