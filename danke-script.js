@@ -1,3 +1,9 @@
+// ── Hero sofort verstecken ────────────────────────────────────────────────
+(function() {
+  var hero = document.querySelector('#danke-hero');
+  if (hero) hero.style.opacity = '0';
+})();
+
 // ==================== DANKE-SEITE SCRIPT ====================
 (function() {
 
@@ -20,13 +26,25 @@
     'Pay-per-Use':  { text: 'Deine Analyse ist bereit. Starte jetzt direkt.' }
   };
 
+  function revealHero() {
+    var hero = document.querySelector('#danke-hero');
+    if (hero) {
+      hero.style.transition = 'opacity 0.4s ease';
+      hero.style.opacity = '1';
+    }
+  }
+
   async function initDankePage() {
     var attempts = 0;
     while ((!window.$memberstackDom || !window.supabase) && attempts < 30) {
       await new Promise(function(r) { setTimeout(r, 300); });
       attempts++;
     }
-    if (!window.$memberstackDom) return;
+
+    if (!window.$memberstackDom) {
+      revealHero();
+      return;
+    }
 
     var params   = new URLSearchParams(window.location.search);
     var priceId  = params.get('msPriceId') || params.get('stripePriceId') || '';
@@ -34,7 +52,7 @@
 
     var result = await window.$memberstackDom.getCurrentMember();
     var member = result?.data;
-    if (!member) return;
+    if (!member) { revealHero(); return; }
 
     var supabaseResult = await window.supabase
       .from('users')
@@ -43,7 +61,7 @@
       .single();
 
     var user = supabaseResult?.data;
-    if (!user) return;
+    if (!user) { revealHero(); return; }
 
     if (!planInfo) {
       var isPaidPlan = ['Starter', 'Pro', 'Professional', 'Enterprise'].indexOf(user.license_type) !== -1;
@@ -63,6 +81,9 @@
     // ── Plan-Text setzen ──
     var planTextEl = document.querySelector('[data-danke="plan-text"]');
     if (planTextEl) planTextEl.textContent = planInfo.text;
+
+    // ── Hero einblenden ──
+    revealHero();
 
   } // ← initDankePage schließt hier
 
