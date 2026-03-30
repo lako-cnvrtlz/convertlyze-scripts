@@ -2,22 +2,22 @@
 (function() {
 
   var PLAN_DATA = {
-    'prc_starter-monthly-udf40q28':   { name: 'Starter-Plan',    text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'prc_starter-yearly-uu680b3d':    { name: 'Starter-Plan',    text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'prc_pro-monthly-9q502rg':        { name: 'Pro-Plan',        text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'prc_pro-yearly-l4c0gnw':         { name: 'Pro-Plan',        text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'prc_enterprise-monthly-ftd0gbp': { name: 'Enterprise-Plan', text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'prc_enterprise-yearly-zv6022j':  { name: 'Enterprise-Plan', text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'prc_pay-per-use-14750y0n':       { name: 'Pay-per-Use',     text: 'Deine Analyse ist bereit. Starte jetzt direkt.' }
+    'prc_starter-monthly-udf40q28':   { text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'prc_starter-yearly-uu680b3d':    { text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'prc_pro-monthly-9q502rg':        { text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'prc_pro-yearly-l4c0gnw':         { text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'prc_enterprise-monthly-ftd0gbp': { text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'prc_enterprise-yearly-zv6022j':  { text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'prc_pay-per-use-14750y0n':       { text: 'Deine Analyse ist bereit. Starte jetzt direkt.' }
   };
 
   var PLAN_BY_LICENSE = {
-    'Free':         { name: 'Free-Plan',         text: 'Dein Free-Plan ist aktiv. Du hast eine kostenlose Analyse verfügbar.' },
-    'Starter':      { name: 'Starter-Plan',      text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'Pro':          { name: 'Pro-Plan',          text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'Professional': { name: 'Professional-Plan', text: 'Dein Professional-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'Enterprise':   { name: 'Enterprise-Plan',   text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'Pay-per-Use':  { name: 'Pay-per-Use',       text: 'Deine Analyse ist bereit. Starte jetzt direkt.' }
+    'Free':         { text: 'Dein Free-Plan ist aktiv. Du hast eine kostenlose Analyse verfügbar.' },
+    'Starter':      { text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'Pro':          { text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'Professional': { text: 'Dein Professional-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'Enterprise':   { text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'Pay-per-Use':  { text: 'Deine Analyse ist bereit. Starte jetzt direkt.' }
   };
 
   async function initDankePage() {
@@ -54,18 +54,20 @@
       }
     }
 
+    // ── Vorname setzen ──
     var firstnameEl = document.querySelector('[data-danke="firstname"]');
     if (firstnameEl && user.firstname) {
       firstnameEl.textContent = 'Willkommen an Bord, ' + user.firstname + '!';
     }
 
+    // ── Plan-Text setzen ──
     var planTextEl = document.querySelector('[data-danke="plan-text"]');
     if (planTextEl) planTextEl.textContent = planInfo.text;
 
     // ── Elemente einblenden ──
-   document.querySelectorAll('[data-danke="firstname"], [data-danke="plan-text"]').forEach(function(el) {
-  el.style.opacity = '1';
-});
+    document.querySelectorAll('[data-danke="firstname"], [data-danke="plan-text"]').forEach(function(el) {
+      el.style.visibility = 'visible';
+    });
 
   } // ← initDankePage schließt hier
 
