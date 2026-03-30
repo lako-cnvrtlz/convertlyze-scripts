@@ -59,9 +59,6 @@
       firstnameEl.textContent = 'Willkommen an Bord, ' + user.firstname + '!';
     }
 
-    var planNameEl = document.querySelector('[data-danke="plan-name"]');
-    if (planNameEl) planNameEl.textContent = planInfo.name;
-
     var planTextEl = document.querySelector('[data-danke="plan-text"]');
     if (planTextEl) planTextEl.textContent = planInfo.text;
 
