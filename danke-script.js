@@ -65,9 +65,9 @@
     if (planTextEl) planTextEl.textContent = planInfo.text;
 
     // ── Elemente einblenden ──
-    document.querySelectorAll('[data-danke="firstname"], [data-danke="plan-text"]').forEach(function(el) {
-      el.style.visibility = 'visible';
-    });
+    document.querySelectorAll('[data-danke="firstname"], [data-danke="plan-text"], #danke-hero').forEach(function(el) {
+  el.style.visibility = 'visible';
+});
 
   } // ← initDankePage schließt hier
 
