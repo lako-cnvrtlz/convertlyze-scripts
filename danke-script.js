@@ -64,9 +64,11 @@
     var planTextEl = document.querySelector('[data-danke="plan-text"]');
     if (planTextEl) planTextEl.textContent = planInfo.text;
 
-    // ── Wrapper einblenden ──
-    var hero = document.querySelector('#danke-hero');
-    if (hero) hero.style.visibility = 'visible';
+    // ── Hero einblenden (mit Delay damit Memberstack fertig ist) ──
+    setTimeout(function() {
+      var hero = document.querySelector('#danke-hero');
+      if (hero) hero.style.setProperty('visibility', 'visible', 'important');
+    }, 500);
 
   } // ← initDankePage schließt hier
 
