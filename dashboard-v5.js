@@ -1,3 +1,15 @@
+// Ganz oben im Dashboard-Script einfügen, vor allem anderen:
+(function() {
+  var url = new URL(window.location.href);
+  if (url.searchParams.has('fromCheckout') || url.searchParams.has('msPriceId')) {
+    url.searchParams.delete('fromCheckout');
+    url.searchParams.delete('msPriceId');
+    url.searchParams.delete('forceRefetch');
+    url.searchParams.delete('stripePriceId');
+    window.history.replaceState({}, '', url.toString());
+  }
+})();
+
 // ── Sofort verstecken wenn Plan im sessionStorage ──────────────────────────
 (function() {
   if (sessionStorage.getItem('selected_plan')) {
