@@ -63,7 +63,7 @@
     if (planTextEl) planTextEl.textContent = planInfo.text;
 
     // ── Elemente einblenden ──
-   document.querySelectorAll('[data-danke="firstname"], [data-danke="plan-name"], [data-danke="plan-text"]').forEach(function(el) {
+   document.querySelectorAll('[data-danke="firstname"], [data-danke="plan-text"]').forEach(function(el) {
   el.style.opacity = '1';
 });
 
