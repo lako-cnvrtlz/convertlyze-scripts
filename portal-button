@@ -1,17 +1,23 @@
-<script>
-  document.getElementById('portal-btn').addEventListener('click', async () => {
-    const member = await memberstack.getMemberJSON()
-    const token = member?.data?.auth?.tokens?.accessToken
+document.getElementById('portal-btn').addEventListener('click', async () => {
+  console.log('Button geklickt')
+  
+  const member = await memberstack.getMemberJSON()
+  console.log('Member:', member)
+  
+  const token = member?.data?.auth?.tokens?.accessToken
+  console.log('Token:', token)
 
-    const res = await fetch('https://https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/stripe-portal', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    const { url } = await res.json()
-    if (url) window.location.href = url
+  const res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/stripe-portal', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json'
+    }
   })
-</script>
+
+  console.log('Response Status:', res.status)
+  const data = await res.json()
+  console.log('Response Data:', data)
+
+  if (data.url) window.location.href = data.url
+})
