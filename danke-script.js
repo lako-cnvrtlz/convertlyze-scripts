@@ -72,10 +72,10 @@
       }
     }
 
-    // ── Vorname setzen ──
+    // ── Begrüßung setzen ──
     var firstnameEl = document.querySelector('[data-danke="firstname"]');
-    if (firstnameEl && user.firstname) {
-      firstnameEl.textContent = 'Willkommen an Bord, ' + user.firstname + '!';
+    if (firstnameEl) {
+      firstnameEl.textContent = 'Vielen Dank, ' + (user.firstname || 'Member') + '!';
       firstnameEl.style.setProperty('color', '#ffffff', 'important');
     }
 
