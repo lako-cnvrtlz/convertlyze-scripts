@@ -1,0 +1,113 @@
+// ==================== DANKE-SEITE SCRIPT ====================
+(function() {
+
+  var PLAN_DATA = {
+    // Erkennnung via msPriceId in der URL (was gerade gekauft wurde)
+    'prc_starter-monthly-udf40q28':   { name: 'Starter-Plan',      text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'prc_starter-yearly-uu680b3d':    { name: 'Starter-Plan',      text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'prc_pro-monthly-9q502rg':        { name: 'Pro-Plan',          text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'prc_pro-yearly-l4c0gnw':         { name: 'Pro-Plan',          text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'prc_enterprise-monthly-ftd0gbp': { name: 'Enterprise-Plan',   text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'prc_enterprise-yearly-zv6022j':  { name: 'Enterprise-Plan',   text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'prc_pay-per-use-14750y0n':       { name: 'Pay-per-Use',       text: 'Deine Analyse ist bereit. Starte jetzt direkt.', isPPU: true }
+  };
+
+  // Fallback nach license_type falls keine URL-Param vorhanden
+  var PLAN_BY_LICENSE = {
+    'Free':         { name: 'Free-Plan',        text: 'Dein Free-Plan ist aktiv. Du hast eine kostenlose Analyse verfügbar.' },
+    'Starter':      { name: 'Starter-Plan',     text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'Pro':          { name: 'Pro-Plan',         text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'Professional': { name: 'Professional-Plan',text: 'Dein Professional-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'Enterprise':   { name: 'Enterprise-Plan',  text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
+    'Pay-per-Use':  { name: 'Pay-per-Use',      text: 'Deine Analyse ist bereit. Starte jetzt direkt.', isPPU: true }
+  };
+
+  async function initDankePage() {
+    // Warten bis Memberstack + Supabase geladen sind
+    var attempts = 0;
+    while ((!window.$memberstackDom || !window.supabase) && attempts < 30) {
+      await new Promise(function(r) { setTimeout(r, 300); });
+      attempts++;
+    }
+    if (!window.$memberstackDom) return;
+
+    // Was wurde gerade gekauft? → URL-Parameter auswerten
+    var params   = new URLSearchParams(window.location.search);
+    var priceId  = params.get('msPriceId') || params.get('stripePriceId') || '';
+    var planInfo = PLAN_DATA[priceId] || null;
+
+    // Memberstack Member holen
+    var result = await window.$memberstackDom.getCurrentMember();
+    var member = result?.data;
+    if (!member) return;
+
+    // Supabase User holen
+    var supabaseResult = await window.supabase
+      .from('users')
+      .select('firstname, license_type, ppu_credits')
+      .eq('memberstack_id', member.id)
+      .single();
+
+    var user = supabaseResult?.data;
+    if (!user) return;
+
+    // Falls kein URL-Param → Fallback auf license_type
+    if (!planInfo) {
+      // Wenn ppu_credits > 0 und kein Abo-Plan → wahrscheinlich PPU
+      var isPaidPlan = ['Starter', 'Pro', 'Professional', 'Enterprise'].indexOf(user.license_type) !== -1;
+      if (!isPaidPlan && user.ppu_credits > 0) {
+        planInfo = PLAN_BY_LICENSE['Pay-per-Use'];
+      } else {
+        planInfo = PLAN_BY_LICENSE[user.license_type] || PLAN_BY_LICENSE['Free'];
+      }
+    }
+
+    // ── Vorname setzen ──
+    var firstnameEl = document.querySelector('[data-danke="firstname"]');
+    if (firstnameEl && user.firstname) {
+      firstnameEl.textContent = 'Willkommen an Bord, ' + user.firstname + '!';
+    }
+
+    // ── Plan-Name setzen ──
+    var planNameEl = document.querySelector('[data-danke="plan-name"]');
+    if (planNameEl) planNameEl.textContent = planInfo.name;
+
+    // ── Plan-Text setzen ──
+    var planTextEl = document.querySelector('[data-danke="plan-text"]');
+    if (planTextEl) planTextEl.textContent = planInfo.text;
+
+    // ── PPU: Weiterleitung zum Analyse-Formular ──
+    if (planInfo.isPPU) {
+      var ppuSection   = document.querySelector('[data-danke="ppu-section"]');
+      var aboSection   = document.querySelector('[data-danke="abo-section"]');
+      if (ppuSection) ppuSection.style.display = 'block';
+      if (aboSection) aboSection.style.display = 'none';
+
+      // Nach 3 Sekunden automatisch zum Formular weiterleiten
+      var countdown = document.querySelector('[data-danke="countdown"]');
+      var seconds = 5;
+      if (countdown) {
+        countdown.textContent = seconds;
+        var interval = setInterval(function() {
+          seconds--;
+          countdown.textContent = seconds;
+          if (seconds <= 0) {
+            clearInterval(interval);
+            window.location.href = '/analyse/formular';
+          }
+        }, 1000);
+      }
+    } else {
+      var ppuSection2 = document.querySelector('[data-danke="ppu-section"]');
+      var aboSection2 = document.querySelector('[data-danke="abo-section"]');
+      if (ppuSection2) ppuSection2.style.display = 'none';
+      if (aboSection2) aboSection2.style.display = 'block';
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDankePage);
+  } else {
+    initDankePage();
+  }
+})();
