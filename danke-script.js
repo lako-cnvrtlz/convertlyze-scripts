@@ -76,11 +76,15 @@
     var firstnameEl = document.querySelector('[data-danke="firstname"]');
     if (firstnameEl && user.firstname) {
       firstnameEl.textContent = 'Willkommen an Bord, ' + user.firstname + '!';
+      firstnameEl.style.setProperty('color', '#ffffff', 'important');
     }
 
     // ── Plan-Text setzen ──
     var planTextEl = document.querySelector('[data-danke="plan-text"]');
-    if (planTextEl) planTextEl.textContent = planInfo.text;
+    if (planTextEl) {
+      planTextEl.textContent = planInfo.text;
+      planTextEl.style.setProperty('color', '#ffffff', 'important');
+    }
 
     // ── Hero einblenden ──
     revealHero();
