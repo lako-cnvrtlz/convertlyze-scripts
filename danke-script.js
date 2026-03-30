@@ -20,6 +20,25 @@
     'Pay-per-Use':  { text: 'Deine Analyse ist bereit. Starte jetzt direkt.' }
   };
 
+  // ── MutationObserver: verhindert dass Memberstack den Hero versteckt ──
+  function keepHeroVisible() {
+    var hero = document.querySelector('#danke-hero');
+    if (!hero) return;
+
+    var observer = new MutationObserver(function() {
+      var computed = window.getComputedStyle(hero).visibility;
+      if (computed === 'hidden' || hero.style.visibility === 'hidden') {
+        hero.style.setProperty('visibility', 'visible', 'important');
+      }
+    });
+
+    observer.observe(hero, { attributes: true, attributeFilter: ['style', 'class'] });
+    observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['style', 'class'] });
+
+    // Nach 5 Sekunden Observer stoppen
+    setTimeout(function() { observer.disconnect(); }, 5000);
+  }
+
   async function initDankePage() {
     var attempts = 0;
     while ((!window.$memberstackDom || !window.supabase) && attempts < 30) {
@@ -27,6 +46,9 @@
       attempts++;
     }
     if (!window.$memberstackDom) return;
+
+    // Observer sofort starten
+    keepHeroVisible();
 
     var params   = new URLSearchParams(window.location.search);
     var priceId  = params.get('msPriceId') || params.get('stripePriceId') || '';
@@ -64,11 +86,9 @@
     var planTextEl = document.querySelector('[data-danke="plan-text"]');
     if (planTextEl) planTextEl.textContent = planInfo.text;
 
-    // ── Hero einblenden (mit Delay damit Memberstack fertig ist) ──
-    setTimeout(function() {
-      var hero = document.querySelector('#danke-hero');
-      if (hero) hero.style.setProperty('visibility', 'visible', 'important');
-    }, 500);
+    // ── Hero sichtbar halten ──
+    var hero = document.querySelector('#danke-hero');
+    if (hero) hero.style.setProperty('visibility', 'visible', 'important');
 
   } // ← initDankePage schließt hier
 
