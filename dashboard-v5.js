@@ -68,7 +68,7 @@
   // ── Warten bis Supabase-Client UND Memberstack bereit sind ──
   async function waitForDependencies() {
     for (var i = 0; i < 100; i++) {
-      var supabaseOk   = window.supabase && typeof window.supabase.from === 'function';
+      var supabaseOk    = window.supabase && typeof window.supabase.from === 'function';
       var memberstackOk = window.$memberstackDom && typeof window.$memberstackDom.getCurrentMember === 'function';
       if (supabaseOk && memberstackOk) {
         console.log('✅ Supabase & Memberstack bereit nach ' + (i * 100) + 'ms');
@@ -325,11 +325,12 @@
     }
 
     // ── Team-Button: nur bei bezahlten Plänen mit Team-Feature ──
-    var teamBtn = document.getElementById('open-team-modal');
-    if (teamBtn) {
-      var teamPlans = ['Starter', 'Pro', 'Professional', 'Enterprise'];
-      teamBtn.style.display = teamPlans.indexOf(billingUser.license_type) !== -1 ? '' : 'none';
-    }
+    var teamPlans = ['Starter', 'Pro', 'Professional', 'Enterprise'];
+    var hasTeam   = teamPlans.indexOf(billingUser.license_type) !== -1;
+    var teamBtn     = document.getElementById('open-team-modal');
+    var teamSection = document.getElementById('team-section');
+    if (teamBtn)     teamBtn.style.display     = hasTeam ? '' : 'none';
+    if (teamSection) teamSection.style.display = hasTeam ? '' : 'none';
   }
 
   function removeLoadingSkeleton() {
@@ -673,7 +674,6 @@
     try {
       console.log('🔍 Dashboard init...');
 
-      // ── Warten bis Supabase-Client und Memberstack bereit sind ──
       var ready = await waitForDependencies();
       if (!ready) return;
 
@@ -702,12 +702,11 @@
 
       globalMemberstackId = memberstackId;
 
-      // ── Checkout nach Registrierung triggern ──
+      // ── Checkout nach Registrierung triggern (nur Abo-Pläne, KEIN Pay-per-Use) ──
       var CHECKOUT_PRICE_IDS = {
-        'starter':     { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'    },
-        'pro':         { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'         },
-        'enterprise':  { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j'  },
-        'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'       }
+        'starter':    { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
+        'pro':        { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
+        'enterprise': { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' }
       };
       var savedPlan       = sessionStorage.getItem('selected_plan');
       var savedBilling    = sessionStorage.getItem('selected_billing') || 'monthly';
@@ -725,6 +724,9 @@
         return;
       }
 
+      // Kein Checkout → alten sessionStorage-Wert aufräumen und weitermachen
+      sessionStorage.removeItem('selected_plan');
+      sessionStorage.removeItem('selected_billing');
       document.documentElement.style.visibility = 'visible';
 
       console.log('📡 Lade User aus Supabase...');
@@ -775,6 +777,7 @@
 
 })();
 
+// ── Pay-per-Use Button ────────────────────────────────────────────────────
 (function() {
   var PAY_PER_USE_PRICE_ID = 'prc_pay-per-use-14750y0n';
 
@@ -788,14 +791,10 @@
       btn.href = '#';
       btn.addEventListener('click', function(e) {
         e.preventDefault();
-        sessionStorage.setItem('selected_plan', 'pay-per-use');
-        sessionStorage.setItem('selected_billing', 'monthly');
         window.$memberstackDom.purchasePlansWithCheckout({
           priceId: PAY_PER_USE_PRICE_ID
         }).catch(function(err) {
           console.error('Pay-per-Use Checkout error:', err);
-          sessionStorage.removeItem('selected_plan');
-          sessionStorage.removeItem('selected_billing');
         });
       });
     });
