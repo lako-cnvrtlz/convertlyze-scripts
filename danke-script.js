@@ -20,6 +20,16 @@
     'Pay-per-Use':  { name: 'Pay-per-Use',       text: 'Deine Analyse ist bereit. Starte jetzt direkt.' }
   };
 
+  // ── Elemente sofort verstecken ──
+  var style = document.createElement('style');
+  style.textContent =
+    '[data-danke="firstname"],' +
+    '[data-danke="plan-name"],' +
+    '[data-danke="plan-text"] {' +
+      'visibility: hidden;' +
+    '}';
+  document.head.appendChild(style);
+
   async function initDankePage() {
     var attempts = 0;
     while ((!window.$memberstackDom || !window.supabase) && attempts < 30) {
@@ -64,6 +74,11 @@
 
     var planTextEl = document.querySelector('[data-danke="plan-text"]');
     if (planTextEl) planTextEl.textContent = planInfo.text;
+
+    // ── Elemente einblenden ──
+    document.querySelectorAll('[data-danke="firstname"], [data-danke="plan-name"], [data-danke="plan-text"]').forEach(function(el) {
+      el.style.visibility = 'visible';
+    });
 
   } // ← initDankePage schließt hier
 
