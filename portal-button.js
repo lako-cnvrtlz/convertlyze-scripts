@@ -1,25 +1,31 @@
+<script>
 document.getElementById('portal-btn').addEventListener('click', async (e) => {
   e.preventDefault()
-  console.log('Button geklickt')
+
+  // Sofortiges Feedback
+  const btn = e.currentTarget
+  btn.textContent = 'Wird geladen...'
+  btn.style.opacity = '0.6'
+  btn.style.pointerEvents = 'none'
 
   const ms = window.$memberstackDom
-  const member = await ms.getMemberJSON()
-  console.log('Member:', member)
-  
-  const token = member?.data?.auth?.tokens?.accessToken
-  console.log('Token:', token)
+  const member = await ms.getCurrentMember()
+  const memberstackId = member?.data?.id
+
+  if (!memberstackId) {
+    btn.textContent = 'Rechnungsdaten ändern'
+    btn.style.opacity = '1'
+    btn.style.pointerEvents = 'auto'
+    return
+  }
 
   const res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/stripe-portal', {
     method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + token,
-      'Content-Type': 'application/json'
-    }
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ memberstackId })
   })
 
-  console.log('Response Status:', res.status)
   const data = await res.json()
-  console.log('Response Data:', data)
-
   if (data.url) window.location.href = data.url
 })
+</script>
