@@ -793,6 +793,7 @@
         e.preventDefault();
         window.$memberstackDom.purchasePlansWithCheckout({
           priceId: PAY_PER_USE_PRICE_ID
+          successUrl: 'https://www.convertlyze.com/analyse/formular'
         }).catch(function(err) {
           console.error('Pay-per-Use Checkout error:', err);
         });
