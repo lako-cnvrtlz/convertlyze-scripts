@@ -1,7 +1,8 @@
 (function() {
 
   var WEBHOOK_URL = 'https://hook.eu2.make.com/2lsybme5qm0fw8cw1ua9a4xcjx94xg29';
-  var currentMemberId = null;
+  var currentMemberId      = null;
+  var submitHandlerAttached = false; // Guard gegen mehrfaches Anhängen
 
   // ── Dropdown befüllen ─────────────────────────────────────────────────────
   function initDropdown() {
@@ -126,13 +127,26 @@
 
   // ── Submit-Handler mit Live-Credit-Prüfung ────────────────────────────────
   function initSubmitHandler() {
+    // Guard: nur einmal anhängen
+    if (submitHandlerAttached) return;
     var form = document.querySelector('form');
     if (!form) return;
+    submitHandlerAttached = true;
 
     form.addEventListener('submit', function(e) {
       e.preventDefault();
+
+      // Button sofort deaktivieren — verhindert Doppelklick
+      var btn = document.querySelector('.analyseformular-button');
+      if (btn) {
+        btn.style.opacity = '0.6';
+        btn.style.pointerEvents = 'none';
+        btn.textContent = 'Wird gestartet...';
+      }
+
       if (!currentMemberId) { window.location.href = '/analyse/fehler'; return; }
 
+      // Live Credit-Prüfung vor dem Absenden
       window.supabase
         .from('users')
         .select('credits_limit, credits_used_current_period, reserved_credits, ppu_credits, reserved_ppu_credits')
@@ -140,6 +154,7 @@
         .single()
         .then(function(res) {
           if (!res.data) { window.location.href = '/analyse/fehler'; return; }
+
           var total = calcCredits(res.data);
           if (total <= 0) { window.location.href = '/analyse/fehler'; return; }
 
@@ -158,11 +173,12 @@
   function init() {
     var memberstackReady = !!window.$memberstackDom;
     var supabaseReady    = !!window.supabase && typeof window.supabase.from === 'function';
+
     if (memberstackReady && supabaseReady) {
       initDropdown();
       loadCredits();
       injectMemberstackFields();
-      initSubmitHandler();
+      initSubmitHandler(); // Guard stellt sicher dass nur einmal ausgeführt
     } else if (attempts < 30) {
       attempts++;
       setTimeout(init, 300);
@@ -174,4 +190,5 @@
   } else {
     init();
   }
+
 })();
