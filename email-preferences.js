@@ -1,4 +1,8 @@
 (async () => {
+  // Erfolgsmeldung initial verstecken
+  const msg = document.getElementById('pref-success')
+  if (msg) msg.style.display = 'none'
+
   const ms = window.$memberstackDom
   const member = await ms.getCurrentMember()
   const memberstackId = member?.data?.id
@@ -45,7 +49,6 @@
       btn.style.opacity = '1'
       btn.style.pointerEvents = 'auto'
 
-      const msg = document.getElementById('pref-success')
       if (msg) {
         msg.style.display = 'block'
         setTimeout(() => msg.style.display = 'none', 3000)
