@@ -8,19 +8,23 @@
   var token      = params.get('invite');
   var emailParam = params.get('email') ? decodeURIComponent(params.get('email')) : '';
 
-  // ── E-Mail vorausfüllen mit Retry ──
+  // ── E-Mail vorausfüllen ──
   function setEmailField() {
     var emailEl = document.querySelector('[data-invite="email"]');
-    if (emailEl && emailParam) {
-      emailEl.value    = emailParam;
-      emailEl.readOnly = true;
-      emailEl.style.backgroundColor = '#1e2738';
-      emailEl.style.cursor = 'not-allowed';
-      return true;
-    }
-    return false;
+    if (!emailEl || !emailParam) return false;
+
+    // Native setter verwenden damit Webflow den Wert nicht überschreibt
+    var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    nativeInputValueSetter.call(emailEl, emailParam);
+    emailEl.dispatchEvent(new Event('input', { bubbles: true }));
+    emailEl.readOnly = true;
+    emailEl.style.backgroundColor = '#1e2738';
+    emailEl.style.cursor = 'not-allowed';
+    emailEl.style.opacity = '0.8';
+    return true;
   }
 
+  // Sofort + mit Delays versuchen
   if (!setEmailField()) {
     setTimeout(setEmailField, 300);
     setTimeout(setEmailField, 800);
@@ -34,8 +38,9 @@
       attempts++;
     }
 
-    // ── E-Mail nochmal setzen nachdem Memberstack geladen ──
+    // Nochmal setzen nachdem Memberstack geladen
     setEmailField();
+    setTimeout(setEmailField, 500);
 
     // ── Kein Token → Fehlermeldung ──
     if (!token) {
