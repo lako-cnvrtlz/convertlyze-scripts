@@ -3,6 +3,16 @@
   const msg = document.getElementById('pref-success')
   if (msg) msg.style.display = 'none'
 
+  // Pflicht-Checkboxen sperren
+  const requiredCheckboxes = ['pref-analysis', 'pref-account']
+  requiredCheckboxes.forEach(id => {
+    const el = document.getElementById(id)
+    if (el) {
+      el.checked = true
+      el.addEventListener('click', (e) => e.preventDefault())
+    }
+  })
+
   const ms = window.$memberstackDom
   const member = await ms.getCurrentMember()
   const memberstackId = member?.data?.id
