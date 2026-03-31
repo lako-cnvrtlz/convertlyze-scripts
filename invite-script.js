@@ -4,6 +4,29 @@
   var SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
   var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
 
+  var params     = new URLSearchParams(window.location.search);
+  var token      = params.get('invite');
+  var emailParam = params.get('email') ? decodeURIComponent(params.get('email')) : '';
+
+  // ── E-Mail vorausfüllen mit Retry ──
+  function setEmailField() {
+    var emailEl = document.querySelector('[data-invite="email"]');
+    if (emailEl && emailParam) {
+      emailEl.value    = emailParam;
+      emailEl.readOnly = true;
+      emailEl.style.backgroundColor = '#1e2738';
+      emailEl.style.cursor = 'not-allowed';
+      return true;
+    }
+    return false;
+  }
+
+  if (!setEmailField()) {
+    setTimeout(setEmailField, 300);
+    setTimeout(setEmailField, 800);
+    setTimeout(setEmailField, 1500);
+  }
+
   async function initInvitePage() {
     var attempts = 0;
     while (!window.$memberstackDom && attempts < 30) {
@@ -11,22 +34,8 @@
       attempts++;
     }
 
-    var params     = new URLSearchParams(window.location.search);
-    var token      = params.get('invite');
-    var emailParam = params.get('email') ? decodeURIComponent(params.get('email')) : '';
-
-    // ── E-Mail vorausfüllen ──
-    var emailEl = document.querySelector('[data-invite="email"]');
-    if (emailEl && emailParam) {
-      emailEl.value    = emailParam;
-      emailEl.readOnly = true;
-      emailEl.style.backgroundColor = '#1e2738';
-      emailEl.style.cursor = 'not-allowed';
-    }
-
-    // ── E-Mail-Anzeige setzen ──
-    var emailDisplayEl = document.querySelector('[data-invite="email-display"]');
-    if (emailDisplayEl && emailParam) emailDisplayEl.textContent = emailParam;
+    // ── E-Mail nochmal setzen nachdem Memberstack geladen ──
+    setEmailField();
 
     // ── Kein Token → Fehlermeldung ──
     if (!token) {
@@ -44,12 +53,10 @@
       if (btn) { btn.value = 'Wird verarbeitet…'; btn.disabled = true; }
 
       try {
-        // Prüfen ob User eingeloggt
         var member = await window.$memberstackDom.getCurrentMember();
         var memberstackId = member?.data?.id;
 
         if (!memberstackId) {
-          // Nicht eingeloggt → zur Registrierung mit Token
           window.location.href = '/register?invite=' + token + '&email=' + encodeURIComponent(emailParam);
           return;
         }
