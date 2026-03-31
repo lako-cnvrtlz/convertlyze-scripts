@@ -11,12 +11,14 @@
 
   // E-Mail readonly setzen
   const emailField = document.getElementById('profile-email')
-  if (emailField) {
-    emailField.value = email || ''
+if (emailField) {
+  emailField.value = email || ''
+  setTimeout(() => {
     emailField.setAttribute('readonly', '')
     emailField.style.opacity = '0.6'
     emailField.style.cursor = 'not-allowed'
-  }
+  }, 500)
+}
 
   function setValue(id, value) {
     const el = document.getElementById(id)
