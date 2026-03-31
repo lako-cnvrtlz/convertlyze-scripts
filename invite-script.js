@@ -8,27 +8,20 @@
   var token      = params.get('invite');
   var emailParam = params.get('email') ? decodeURIComponent(params.get('email')) : '';
 
-  // ── E-Mail vorausfüllen ──
-  function setEmailField() {
-    var emailEl = document.querySelector('[data-invite="email"]');
-    if (!emailEl || !emailParam) return false;
-
-    // Native setter verwenden damit Webflow den Wert nicht überschreibt
-    var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    nativeInputValueSetter.call(emailEl, emailParam);
-    emailEl.dispatchEvent(new Event('input', { bubbles: true }));
-    emailEl.readOnly = true;
-    emailEl.style.backgroundColor = '#1e2738';
-    emailEl.style.cursor = 'not-allowed';
-    emailEl.style.opacity = '0.8';
-    return true;
+  // ── E-Mail als Text anzeigen ──
+  function setEmailDisplay() {
+    var el = document.querySelector('[data-invite="email-display"]');
+    if (el && emailParam) {
+      el.textContent = emailParam;
+      return true;
+    }
+    return false;
   }
 
-  // Sofort + mit Delays versuchen
-  if (!setEmailField()) {
-    setTimeout(setEmailField, 300);
-    setTimeout(setEmailField, 800);
-    setTimeout(setEmailField, 1500);
+  if (!setEmailDisplay()) {
+    setTimeout(setEmailDisplay, 300);
+    setTimeout(setEmailDisplay, 800);
+    setTimeout(setEmailDisplay, 1500);
   }
 
   async function initInvitePage() {
@@ -38,23 +31,18 @@
       attempts++;
     }
 
-    // Nochmal setzen nachdem Memberstack geladen
-    setEmailField();
-    setTimeout(setEmailField, 500);
+    setEmailDisplay();
 
-    // ── Kein Token → Fehlermeldung ──
     if (!token) {
       showStatus('Ungültiger Einladungslink.', 'error');
       return;
     }
 
-    // ── Formular-Submit abfangen ──
     var form = document.querySelector('[data-invite="form"]');
     var btn  = document.querySelector('[data-invite="accept-btn"]');
 
     async function handleAccept(e) {
       if (e) { e.preventDefault(); e.stopPropagation(); }
-
       if (btn) { btn.value = 'Wird verarbeitet…'; btn.disabled = true; }
 
       try {
