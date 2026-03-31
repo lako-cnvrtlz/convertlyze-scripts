@@ -36,32 +36,39 @@
 
   async function initDankePage() {
     var attempts = 0;
-    while ((!window.$memberstackDom || !window.supabase) && attempts < 30) {
+    while (!window.$memberstackDom && attempts < 30) {
       await new Promise(function(r) { setTimeout(r, 300); });
       attempts++;
     }
 
-    if (!window.$memberstackDom) {
-      revealHero();
-      return;
-    }
+    if (!window.$memberstackDom) { revealHero(); return; }
 
+    // ── Token holen ────────────────────────────────────────────────────────────
+    var tokenResult = await window.$memberstackDom.getMemberJSON();
+    var token = tokenResult?.data?._token;
+
+    if (!token) { revealHero(); return; }
+
+    // ── User-Daten per Edge Function laden (kein direkter Supabase-Zugriff) ────
+    var res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/get-user-info', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      }
+    });
+
+    if (!res.ok) { revealHero(); return; }
+
+    var result = await res.json();
+    var user = result?.data;
+
+    if (!user) { revealHero(); return; }
+
+    // ── Plan-Text bestimmen ────────────────────────────────────────────────────
     var params   = new URLSearchParams(window.location.search);
     var priceId  = params.get('msPriceId') || params.get('stripePriceId') || '';
     var planInfo = PLAN_DATA[priceId] || null;
-
-    var result = await window.$memberstackDom.getCurrentMember();
-    var member = result?.data;
-    if (!member) { revealHero(); return; }
-
-    var supabaseResult = await window.supabase
-      .from('users')
-      .select('firstname, license_type, ppu_credits')
-      .eq('memberstack_id', member.id)
-      .single();
-
-    var user = supabaseResult?.data;
-    if (!user) { revealHero(); return; }
 
     if (!planInfo) {
       var isPaidPlan = ['Starter', 'Pro', 'Professional', 'Enterprise'].indexOf(user.license_type) !== -1;
@@ -72,24 +79,22 @@
       }
     }
 
-    // ── Begrüßung setzen ──
+    // ── Begrüßung setzen ───────────────────────────────────────────────────────
     var firstnameEl = document.querySelector('[data-danke="firstname"]');
     if (firstnameEl) {
       firstnameEl.textContent = 'Vielen Dank, ' + (user.firstname || 'Member') + '!';
       firstnameEl.style.setProperty('color', '#ffffff', 'important');
     }
 
-    // ── Plan-Text setzen ──
+    // ── Plan-Text setzen ───────────────────────────────────────────────────────
     var planTextEl = document.querySelector('[data-danke="plan-text"]');
     if (planTextEl) {
       planTextEl.textContent = planInfo.text;
       planTextEl.style.setProperty('color', '#ffffff', 'important');
     }
 
-    // ── Hero einblenden ──
     revealHero();
-
-  } // ← initDankePage schließt hier
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initDankePage);
