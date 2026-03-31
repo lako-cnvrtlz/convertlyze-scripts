@@ -2,6 +2,8 @@
 document.getElementById('portal-btn').addEventListener('click', async (e) => {
   e.preventDefault()
 
+  const btn = e.currentTarget  // ← sofort speichern, vor dem ersten await!
+
   const ms = window.$memberstackDom
   const member = await ms.getCurrentMember()
   const memberstackId = member?.data?.id
@@ -12,7 +14,6 @@ document.getElementById('portal-btn').addEventListener('click', async (e) => {
     return
   }
 
-  const btn = e.currentTarget
   btn.textContent = 'Wird geladen...'
   btn.style.opacity = '0.6'
   btn.style.pointerEvents = 'none'
@@ -24,6 +25,7 @@ document.getElementById('portal-btn').addEventListener('click', async (e) => {
   })
 
   const data = await res.json()
+  console.log('Response:', data)
   if (data.url) window.location.href = data.url
 })
 </script>
