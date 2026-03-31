@@ -47,14 +47,17 @@
     `;
   }
 
-  // ── Credit-Berechnung ─────────────────────────────────────────────────────
+  // ── Credit-Berechnung inkl. reserved_ppu_credits ──────────────────────────
   function calcCredits(d) {
     var planCredits = Math.max(0,
       (parseFloat(d.credits_limit) || 0)
       - (parseFloat(d.credits_used_current_period) || 0)
       - (parseFloat(d.reserved_credits) || 0)
     );
-    var ppuCredits = parseInt(d.ppu_credits) || 0;
+    var ppuCredits = Math.max(0,
+      (parseInt(d.ppu_credits) || 0)
+      - (parseInt(d.reserved_ppu_credits) || 0)
+    );
     return planCredits + ppuCredits;
   }
 
@@ -63,18 +66,17 @@
     window.$memberstackDom.getCurrentMember().then(function(result) {
       var member = result?.data;
       if (!member?.id) return;
-
       currentMemberId = member.id;
 
       window.supabase
         .from('users')
-        .select('credits_limit, credits_used_current_period, reserved_credits, ppu_credits')
+        .select('credits_limit, credits_used_current_period, reserved_credits, ppu_credits, reserved_ppu_credits')
         .eq('memberstack_id', member.id)
         .single()
         .then(function(res) {
           if (!res.data) return;
-
           var total = calcCredits(res.data);
+
           var display = document.querySelector('[data-field="credits_remaining"]');
           if (display) {
             display.textContent = total;
@@ -106,7 +108,6 @@
     window.$memberstackDom.getCurrentMember().then(function(result) {
       var member = result?.data;
       if (!member?.id) return;
-
       var form = document.querySelector('form');
       if (!form) return;
 
@@ -120,7 +121,6 @@
 
       setHidden('memberstack_id', member.id);
       setHidden('email', member.auth?.email || member.email || '');
-      console.log('Memberstack fields injected:', member.id);
     }).catch(function() {});
   }
 
@@ -131,17 +131,15 @@
 
     form.addEventListener('submit', function(e) {
       e.preventDefault();
-
       if (!currentMemberId) { window.location.href = '/analyse/fehler'; return; }
 
       window.supabase
         .from('users')
-        .select('credits_limit, credits_used_current_period, reserved_credits, ppu_credits')
+        .select('credits_limit, credits_used_current_period, reserved_credits, ppu_credits, reserved_ppu_credits')
         .eq('memberstack_id', currentMemberId)
         .single()
         .then(function(res) {
           if (!res.data) { window.location.href = '/analyse/fehler'; return; }
-
           var total = calcCredits(res.data);
           if (total <= 0) { window.location.href = '/analyse/fehler'; return; }
 
@@ -160,7 +158,6 @@
   function init() {
     var memberstackReady = !!window.$memberstackDom;
     var supabaseReady    = !!window.supabase && typeof window.supabase.from === 'function';
-
     if (memberstackReady && supabaseReady) {
       initDropdown();
       loadCredits();
@@ -177,5 +174,4 @@
   } else {
     init();
   }
-
 })();
