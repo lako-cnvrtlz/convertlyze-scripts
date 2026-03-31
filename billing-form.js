@@ -4,13 +4,16 @@
   const memberstackId = member?.data?.id
   const stripeCustomerId = member?.data?.stripeCustomerId
 
+  // ── NEU: Token holen ────────────────────────────────────────────────────────
+  const { data: tokenData } = await ms.getMemberJSON()
+  const token = tokenData?._token
+
   const res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/get-user-billing', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ memberstackId })
   })
   const { data: user } = await res.json()
-
   if (user) {
     setValue('billing-salutation', user.salutation)
     setValue('billing-firstname', user.firstname)
@@ -38,24 +41,26 @@
 
     const saveRes = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/update-billing', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`  // ── NEU
+      },
       body: JSON.stringify({
-        memberstackId,
+        // memberstackId raus — kommt jetzt aus dem Token
         stripeCustomerId,
         salutation: document.getElementById('billing-salutation')?.value,
-        firstname: document.getElementById('billing-firstname')?.value,
-        lastname: document.getElementById('billing-lastname')?.value,
-        company: document.getElementById('billing-company')?.value,
-        vat_id: document.getElementById('billing-vat')?.value,
-        street: document.getElementById('billing-street')?.value,
-        zip: document.getElementById('billing-zip')?.value,
-        city: document.getElementById('billing-city')?.value,
-        country: document.getElementById('billing-country')?.value,
+        firstname:  document.getElementById('billing-firstname')?.value,
+        lastname:   document.getElementById('billing-lastname')?.value,
+        company:    document.getElementById('billing-company')?.value,
+        vat_id:     document.getElementById('billing-vat')?.value,
+        street:     document.getElementById('billing-street')?.value,
+        zip:        document.getElementById('billing-zip')?.value,
+        city:       document.getElementById('billing-city')?.value,
+        country:    document.getElementById('billing-country')?.value,
       })
     })
 
     const data = await saveRes.json()
-
     if (data.success) {
       btn.textContent = 'Gespeichert ✓'
       btn.style.opacity = '1'
