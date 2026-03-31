@@ -1,19 +1,24 @@
 (async () => {
   const ms = window.$memberstackDom
   const member = await ms.getCurrentMember()
-  const memberstackId = member?.data?.id
   const stripeCustomerId = member?.data?.stripeCustomerId
 
-  // ── NEU: Token holen ────────────────────────────────────────────────────────
+  // Token holen
   const { data: tokenData } = await ms.getMemberJSON()
   const token = tokenData?._token
 
+  // Billing-Daten laden — Token im Header, kein memberstackId im Body
   const res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/get-user-billing', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ memberstackId })
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`  // ← war vorher fehlend
+    }
+    // kein body nötig — memberstackId kommt aus dem Token
   })
+
   const { data: user } = await res.json()
+
   if (user) {
     setValue('billing-salutation', user.salutation)
     setValue('billing-firstname', user.firstname)
@@ -43,10 +48,9 @@
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`  // ── NEU
+        'Authorization': `Bearer ${token}`
       },
       body: JSON.stringify({
-        // memberstackId raus — kommt jetzt aus dem Token
         stripeCustomerId,
         salutation: document.getElementById('billing-salutation')?.value,
         firstname:  document.getElementById('billing-firstname')?.value,
