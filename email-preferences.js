@@ -1,11 +1,8 @@
-<script>
 (async () => {
   // Webflow Form Submit abfangen
-  const form = document.querySelector('form[data-action="save-preferences"]') 
+  const form = document.querySelector('form[data-action="save-preferences"]')
     || document.getElementById('pref-save')?.closest('form')
-  if (form) {
-    form.addEventListener('submit', (e) => e.preventDefault())
-  }
+  if (form) form.addEventListener('submit', (e) => e.preventDefault())
 
   // Erfolgsmeldung initial verstecken
   const msg = document.getElementById('pref-success')
@@ -25,13 +22,13 @@
   const member = await ms.getCurrentMember()
   const memberstackId = member?.data?.id
 
+  // Aktuelle Präferenzen laden
   const res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/get-user-billing', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ memberstackId })
   })
   const { data: user } = await res.json()
-
   if (user?.email_preferences) {
     setCheckbox('pref-product-updates', user.email_preferences.product_updates)
     setCheckbox('pref-marketing-tips', user.email_preferences.marketing_tips)
@@ -57,17 +54,15 @@
       body: JSON.stringify({
         memberstackId,
         product_updates: document.getElementById('pref-product-updates')?.checked,
-        marketing_tips: document.getElementById('pref-marketing-tips')?.checked,
+        marketing_tips:  document.getElementById('pref-marketing-tips')?.checked,
       })
     })
-
     const data = await saveRes.json()
 
     if (data.success) {
       btn.value = originalText
       btn.style.opacity = '1'
       btn.style.pointerEvents = 'auto'
-
       if (msg) {
         msg.style.display = 'block'
         setTimeout(() => msg.style.display = 'none', 3000)
@@ -79,4 +74,3 @@
     }
   })
 })()
-</script>
