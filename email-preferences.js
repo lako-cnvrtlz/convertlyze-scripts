@@ -3,7 +3,6 @@
   const member = await ms.getCurrentMember()
   const memberstackId = member?.data?.id
 
-  // Präferenzen aus Supabase laden
   const res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/get-user-billing', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -11,7 +10,6 @@
   })
   const { data: user } = await res.json()
 
-  // Checkboxen befüllen
   if (user?.email_preferences) {
     setCheckbox('pref-product-updates', user.email_preferences.product_updates)
     setCheckbox('pref-marketing-tips', user.email_preferences.marketing_tips)
@@ -22,7 +20,6 @@
     if (el) el.checked = !!value
   }
 
-  // Speichern
   document.getElementById('pref-save').addEventListener('click', async (e) => {
     e.preventDefault()
     const btn = document.getElementById('pref-save')
@@ -44,12 +41,15 @@
     const data = await saveRes.json()
 
     if (data.success) {
-      btn.textContent = 'Gespeichert ✓'
+      btn.textContent = originalText
       btn.style.opacity = '1'
-      setTimeout(() => {
-        btn.textContent = originalText
-        btn.style.pointerEvents = 'auto'
-      }, 2000)
+      btn.style.pointerEvents = 'auto'
+
+      const msg = document.getElementById('pref-success')
+      if (msg) {
+        msg.style.display = 'block'
+        setTimeout(() => msg.style.display = 'none', 3000)
+      }
     } else {
       btn.textContent = 'Fehler – nochmal versuchen'
       btn.style.opacity = '1'
