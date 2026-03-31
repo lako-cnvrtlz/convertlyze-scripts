@@ -13,7 +13,9 @@
   const emailField = document.getElementById('profile-email')
   if (emailField) {
     emailField.value = email || ''
-    emailField.setAttribute('disabled', 'true')
+    emailField.setAttribute('readonly', '')
+    emailField.style.opacity = '0.6'
+    emailField.style.cursor = 'not-allowed'
   }
 
   function setValue(id, value) {
