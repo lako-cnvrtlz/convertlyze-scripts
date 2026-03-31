@@ -43,19 +43,16 @@
 
     if (!window.$memberstackDom) { revealHero(); return; }
 
-    // ── Token holen ────────────────────────────────────────────────────────────
-    var tokenResult = await window.$memberstackDom.getMemberJSON();
-    var token = tokenResult?.data?._token;
+    var memberResult = await window.$memberstackDom.getCurrentMember();
+    var memberstackId = memberResult?.data?.id;
 
-    if (!token) { revealHero(); return; }
+    if (!memberstackId) { revealHero(); return; }
 
-    // ── User-Daten per Edge Function laden (kein direkter Supabase-Zugriff) ────
+    // ── User-Daten per Edge Function laden ────────────────────────────────────
     var res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/get-user-info', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + token
-      }
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memberstack_id: memberstackId })
     });
 
     if (!res.ok) { revealHero(); return; }
@@ -65,7 +62,7 @@
 
     if (!user) { revealHero(); return; }
 
-    // ── Plan-Text bestimmen ────────────────────────────────────────────────────
+    // ── Plan-Text bestimmen ───────────────────────────────────────────────────
     var params   = new URLSearchParams(window.location.search);
     var priceId  = params.get('msPriceId') || params.get('stripePriceId') || '';
     var planInfo = PLAN_DATA[priceId] || null;
@@ -79,14 +76,14 @@
       }
     }
 
-    // ── Begrüßung setzen ───────────────────────────────────────────────────────
+    // ── Begrüßung setzen ──────────────────────────────────────────────────────
     var firstnameEl = document.querySelector('[data-danke="firstname"]');
     if (firstnameEl) {
       firstnameEl.textContent = 'Vielen Dank, ' + (user.firstname || 'Member') + '!';
       firstnameEl.style.setProperty('color', '#ffffff', 'important');
     }
 
-    // ── Plan-Text setzen ───────────────────────────────────────────────────────
+    // ── Plan-Text setzen ──────────────────────────────────────────────────────
     var planTextEl = document.querySelector('[data-danke="plan-text"]');
     if (planTextEl) {
       planTextEl.textContent = planInfo.text;
