@@ -4,28 +4,27 @@
   const memberstackId = member?.data?.id
   const email = member?.data?.auth?.email
 
-  // Felder befüllen
+  // Felder aus Memberstack Custom Fields befüllen
   setValue('profile-salutation', member?.data?.customFields?.salutation)
-  setValue('profile-firstname', member?.data?.customFields?.['first-name'])
-  setValue('profile-lastname', member?.data?.customFields?.['last-name'])
+  setValue('profile-firstname',  member?.data?.customFields?.['first-name'])
+  setValue('profile-lastname',   member?.data?.customFields?.['last-name'])
 
   // E-Mail readonly setzen
   const emailField = document.getElementById('profile-email')
-if (emailField) {
-  emailField.value = email || ''
-  setTimeout(() => {
-    emailField.setAttribute('readonly', '')
-    emailField.style.opacity = '0.6'
-    emailField.style.cursor = 'not-allowed'
-  }, 500)
-}
+  if (emailField) {
+    emailField.value = email || ''
+    setTimeout(() => {
+      emailField.setAttribute('readonly', '')
+      emailField.style.opacity = '0.6'
+      emailField.style.cursor = 'not-allowed'
+    }, 500)
+  }
 
   function setValue(id, value) {
     const el = document.getElementById(id)
     if (el && value) el.value = value
   }
 
-  // Speichern
   document.getElementById('profile-save').addEventListener('click', async (e) => {
     e.preventDefault()
     const btn = document.getElementById('profile-save')
@@ -40,11 +39,10 @@ if (emailField) {
       body: JSON.stringify({
         memberstackId,
         salutation: document.getElementById('profile-salutation')?.value,
-        firstname: document.getElementById('profile-firstname')?.value,
-        lastname: document.getElementById('profile-lastname')?.value,
+        firstname:  document.getElementById('profile-firstname')?.value,
+        lastname:   document.getElementById('profile-lastname')?.value,
       })
     })
-
     const data = await res.json()
 
     if (data.success) {
