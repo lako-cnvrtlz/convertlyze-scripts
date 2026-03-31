@@ -1,4 +1,12 @@
+<script>
 (async () => {
+  // Webflow Form Submit abfangen
+  const form = document.querySelector('form[data-action="save-preferences"]') 
+    || document.getElementById('pref-save')?.closest('form')
+  if (form) {
+    form.addEventListener('submit', (e) => e.preventDefault())
+  }
+
   // Erfolgsmeldung initial verstecken
   const msg = document.getElementById('pref-success')
   if (msg) msg.style.display = 'none'
@@ -36,9 +44,10 @@
 
   document.getElementById('pref-save').addEventListener('click', async (e) => {
     e.preventDefault()
+    e.stopPropagation()
     const btn = document.getElementById('pref-save')
-    const originalText = btn.textContent
-    btn.textContent = 'Wird gespeichert...'
+    const originalText = btn.value || btn.textContent
+    btn.value = 'Wird gespeichert...'
     btn.style.opacity = '0.6'
     btn.style.pointerEvents = 'none'
 
@@ -55,7 +64,7 @@
     const data = await saveRes.json()
 
     if (data.success) {
-      btn.textContent = originalText
+      btn.value = originalText
       btn.style.opacity = '1'
       btn.style.pointerEvents = 'auto'
 
@@ -64,9 +73,10 @@
         setTimeout(() => msg.style.display = 'none', 3000)
       }
     } else {
-      btn.textContent = 'Fehler – nochmal versuchen'
+      btn.value = 'Fehler – nochmal versuchen'
       btn.style.opacity = '1'
       btn.style.pointerEvents = 'auto'
     }
   })
 })()
+</script>
