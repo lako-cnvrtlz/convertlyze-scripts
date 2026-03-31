@@ -1,18 +1,14 @@
 <script>
 document.getElementById('portal-btn').addEventListener('click', async (e) => {
   e.preventDefault()
-  console.log('Geklickt')
 
-  // _ms-mid Cookie auslesen
-  const token = document.cookie
-    .split('; ')
-    .find(row => row.startsWith('_ms-mid='))
-    ?.split('=')[1]
+  const ms = window.$memberstackDom
+  const member = await ms.getCurrentMember()
+  const memberstackId = member?.data?.id
+  const stripeCustomerId = member?.data?.stripeCustomerId
 
-  console.log('Cookie Token:', token)
-
-  if (!token) {
-    console.error('Kein Token gefunden')
+  if (!memberstackId || !stripeCustomerId) {
+    console.error('Kein User oder Stripe ID')
     return
   }
 
@@ -23,14 +19,11 @@ document.getElementById('portal-btn').addEventListener('click', async (e) => {
 
   const res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/stripe-portal', {
     method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + token,
-      'Content-Type': 'application/json'
-    }
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ memberstackId, stripeCustomerId })
   })
 
   const data = await res.json()
-  console.log('Response:', data)
   if (data.url) window.location.href = data.url
 })
 </script>
