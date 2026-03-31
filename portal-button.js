@@ -4,10 +4,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btn.addEventListener('click', async (e) => {
     e.preventDefault()
-
     const ms = window.$memberstackDom
     const member = await ms.getCurrentMember()
-    const memberstackId = member?.data?.id
+    const memberstackId    = member?.data?.id
     const stripeCustomerId = member?.data?.stripeCustomerId
 
     if (!memberstackId || !stripeCustomerId) {
@@ -24,7 +23,6 @@ document.addEventListener('DOMContentLoaded', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ memberstackId, stripeCustomerId })
     })
-
     const data = await res.json()
 
     if (data.url) {
