@@ -1,15 +1,3 @@
-// ── URL-Parameter bereinigen ──────────────────────────────────────────────
-(function() {
-  var url = new URL(window.location.href);
-  if (url.searchParams.has('fromCheckout') || url.searchParams.has('msPriceId')) {
-    url.searchParams.delete('fromCheckout');
-    url.searchParams.delete('msPriceId');
-    url.searchParams.delete('forceRefetch');
-    url.searchParams.delete('stripePriceId');
-    window.history.replaceState({}, '', url.toString());
-  }
-})();
-
 // ── Sofort verstecken wenn Plan im sessionStorage ──────────────────────────
 (function() {
   if (sessionStorage.getItem('selected_plan')) {
@@ -21,8 +9,10 @@
   function fixStickyHeader() {
     var header = document.querySelector('.analysis-row-header');
     if (!header) return;
+
     var nav = document.querySelector('nav') || document.querySelector('.navbar') || document.querySelector('.w-nav');
     var navHeight = nav ? nav.offsetHeight : 60;
+
     var parent = header.parentElement;
     while (parent && parent !== document.body && parent !== document.documentElement) {
       var style = window.getComputedStyle(parent);
@@ -35,11 +25,13 @@
       }
       parent = parent.parentElement;
     }
+
     header.style.position = 'sticky';
     header.style.top = navHeight + 'px';
     header.style.zIndex = '100';
     header.style.backgroundColor = '#ffffff';
   }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', fixStickyHeader);
   } else {
@@ -54,6 +46,7 @@
 
   var PDF_SERVICE_URL = 'https://convertlyze-pdf-service-production.up.railway.app';
   var PDF_SECRET      = 'cvl-pdf-2026-geheim';
+
   var PAGE_SIZE = 10;
 
   var analysesData = [];
@@ -62,11 +55,11 @@
   var paginationEl = null;
 
   var globalSupabaseUserId = null;
-  var globalMemberstackId  = null;
-  var globalLicenseType    = null;
-  var globalHasPdfAccess   = false;
-  var globalContainer      = null;
-  var realtimeChannel      = null;
+  var globalMemberstackId = null;
+  var globalLicenseType   = null;
+  var globalHasPdfAccess  = false;
+  var globalContainer = null;
+  var realtimeChannel = null;
 
   var pdfUrlCache = {};
 
@@ -82,7 +75,7 @@
       }
       await sleep(100);
     }
-    console.warn('⚠️ Timeout: Supabase oder Memberstack nicht bereit nach 10s');
+    console.warn('⚠️ Timeout nach 10s');
     return false;
   }
 
@@ -91,10 +84,13 @@
     var type    = billingUser.license_type   || '';
     var status  = billingUser.license_status || '';
     var expires = billingUser.license_expires_at;
+
     var paidPlans = ['Starter', 'Growth', 'Pro', 'Professional', 'Enterprise', 'Agency'];
     if (paidPlans.indexOf(type) === -1) return false;
+
     if (status === 'active') return true;
     if (status === 'canceling' && expires && new Date(expires) > new Date()) return true;
+
     return false;
   }
 
@@ -109,7 +105,7 @@
   async function fetchUserFast(memberstackId) {
     var result = await supabase
       .from('users')
-      .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, reserved_ppu_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits')
+      .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits')
       .eq('memberstack_id', memberstackId)
       .single();
 
@@ -121,10 +117,13 @@
     if (result.data.owner_user_id) {
       var ownerResult = await supabase
         .from('users')
-        .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, reserved_ppu_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price, ppu_credits')
+        .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price')
         .eq('id', result.data.owner_user_id)
         .single();
-      if (ownerResult.data) result.data._billingUser = ownerResult.data;
+
+      if (ownerResult.data) {
+        result.data._billingUser = ownerResult.data;
+      }
     }
 
     return result.data;
@@ -133,10 +132,11 @@
   async function fetchUserWithSmartRetry(memberstackId) {
     var maxAttempts = 5;
     var delayMs = 300;
+
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       var result = await supabase
         .from('users')
-        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, reserved_ppu_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits')
+        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits')
         .eq('memberstack_id', memberstackId)
         .single();
 
@@ -144,10 +144,13 @@
         if (result.data.owner_user_id) {
           var ownerResult = await supabase
             .from('users')
-            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, reserved_ppu_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price, ppu_credits')
+            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price')
             .eq('id', result.data.owner_user_id)
             .single();
-          if (ownerResult.data) result.data._billingUser = ownerResult.data;
+
+          if (ownerResult.data) {
+            result.data._billingUser = ownerResult.data;
+          }
         }
         return result.data;
       }
@@ -160,13 +163,19 @@
 
   async function fetchAnalysesForMember(memberstackId) {
     if (!memberstackId) return [];
+
     var result = await supabase.rpc('get_analyses_for_member', { p_memberstack_id: memberstackId });
+
     if (result.error) {
       console.error('❌ Fehler beim Laden der Analysen (RPC):', result.error);
       return [];
     }
+
     var data = result.data || [];
-    data.forEach(function(a) { if (a.pdf_url) pdfUrlCache[a.id] = a.pdf_url; });
+    data.forEach(function(a) {
+      if (a.pdf_url) pdfUrlCache[a.id] = a.pdf_url;
+    });
+
     return data;
   }
 
@@ -175,8 +184,14 @@
       var billingUser = user._billingUser || user;
       var paid = ['Starter', 'Growth', 'Pro', 'Professional', 'Enterprise'].indexOf(billingUser.license_type) !== -1;
       if (!paid) return false;
+
       var result = await supabase.rpc('reset_user_credits_if_due', { p_user_id: billingUser.id });
-      if (result.error) { console.warn('⚠️ reset_user_credits_if_due:', result.error); return false; }
+
+      if (result.error) {
+        console.warn('⚠️ reset_user_credits_if_due:', result.error);
+        return false;
+      }
+
       var row = Array.isArray(result.data) ? result.data[0] : result.data;
       return !!row?.did_reset;
     } catch (e) {
@@ -186,36 +201,26 @@
   }
 
   function renderUserDashboard(user) {
-    var billingUser  = user._billingUser || user;
+    var billingUser = user._billingUser || user;
     var isTeamMember = !!user.owner_user_id;
 
-    var reservedCredits    = Math.round(Number(billingUser.reserved_credits || 0));
-    var reservedPpuCredits = Math.round(Number(billingUser.reserved_ppu_credits || 0));
-    var analysesUsed       = Math.round(Number(billingUser.credits_used_current_period || 0));
-    var analysesLimit      = Math.round(Number(billingUser.credits_limit || 0));
-    var ppuCredits         = Math.round(Number(billingUser.ppu_credits || 0));
+    var reservedCredits = Math.round(Number(billingUser.reserved_credits || 0));
+    var analysesUsed    = Math.round(Number(billingUser.credits_used_current_period || 0));
+    var analysesLimit   = Math.round(Number(billingUser.credits_limit || 0));
+    var ppuCredits      = Math.round(Number(user.ppu_credits || 0));
 
-    // Verfügbare Plan-Credits (reservierte abziehen)
-    var planCreditsLeft;
+    var analysesLeft;
     if (billingUser.credits_remaining !== null && billingUser.credits_remaining !== undefined) {
-      planCreditsLeft = Math.max(0, Math.round(Number(billingUser.credits_remaining)) - reservedCredits);
+      analysesLeft = Math.max(0, Math.round(Number(billingUser.credits_remaining)) - reservedCredits);
     } else {
-      planCreditsLeft = Math.max(0, analysesLimit - analysesUsed - reservedCredits);
+      analysesLeft = Math.max(0, analysesLimit - analysesUsed - reservedCredits);
     }
-
-    // Verfügbare PPU-Credits (reservierte abziehen)
-    var ppuCreditsLeft = Math.max(0, ppuCredits - reservedPpuCredits);
-
-    var analysesLeft = planCreditsLeft + ppuCreditsLeft;
 
     var chatUsed  = Math.round(Number(user.chat_messages_used_current_period || 0));
     var chatLimit = Math.round(Number(user.chat_messages_limit || 0));
     var chatLeft  = Math.max(chatLimit - chatUsed, 0);
 
-    var totalReserved = reservedCredits + reservedPpuCredits;
-
-    // Fortschrittsbalken basiert auf Plan-Credits
-    var percentRaw    = analysesLimit ? ((analysesUsed + reservedCredits) / analysesLimit) * 100 : 0;
+    var percentRaw = analysesLimit ? ((analysesUsed + reservedCredits) / analysesLimit) * 100 : 0;
     var percentText   = Math.round(percentRaw);
     var percentForBar = Math.min(percentRaw, 100);
 
@@ -224,11 +229,9 @@
       if (el) el.textContent = value ?? '';
     }
 
-    // Hauptanzeige: "1/10 Analysen (2 in Bearbeitung)"
-    var usedDisplay = analysesUsed + '/' + analysesLimit + ' Analysen';
-    if (totalReserved > 0) {
-      usedDisplay += ' (' + totalReserved + ' in Bearbeitung)';
-    }
+    var usedDisplay = reservedCredits > 0
+      ? (analysesUsed + '/' + analysesLimit + ' Analysen (' + reservedCredits + ' in Bearbeitung)')
+      : (analysesUsed + '/' + analysesLimit + ' Analysen');
     setText('[data-dashboard="credits_used_current_period"]', usedDisplay);
     setText('[data-dashboard="analyses-percent"]', percentText + '% des Limits genutzt');
 
@@ -239,9 +242,9 @@
     setText('[data-dashboard="chat-messages-remaining"]', chatLeft);
     setText('[data-dashboard="chat-messages-used"]', chatUsed + '/' + chatLimit);
 
-    setText('[data-dashboard="ppu-credits"]', ppuCreditsLeft);
-    setText('[data-dashboard="ppu-label"]', ppuCreditsLeft > 0
-      ? ppuCreditsLeft + ' Pay-per-Use Analyse' + (ppuCreditsLeft > 1 ? 'n' : '') + ' verfügbar'
+    setText('[data-dashboard="ppu-credits"]', ppuCredits);
+    setText('[data-dashboard="ppu-label"]', ppuCredits > 0
+      ? ppuCredits + ' Pay-per-Use Analyse' + (ppuCredits > 1 ? 'n' : '') + ' verfügbar'
       : 'Keine Pay-per-Use Analysen');
 
     var ppuCard = document.querySelector('[data-dashboard="ppu-card"]');
@@ -269,10 +272,14 @@
       renewalText = renewalDate || '–';
     } else if (isFreePlan) {
       renewalLabel = 'Analyse-Status';
-      renewalText  = analysesLeft > 0 ? '1 kostenlose Analyse verfügbar' : 'Kostenlose Analyse bereits genutzt';
+      renewalText  = analysesLeft > 0
+        ? '1 kostenlose Analyse verfügbar'
+        : 'Kostenlose Analyse bereits genutzt';
     } else if (isPayPerUse) {
       renewalLabel = 'Analyse-Status';
-      renewalText  = analysesLeft > 0 ? '1 Analyse verfügbar' : 'Analyse bereits genutzt – jetzt neue Analyse kaufen';
+      renewalText  = analysesLeft > 0
+        ? '1 Analyse verfügbar'
+        : 'Analyse bereits genutzt – jetzt neue Analyse kaufen';
     } else if (isBetaPlan) {
       renewalLabel = 'Analyse-Status';
       renewalText  = 'Beta-Analysen erneuern sich nicht automatisch';
@@ -285,14 +292,17 @@
     if (typeof planName === 'string' && planName.length > 0 && !isPayPerUse) {
       planName = planName.charAt(0).toUpperCase() + planName.slice(1);
     }
+
     if (isTeamMember) planName += ' (Team)';
+
     setText('[data-dashboard="plan-name"]', planName);
 
     if (analysesLimit) {
       var planDesc = isPaidPlan
         ? analysesLimit + ' Analysen pro Monat'
-        : isPayPerUse ? '1 Analyse, kein Abo'
-        : analysesLimit + ' Analyse(n)';
+        : isPayPerUse
+          ? '1 Analyse, kein Abo'
+          : analysesLimit + ' Analyse(n)';
       setText('[data-dashboard="plan-description"]', planDesc);
     } else {
       setText('[data-dashboard="plan-description"]', '');
@@ -313,8 +323,9 @@
       avatarEl.style.justifyContent = 'center';
     }
 
-    var teamPlans = ['Starter', 'Pro', 'Professional', 'Enterprise'];
-    var hasTeam   = teamPlans.indexOf(billingUser.license_type) !== -1;
+    // ── Team-Section: nur bei bezahlten Plänen mit Team-Feature ──
+    var teamPlans   = ['Starter', 'Pro', 'Professional', 'Enterprise'];
+    var hasTeam     = teamPlans.indexOf(billingUser.license_type) !== -1;
     var teamBtn     = document.getElementById('open-team-modal');
     var teamSection = document.getElementById('team-section');
     if (teamBtn)     teamBtn.style.display     = hasTeam ? '' : 'none';
@@ -358,19 +369,24 @@
 
   function initPagination(container) {
     if (paginationEl) return;
+
     paginationEl = document.createElement('div');
     paginationEl.className = 'pagination-wrapper';
     paginationEl.innerHTML =
       '<button class="pagination-btn pagination-prev" type="button">« Zurück</button>' +
       '<span class="pagination-info"></span>' +
       '<button class="pagination-btn pagination-next" type="button">Nächste Seite »</button>';
+
     container.parentElement.appendChild(paginationEl);
+
     paginationEl.querySelector('.pagination-prev').addEventListener('click', function() {
       if (currentPage > 1) { currentPage -= 1; renderAnalysesPage(globalContainer, currentPage); }
     });
+
     paginationEl.querySelector('.pagination-next').addEventListener('click', function() {
       if (currentPage < totalPages) { currentPage += 1; renderAnalysesPage(globalContainer, currentPage); }
     });
+
     updatePaginationInfo();
   }
 
@@ -379,6 +395,7 @@
     var info    = paginationEl.querySelector('.pagination-info');
     var prevBtn = paginationEl.querySelector('.pagination-prev');
     var nextBtn = paginationEl.querySelector('.pagination-next');
+
     info.textContent = 'Seite ' + currentPage + ' von ' + totalPages;
     if (currentPage <= 1) prevBtn.setAttribute('disabled', 'disabled'); else prevBtn.removeAttribute('disabled');
     if (currentPage >= totalPages) nextBtn.setAttribute('disabled', 'disabled'); else nextBtn.removeAttribute('disabled');
@@ -407,18 +424,27 @@
     var blob = await fileRes.blob();
     var blobUrl = URL.createObjectURL(blob);
     var a = document.createElement('a');
-    a.href = blobUrl; a.download = fileName;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    a.href = blobUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
     setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 5000);
   }
 
   async function handleReportDownload(btn, analysisId) {
-    if (!globalSupabaseUserId || !globalHasPdfAccess) return;
+    if (!globalSupabaseUserId) return;
+    if (!globalHasPdfAccess) return;
+
     var isAgency = (globalLicenseType || '').toLowerCase() === 'agency';
-    btn.classList.add('loading'); btn.title = 'Wird generiert...';
+
+    btn.classList.add('loading');
+    btn.title = 'Wird generiert...';
+
     try {
       var analysis = analysesData.find(function(a) { return a.id === analysisId; });
-      var domain = 'report'; var datetime = '';
+      var domain = 'report';
+      var datetime = '';
       try {
         domain = new URL(analysis.landing_page_url).hostname.replace('www.', '');
         var d = new Date(analysis.created_at);
@@ -428,31 +454,51 @@
       } catch(e) {}
       var ext = isAgency ? 'docx' : 'pdf';
       var fileName = 'convertlyze-' + domain + datetime + '.' + ext;
+
       var existingUrl = pdfUrlCache[analysisId] || null;
       if (existingUrl) {
         await triggerBlobDownload(existingUrl, fileName);
-        btn.classList.remove('loading'); btn.title = 'Report herunterladen';
+        btn.classList.remove('loading');
+        btn.title = 'Report herunterladen';
         return;
       }
+
       var endpoint = isAgency ? '/generate-word' : '/generate-pdf';
+
       var response = await fetch(PDF_SERVICE_URL + endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-pdf-secret': PDF_SECRET },
-        body: JSON.stringify({ userId: globalSupabaseUserId, analysisId: analysisId })
+        headers: {
+          'Content-Type': 'application/json',
+          'x-pdf-secret': PDF_SECRET
+        },
+        body: JSON.stringify({
+          userId: globalSupabaseUserId,
+          analysisId: analysisId
+        })
       });
+
       if (!response.ok) {
         var err = await response.json();
         throw new Error(err.error || 'Generierung fehlgeschlagen');
       }
+
       var data = await response.json();
       var downloadUrl = data.downloadUrl;
       pdfUrlCache[analysisId] = downloadUrl;
-      supabase.from('analyses').update({ pdf_url: downloadUrl, pdf_generated_at: new Date().toISOString() }).eq('id', analysisId).then(function() {});
+      supabase
+        .from('analyses')
+        .update({ pdf_url: downloadUrl, pdf_generated_at: new Date().toISOString() })
+        .eq('id', analysisId)
+        .then(function() {});
+
       await triggerBlobDownload(downloadUrl, fileName);
-      btn.classList.remove('loading'); btn.title = 'Report herunterladen';
+      btn.classList.remove('loading');
+      btn.title = 'Report herunterladen';
+
     } catch (err) {
       console.error('❌ Report-Download Fehler:', err);
-      btn.classList.remove('loading'); btn.title = 'Fehler – erneut versuchen';
+      btn.classList.remove('loading');
+      btn.title = 'Fehler – erneut versuchen';
       btn.style.backgroundColor = '#fee2e2';
       setTimeout(function() { btn.style.backgroundColor = ''; }, 2500);
     }
@@ -483,16 +529,29 @@
   function createAnalysisRow(analysis) {
     var row = document.createElement('div');
     row.className = 'table-list';
-    var formattedDate = '-';
-    try { formattedDate = new Date(analysis.created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch(e) {}
 
-    var statusText = 'Abgeschlossen'; var statusClass = 'completed';
-    if (analysis.status === 'processing') { statusText = 'In Bearbeitung'; statusClass = 'processing'; }
-    else if (analysis.status === 'error' || analysis.status === 'failed') { statusText = 'Fehler'; statusClass = 'error'; }
+    var formattedDate = '-';
+    try {
+      formattedDate = new Date(analysis.created_at).toLocaleDateString('de-DE', {
+        day: '2-digit', month: '2-digit', year: 'numeric'
+      });
+    } catch(e) {}
+
+    var statusText  = 'Abgeschlossen';
+    var statusClass = 'completed';
+
+    if (analysis.status === 'processing') {
+      statusText  = 'In Bearbeitung';
+      statusClass = 'processing';
+    } else if (analysis.status === 'error' || analysis.status === 'failed') {
+      statusText  = 'Fehler';
+      statusClass = 'error';
+    }
 
     var isCompleted = analysis.status === 'completed';
     var actionClass = isCompleted ? '' : 'action-disabled';
     var actionTitle = isCompleted ? '' : 'title="Analyse ist noch nicht abgeschlossen"';
+
     var isMobile = window.innerWidth <= 768;
 
     var displayUrl = analysis.landing_page_url || '-';
@@ -504,6 +563,7 @@
     if (displayKeyword.length > maxKeywordLength) displayKeyword = displayKeyword.substring(0, maxKeywordLength - 3) + '...';
 
     var canDownload = isCompleted && globalHasPdfAccess;
+
     var downloadTitle = !isCompleted
       ? 'Analyse muss abgeschlossen sein'
       : !globalHasPdfAccess
@@ -512,9 +572,11 @@
 
     var downloadBtnHtml =
       '<button class="aktion-link download-link ' + (canDownload ? '' : 'action-disabled') + '" ' +
-        'aria-label="Report herunterladen" title="' + downloadTitle + '" ' +
-        'data-analysis-id="' + analysis.id + '"' + (canDownload ? '' : ' disabled') + '>' +
-        downloadSvg + '</button>';
+        'aria-label="Report herunterladen" ' +
+        'title="' + downloadTitle + '" ' +
+        'data-analysis-id="' + analysis.id + '"' +
+        (canDownload ? '' : ' disabled') +
+      '>' + downloadSvg + '</button>';
 
     if (isMobile) {
       row.innerHTML =
@@ -540,7 +602,11 @@
 
     if (canDownload) {
       var dlBtn = row.querySelector('.download-link');
-      if (dlBtn) dlBtn.addEventListener('click', function() { handleReportDownload(dlBtn, analysis.id); });
+      if (dlBtn) {
+        dlBtn.addEventListener('click', function() {
+          handleReportDownload(dlBtn, analysis.id);
+        });
+      }
     }
 
     return row;
@@ -549,29 +615,50 @@
   function renderAnalysesPage(container, page) {
     currentPage = page;
     ensureHeaderExists(container);
+
     var rows = container.querySelectorAll('.table-list');
     for (var i = 0; i < rows.length; i++) rows[i].remove();
+
     var startIdx = (page - 1) * PAGE_SIZE;
-    var items    = analysesData.slice(startIdx, startIdx + PAGE_SIZE);
-    for (var j = 0; j < items.length; j++) container.appendChild(createAnalysisRow(items[j]));
+    var endIdx   = startIdx + PAGE_SIZE;
+    var items    = analysesData.slice(startIdx, endIdx);
+
+    for (var j = 0; j < items.length; j++) {
+      container.appendChild(createAnalysisRow(items[j]));
+    }
     updatePaginationInfo();
   }
 
   async function loadAndRenderAnalyses(keepPage) {
-    if (!globalContainer || !globalMemberstackId) { showEmptyState(); return; }
+    if (!globalContainer) return;
+
+    if (!globalMemberstackId) {
+      showEmptyState();
+      return;
+    }
+
     var data = await fetchAnalysesForMember(globalMemberstackId);
     analysesData = data || [];
     totalPages   = Math.max(1, Math.ceil(analysesData.length / PAGE_SIZE));
-    if (!analysesData.length) { showEmptyState(); return; }
+
+    if (!analysesData.length) {
+      showEmptyState();
+      return;
+    }
+
     removeLoadingSkeleton();
+
     if (!keepPage) currentPage = 1;
     else currentPage = Math.min(currentPage, totalPages);
+
     renderAnalysesPage(globalContainer, currentPage);
   }
 
   function subscribeToAnalysisChanges(userId) {
     if (!supabase?.channel) return;
+
     if (realtimeChannel) supabase.removeChannel(realtimeChannel);
+
     realtimeChannel = supabase
       .channel('analyses-realtime-' + userId)
       .on('postgres_changes',
@@ -584,6 +671,7 @@
   async function initDashboard() {
     try {
       console.log('🔍 Dashboard init...');
+
       var ready = await waitForDependencies();
       if (!ready) return;
 
@@ -591,15 +679,19 @@
       var container = firstTableList ? firstTableList.parentElement : null;
       globalContainer = container;
       console.log('📋 Container gefunden:', container ? 'ja' : 'nein');
+
       if (container) showLoadingSkeleton();
 
       var memberstackId = null;
       try {
         var member = await window.$memberstackDom.getCurrentMember();
         memberstackId = member?.data?.id || null;
-      } catch (e) { console.error('❌ Memberstack Fehler:', e); }
+      } catch (e) {
+        console.error('❌ Memberstack Fehler:', e);
+      }
 
       console.log('👤 Memberstack ID:', memberstackId || 'KEINE ID');
+
       if (!memberstackId) {
         if (container) showNoUserMessage();
         document.body.classList.add('content-loaded');
@@ -608,6 +700,7 @@
 
       globalMemberstackId = memberstackId;
 
+      // ── Checkout nur für Abo-Pläne – Pay-per-Use NICHT hier ──
       var CHECKOUT_PRICE_IDS = {
         'starter':    { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
         'pro':        { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
@@ -617,18 +710,20 @@
       var savedBilling    = sessionStorage.getItem('selected_billing') || 'monthly';
       var checkoutPriceId = CHECKOUT_PRICE_IDS[savedPlan]?.[savedBilling];
 
+      // Session immer aufräumen
+      sessionStorage.removeItem('selected_plan');
+      sessionStorage.removeItem('selected_billing');
+
       if (checkoutPriceId) {
-        sessionStorage.removeItem('selected_plan');
-        sessionStorage.removeItem('selected_billing');
         window.$memberstackDom.purchasePlansWithCheckout({
           priceId: checkoutPriceId,
           successUrl: window.location.origin + '/member/danke'
-        }).catch(function() { document.documentElement.style.visibility = 'visible'; });
+        }).catch(function() {
+          document.documentElement.style.visibility = 'visible';
+        });
         return;
       }
 
-      sessionStorage.removeItem('selected_plan');
-      sessionStorage.removeItem('selected_billing');
       document.documentElement.style.visibility = 'visible';
 
       console.log('📡 Lade User aus Supabase...');
@@ -678,22 +773,25 @@
 
 })();
 
-// ── Pay-per-Use Button ────────────────────────────────────────────────────
+// ==================== PAY-PER-USE BUTTON ====================
 (function() {
   var PAY_PER_USE_PRICE_ID = 'prc_pay-per-use-14750y0n';
 
   function initPPUButton() {
     if (!window.$memberstackDom) return;
+
     document.querySelectorAll('[data-plan-upgrade="' + PAY_PER_USE_PRICE_ID + '"], [data-upgrade-plan="' + PAY_PER_USE_PRICE_ID + '"]').forEach(function(el) {
       var btn = el.tagName === 'A' ? el : el.closest('a');
       if (!btn) return;
+
       btn.href = '#';
       btn.addEventListener('click', function(e) {
         e.preventDefault();
         window.$memberstackDom.purchasePlansWithCheckout({
-          priceId: PAY_PER_USE_PRICE_ID,
-          successUrl: 'https://www.convertlyze.com/analyse/formular'
-        }).catch(function(err) { console.error('Pay-per-Use Checkout error:', err); });
+          priceId: PAY_PER_USE_PRICE_ID
+        }).catch(function(err) {
+          console.error('Pay-per-Use Checkout error:', err);
+        });
       });
     });
   }
@@ -701,8 +799,11 @@
   var attempts = 0;
   function tryInit() {
     attempts++;
-    if (window.$memberstackDom) { initPPUButton(); }
-    else if (attempts < 5) { setTimeout(tryInit, 500); }
+    if (window.$memberstackDom) {
+      initPPUButton();
+    } else if (attempts < 5) {
+      setTimeout(tryInit, 500);
+    }
   }
 
   if (document.readyState === 'loading') {
