@@ -136,8 +136,24 @@
     form.addEventListener('submit', function(e) {
       e.preventDefault();
 
-      // Button sofort deaktivieren — verhindert Doppelklick
       var btn = document.querySelector('.analyseformular-button');
+
+      // ── Pflichtfelder validieren — bevor irgendetwas passiert ──────────────
+      var urlInput = form.querySelector('input[name="landing_page_url"]');
+      var urlValue = urlInput ? urlInput.value.trim() : '';
+
+      if (!urlValue) {
+        console.warn('Analyse abgebrochen: Keine URL angegeben.');
+        if (btn) {
+          btn.style.opacity = '1';
+          btn.style.pointerEvents = 'auto';
+          btn.textContent = 'Analyse starten';
+        }
+        return; // Kein Webhook, kein Supabase-Row, nichts im Dashboard
+      }
+      // ──────────────────────────────────────────────────────────────────────
+
+      // Button sofort deaktivieren — verhindert Doppelklick
       if (btn) {
         btn.style.opacity = '0.6';
         btn.style.pointerEvents = 'none';
