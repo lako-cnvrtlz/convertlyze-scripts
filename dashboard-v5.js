@@ -29,7 +29,7 @@
     header.style.position = 'sticky';
     header.style.top = navHeight + 'px';
     header.style.zIndex = '100';
-    header.style.backgroundColor = '#ffffff';
+    header.style.backgroundColor = '#0d1117';
   }
 
   if (document.readyState === 'loading') {
@@ -343,7 +343,7 @@
     globalContainer.innerHTML =
       '<div class="loading-skeleton">' +
         '<div class="spinner"></div>' +
-        '<p style="margin-top: 16px; color: #6b7280;">Lade Dashboard...</p>' +
+        '<p style="margin-top: 16px; color: #7a8ba8;">Lade Dashboard...</p>' +
       '</div>';
   }
 
@@ -351,9 +351,9 @@
     if (!globalContainer) return;
     removeLoadingSkeleton();
     globalContainer.innerHTML =
-      '<div style="grid-column: 1 / -1; padding: 60px 20px; text-align: center; color: #ef4444;">' +
+      '<div style="grid-column: 1 / -1; padding: 60px 20px; text-align: center; color: #f87171;">' +
         '<p style="font-weight: 600; margin-bottom: 8px;">Account nicht gefunden</p>' +
-        '<p style="font-size: 14px; color: #6b7280;">Bitte melde dich erneut an oder kontaktiere den Support.</p>' +
+        '<p style="font-size: 14px; color: #7a8ba8;">Bitte melde dich erneut an oder kontaktiere den Support.</p>' +
       '</div>';
   }
 
@@ -361,7 +361,7 @@
     if (!globalContainer) return;
     removeLoadingSkeleton();
     globalContainer.innerHTML =
-      '<div style="grid-column: 1 / -1; padding: 60px 20px; text-align: center; color: #6b7280;">' +
+      '<div style="grid-column: 1 / -1; padding: 60px 20px; text-align: center; color: #7a8ba8;">' +
         '<p style="margin: 0 0 10px 0; font-weight: 500;">Noch keine Analysen vorhanden</p>' +
         '<p style="margin: 0; font-size: 14px;">Starte deine erste Analyse! 🚀</p>' +
       '</div>';
@@ -499,31 +499,33 @@
       console.error('❌ Report-Download Fehler:', err);
       btn.classList.remove('loading');
       btn.title = 'Fehler – erneut versuchen';
-      btn.style.backgroundColor = '#fee2e2';
+      btn.style.backgroundColor = '#1f1215';
       setTimeout(function() { btn.style.backgroundColor = ''; }, 2500);
     }
   }
 
+  // SVG-Icons: Stroke/Fill auf Teal (#4fd1c5) für aktive Aktionen,
+  // helles Text-Grau (#e8edf5) für Icon-Füllflächen, Teal-Akzent für Highlights
   var downloadSvg =
     '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<path d="M12 3v13m0 0l-4-4m4 4l4-4" stroke="#1f2937" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
-      '<path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="#1f2937" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path d="M12 3v13m0 0l-4-4m4 4l4-4" stroke="#4fd1c5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="#4fd1c5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
     '</svg>';
 
   var eyeSvg =
     '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">' +
-      '<path d="M12 4.5C6.5 4.5 2.15 8 0.75 12c1.4 4 5.75 7.5 11.25 7.5s9.85-3.5 11.25-7.5C21.85 8 17.5 4.5 12 4.5z" fill="#1f2937"/>' +
-      '<circle cx="12" cy="12" r="3.2" fill="#EFF6FF"/>' +
+      '<path d="M12 4.5C6.5 4.5 2.15 8 0.75 12c1.4 4 5.75 7.5 11.25 7.5s9.85-3.5 11.25-7.5C21.85 8 17.5 4.5 12 4.5z" fill="#4fd1c5"/>' +
+      '<circle cx="12" cy="12" r="3.2" fill="#0d1117"/>' +
     '</svg>';
 
   var aiAgentSvg =
     '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<rect x="6" y="8" width="12" height="10" rx="2" fill="#1f2937"/>' +
-      '<circle cx="9" cy="12" r="1.5" fill="#FFFFFF"/>' +
-      '<circle cx="15" cy="12" r="1.5" fill="#FFFFFF"/>' +
-      '<rect x="10" y="15" width="4" height="1.5" rx="0.75" fill="#FFFFFF"/>' +
-      '<rect x="11" y="4" width="2" height="4" rx="1" fill="#1f2937"/>' +
-      '<circle cx="12" cy="5" r="2" fill="#A78BFA"/>' +
+      '<rect x="6" y="8" width="12" height="10" rx="2" fill="#4fd1c5"/>' +
+      '<circle cx="9" cy="12" r="1.5" fill="#0d1117"/>' +
+      '<circle cx="15" cy="12" r="1.5" fill="#0d1117"/>' +
+      '<rect x="10" y="15" width="4" height="1.5" rx="0.75" fill="#0d1117"/>' +
+      '<rect x="11" y="4" width="2" height="4" rx="1" fill="#e8edf5"/>' +
+      '<circle cx="12" cy="5" r="2" fill="#a78bfa"/>' +
     '</svg>';
 
   function createAnalysisRow(analysis) {
