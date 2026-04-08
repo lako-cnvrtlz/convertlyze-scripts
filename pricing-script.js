@@ -29,13 +29,13 @@
       switcher.classList.add('is-annual');
     }
 
-    switcher.style.position    = 'absolute';
-    switcher.style.top         = '2px';
-    switcher.style.left        = '2px';
-    switcher.style.width       = 'calc(50% - 3px)';
-    switcher.style.height      = 'calc(100% - 4px)';
-    switcher.style.transition  = 'transform 0.3s ease';
-    switcher.style.zIndex      = '1';
+    switcher.style.position     = 'absolute';
+    switcher.style.top          = '2px';
+    switcher.style.left         = '2px';
+    switcher.style.width        = 'calc(50% - 3px)';
+    switcher.style.height       = 'calc(100% - 4px)';
+    switcher.style.transition   = 'transform 0.3s ease';
+    switcher.style.zIndex       = '1';
     switcher.style.borderRadius = 'inherit';
 
     var switchContainer = document.querySelector('.switch');
@@ -88,26 +88,34 @@
     }
 
     if (btn) {
-      btn.textContent = 'Wird geladen…';
-      btn.style.opacity = '0.6';
+      btn.textContent         = 'Wird geladen…';
+      btn.style.opacity       = '0.6';
       btn.style.pointerEvents = 'none';
     }
 
-    var res = await fetch(SUPABASE_URL + '/functions/v1/stripe-portal', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ memberstackId, stripeCustomerId })
-    });
+    try {
+      var res = await fetch(SUPABASE_URL + '/functions/v1/stripe-portal', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey':        SUPABASE_ANON_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify({ memberstackId, stripeCustomerId })
+      });
 
-    var data = await res.json();
+      var data = await res.json();
 
-    if (data.url) {
-      window.location.href = data.url;
-    } else {
-      console.error('❌ Portal-URL fehlt', data);
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error(data.error || 'Keine URL erhalten');
+      }
+    } catch (err) {
+      console.error('❌ Portal-Fehler:', err);
       if (btn) {
-        btn.textContent = 'Fehler – nochmal versuchen';
-        btn.style.opacity = '1';
+        btn.textContent         = 'Fehler – nochmal versuchen';
+        btn.style.opacity       = '1';
         btn.style.pointerEvents = 'auto';
       }
     }
