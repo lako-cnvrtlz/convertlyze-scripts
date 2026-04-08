@@ -67,11 +67,51 @@
 
 // ==================== PLAN BUTTONS FÜR EINGELOGGTE USER ====================
 (function() {
+  var SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
+  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
+
   var PLAN_DATA = {
     'starter':    { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
     'pro':        { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
     'enterprise': { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' }
   };
+
+  async function openStripePortal(btn) {
+    var ms = window.$memberstackDom;
+    var member = await ms.getCurrentMember();
+    var memberstackId    = member?.data?.id;
+    var stripeCustomerId = member?.data?.stripeCustomerId;
+
+    if (!memberstackId || !stripeCustomerId) {
+      console.error('❌ Kein User oder Stripe ID');
+      return;
+    }
+
+    if (btn) {
+      btn.textContent = 'Wird geladen…';
+      btn.style.opacity = '0.6';
+      btn.style.pointerEvents = 'none';
+    }
+
+    var res = await fetch(SUPABASE_URL + '/functions/v1/stripe-portal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memberstackId, stripeCustomerId })
+    });
+
+    var data = await res.json();
+
+    if (data.url) {
+      window.location.href = data.url;
+    } else {
+      console.error('❌ Portal-URL fehlt', data);
+      if (btn) {
+        btn.textContent = 'Fehler – nochmal versuchen';
+        btn.style.opacity = '1';
+        btn.style.pointerEvents = 'auto';
+      }
+    }
+  }
 
   async function initPlanButtons() {
     // Auf Memberstack warten
@@ -80,26 +120,33 @@
       await new Promise(function(r) { setTimeout(r, 100); });
       attempts++;
     }
-
     if (!window.$memberstackDom) return;
 
     // Prüfen ob User eingeloggt
     var member = await window.$memberstackDom.getCurrentMember();
     if (!member?.data?.id) return; // Nicht eingeloggt → normale Links bleiben
 
-    console.log('✅ User eingeloggt – Plan-Buttons auf Checkout umleiten');
+    var hasActivePlan = member?.data?.planConnections?.length > 0;
+    console.log('✅ User eingeloggt – hat Plan:', hasActivePlan);
 
-    // Alle Plan-Buttons abfangen
     document.querySelectorAll('a[href*="/register?plan="]').forEach(function(btn) {
-      btn.addEventListener('click', function(e) {
+      btn.addEventListener('click', async function(e) {
         e.preventDefault();
 
+        // User hat bereits einen Plan → Stripe Portal öffnen
+        if (hasActivePlan) {
+          console.log('🔄 User hat Plan – öffne Stripe Portal');
+          await openStripePortal(btn);
+          return;
+        }
+
+        // User hat noch keinen Plan → Checkout starten
         var url        = new URL(btn.href);
         var plan       = url.searchParams.get('plan');
         var billing    = url.searchParams.get('billing') || 'monthly';
         var billingKey = billing === 'annual' ? 'annual' : 'monthly';
+        var priceId    = PLAN_DATA[plan]?.[billingKey];
 
-        var priceId = PLAN_DATA[plan]?.[billingKey];
         if (!priceId) {
           console.warn('⚠️ Kein priceId für Plan:', plan, billing);
           return;
