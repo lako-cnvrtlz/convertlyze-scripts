@@ -135,16 +135,12 @@
 
   function showModal() {
     var modal = document.getElementById('cvz-member-modal');
-    if (modal) {
-      modal.style.display = 'flex';
-    }
+    if (modal) modal.style.display = 'flex';
   }
 
   function closeModal() {
     var modal = document.getElementById('cvz-member-modal');
-    if (modal) {
-      modal.style.display = 'none';
-    }
+    if (modal) modal.style.display = 'none';
   }
 
   window.cvzShowMemberModal = showModal;
@@ -168,7 +164,14 @@
     'enterprise': { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' }
   };
 
-  async function openStripePortal(btn) {
+  function startCheckout(priceId) {
+    return window.$memberstackDom.purchasePlansWithCheckout({
+      priceId: priceId,
+      successUrl: window.location.origin + '/member/danke'
+    });
+  }
+
+  async function openStripePortalOrCheckout(btn, priceId) {
     var ms = window.$memberstackDom;
     var member = await ms.getCurrentMember();
     var memberstackId = member?.data?.id;
@@ -179,9 +182,10 @@
     }
 
     if (btn) {
-      btn.textContent         = 'Wird geladen…';
-      btn.style.opacity       = '0.6';
-      btn.style.pointerEvents = 'none';
+      btn.dataset.originalText  = btn.dataset.originalText || btn.textContent;
+      btn.textContent           = 'Wird geladen…';
+      btn.style.opacity         = '0.6';
+      btn.style.pointerEvents   = 'none';
     }
 
     try {
@@ -196,19 +200,27 @@
 
       var data = await res.json();
 
+      // Erfolgreich → Portal öffnen
       if (data.url) {
         window.location.href = data.url;
         return;
       }
 
-      // Member ohne Berechtigung → Modal zeigen
+      // Member ohne Berechtigung → Modal
       if (data.error === 'no_permission') {
-        if (btn) {
-          btn.textContent         = btn.dataset.originalText || 'Plan wählen';
-          btn.style.opacity       = '1';
-          btn.style.pointerEvents = 'auto';
-        }
+        resetBtn(btn);
         window.cvzShowMemberModal();
+        return;
+      }
+
+      // Kein Stripe Customer → Checkout starten
+      if (data.error === 'no_customer') {
+        resetBtn(btn);
+        if (priceId) {
+          startCheckout(priceId).catch(function(err) {
+            console.error('❌ Checkout Fehler:', err);
+          });
+        }
         return;
       }
 
@@ -224,6 +236,13 @@
     }
   }
 
+  function resetBtn(btn) {
+    if (!btn) return;
+    btn.textContent         = btn.dataset.originalText || 'Plan wählen';
+    btn.style.opacity       = '1';
+    btn.style.pointerEvents = 'auto';
+  }
+
   async function initPlanButtons() {
     var attempts = 0;
     while (!window.$memberstackDom && attempts < 50) {
@@ -233,45 +252,24 @@
     if (!window.$memberstackDom) return;
 
     var member = await window.$memberstackDom.getCurrentMember();
-    if (!member?.data?.id) return;
+    if (!member?.data?.id) return; // Nicht eingeloggt → normale Links bleiben
 
-    var hasActivePlan = member?.data?.planConnections?.length > 0;
-    console.log('✅ User eingeloggt – hat Plan:', hasActivePlan);
+    console.log('✅ User eingeloggt');
 
     document.querySelectorAll('a[href*="/register?plan="]').forEach(function(btn) {
-      // Originaltext merken für Reset nach Modal
       btn.dataset.originalText = btn.textContent;
 
       btn.addEventListener('click', async function(e) {
         e.preventDefault();
 
-        // User hat bereits einen Plan → Portal oder Modal
-        if (hasActivePlan) {
-          console.log('🔄 User hat Plan – öffne Stripe Portal');
-          await openStripePortal(btn);
-          return;
-        }
-
-        // User hat noch keinen Plan → Checkout starten
         var url        = new URL(btn.href);
         var plan       = url.searchParams.get('plan');
         var billing    = url.searchParams.get('billing') || 'monthly';
         var billingKey = billing === 'annual' ? 'annual' : 'monthly';
         var priceId    = PLAN_DATA[plan]?.[billingKey];
 
-        if (!priceId) {
-          console.warn('⚠️ Kein priceId für Plan:', plan, billing);
-          return;
-        }
-
-        console.log('🛒 Starte Checkout für:', plan, billing, priceId);
-
-        window.$memberstackDom.purchasePlansWithCheckout({
-          priceId: priceId,
-          successUrl: window.location.origin + '/member/danke'
-        }).catch(function(err) {
-          console.error('❌ Checkout Fehler:', err);
-        });
+        // Portal versuchen – mit priceId als Fallback für Checkout
+        await openStripePortalOrCheckout(btn, priceId);
       });
     });
   }
