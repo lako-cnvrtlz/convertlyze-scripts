@@ -65,6 +65,98 @@
 })();
 
 
+// ==================== MODAL ====================
+(function() {
+  function createModal() {
+    if (document.getElementById('cvz-member-modal')) return;
+
+    var overlay = document.createElement('div');
+    overlay.id = 'cvz-member-modal';
+    overlay.style.cssText = [
+      'display: none',
+      'position: fixed',
+      'inset: 0',
+      'background: rgba(0,0,0,0.6)',
+      'z-index: 9999',
+      'align-items: center',
+      'justify-content: center',
+      'backdrop-filter: blur(4px)',
+    ].join(';');
+
+    var box = document.createElement('div');
+    box.style.cssText = [
+      'background: #0d1117',
+      'border: 1px solid #2d3748',
+      'border-radius: 12px',
+      'padding: 32px',
+      'max-width: 420px',
+      'width: 90%',
+      'text-align: center',
+      'font-family: Geist, sans-serif',
+    ].join(';');
+
+    var icon = document.createElement('div');
+    icon.textContent = '🔒';
+    icon.style.cssText = 'font-size: 32px; margin-bottom: 16px;';
+
+    var title = document.createElement('h3');
+    title.textContent = 'Keine Berechtigung';
+    title.style.cssText = 'color: #e8edf5; font-size: 18px; font-weight: 600; margin: 0 0 12px;';
+
+    var text = document.createElement('p');
+    text.textContent = 'Plan-Änderungen können nur vom Account-Inhaber vorgenommen werden. Wende dich an deinen Administrator.';
+    text.style.cssText = 'color: #8b98a5; font-size: 14px; line-height: 1.6; margin: 0 0 24px;';
+
+    var btn = document.createElement('button');
+    btn.textContent = 'Verstanden';
+    btn.style.cssText = [
+      'background: #4fd1c5',
+      'color: #0d1117',
+      'border: none',
+      'border-radius: 8px',
+      'padding: 10px 24px',
+      'font-size: 14px',
+      'font-weight: 600',
+      'cursor: pointer',
+    ].join(';');
+
+    btn.addEventListener('click', function() { closeModal(); });
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) closeModal();
+    });
+
+    box.appendChild(icon);
+    box.appendChild(title);
+    box.appendChild(text);
+    box.appendChild(btn);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  }
+
+  function showModal() {
+    var modal = document.getElementById('cvz-member-modal');
+    if (modal) {
+      modal.style.display = 'flex';
+    }
+  }
+
+  function closeModal() {
+    var modal = document.getElementById('cvz-member-modal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  }
+
+  window.cvzShowMemberModal = showModal;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', createModal);
+  } else {
+    createModal();
+  }
+})();
+
+
 // ==================== PLAN BUTTONS FÜR EINGELOGGTE USER ====================
 (function() {
   var SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
@@ -99,7 +191,6 @@
           'Content-Type':  'application/json',
           'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
         },
-        // Nur memberstackId senden – stripeCustomerId kommt serverseitig aus der DB
         body: JSON.stringify({ memberstackId })
       });
 
@@ -107,9 +198,22 @@
 
       if (data.url) {
         window.location.href = data.url;
-      } else {
-        throw new Error(data.error || 'Keine URL erhalten');
+        return;
       }
+
+      // Member ohne Berechtigung → Modal zeigen
+      if (data.error === 'no_permission') {
+        if (btn) {
+          btn.textContent         = btn.dataset.originalText || 'Plan wählen';
+          btn.style.opacity       = '1';
+          btn.style.pointerEvents = 'auto';
+        }
+        window.cvzShowMemberModal();
+        return;
+      }
+
+      throw new Error(data.error || 'Unbekannter Fehler');
+
     } catch (err) {
       console.error('❌ Portal-Fehler:', err);
       if (btn) {
@@ -121,7 +225,6 @@
   }
 
   async function initPlanButtons() {
-    // Auf Memberstack warten
     var attempts = 0;
     while (!window.$memberstackDom && attempts < 50) {
       await new Promise(function(r) { setTimeout(r, 100); });
@@ -129,18 +232,20 @@
     }
     if (!window.$memberstackDom) return;
 
-    // Prüfen ob User eingeloggt
     var member = await window.$memberstackDom.getCurrentMember();
-    if (!member?.data?.id) return; // Nicht eingeloggt → normale Links bleiben
+    if (!member?.data?.id) return;
 
     var hasActivePlan = member?.data?.planConnections?.length > 0;
     console.log('✅ User eingeloggt – hat Plan:', hasActivePlan);
 
     document.querySelectorAll('a[href*="/register?plan="]').forEach(function(btn) {
+      // Originaltext merken für Reset nach Modal
+      btn.dataset.originalText = btn.textContent;
+
       btn.addEventListener('click', async function(e) {
         e.preventDefault();
 
-        // User hat bereits einen Plan → Stripe Portal öffnen
+        // User hat bereits einen Plan → Portal oder Modal
         if (hasActivePlan) {
           console.log('🔄 User hat Plan – öffne Stripe Portal');
           await openStripePortal(btn);
