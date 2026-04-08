@@ -79,11 +79,10 @@
   async function openStripePortal(btn) {
     var ms = window.$memberstackDom;
     var member = await ms.getCurrentMember();
-    var memberstackId    = member?.data?.id;
-    var stripeCustomerId = member?.data?.stripeCustomerId;
+    var memberstackId = member?.data?.id;
 
-    if (!memberstackId || !stripeCustomerId) {
-      console.error('❌ Kein User oder Stripe ID');
+    if (!memberstackId) {
+      console.error('❌ Kein eingeloggter User');
       return;
     }
 
@@ -97,11 +96,11 @@
       var res = await fetch(SUPABASE_URL + '/functions/v1/stripe-portal', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'apikey':        SUPABASE_ANON_KEY,
+          'Content-Type':  'application/json',
           'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
         },
-        body: JSON.stringify({ memberstackId, stripeCustomerId })
+        // Nur memberstackId senden – stripeCustomerId kommt serverseitig aus der DB
+        body: JSON.stringify({ memberstackId })
       });
 
       var data = await res.json();
