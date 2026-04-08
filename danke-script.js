@@ -8,22 +8,22 @@
 (function() {
 
   var PLAN_DATA = {
-    'prc_starter-monthly-udf40q28':   { text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'prc_starter-yearly-uu680b3d':    { text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'prc_pro-monthly-9q502rg':        { text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'prc_pro-yearly-l4c0gnw':         { text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'prc_enterprise-monthly-ftd0gbp': { text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'prc_enterprise-yearly-zv6022j':  { text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'prc_pay-per-use-14750y0n':       { text: 'Deine Analyse ist bereit. Starte jetzt direkt.' }
+    'prc_starter-monthly-udf40q28':   { text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner Landingpage-Analyse starten.' },
+    'prc_starter-yearly-uu680b3d':    { text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner Landingpage-Analyse starten.' },
+    'prc_pro-monthly-9q502rg':        { text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner Landingpage-Analyse starten.' },
+    'prc_pro-yearly-l4c0gnw':         { text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner Landingpage-Analyse starten.' },
+    'prc_enterprise-monthly-ftd0gbp': { text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner Landingpage-Analyse starten.' },
+    'prc_enterprise-yearly-zv6022j':  { text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner Landingpage-Analyse starten.' },
+    'prc_pay-per-use-14750y0n':       { text: 'Deine Analyse-Credits wurden gutgeschrieben. Du kannst jetzt loslegen.' }
   };
 
   var PLAN_BY_LICENSE = {
     'Free':         { text: 'Dein Free-Plan ist aktiv. Du hast eine kostenlose Analyse verfügbar.' },
-    'Starter':      { text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'Pro':          { text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'Professional': { text: 'Dein Professional-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'Enterprise':   { text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner ersten Landingpage-Analyse starten.' },
-    'Pay-per-Use':  { text: 'Deine Analyse ist bereit. Starte jetzt direkt.' }
+    'Starter':      { text: 'Dein Starter-Plan ist jetzt aktiv. Du kannst sofort mit deiner Landingpage-Analyse starten.' },
+    'Pro':          { text: 'Dein Pro-Plan ist jetzt aktiv. Du kannst sofort mit deiner Landingpage-Analyse starten.' },
+    'Professional': { text: 'Dein Professional-Plan ist jetzt aktiv. Du kannst sofort mit deiner Landingpage-Analyse starten.' },
+    'Enterprise':   { text: 'Dein Enterprise-Plan ist jetzt aktiv. Du kannst sofort mit deiner Landingpage-Analyse starten.' },
+    'Pay-per-Use':  { text: 'Deine Analyse-Credits wurden gutgeschrieben. Du kannst jetzt loslegen.' }
   };
 
   function revealHero() {
@@ -68,11 +68,15 @@
     var planInfo = PLAN_DATA[priceId] || null;
 
     if (!planInfo) {
-      var isPaidPlan = ['Starter', 'Pro', 'Professional', 'Enterprise'].indexOf(user.license_type) !== -1;
-      if (!isPaidPlan && user.ppu_credits > 0) {
+      if (priceId === 'prc_pay-per-use-14750y0n') {
         planInfo = PLAN_BY_LICENSE['Pay-per-Use'];
       } else {
-        planInfo = PLAN_BY_LICENSE[user.license_type] || PLAN_BY_LICENSE['Free'];
+        var isPaidPlan = ['Starter', 'Pro', 'Professional', 'Enterprise'].indexOf(user.license_type) !== -1;
+        if (!isPaidPlan && user.ppu_credits > 0) {
+          planInfo = PLAN_BY_LICENSE['Pay-per-Use'];
+        } else {
+          planInfo = PLAN_BY_LICENSE[user.license_type] || PLAN_BY_LICENSE['Free'];
+        }
       }
     }
 
