@@ -159,16 +159,24 @@
   var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
 
   var PLAN_DATA = {
-    'starter':    { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
-    'pro':        { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
-    'enterprise': { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' }
+    'starter':     { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
+    'pro':         { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
+    'enterprise':  { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' },
+    'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      }
   };
 
   function startCheckout(priceId) {
     return window.$memberstackDom.purchasePlansWithCheckout({
-      priceId: priceId,
+      priceId:    priceId,
       successUrl: window.location.origin + '/member/danke'
     });
+  }
+
+  function resetBtn(btn) {
+    if (!btn) return;
+    btn.textContent         = btn.dataset.originalText || 'Plan wählen';
+    btn.style.opacity       = '1';
+    btn.style.pointerEvents = 'auto';
   }
 
   async function openStripePortalOrCheckout(btn, priceId) {
@@ -213,7 +221,7 @@
         return;
       }
 
-      // Kein Stripe Customer → Checkout starten
+      // Kein Stripe Customer oder kein aktives Abo → Checkout
       if (data.error === 'no_customer') {
         resetBtn(btn);
         if (priceId) {
@@ -234,13 +242,6 @@
         btn.style.pointerEvents = 'auto';
       }
     }
-  }
-
-  function resetBtn(btn) {
-    if (!btn) return;
-    btn.textContent         = btn.dataset.originalText || 'Plan wählen';
-    btn.style.opacity       = '1';
-    btn.style.pointerEvents = 'auto';
   }
 
   async function initPlanButtons() {
@@ -268,7 +269,18 @@
         var billingKey = billing === 'annual' ? 'annual' : 'monthly';
         var priceId    = PLAN_DATA[plan]?.[billingKey];
 
-        // Portal versuchen – mit priceId als Fallback für Checkout
+        // Pay-per-Use → immer direkt zum Checkout, kein Portal-Versuch
+        if (plan === 'pay-per-use') {
+          console.log('🛒 Pay-per-Use – direkt zum Checkout');
+          if (priceId) {
+            startCheckout(priceId).catch(function(err) {
+              console.error('❌ Checkout Fehler:', err);
+            });
+          }
+          return;
+        }
+
+        // Alle anderen Pläne → Portal oder Checkout
         await openStripePortalOrCheckout(btn, priceId);
       });
     });
