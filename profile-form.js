@@ -9,14 +9,13 @@
   setValue('profile-firstname',  member?.data?.customFields?.['first-name'])
   setValue('profile-lastname',   member?.data?.customFields?.['last-name'])
 
-  // E-Mail readonly setzen
+  // E-Mail sichtbar aber nicht editierbar
   const emailField = document.getElementById('profile-email')
   if (emailField) {
     emailField.value = email || ''
     setTimeout(() => {
       emailField.setAttribute('readonly', '')
-      emailField.style.opacity = '0.6'
-      emailField.style.cursor = 'not-allowed'
+      emailField.style.cssText += '; opacity: 1 !important; cursor: not-allowed; background-color: #1a2234; color: #e8edf5;'
     }, 500)
   }
 
@@ -43,8 +42,8 @@
         lastname:   document.getElementById('profile-lastname')?.value,
       })
     })
-    const data = await res.json()
 
+    const data = await res.json()
     if (data.success) {
       btn.textContent = 'Gespeichert ✓'
       btn.style.opacity = '1'
