@@ -178,6 +178,7 @@
 (function() {
   var SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
   var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
+  var PORTAL_ENDPOINT   = SUPABASE_URL + '/functions/v1/stripe-portal';
 
   var PLAN_DATA = {
     'starter':     { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
@@ -208,13 +209,58 @@
     btn.style.pointerEvents  = 'none';
   }
 
-  async function handlePlanClick(btn, priceId) {
-    // Immer direkt zum Stripe Checkout – auch für eingeloggte User
-    // Nach erfolgreicher Zahlung: Stripe Webhook → stripe-webhook EF → Memberstack → Supabase
-    if (priceId) {
-      startCheckout(priceId).catch(function(err) {
-        console.error('Checkout Fehler:', err);
+  async function handlePlanClick(btn, memberstackId, priceId) {
+    setBtnLoading(btn);
+
+    try {
+      // Supabase: hat User aktiven Plan?
+      var dbRes = await fetch(
+        SUPABASE_URL + '/rest/v1/users?select=current_price_id&memberstack_id=eq.' + memberstackId,
+        { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY } }
+      );
+      var users = await dbRes.json();
+      var hasActivePlan = users?.[0]?.current_price_id;
+
+      if (hasActivePlan) {
+        // Bestehender Plan → Customer Portal für Plan-Wechsel
+        var portalRes = await fetch(PORTAL_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type':  'application/json',
+            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
+          },
+          body: JSON.stringify({ memberstackId: memberstackId })
+        });
+        var portalData = await portalRes.json();
+
+        if (portalData.url) {
+          window.location.href = portalData.url;
+          return;
+        }
+
+        // Portal-Fehler
         resetBtn(btn);
+        window.cvzShowModal({
+          icon: '❌',
+          title: 'Fehler beim Öffnen',
+          text: 'Das Abrechnungsportal konnte nicht geöffnet werden. Bitte versuche es erneut oder kontaktiere den Support.',
+        });
+
+      } else {
+        // Kein aktiver Plan → Stripe Checkout
+        resetBtn(btn);
+        startCheckout(priceId).catch(function(err) {
+          console.error('Checkout Fehler:', err);
+        });
+      }
+
+    } catch (err) {
+      console.error('Plan-Klick Fehler:', err);
+      resetBtn(btn);
+      window.cvzShowModal({
+        icon: '❌',
+        title: 'Verbindungsfehler',
+        text: 'Es konnte keine Verbindung zum Server hergestellt werden. Bitte prüfe deine Internetverbindung.',
       });
     }
   }
@@ -245,7 +291,7 @@
         var billingKey = billing === 'annual' ? 'annual' : 'monthly';
         var priceId    = PLAN_DATA[plan]?.[billingKey];
 
-        await handlePlanClick(btn, priceId);
+        await handlePlanClick(btn, memberstackId, priceId);
       });
     });
   }
