@@ -187,9 +187,11 @@
     'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      }
   };
 
+  // FIX: priceIds als Array von Objekten statt einzelner priceId-String
   function startCheckout(priceId) {
+    console.log('[CVZ] startCheckout aufgerufen mit priceId:', priceId);
     return window.$memberstackDom.purchasePlansWithCheckout({
-      priceId:    priceId,
+      priceIds:   [{ id: priceId }],
       successUrl: window.location.origin + '/member/danke'
     });
   }
@@ -210,6 +212,18 @@
   }
 
   async function handlePlanClick(btn, memberstackId, priceId) {
+    console.log('[CVZ] handlePlanClick → memberstackId:', memberstackId, '| priceId:', priceId);
+
+    if (!priceId) {
+      console.error('[CVZ] Kein priceId ermittelt – Plan oder Billing-Key fehlt im PLAN_DATA.');
+      window.cvzShowModal({
+        icon: '❌',
+        title: 'Konfigurationsfehler',
+        text: 'Für diesen Plan konnte kein Preis ermittelt werden. Bitte kontaktiere den Support.',
+      });
+      return;
+    }
+
     setBtnLoading(btn);
 
     try {
@@ -219,7 +233,10 @@
         { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY } }
       );
       var users = await dbRes.json();
+      console.log('[CVZ] Supabase User-Response:', users);
+
       var hasActivePlan = users?.[0]?.current_price_id;
+      console.log('[CVZ] current_price_id:', hasActivePlan, '→', hasActivePlan ? 'Portal-Flow' : 'Checkout-Flow');
 
       if (hasActivePlan) {
         // Bestehender Plan → Customer Portal für Plan-Wechsel
@@ -232,6 +249,7 @@
           body: JSON.stringify({ memberstackId: memberstackId })
         });
         var portalData = await portalRes.json();
+        console.log('[CVZ] Portal-Response:', portalData);
 
         if (portalData.url) {
           window.location.href = portalData.url;
@@ -247,15 +265,22 @@
         });
 
       } else {
-        // Kein aktiver Plan → Stripe Checkout
+        // Kein aktiver Plan → Stripe Checkout via Memberstack
         resetBtn(btn);
         startCheckout(priceId).catch(function(err) {
-          console.error('Checkout Fehler:', err);
+          // Erweitertes Fehler-Logging
+          console.error('[CVZ] Checkout Fehler (raw):', err);
+          console.error('[CVZ] Checkout Fehler message:', err?.message);
+          console.error('[CVZ] Checkout Fehler status:', err?.status);
+          console.error('[CVZ] Checkout Fehler body:', err?.body);
+          console.error('[CVZ] Checkout Fehler JSON:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
         });
       }
 
     } catch (err) {
-      console.error('Plan-Klick Fehler:', err);
+      console.error('[CVZ] handlePlanClick Exception:', err);
+      console.error('[CVZ] Exception message:', err?.message);
+      console.error('[CVZ] Exception JSON:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
       resetBtn(btn);
       window.cvzShowModal({
         icon: '❌',
@@ -271,13 +296,16 @@
       await new Promise(function(r) { setTimeout(r, 100); });
       attempts++;
     }
-    if (!window.$memberstackDom) return;
+    if (!window.$memberstackDom) {
+      console.warn('[CVZ] $memberstackDom nicht gefunden nach 5s.');
+      return;
+    }
 
     var member = await window.$memberstackDom.getCurrentMember();
+    console.log('[CVZ] getCurrentMember:', member?.data?.id || 'nicht eingeloggt');
     if (!member?.data?.id) return; // Nicht eingeloggt → normale Links bleiben
 
     var memberstackId = member.data.id;
-    console.log('User eingeloggt:', memberstackId);
 
     document.querySelectorAll('a[href*="/register?plan="]').forEach(function(btn) {
       btn.dataset.originalText = btn.textContent;
@@ -291,9 +319,13 @@
         var billingKey = billing === 'annual' ? 'annual' : 'monthly';
         var priceId    = PLAN_DATA[plan]?.[billingKey];
 
+        console.log('[CVZ] Button geklickt → plan:', plan, '| billing:', billingKey, '| priceId:', priceId);
+
         await handlePlanClick(btn, memberstackId, priceId);
       });
     });
+
+    console.log('[CVZ] Plan-Buttons initialisiert für User:', memberstackId);
   }
 
   if (document.readyState === 'loading') {
