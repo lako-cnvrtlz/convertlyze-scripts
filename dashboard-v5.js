@@ -79,6 +79,7 @@
     return false;
   }
 
+  // Globaler PDF-Zugriff: nur für aktive Paid-Plans
   function checkPdfAccess(user) {
     var billingUser = user._billingUser || user;
     var type    = billingUser.license_type   || '';
@@ -86,11 +87,18 @@
     var expires = billingUser.license_expires_at;
 
     var paidPlans = ['Starter', 'Growth', 'Pro', 'Professional', 'Enterprise', 'Agency'];
-    if (paidPlans.indexOf(type) === -1) return false;
+    if (paidPlans.indexOf(type) !== -1) {
+      if (status === 'active') return true;
+      if (status === 'canceling' && expires && new Date(expires) > new Date()) return true;
+    }
 
-    if (status === 'active') return true;
-    if (status === 'canceling' && expires && new Date(expires) > new Date()) return true;
+    return false;
+  }
 
+  // PDF-Zugriff pro Analyse: Paid-Plan ODER PPU-Analyse
+  function canAccessPdf(analysis) {
+    if (globalHasPdfAccess) return true;
+    if (analysis.analysis_source === 'Pay-per-Use') return true;
     return false;
   }
 
@@ -434,7 +442,9 @@
 
   async function handleReportDownload(btn, analysisId) {
     if (!globalSupabaseUserId) return;
-    if (!globalHasPdfAccess) return;
+
+    var analysis = analysesData.find(function(a) { return a.id === analysisId; });
+    if (!canAccessPdf(analysis)) return;
 
     var isAgency = (globalLicenseType || '').toLowerCase() === 'agency';
 
@@ -442,7 +452,6 @@
     btn.title = 'Wird generiert...';
 
     try {
-      var analysis = analysesData.find(function(a) { return a.id === analysisId; });
       var domain = 'report';
       var datetime = '';
       try {
@@ -562,12 +571,13 @@
     var maxKeywordLength = isMobile ? 25 : 40;
     if (displayKeyword.length > maxKeywordLength) displayKeyword = displayKeyword.substring(0, maxKeywordLength - 3) + '...';
 
-    var canDownload = isCompleted && globalHasPdfAccess;
+    // PDF-Zugriff pro Analyse: Paid-Plan global ODER PPU-Analyse
+    var canDownload = isCompleted && canAccessPdf(analysis);
 
     var downloadTitle = !isCompleted
       ? 'Analyse muss abgeschlossen sein'
-      : !globalHasPdfAccess
-        ? 'Kein aktiver Plan – bitte Plan verlängern'
+      : !canAccessPdf(analysis)
+        ? 'PDF-Report nur für kostenpflichtige Pläne oder Pay-per-Use verfügbar'
         : (pdfUrlCache[analysis.id] ? 'Report öffnen' : 'Report generieren & herunterladen');
 
     var downloadBtnHtml =
@@ -741,7 +751,7 @@
       globalLicenseType    = (currentUser._billingUser || currentUser).license_type || '';
       globalHasPdfAccess   = checkPdfAccess(currentUser);
 
-      console.log('✅ User geladen:', currentUser.email, '| Plan:', globalLicenseType);
+      console.log('✅ User geladen:', currentUser.email, '| Plan:', globalLicenseType, '| PDF-Zugriff global:', globalHasPdfAccess);
 
       var didReset = await triggerCreditResetIfPaid(currentUser);
       if (didReset) {
