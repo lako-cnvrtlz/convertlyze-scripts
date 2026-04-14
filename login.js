@@ -1,26 +1,36 @@
 document.addEventListener('DOMContentLoaded', function() {
   const loginForm = document.querySelector('[data-ms-form="login"]');
-  
+
   if (loginForm) {
     const urlParams = new URLSearchParams(window.location.search);
-    const email = urlParams.get('email');
-    
+    const email   = urlParams.get('email');
+    const plan    = urlParams.get('plan');
+    const billing = urlParams.get('billing') || 'monthly';
+
+    // E-Mail aus URL-Parameter ausfüllen
     if (email) {
       const emailInput = loginForm.querySelector('input[type="email"]');
       if (emailInput) {
         emailInput.value = decodeURIComponent(email);
       }
     }
-    
+
+    // Plan-Parameter in localStorage schreiben damit post-login-checkout.js sie findet
+    if (plan) {
+      localStorage.setItem('selected_plan', plan);
+      localStorage.setItem('selected_billing', billing);
+      console.log('[CVZ] Login: localStorage gesetzt | plan:', plan, '| billing:', billing);
+    }
+
     loginForm.addEventListener('submit', async function(e) {
       e.preventDefault();
-      
+
       const emailInput = loginForm.querySelector('input[type="email"]');
       const emailValue = emailInput.value;
-      
+
       const oldMessage = document.querySelector('.memberstack-custom-message');
       if (oldMessage) oldMessage.remove();
-      
+
       try {
         await $memberstackDOM.sendMagicLink({ email: emailValue });
         showMagicLinkSentMessage(loginForm);
@@ -46,7 +56,7 @@ function showNotRegisteredMessage(email, formElement) {
     border-radius: 8px;
     text-align: center;
   `;
-  
+
   messageDiv.innerHTML = `
     <p style="margin: 0 0 15px 0; color: #495057; font-size: 16px;">
       Diese E-Mail-Adresse ist noch nicht registriert.
@@ -59,7 +69,7 @@ function showNotRegisteredMessage(email, formElement) {
       Jetzt registrieren
     </a>
   `;
-  
+
   formElement.parentElement.appendChild(messageDiv);
 }
 
@@ -74,13 +84,13 @@ function showMagicLinkSentMessage(formElement) {
     border-radius: 8px;
     text-align: center;
   `;
-  
+
   messageDiv.innerHTML = `
     <p style="margin: 0; color: #155724; font-size: 16px;">
       ✓ Magic Link wurde versendet! Bitte prüfen Sie Ihr E-Mail-Postfach.
     </p>
   `;
-  
+
   formElement.parentElement.appendChild(messageDiv);
 }
 
@@ -95,12 +105,12 @@ function showErrorMessage(formElement, errorMsg) {
     border-radius: 8px;
     text-align: center;
   `;
-  
+
   messageDiv.innerHTML = `
     <p style="margin: 0; color: #721c24; font-size: 16px;">
       Ein Fehler ist aufgetreten. Bitte versuchen Sie es erneut.
     </p>
   `;
-  
+
   formElement.parentElement.appendChild(messageDiv);
 }
