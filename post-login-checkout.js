@@ -10,15 +10,24 @@
   };
 
   async function triggerPostLoginCheckout() {
-    var plan       = sessionStorage.getItem('selected_plan');
-    var billing    = sessionStorage.getItem('selected_billing') || 'monthly';
+    // URL-Parameter als primäre Quelle, localStorage als Fallback
+    var urlParams  = new URLSearchParams(window.location.search);
+    var plan       = urlParams.get('plan') || localStorage.getItem('selected_plan');
+    var billing    = urlParams.get('billing') || localStorage.getItem('selected_billing') || 'monthly';
     var billingKey = billing === 'annual' ? 'annual' : 'monthly';
     var priceId    = PRICE_IDS[plan]?.[billingKey];
 
-    if (!priceId) return;
+    console.log('[CVZ] Post-Login | plan:', plan, '| billing:', billing, '| priceId:', priceId);
 
-    sessionStorage.removeItem('selected_plan');
-    sessionStorage.removeItem('selected_billing');
+    // Kein Plan gespeichert → normaler Login, nichts tun
+    if (!priceId) {
+      localStorage.removeItem('selected_plan');
+      localStorage.removeItem('selected_billing');
+      return;
+    }
+
+    localStorage.removeItem('selected_plan');
+    localStorage.removeItem('selected_billing');
 
     var SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
     var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
@@ -35,7 +44,10 @@
       var users = await dbRes.json();
       var hasActivePlan = users?.[0]?.current_price_id;
 
+      console.log('[CVZ] Post-Login | hasActivePlan:', hasActivePlan);
+
       if (hasActivePlan) {
+        // Hat bereits Plan → Customer Portal für Plan-Wechsel
         var portalRes = await fetch(SUPABASE_URL + '/functions/v1/stripe-portal', {
           method: 'POST',
           headers: {
@@ -50,6 +62,7 @@
           return;
         }
       } else {
+        // Kein aktiver Plan → direkt Checkout starten
         await window.$memberstackDom.purchasePlansWithCheckout({
           priceIds:   [{ id: priceId }],
           successUrl: window.location.origin + '/member/danke'
