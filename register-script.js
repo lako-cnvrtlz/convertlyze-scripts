@@ -26,10 +26,10 @@
     }
 
     try {
-      await window.$memberstackDom.purchasePlansWithCheckout({
-        priceId:    priceId,
-        successUrl: window.location.origin + '/member/danke'
-      });
+  await window.$memberstackDom.purchasePlansWithCheckout({
+    priceIds:   [{ id: priceId }],  // ← so
+    successUrl: window.location.origin + '/member/danke'
+  });
     } catch (err) {
       console.error('❌ Checkout Fehler:', err);
       window.location.href = '/member/dashboard';
