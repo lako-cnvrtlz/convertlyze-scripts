@@ -157,7 +157,6 @@
   window.cvzShowModal    = showModal;
   window.cvzCloseModal   = closeModal;
 
-  // Legacy-Kompatibilität
   window.cvzShowMemberModal = function() {
     showModal({
       icon: '🔒',
@@ -187,7 +186,6 @@
     'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      }
   };
 
-  // FIX: priceIds als Array von Objekten statt einzelner priceId-String
   function startCheckout(priceId) {
     console.log('[CVZ] startCheckout aufgerufen mit priceId:', priceId);
     return window.$memberstackDom.purchasePlansWithCheckout({
@@ -227,7 +225,6 @@
     setBtnLoading(btn);
 
     try {
-      // Supabase: hat User aktiven Plan?
       var dbRes = await fetch(
         SUPABASE_URL + '/rest/v1/users?select=current_price_id&memberstack_id=eq.' + memberstackId,
         { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY } }
@@ -239,7 +236,6 @@
       console.log('[CVZ] current_price_id:', hasActivePlan, '→', hasActivePlan ? 'Portal-Flow' : 'Checkout-Flow');
 
       if (hasActivePlan) {
-        // Bestehender Plan → Customer Portal für Plan-Wechsel
         var portalRes = await fetch(PORTAL_ENDPOINT, {
           method: 'POST',
           headers: {
@@ -256,7 +252,6 @@
           return;
         }
 
-        // Portal-Fehler
         resetBtn(btn);
         window.cvzShowModal({
           icon: '❌',
@@ -265,10 +260,8 @@
         });
 
       } else {
-        // Kein aktiver Plan → Stripe Checkout via Memberstack
         resetBtn(btn);
         startCheckout(priceId).catch(function(err) {
-          // Erweitertes Fehler-Logging
           console.error('[CVZ] Checkout Fehler (raw):', err);
           console.error('[CVZ] Checkout Fehler message:', err?.message);
           console.error('[CVZ] Checkout Fehler status:', err?.status);
@@ -303,8 +296,24 @@
 
     var member = await window.$memberstackDom.getCurrentMember();
     console.log('[CVZ] getCurrentMember:', member?.data?.id || 'nicht eingeloggt');
-    if (!member?.data?.id) return; // Nicht eingeloggt → normale Links bleiben
 
+    if (!member?.data?.id) {
+      // ── NICHT EINGELOGGT: sessionStorage befüllen, dann normal zu /register navigieren ──
+      document.querySelectorAll('a[href*="/register?plan="]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var url     = new URL(btn.href);
+          var plan    = url.searchParams.get('plan');
+          var billing = url.searchParams.get('billing') || 'monthly';
+          console.log('[CVZ] Nicht eingeloggt → sessionStorage setzen | plan:', plan, '| billing:', billing);
+          sessionStorage.setItem('selected_plan', plan);
+          sessionStorage.setItem('selected_billing', billing);
+          // Kein preventDefault – Navigation zu /register läuft normal weiter
+        });
+      });
+      return;
+    }
+
+    // ── EINGELOGGT: Plan-Button-Flow ──
     var memberstackId = member.data.id;
 
     document.querySelectorAll('a[href*="/register?plan="]').forEach(function(btn) {
