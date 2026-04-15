@@ -1,3 +1,4 @@
+// ==================== POST-LOGIN SCRIPT ====================
 (function() {
   if (window._cvlyPostLoginCheckout) return;
   window._cvlyPostLoginCheckout = true;
@@ -12,22 +13,39 @@
     'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      }
   };
 
-  var urlParams   = new URLSearchParams(window.location.search);
+  var urlParams = new URLSearchParams(window.location.search);
+
+  // ── Cookie Helpers ─────────────────────────────────────────────────────────
+  function getPlanCookie(name) {
+    var match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+    return match ? match[1] : null;
+  }
+
+  function clearPlanCookies() {
+    document.cookie = 'cvz_plan=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+    document.cookie = 'cvz_billing=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+  }
+
+  function getFromStorage(key) {
+    try { return localStorage.getItem(key); } catch(e) { return null; }
+  }
+
+  function removeFromStorage(key) {
+    try { localStorage.removeItem(key); } catch(e) {}
+  }
 
   window.addEventListener('memberstack:auth:login', async function(event) {
     var memberstackId = event?.detail?.member?.id || event?.detail?.id;
     console.log('[CVZ] Post-Login detected, memberstackId:', memberstackId);
 
     // ── INVITE FLOW ──────────────────────────────────────────────────────────
-    // sessionStorage als primäre Quelle, URL-Parameter als Fallback
-    // (sessionStorage kann durch Browser Tracking Prevention blockiert sein)
     var token = sessionStorage.getItem('pending_invite_token')
              || urlParams.get('invite');
     console.log('[CVZ] pending_invite_token:', token);
 
     if (token) {
       sessionStorage.removeItem('pending_invite_token');
-      console.log('[CVZ] Invite-Flow nach Login – rufe accept-team-invite auf...');
+      console.log('[CVZ] Invite-Flow nach Login...');
 
       try {
         var res = await fetch(SUPABASE_URL + '/functions/v1/accept-team-invite', {
@@ -36,10 +54,7 @@
             'Content-Type': 'application/json',
             'apikey': SUPABASE_ANON_KEY
           },
-          body: JSON.stringify({
-            token:          token,
-            memberstack_id: memberstackId
-          })
+          body: JSON.stringify({ token, memberstack_id: memberstackId })
         });
         var data = await res.json();
         console.log('[CVZ] accept-team-invite Response:', data);
@@ -57,15 +72,23 @@
     }
 
     // ── NORMALER POST-LOGIN CHECKOUT FLOW ────────────────────────────────────
-    var currentPlan    = urlParams.get('plan') || localStorage.getItem('selected_plan');
-    var currentBilling = urlParams.get('billing') || localStorage.getItem('selected_billing') || 'monthly';
-    var billingKey     = currentBilling === 'annual' ? 'annual' : 'monthly';
-    var priceId        = PRICE_IDS[currentPlan]?.[billingKey];
+    // Cookie als primäre Quelle, localStorage + URL als Fallback
+    var currentPlan    = getPlanCookie('cvz_plan')
+                      || urlParams.get('plan')
+                      || getFromStorage('selected_plan');
+    var currentBilling = getPlanCookie('cvz_billing')
+                      || urlParams.get('billing')
+                      || getFromStorage('selected_billing')
+                      || 'monthly';
+
+    var billingKey = currentBilling === 'annual' ? 'annual' : 'monthly';
+    var priceId    = PRICE_IDS[currentPlan]?.[billingKey];
 
     console.log('[CVZ] Post-Login | plan:', currentPlan, '| billing:', currentBilling, '| priceId:', priceId);
 
-    localStorage.removeItem('selected_plan');
-    localStorage.removeItem('selected_billing');
+    clearPlanCookies();
+    removeFromStorage('selected_plan');
+    removeFromStorage('selected_billing');
 
     if (!priceId) {
       console.log('[CVZ] Kein Plan – normaler Login-Redirect');
@@ -88,7 +111,7 @@
             'Content-Type':  'application/json',
             'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
           },
-          body: JSON.stringify({ memberstackId: memberstackId })
+          body: JSON.stringify({ memberstackId })
         });
         var portalData = await portalRes.json();
         if (portalData.url) {
