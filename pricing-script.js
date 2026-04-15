@@ -73,6 +73,32 @@
     }
   })();
 
+  // ==================== MODAL ====================
+  function showTeamMemberModal() {
+    let modal = document.getElementById('cvz-member-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'cvz-member-modal';
+      modal.style.cssText = 'display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;';
+      modal.innerHTML = `
+        <div style="background:#fff; border-radius:12px; padding:40px 32px; max-width:440px; width:90%; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,0.2);">
+          <h3 style="margin:0 0 12px; font-size:20px;">Plan-Änderung nicht möglich</h3>
+          <p style="margin:0 0 24px; color:#555; line-height:1.5;">Du bist Mitglied eines Teams. Bitte wende dich an den Inhaber deines Accounts, um den Plan zu ändern.</p>
+          <button id="cvz-member-modal-close" style="background:#0d1117; color:#fff; border:none; border-radius:8px; padding:12px 24px; cursor:pointer; font-size:15px;">Verstanden</button>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      document.getElementById('cvz-member-modal-close').addEventListener('click', () => {
+        modal.style.display = 'none';
+      });
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.style.display = 'none';
+      });
+    } else {
+      modal.style.display = 'flex';
+    }
+  }
+
   // ==================== PLAN BUTTONS ====================
   const ENDPOINT = "https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/billing-redirect";
   let isLoading = false;
@@ -91,12 +117,23 @@
         body: JSON.stringify({ plan, billing, memberstackId }),
       });
       const data = await res.json();
+
       if (!res.ok) throw new Error(data.error || "Request failed");
+
+      // Team-Member → Modal statt Checkout/Portal
+      if (data.team_role === 'member') {
+        showTeamMemberModal();
+        btn.textContent = originalText;
+        return;
+      }
+
       if (data.url) {
         window.location.href = data.url;
         return;
       }
+
       throw new Error("No URL returned");
+
     } catch (err) {
       console.error("[CVZ] Billing error:", err);
       btn.textContent = "Fehler – erneut versuchen";
