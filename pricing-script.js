@@ -187,12 +187,11 @@
   };
 
   function startCheckout(priceId) {
-    console.log('[CVZ] startCheckout aufgerufen mit priceId:', priceId);
-    return window.$memberstackDom.purchasePlansWithCheckout({
-      priceIds:   [{ id: priceId }],
-      successUrl: window.location.origin + '/member/danke'
-    });
-  }
+  return window.$memberstackDom.purchasePlansWithCheckout({
+    priceId:    priceId,
+    successUrl: window.location.origin + '/member/danke'
+  });
+}
 
   function resetBtn(btn) {
     if (!btn) return;
