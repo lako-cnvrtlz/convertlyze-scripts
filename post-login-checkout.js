@@ -12,19 +12,17 @@
     'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      }
   };
 
-  // ── TEMPORÄRER DEBUG-LISTENER ──────────────────────────────────────────────
-  window.addEventListener('memberstack:auth:login', function(event) {
-    console.log('[CVZ] DEBUG memberstack:auth:login fired:', JSON.stringify(event.detail));
-    console.log('[CVZ] DEBUG sessionStorage token:', sessionStorage.getItem('pending_invite_token'));
-  });
+  var urlParams   = new URLSearchParams(window.location.search);
 
-  // ── HAUPT-LISTENER ─────────────────────────────────────────────────────────
   window.addEventListener('memberstack:auth:login', async function(event) {
     var memberstackId = event?.detail?.member?.id || event?.detail?.id;
     console.log('[CVZ] Post-Login detected, memberstackId:', memberstackId);
 
     // ── INVITE FLOW ──────────────────────────────────────────────────────────
-    var token = sessionStorage.getItem('pending_invite_token');
+    // sessionStorage als primäre Quelle, URL-Parameter als Fallback
+    // (sessionStorage kann durch Browser Tracking Prevention blockiert sein)
+    var token = sessionStorage.getItem('pending_invite_token')
+             || urlParams.get('invite');
     console.log('[CVZ] pending_invite_token:', token);
 
     if (token) {
@@ -59,7 +57,6 @@
     }
 
     // ── NORMALER POST-LOGIN CHECKOUT FLOW ────────────────────────────────────
-    var urlParams      = new URLSearchParams(window.location.search);
     var currentPlan    = urlParams.get('plan') || localStorage.getItem('selected_plan');
     var currentBilling = urlParams.get('billing') || localStorage.getItem('selected_billing') || 'monthly';
     var billingKey     = currentBilling === 'annual' ? 'annual' : 'monthly';
