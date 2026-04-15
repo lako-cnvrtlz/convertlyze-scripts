@@ -1,3 +1,4 @@
+// ==================== LOGIN SCRIPT ====================
 (function() {
   if (window._cvlyLoginInit) return;
   window._cvlyLoginInit = true;
@@ -8,10 +9,22 @@
   var plan        = urlParams.get('plan');
   var billing     = urlParams.get('billing') || 'monthly';
 
+  // ── Cookie Helpers ─────────────────────────────────────────────────────────
+  function setInviteCookie(token) {
+    var expires = new Date(Date.now() + 30 * 60 * 1000).toUTCString();
+    document.cookie = 'cvz_invite=' + token + ';expires=' + expires + ';path=/;SameSite=Lax';
+  }
+
+  function setPlanCookie(p, b) {
+    var expires = new Date(Date.now() + 10 * 60 * 1000).toUTCString();
+    document.cookie = 'cvz_plan='    + p + ';expires=' + expires + ';path=/;SameSite=Lax';
+    document.cookie = 'cvz_billing=' + b + ';expires=' + expires + ';path=/;SameSite=Lax';
+  }
+
   // ── 1. Invite-Token sichern ────────────────────────────────────────────────
   if (inviteToken) {
-    sessionStorage.setItem('pending_invite_token', inviteToken);
-    console.log('[CVZ] Login: Invite-Token gesichert:', inviteToken);
+    setInviteCookie(inviteToken);
+    console.log('[CVZ] Login: Invite-Token gesichert (Cookie):', inviteToken);
   }
 
   // ── 2. DOMContentLoaded ────────────────────────────────────────────────────
@@ -30,14 +43,17 @@
       }
     }
 
-    // Plan in localStorage sichern
+    // Plan in Cookie sichern
     if (plan) {
-      localStorage.setItem('selected_plan', plan);
-      localStorage.setItem('selected_billing', billing);
+      setPlanCookie(plan, billing);
+      try {
+        localStorage.setItem('selected_plan', plan);
+        localStorage.setItem('selected_billing', billing);
+      } catch(e) {}
       console.log('[CVZ] Login: Plan gesichert | plan:', plan, '| billing:', billing);
     }
 
-    // Register-Link anreichern (falls User noch kein Konto hat)
+    // Register-Link anreichern
     document.querySelectorAll('a[href*="/register"]').forEach(function(link) {
       var params = [];
       if (inviteToken) params.push('invite=' + inviteToken);
