@@ -1,4 +1,3 @@
-// ==================== POST-LOGIN SCRIPT ====================
 (function() {
   if (window._cvlyPostLoginCheckout) return;
   window._cvlyPostLoginCheckout = true;
@@ -33,13 +32,13 @@
     try { localStorage.removeItem(key); } catch(e) {}
   }
 
-  window.addEventListener('memberstack:auth:login', async function(event) {
-    var memberstackId = event?.detail?.member?.id || event?.detail?.id;
-    console.log('[CVZ] Post-Login detected, memberstackId:', memberstackId);
+  // ── Haupt-Handler ──────────────────────────────────────────────────────────
+  async function handlePostLogin(memberstackId) {
+    if (!memberstackId) return;
+    console.log('[CVZ] handlePostLogin | memberstackId:', memberstackId);
 
     // ── INVITE FLOW ──────────────────────────────────────────────────────────
     var token = getCookie('cvz_invite') || urlParams.get('invite');
-    console.log('[CVZ] pending_invite_token:', token);
 
     if (token) {
       clearCookie('cvz_invite');
@@ -69,7 +68,7 @@
       return;
     }
 
-    // ── NORMALER POST-LOGIN CHECKOUT FLOW ────────────────────────────────────
+    // ── CHECKOUT FLOW ─────────────────────────────────────────────────────────
     var currentPlan    = getCookie('cvz_plan')
                       || urlParams.get('plan')
                       || getFromStorage('selected_plan');
@@ -126,6 +125,39 @@
       console.error('[CVZ] ❌ Post-Login Checkout Fehler:', err);
       window.location.href = '/member/dashboard';
     }
+  }
+
+  // ── Event-Listener: normaler Login ────────────────────────────────────────
+  window.addEventListener('memberstack:auth:login', function(event) {
+    var memberstackId = event?.detail?.member?.id || event?.detail?.id;
+    handlePostLogin(memberstackId);
   });
+
+  // ── On-Load-Check: User bereits eingeloggt (Magic Link, Signup-Redirect) ──
+  async function checkOnLoad() {
+    // Nur ausführen wenn ein Plan-Cookie oder Invite-Cookie vorhanden ist
+    if (!getCookie('cvz_plan') && !getCookie('cvz_invite') && !urlParams.get('invite')) return;
+
+    var memberstackReady = !!window.$memberstackDom;
+    if (!memberstackReady) {
+      setTimeout(checkOnLoad, 300);
+      return;
+    }
+
+    try {
+      var result = await window.$memberstackDom.getCurrentMember();
+      var memberstackId = result?.data?.id;
+      if (memberstackId) {
+        console.log('[CVZ] On-Load: User bereits eingeloggt, starte handlePostLogin');
+        handlePostLogin(memberstackId);
+      }
+    } catch(e) {}
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', checkOnLoad);
+  } else {
+    checkOnLoad();
+  }
 
 })();
