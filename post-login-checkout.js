@@ -12,15 +12,24 @@
     'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      }
   };
 
+  // ── TEMPORÄRER DEBUG-LISTENER ──────────────────────────────────────────────
+  window.addEventListener('memberstack:auth:login', function(event) {
+    console.log('[CVZ] DEBUG memberstack:auth:login fired:', JSON.stringify(event.detail));
+    console.log('[CVZ] DEBUG sessionStorage token:', sessionStorage.getItem('pending_invite_token'));
+  });
+
+  // ── HAUPT-LISTENER ─────────────────────────────────────────────────────────
   window.addEventListener('memberstack:auth:login', async function(event) {
     var memberstackId = event?.detail?.member?.id || event?.detail?.id;
     console.log('[CVZ] Post-Login detected, memberstackId:', memberstackId);
 
     // ── INVITE FLOW ──────────────────────────────────────────────────────────
     var token = sessionStorage.getItem('pending_invite_token');
+    console.log('[CVZ] pending_invite_token:', token);
+
     if (token) {
       sessionStorage.removeItem('pending_invite_token');
-      console.log('[CVZ] Invite-Flow nach Login...');
+      console.log('[CVZ] Invite-Flow nach Login – rufe accept-team-invite auf...');
 
       try {
         var res = await fetch(SUPABASE_URL + '/functions/v1/accept-team-invite', {
@@ -45,7 +54,6 @@
         console.error('[CVZ] ❌ accept-team-invite fehlgeschlagen:', err);
       }
 
-      // Kein Checkout für Team Members
       window.location.href = '/willkommen';
       return;
     }
@@ -68,7 +76,6 @@
     }
 
     try {
-      // Prüfen ob User bereits einen aktiven Plan hat
       var dbRes = await fetch(
         SUPABASE_URL + '/rest/v1/users?select=current_price_id&memberstack_id=eq.' + memberstackId,
         { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY } }
@@ -78,7 +85,6 @@
       console.log('[CVZ] Post-Login | hasActivePlan:', hasActivePlan);
 
       if (hasActivePlan) {
-        // Hat bereits Plan → Customer Portal für Plan-Wechsel
         var portalRes = await fetch(SUPABASE_URL + '/functions/v1/stripe-portal', {
           method: 'POST',
           headers: {
@@ -93,7 +99,6 @@
           return;
         }
       } else {
-        // Kein aktiver Plan → direkt Checkout starten
         await window.$memberstackDom.purchasePlansWithCheckout({
           priceIds:   [{ id: priceId }],
           successUrl: window.location.origin + '/member/danke'
