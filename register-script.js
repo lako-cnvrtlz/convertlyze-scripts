@@ -1,3 +1,4 @@
+// ==================== REGISTER SCRIPT ====================
 (function() {
   if (window._cvlyCheckoutStarted) return;
 
@@ -13,7 +14,24 @@
   var plan       = urlParams.get('plan');
   var billing    = urlParams.get('billing') || 'monthly';
 
-  // ── 1. E-Mail prefill (Display-Element + Input-Feld) ──────────────────────
+  // ── Cookie Helpers ─────────────────────────────────────────────────────────
+  function setPlanCookie(p, b) {
+    var expires = new Date(Date.now() + 10 * 60 * 1000).toUTCString(); // 10 Min
+    document.cookie = 'cvz_plan='    + p + ';expires=' + expires + ';path=/;SameSite=Lax';
+    document.cookie = 'cvz_billing=' + b + ';expires=' + expires + ';path=/;SameSite=Lax';
+  }
+
+  function clearPlanCookies() {
+    document.cookie = 'cvz_plan=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+    document.cookie = 'cvz_billing=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+  }
+
+  function getPlanCookie(name) {
+    var match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+    return match ? match[1] : null;
+  }
+
+  // ── 1. E-Mail prefill ──────────────────────────────────────────────────────
   function prefillEmail() {
     if (!emailParam) return false;
 
@@ -41,21 +59,23 @@
   // ── 2. DOMContentLoaded ────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', function() {
 
-    // E-Mail prefill mit Retry (Memberstack rendert Formular async)
     if (!prefillEmail()) {
       setTimeout(prefillEmail, 400);
       setTimeout(prefillEmail, 900);
       setTimeout(prefillEmail, 1800);
     }
 
-    // Plan-Parameter für normalen Signup-Flow in localStorage sichern
+    // Plan in Cookie + localStorage sichern (doppelte Absicherung)
     if (plan) {
-      localStorage.setItem('selected_plan', plan);
-      localStorage.setItem('selected_billing', billing);
+      setPlanCookie(plan, billing);
+      try {
+        localStorage.setItem('selected_plan', plan);
+        localStorage.setItem('selected_billing', billing);
+      } catch(e) {}
       console.log('[CVZ] Plan gesichert | plan:', plan, '| billing:', billing);
     }
 
-    // Login-Links anreichern (E-Mail + Plan mitgeben, kein Invite-Token mehr nötig)
+    // Login-Links anreichern
     document.querySelectorAll('a[href*="/login"]').forEach(function(link) {
       var params = [];
       if (emailParam) params.push('email=' + encodeURIComponent(emailParam));
@@ -65,18 +85,25 @@
     });
   });
 
-  // ── 3. Nach Signup: Checkout starten (kein Invite-Flow mehr nötig) ─────────
+  // ── 3. Nach Signup: Checkout starten ──────────────────────────────────────
   async function handleAfterSignup(event) {
     if (window._cvlyCheckoutStarted) return;
     window._cvlyCheckoutStarted = true;
 
-    var currentPlan    = urlParams.get('plan') || localStorage.getItem('selected_plan');
-    var currentBilling = urlParams.get('billing') || localStorage.getItem('selected_billing') || 'monthly';
-    var billingKey     = currentBilling === 'annual' ? 'annual' : 'monthly';
-    var priceId        = PRICE_IDS[currentPlan]?.[billingKey];
+    // Cookie als primäre Quelle, localStorage + URL als Fallback
+    var currentPlan    = getPlanCookie('cvz_plan')
+                      || urlParams.get('plan')
+                      || (() => { try { return localStorage.getItem('selected_plan'); } catch(e) { return null; } })();
+    var currentBilling = getPlanCookie('cvz_billing')
+                      || urlParams.get('billing')
+                      || (() => { try { return localStorage.getItem('selected_billing'); } catch(e) { return null; } })()
+                      || 'monthly';
 
-    localStorage.removeItem('selected_plan');
-    localStorage.removeItem('selected_billing');
+    var billingKey = currentBilling === 'annual' ? 'annual' : 'monthly';
+    var priceId    = PRICE_IDS[currentPlan]?.[billingKey];
+
+    clearPlanCookies();
+    try { localStorage.removeItem('selected_plan'); localStorage.removeItem('selected_billing'); } catch(e) {}
 
     if (!priceId) {
       console.log('[CVZ] Kein priceId – weiterleiten zu /willkommen');
