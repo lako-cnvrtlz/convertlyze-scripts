@@ -724,9 +724,9 @@
       sessionStorage.removeItem('selected_plan');
       sessionStorage.removeItem('selected_billing');
 
-      if (checkoutPriceId) {
+     if (checkoutPriceId) {
         window.$memberstackDom.purchasePlansWithCheckout({
-          priceId: checkoutPriceId,
+          priceIds:   [{ id: checkoutPriceId }],
           successUrl: window.location.origin + '/member/danke'
         }).catch(function() {
           document.documentElement.style.visibility = 'visible';
