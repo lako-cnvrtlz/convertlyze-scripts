@@ -86,7 +86,8 @@
     var memberstackId = event?.detail?.member?.id || event?.detail?.id;
     console.log('[CVZ] Signup detected, memberstackId:', memberstackId);
 
-    var token = sessionStorage.getItem('pending_invite_token');
+    var token = sessionStorage.getItem('pending_invite_token')
+         || urlParams.get('invite');
 
     // ── INVITE FLOW ──
     if (token) {
