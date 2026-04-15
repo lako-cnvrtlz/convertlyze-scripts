@@ -2,7 +2,7 @@
 
   var WEBHOOK_URL = 'https://hook.eu2.make.com/2lsybme5qm0fw8cw1ua9a4xcjx94xg29';
   var currentMemberId      = null;
-  var submitHandlerAttached = false; // Guard gegen mehrfaches Anhängen
+  var submitHandlerAttached = false;
 
   // ── Dropdown befüllen ─────────────────────────────────────────────────────
   function initDropdown() {
@@ -70,7 +70,7 @@
       currentMemberId = member.id;
 
       window.supabase
-        .from('users')
+        .from('user_effective_credits')  // ← Owner-Credits für Members
         .select('credits_limit, credits_used_current_period, reserved_credits, ppu_credits, reserved_ppu_credits')
         .eq('memberstack_id', member.id)
         .single()
@@ -127,7 +127,6 @@
 
   // ── Submit-Handler mit Live-Credit-Prüfung ────────────────────────────────
   function initSubmitHandler() {
-    // Guard: nur einmal anhängen
     if (submitHandlerAttached) return;
     var form = document.querySelector('form');
     if (!form) return;
@@ -138,7 +137,7 @@
 
       var btn = document.querySelector('.analyseformular-button');
 
-      // ── Pflichtfelder validieren — bevor irgendetwas passiert ──────────────
+      // ── Pflichtfelder validieren ───────────────────────────────────────────
       var urlInput = form.querySelector('input[name="landing_page_url"]');
       var urlValue = urlInput ? urlInput.value.trim() : '';
 
@@ -149,11 +148,10 @@
           btn.style.pointerEvents = 'auto';
           btn.textContent = 'Analyse starten';
         }
-        return; // Kein Webhook, kein Supabase-Row, nichts im Dashboard
+        return;
       }
-      // ──────────────────────────────────────────────────────────────────────
 
-      // Button sofort deaktivieren — verhindert Doppelklick
+      // Button sofort deaktivieren
       if (btn) {
         btn.style.opacity = '0.6';
         btn.style.pointerEvents = 'none';
@@ -164,7 +162,7 @@
 
       // Live Credit-Prüfung vor dem Absenden
       window.supabase
-        .from('users')
+        .from('user_effective_credits')  // ← Owner-Credits für Members
         .select('credits_limit, credits_used_current_period, reserved_credits, ppu_credits, reserved_ppu_credits')
         .eq('memberstack_id', currentMemberId)
         .single()
@@ -194,7 +192,7 @@
       initDropdown();
       loadCredits();
       injectMemberstackFields();
-      initSubmitHandler(); // Guard stellt sicher dass nur einmal ausgeführt
+      initSubmitHandler();
     } else if (attempts < 30) {
       attempts++;
       setTimeout(init, 300);
