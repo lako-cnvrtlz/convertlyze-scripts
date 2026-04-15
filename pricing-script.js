@@ -81,12 +81,12 @@
       modal.id = 'cvz-member-modal';
       modal.style.cssText = 'display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;';
       modal.innerHTML = `
-  <div style="background:#fff; border-radius:12px; padding:40px 32px; max-width:440px; width:90%; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,0.2);">
-    <h3 style="margin:0 0 12px; font-size:20px; color:#0d1117;">Plan-Änderung nicht möglich</h3>
-    <p style="margin:0 0 24px; color:#555; line-height:1.5;">Du bist Mitglied eines Teams. Bitte wende dich an den Inhaber deines Accounts, um den Plan zu ändern.</p>
-    <button id="cvz-member-modal-close" style="background:#4fd1c5; color:#0d1117; border:none; border-radius:8px; padding:12px 24px; cursor:pointer; font-size:15px; font-weight:600;">Verstanden</button>
-  </div>
-`;
+        <div style="background:#fff; border-radius:12px; padding:40px 32px; max-width:440px; width:90%; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,0.2);">
+          <h3 style="margin:0 0 12px; font-size:20px; color:#0d1117;">Plan-Änderung nicht möglich</h3>
+          <p style="margin:0 0 24px; color:#555; line-height:1.5;">Du bist Mitglied eines Teams. Bitte wende dich an den Inhaber deines Accounts, um den Plan zu ändern.</p>
+          <button id="cvz-member-modal-close" style="background:#4fd1c5; color:#0d1117; border:none; border-radius:8px; padding:12px 24px; cursor:pointer; font-size:15px; font-weight:600;">Verstanden</button>
+        </div>
+      `;
       document.body.appendChild(modal);
       document.getElementById('cvz-member-modal-close').addEventListener('click', () => {
         modal.style.display = 'none';
@@ -107,10 +107,20 @@
     if (isLoading) return;
     isLoading = true;
     const originalText = btn.textContent;
+
     try {
       btn.textContent = "Wird geladen...";
+
+      // Memberstack-Status prüfen
       const member = await window.$memberstackDom.getCurrentMember();
       const memberstackId = member?.data?.id;
+
+      // Nicht eingeloggt → zur Registrierung mit Plan-Parametern
+      if (!memberstackId) {
+        window.location.href = `/register?plan=${plan}&billing=${billing}`;
+        return;
+      }
+
       const res = await fetch(ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -120,7 +130,7 @@
 
       if (!res.ok) throw new Error(data.error || "Request failed");
 
-      // Team-Member → Modal statt Checkout/Portal
+      // Team-Member → Modal
       if (data.team_role === 'member') {
         showTeamMemberModal();
         btn.textContent = originalText;
