@@ -16,14 +16,13 @@
   var urlParams = new URLSearchParams(window.location.search);
 
   // ── Cookie Helpers ─────────────────────────────────────────────────────────
-  function getPlanCookie(name) {
+  function getCookie(name) {
     var match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
     return match ? match[1] : null;
   }
 
-  function clearPlanCookies() {
-    document.cookie = 'cvz_plan=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
-    document.cookie = 'cvz_billing=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+  function clearCookie(name) {
+    document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
   }
 
   function getFromStorage(key) {
@@ -39,12 +38,11 @@
     console.log('[CVZ] Post-Login detected, memberstackId:', memberstackId);
 
     // ── INVITE FLOW ──────────────────────────────────────────────────────────
-    var token = sessionStorage.getItem('pending_invite_token')
-             || urlParams.get('invite');
+    var token = getCookie('cvz_invite') || urlParams.get('invite');
     console.log('[CVZ] pending_invite_token:', token);
 
     if (token) {
-      sessionStorage.removeItem('pending_invite_token');
+      clearCookie('cvz_invite');
       console.log('[CVZ] Invite-Flow nach Login...');
 
       try {
@@ -72,11 +70,10 @@
     }
 
     // ── NORMALER POST-LOGIN CHECKOUT FLOW ────────────────────────────────────
-    // Cookie als primäre Quelle, localStorage + URL als Fallback
-    var currentPlan    = getPlanCookie('cvz_plan')
+    var currentPlan    = getCookie('cvz_plan')
                       || urlParams.get('plan')
                       || getFromStorage('selected_plan');
-    var currentBilling = getPlanCookie('cvz_billing')
+    var currentBilling = getCookie('cvz_billing')
                       || urlParams.get('billing')
                       || getFromStorage('selected_billing')
                       || 'monthly';
@@ -86,7 +83,8 @@
 
     console.log('[CVZ] Post-Login | plan:', currentPlan, '| billing:', currentBilling, '| priceId:', priceId);
 
-    clearPlanCookies();
+    clearCookie('cvz_plan');
+    clearCookie('cvz_billing');
     removeFromStorage('selected_plan');
     removeFromStorage('selected_billing');
 
