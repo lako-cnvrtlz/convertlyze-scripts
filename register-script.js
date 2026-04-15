@@ -14,6 +14,8 @@
   var urlParams   = new URLSearchParams(window.location.search);
   var inviteToken = urlParams.get('invite');
   var emailParam  = urlParams.get('email') ? decodeURIComponent(urlParams.get('email')) : '';
+  var plan        = urlParams.get('plan');
+  var billing     = urlParams.get('billing') || 'monthly';
 
   // ── 1. Invite-Token in sessionStorage sichern ──────────────────────────────
   if (inviteToken) {
@@ -21,9 +23,9 @@
     console.log('[CVZ] Invite-Token gesichert:', inviteToken);
   }
 
-  // ── 2. E-Mail prefill (Display + Input-Feld) ───────────────────────────────
+  // ── 2. E-Mail prefill (Display-Element + Input-Feld) ──────────────────────
   function prefillEmail() {
-    if (!emailParam) return;
+    if (!emailParam) return false;
 
     // a) Text-Display-Element (falls vorhanden)
     var display = document.querySelector('[data-invite="email-display"]');
@@ -35,8 +37,8 @@
       '[data-ms-form="signup"] input[name="email"]',
       'input[type="email"]'
     ];
-    for (var s of selectors) {
-      var input = document.querySelector(s);
+    for (var i = 0; i < selectors.length; i++) {
+      var input = document.querySelector(selectors[i]);
       if (input) {
         input.value = emailParam;
         input.dispatchEvent(new Event('input',  { bubbles: true }));
@@ -48,27 +50,35 @@
     return false;
   }
 
-  // Mit Retry – Memberstack rendert das Formular async
+  // ── 3. DOMContentLoaded ────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', function() {
+
+    // E-Mail prefill mit Retry (Memberstack rendert Formular async)
     if (!prefillEmail()) {
       setTimeout(prefillEmail, 400);
       setTimeout(prefillEmail, 900);
       setTimeout(prefillEmail, 1800);
     }
 
-    // Plan-Parameter für normalen Signup-Flow
-    var plan    = urlParams.get('plan');
-    var billing = urlParams.get('billing') || 'monthly';
+    // Plan-Parameter für normalen Signup-Flow in localStorage sichern
     if (plan) {
       localStorage.setItem('selected_plan', plan);
       localStorage.setItem('selected_billing', billing);
-      document.querySelectorAll('a[href*="/login"]').forEach(function(link) {
-        link.href = '/login?plan=' + plan + '&billing=' + billing;
-      });
+      console.log('[CVZ] Plan gesichert | plan:', plan, '| billing:', billing);
     }
+
+    // Login-Links anreichern (Plan UND Invite-Token + E-Mail mitgeben)
+    document.querySelectorAll('a[href*="/login"]').forEach(function(link) {
+      var params = [];
+      if (inviteToken) params.push('invite=' + inviteToken);
+      if (emailParam)  params.push('email=' + encodeURIComponent(emailParam));
+      if (plan)        params.push('plan=' + plan + '&billing=' + billing);
+      if (params.length) link.href = '/login?' + params.join('&');
+      console.log('[CVZ] Login-Link aktualisiert:', link.href);
+    });
   });
 
-  // ── 3. Nach Signup: Invite annehmen ODER Checkout starten ─────────────────
+  // ── 4. Nach Signup: Invite annehmen ODER Checkout starten ─────────────────
   async function handleAfterSignup(event) {
     if (window._cvlyCheckoutStarted) return;
     window._cvlyCheckoutStarted = true;
@@ -83,8 +93,8 @@
       sessionStorage.removeItem('pending_invite_token');
       console.log('[CVZ] Invite-Flow: rufe accept-team-invite auf...');
 
-      // Kurz warten bis Memberstack den User in der DB hat
-      await new Promise(r => setTimeout(r, 1500));
+      // Warten bis Memberstack-Webhook den User in Supabase angelegt hat
+      await new Promise(function(r) { setTimeout(r, 1500); });
 
       try {
         var res = await fetch(SUPABASE_URL + '/functions/v1/accept-team-invite', {
@@ -103,33 +113,35 @@
         console.log('[CVZ] accept-team-invite Response:', data);
 
         if (data.success) {
-          console.log('[CVZ] ✅ Team-Invite angenommen – weiterleiten zu /willkommen');
-          window.location.href = '/willkommen';
+          console.log('[CVZ] ✅ Team-Invite angenommen');
         } else {
           console.error('[CVZ] ❌ Invite-Fehler:', data.error);
-          // Trotzdem weiterleiten, nicht hängen lassen
-          window.location.href = '/willkommen';
         }
       } catch (err) {
         console.error('[CVZ] ❌ accept-team-invite Request fehlgeschlagen:', err);
-        window.location.href = '/willkommen';
       }
-      return; // Kein Checkout für Team Members
+
+      // Team Members bekommen keinen Checkout – direkt zu /willkommen
+      window.location.href = '/willkommen';
+      return;
     }
 
     // ── NORMALER CHECKOUT FLOW ──
-    var plan       = urlParams.get('plan') || localStorage.getItem('selected_plan');
-    var billing    = urlParams.get('billing') || localStorage.getItem('selected_billing') || 'monthly';
-    var billingKey = billing === 'annual' ? 'annual' : 'monthly';
-    var priceId    = PRICE_IDS[plan]?.[billingKey];
+    var currentPlan    = urlParams.get('plan') || localStorage.getItem('selected_plan');
+    var currentBilling = urlParams.get('billing') || localStorage.getItem('selected_billing') || 'monthly';
+    var billingKey     = currentBilling === 'annual' ? 'annual' : 'monthly';
+    var priceId        = PRICE_IDS[currentPlan]?.[billingKey];
 
     localStorage.removeItem('selected_plan');
     localStorage.removeItem('selected_billing');
 
     if (!priceId) {
+      console.log('[CVZ] Kein priceId – weiterleiten zu /willkommen');
       window.location.href = '/willkommen';
       return;
     }
+
+    console.log('[CVZ] Starte Checkout | plan:', currentPlan, '| billing:', currentBilling);
 
     try {
       await window.$memberstackDom.purchasePlansWithCheckout({
