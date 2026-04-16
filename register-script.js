@@ -2,6 +2,9 @@
 (function() {
   if (window._cvlyCheckoutStarted) return;
 
+  var SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
+  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
+
   var PRICE_IDS = {
     'starter':     { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
     'pro':         { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
@@ -16,7 +19,7 @@
 
   // ── Cookie Helpers ─────────────────────────────────────────────────────────
   function setPlanCookie(p, b) {
-    var expires = new Date(Date.now() + 10 * 60 * 1000).toUTCString(); // 10 Min
+    var expires = new Date(Date.now() + 30 * 60 * 1000).toUTCString(); // 30 Min
     document.cookie = 'cvz_plan='    + p + ';expires=' + expires + ';path=/;SameSite=Lax';
     document.cookie = 'cvz_billing=' + b + ';expires=' + expires + ';path=/;SameSite=Lax';
   }
@@ -31,6 +34,59 @@
     return match ? match[1] : null;
   }
 
+  // ── pending_checkouts: speichern ──────────────────────────────────────────
+  async function savePendingCheckout(email) {
+    if (!plan || !email) return;
+    try {
+      var res = await fetch(SUPABASE_URL + '/rest/v1/pending_checkouts', {
+        method:  'POST',
+        headers: {
+          'apikey':        SUPABASE_ANON_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+          'Content-Type':  'application/json',
+          'Prefer':        'resolution=merge-duplicates'
+        },
+        body: JSON.stringify({ email: email, plan: plan, billing: billing })
+      });
+      if (res.ok) console.log('[CVZ] ✅ pending_checkout gespeichert:', email, plan, billing);
+      else        console.error('[CVZ] ❌ pending_checkout Fehler:', res.status);
+    } catch(err) {
+      console.error('[CVZ] ❌ pending_checkout Exception:', err);
+    }
+  }
+
+  // ── pending_checkouts: lesen ──────────────────────────────────────────────
+  async function getPendingCheckout(email) {
+    if (!email) return null;
+    try {
+      var res = await fetch(
+        SUPABASE_URL + '/rest/v1/pending_checkouts?email=eq.' + encodeURIComponent(email) + '&limit=1',
+        { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY } }
+      );
+      var data = await res.json();
+      return data?.[0] || null;
+    } catch(err) {
+      console.error('[CVZ] ❌ pending_checkout lesen Fehler:', err);
+      return null;
+    }
+  }
+
+  // ── pending_checkouts: löschen ────────────────────────────────────────────
+  async function deletePendingCheckout(email) {
+    if (!email) return;
+    try {
+      await fetch(
+        SUPABASE_URL + '/rest/v1/pending_checkouts?email=eq.' + encodeURIComponent(email),
+        {
+          method:  'DELETE',
+          headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY }
+        }
+      );
+    } catch(err) {
+      console.error('[CVZ] ❌ pending_checkout löschen Fehler:', err);
+    }
+  }
+
   // ── 1. E-Mail prefill ──────────────────────────────────────────────────────
   function prefillEmail() {
     if (!emailParam) return false;
@@ -39,8 +95,7 @@
     if (display) display.textContent = emailParam;
 
     var selectors = [
-      '[data-ms-form="signup"] input[type="email"]',
-      '[data-ms-form="signup"] input[name="email"]',
+      '[data-ms-form="passwordless-signup"] input[type="email"]',
       'input[type="email"]'
     ];
     for (var i = 0; i < selectors.length; i++) {
@@ -65,14 +120,10 @@
       setTimeout(prefillEmail, 1800);
     }
 
-    // Plan in Cookie + localStorage sichern (doppelte Absicherung)
+    // Plan in Cookie sichern
     if (plan) {
       setPlanCookie(plan, billing);
-      try {
-        localStorage.setItem('selected_plan', plan);
-        localStorage.setItem('selected_billing', billing);
-      } catch(e) {}
-      console.log('[CVZ] Plan gesichert | plan:', plan, '| billing:', billing);
+      console.log('[CVZ] Plan in Cookie gesichert | plan:', plan, '| billing:', billing);
     }
 
     // Login-Links anreichern
@@ -83,27 +134,60 @@
       if (params.length) link.href = '/login?' + params.join('&');
       console.log('[CVZ] Login-Link aktualisiert:', link.href);
     });
+
+    // Form Submit – E-Mail lesen und pending_checkout in Supabase speichern
+    if (plan) {
+      var form = document.querySelector('[data-ms-form="passwordless-signup"]');
+      if (form) {
+        form.addEventListener('submit', function() {
+          var emailInput = form.querySelector('input[type="email"]');
+          var email = emailInput ? emailInput.value.trim() : emailParam;
+          if (email) savePendingCheckout(email);
+        });
+        console.log('[CVZ] Form submit Handler registriert');
+      }
+    }
   });
 
   // ── 3. Nach Signup: Checkout starten ──────────────────────────────────────
-  async function handleAfterSignup(event) {
+  async function handleAfterSignup() {
     if (window._cvlyCheckoutStarted) return;
     window._cvlyCheckoutStarted = true;
 
-    // Cookie als primäre Quelle, localStorage + URL als Fallback
-    var currentPlan    = getPlanCookie('cvz_plan')
-                      || urlParams.get('plan')
-                      || (() => { try { return localStorage.getItem('selected_plan'); } catch(e) { return null; } })();
-    var currentBilling = getPlanCookie('cvz_billing')
-                      || urlParams.get('billing')
-                      || (() => { try { return localStorage.getItem('selected_billing'); } catch(e) { return null; } })()
-                      || 'monthly';
+    // 1. Cookie als primäre Quelle
+    var currentPlan    = getPlanCookie('cvz_plan');
+    var currentBilling = getPlanCookie('cvz_billing') || 'monthly';
+
+    // 2. Fallback: pending_checkout in Supabase
+    if (!currentPlan) {
+      console.log('[CVZ] Kein Cookie – suche pending_checkout in Supabase...');
+      try {
+        var member = await window.$memberstackDom.getCurrentMember();
+        var email  = member?.data?.auth?.email || member?.data?.email;
+        if (email) {
+          var pending = await getPendingCheckout(email);
+          if (pending) {
+            currentPlan    = pending.plan;
+            currentBilling = pending.billing || 'monthly';
+            console.log('[CVZ] ✅ pending_checkout gefunden:', currentPlan, currentBilling);
+            await deletePendingCheckout(email);
+          }
+        }
+      } catch(e) {
+        console.warn('[CVZ] pending_checkout Fallback Fehler:', e);
+      }
+    }
+
+    clearPlanCookies();
+
+    if (!currentPlan) {
+      console.log('[CVZ] Kein Plan gefunden – weiterleiten zu /willkommen');
+      window.location.href = '/willkommen';
+      return;
+    }
 
     var billingKey = currentBilling === 'annual' ? 'annual' : 'monthly';
     var priceId    = PRICE_IDS[currentPlan]?.[billingKey];
-
-    clearPlanCookies();
-    try { localStorage.removeItem('selected_plan'); localStorage.removeItem('selected_billing'); } catch(e) {}
 
     if (!priceId) {
       console.log('[CVZ] Kein priceId – weiterleiten zu /willkommen');
@@ -125,4 +209,6 @@
   }
 
   window.addEventListener('memberstack:auth:signup', handleAfterSignup);
+
+  console.log('[CVZ] Register-Script geladen');
 })();
