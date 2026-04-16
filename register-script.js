@@ -111,11 +111,11 @@
       return;
     }
 
-    console.log('[CVZ] Starte Checkout | plan:', currentPlan, '| billing:', currentBilling);
+    console.log('[CVZ] Starte Checkout | plan:', currentPlan, '| billing:', currentBilling, '| priceId:', priceId);
 
     try {
       await window.$memberstackDom.purchasePlansWithCheckout({
-        priceIds:   [{ id: priceId }],
+        priceId:    priceId,
         successUrl: window.location.origin + '/member/danke'
       });
     } catch (err) {
