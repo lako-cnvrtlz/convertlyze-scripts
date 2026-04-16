@@ -87,8 +87,9 @@
       // URL
       var urlEl = row.querySelector('.analysis-url');
       if (urlEl) {
-        urlEl.textContent = analysis.url || '—';
-        urlEl.title       = analysis.url || '';
+        var displayUrl = (analysis.landing_page_url || '—').replace(/^https?:\/\//, '').replace(/\/$/, '');
+        urlEl.textContent = displayUrl;
+        urlEl.title       = analysis.landing_page_url || '';
       }
 
       // Keyword
@@ -137,11 +138,16 @@
         agentLink.style.display = analysis.status === 'completed' ? '' : 'none';
       }
 
-      // PDF Download Link
+      // PDF Download Link – nur wenn pdf_url existiert
       var downloadLink = row.querySelector('.download-link');
-      if (downloadLink && analysis.id) {
-        downloadLink.href = '/member/report?id=' + analysis.id;
-        downloadLink.style.display = analysis.status === 'completed' && analysis.pdf_url ? '' : 'none';
+      if (downloadLink) {
+        if (analysis.status === 'completed' && analysis.pdf_url) {
+          downloadLink.href = analysis.pdf_url;
+          downloadLink.target = '_blank';
+          downloadLink.style.display = '';
+        } else {
+          downloadLink.style.display = 'none';
+        }
       }
 
       tableList.appendChild(row);
@@ -197,7 +203,7 @@
   async function fetchAnalyses(userId) {
     try {
       var analyses = await supabaseFetch(
-        'analyses?select=id,url,keyword,status,created_at,pdf_url' +
+        'analyses?select=id,landing_page_url,keyword,status,created_at,overall_score,pdf_url,pdf_generated_at' +
         '&user_id=eq.' + userId +
         '&order=created_at.desc' +
         '&limit=20'
