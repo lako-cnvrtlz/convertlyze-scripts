@@ -5,16 +5,8 @@
   var SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
   var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
 
-  var PRICE_IDS = {
-    'starter':     { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
-    'pro':         { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
-    'enterprise':  { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' },
-    'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      }
-  };
-
   var urlParams = new URLSearchParams(window.location.search);
 
-  // ── Cookie Helpers ─────────────────────────────────────────────────────────
   function getCookie(name) {
     var match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
     return match ? match[1] : null;
@@ -24,135 +16,54 @@
     document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
   }
 
-  function getFromStorage(key) {
-    try { return localStorage.getItem(key); } catch(e) { return null; }
-  }
-
-  function removeFromStorage(key) {
-    try { localStorage.removeItem(key); } catch(e) {}
-  }
-
-  // ── Haupt-Handler ──────────────────────────────────────────────────────────
   async function handlePostLogin(memberstackId) {
     if (!memberstackId) return;
-    console.log('[CVZ] handlePostLogin | memberstackId:', memberstackId);
 
     // ── INVITE FLOW ──────────────────────────────────────────────────────────
     var token = getCookie('cvz_invite') || urlParams.get('invite');
+    if (!token) return;
 
-    if (token) {
-      clearCookie('cvz_invite');
-      console.log('[CVZ] Invite-Flow nach Login...');
-
-      try {
-        var res = await fetch(SUPABASE_URL + '/functions/v1/accept-team-invite', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': SUPABASE_ANON_KEY
-          },
-          body: JSON.stringify({ token, memberstack_id: memberstackId })
-        });
-        var data = await res.json();
-        console.log('[CVZ] accept-team-invite Response:', data);
-        if (data.success) {
-          console.log('[CVZ] ✅ Team-Invite angenommen');
-        } else {
-          console.error('[CVZ] ❌ Invite-Fehler:', data.error);
-        }
-      } catch (err) {
-        console.error('[CVZ] ❌ accept-team-invite fehlgeschlagen:', err);
-      }
-
-      window.location.href = '/willkommen';
-      return;
-    }
-
-    // ── CHECKOUT FLOW ─────────────────────────────────────────────────────────
-    var currentPlan    = getCookie('cvz_plan')
-                      || urlParams.get('plan')
-                      || getFromStorage('selected_plan');
-    var currentBilling = getCookie('cvz_billing')
-                      || urlParams.get('billing')
-                      || getFromStorage('selected_billing')
-                      || 'monthly';
-
-    var billingKey = currentBilling === 'annual' ? 'annual' : 'monthly';
-    var priceId    = PRICE_IDS[currentPlan]?.[billingKey];
-
-    console.log('[CVZ] Post-Login | plan:', currentPlan, '| billing:', currentBilling, '| priceId:', priceId);
-
-    clearCookie('cvz_plan');
-    clearCookie('cvz_billing');
-    removeFromStorage('selected_plan');
-    removeFromStorage('selected_billing');
-
-    if (!priceId) {
-      console.log('[CVZ] Kein Plan – normaler Login-Redirect');
-      return;
-    }
+    clearCookie('cvz_invite');
+    console.log('[CVZ] Invite-Flow nach Login...');
 
     try {
-      var dbRes = await fetch(
-        SUPABASE_URL + '/rest/v1/users?select=current_price_id&memberstack_id=eq.' + memberstackId,
-        { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY } }
-      );
-      var users = await dbRes.json();
-      var hasActivePlan = users?.[0]?.current_price_id;
-      console.log('[CVZ] Post-Login | hasActivePlan:', hasActivePlan);
-
-      if (hasActivePlan) {
-        var portalRes = await fetch(SUPABASE_URL + '/functions/v1/stripe-portal', {
-          method: 'POST',
-          headers: {
-            'Content-Type':  'application/json',
-            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
-          },
-          body: JSON.stringify({ memberstackId })
-        });
-        var portalData = await portalRes.json();
-        if (portalData.url) {
-          window.location.href = portalData.url;
-          return;
-        }
-      } else {
-        await window.$memberstackDom.purchasePlansWithCheckout({
-          priceIds:   [{ id: priceId }],
-          successUrl: window.location.origin + '/member/danke'
-        });
-      }
+      var res = await fetch(SUPABASE_URL + '/functions/v1/accept-team-invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+        body: JSON.stringify({ token, memberstack_id: memberstackId })
+      });
+      var data = await res.json();
+      console.log('[CVZ] accept-team-invite Response:', data);
     } catch (err) {
-      console.error('[CVZ] ❌ Post-Login Checkout Fehler:', err);
-      window.location.href = '/member/dashboard';
+      console.error('[CVZ] ❌ accept-team-invite fehlgeschlagen:', err);
     }
+
+    window.location.href = '/willkommen';
   }
 
-  // ── Event-Listener: normaler Login ────────────────────────────────────────
+  async function checkOnLoad() {
+    var memberstackReady = !!window.$memberstackDom;
+    if (!memberstackReady) { setTimeout(checkOnLoad, 300); return; }
+
+    var token = getCookie('cvz_invite') || urlParams.get('invite');
+    if (!token) return;
+
+    try {
+      var result = await window.$memberstackDom.getCurrentMember();
+      var memberstackId = result?.data?.id;
+      if (memberstackId) handlePostLogin(memberstackId);
+    } catch(e) {}
+  }
+
   window.addEventListener('memberstack:auth:login', function(event) {
     var memberstackId = event?.detail?.member?.id || event?.detail?.id;
     handlePostLogin(memberstackId);
   });
 
-  // ── On-Load-Check: User bereits eingeloggt (Magic Link, Signup-Redirect) ──
-  async function checkOnLoad() {
-    // Nur ausführen wenn ein Plan-Cookie oder Invite-Cookie vorhanden ist
-    if (!getCookie('cvz_plan') && !getCookie('cvz_invite') && !urlParams.get('invite')) return;
-
-    var memberstackReady = !!window.$memberstackDom;
-    if (!memberstackReady) {
-      setTimeout(checkOnLoad, 300);
-      return;
-    }
-
-    try {
-      var result = await window.$memberstackDom.getCurrentMember();
-      var memberstackId = result?.data?.id;
-      if (memberstackId) {
-        console.log('[CVZ] On-Load: User bereits eingeloggt, starte handlePostLogin');
-        handlePostLogin(memberstackId);
-      }
-    } catch(e) {}
-  }
+  window.addEventListener('memberstack:auth:signup', function(event) {
+    var memberstackId = event?.detail?.member?.id || event?.detail?.id;
+    handlePostLogin(memberstackId);
+  });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', checkOnLoad);
@@ -160,4 +71,5 @@
     checkOnLoad();
   }
 
+  console.log('[CVZ] Post-Login-Script geladen');
 })();
