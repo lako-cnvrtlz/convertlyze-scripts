@@ -44,7 +44,9 @@
 
   // ── DOMContentLoaded ───────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', function() {
-    var loginForm = document.querySelector('[data-ms-form="login"]');
+    // data-ms-form="login" UND data-ms-form="signup" abfangen
+    // (Webflow/Memberstack nutzt je nach Konfiguration unterschiedliche Werte)
+    var loginForm = document.querySelector('[data-ms-form="login"], [data-ms-form="signup"]');
     if (!loginForm) return;
 
     // E-Mail prefill
@@ -67,15 +69,29 @@
       if (params.length) link.href = '/register?' + params.join('&');
     });
 
-    // Form Submit (Magic Link / OTP)
-    loginForm.addEventListener('submit', async function(e) {
+    // ── Button-Handler mit capture:true ───────────────────────────────────
+    // Memberstack bindet seinen Handler an data-ms-passwordless-login.
+    // capture:true stellt sicher dass unser Handler ZUERST läuft –
+    // vor Memberstacks Bubble-Phase-Handler.
+    var submitBtn = loginForm.querySelector('[data-ms-passwordless-login], [type="submit"]');
+    if (!submitBtn) return;
+
+    submitBtn.addEventListener('click', async function(e) {
       e.preventDefault();
+      e.stopImmediatePropagation(); // alle nachfolgenden Handler blockieren
+
       var emailInput = loginForm.querySelector('input[type="email"]');
       var emailValue = emailInput ? emailInput.value.trim() : '';
 
       // Alte Custom-Messages entfernen
       var oldMessage = document.querySelector('.memberstack-custom-message');
       if (oldMessage) oldMessage.remove();
+
+      // Leere E-Mail abfangen
+      if (!emailValue) {
+        showToast('error', 'Bitte gib deine E-Mail-Adresse ein.');
+        return;
+      }
 
       try {
         await $memberstackDOM.sendMagicLink({ email: emailValue });
@@ -90,7 +106,6 @@
         suppressMsToast();
 
         if (error.code === 'MEMBER_NOT_FOUND' || (error.message && error.message.toLowerCase().includes('not found'))) {
-          // Kein Account → Info-Nachricht + Registrierungs-Link
           showToast('error', 'Kein Account mit dieser E-Mail gefunden.');
           showNotRegisteredMessage(emailValue, loginForm);
         } else if (error.code === 'INVALID_EMAIL' || (error.message && error.message.toLowerCase().includes('invalid email'))) {
@@ -101,7 +116,7 @@
           showToast('error', 'Ein Fehler ist aufgetreten. Bitte erneut versuchen.');
         }
       }
-    });
+    }, true); // capture: true → läuft VOR Memberstacks Handler
   });
 
   // ── Helper: Kein Account gefunden ─────────────────────────────────────────
