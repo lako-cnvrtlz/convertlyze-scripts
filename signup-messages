@@ -1,293 +1,144 @@
-/**
- * Convertlyze · Memberstack Custom Toast Notifications
- * =====================================================
- * Ersetzt Memberstacks Standard-Toasts durch Convertlyze-Styled Notifications.
- * Optimiert für Passwordless Auth (OTP / Magic Link).
- *
- * Einbindung in Webflow (Project Settings → Custom Code → Footer Code):
- *
- *   <link  rel="stylesheet" href="https://cdn.jsdelivr.net/gh/DEIN-USER/convertlyze-frontend@v1/ms-toasts.css">
- *   <script src="https://cdn.jsdelivr.net/gh/DEIN-USER/convertlyze-frontend@v1/ms-toasts.js"></script>
- *
- * Danach einmalig im Footer ein leeres Container-Div einfügen:
- *   <div id="cvz-toast-container"></div>
- *   <div data-ms-content="success" style="display:none"></div>
- *   <div data-ms-content="error"   style="display:none"></div>
- *
- * Manuell auslösen (z.B. nach eigenen API-Calls):
- *   window.cvzShowToast('success', 'Gespeichert!');
- *   window.cvzShowToast('error',   'Fehler beim Laden.');
- *   window.cvzShowToast('warning', 'Bitte warte kurz.');
- *
- * Version:  1.0.0
- * Autor:    Convertlyze
- * Lizenz:   MIT
- */
+(function() {
+  if (window._cvlyLoginInit) return;
+  window._cvlyLoginInit = true;
 
-(function () {
+  var urlParams   = new URLSearchParams(window.location.search);
+  var inviteToken = urlParams.get('invite');
+  var emailParam  = urlParams.get('email') ? decodeURIComponent(urlParams.get('email')) : '';
+  var plan        = urlParams.get('plan');
+  var billing     = urlParams.get('billing') || 'monthly';
 
-  'use strict';
-
-  // ── CSS injizieren (inline, kein separates Stylesheet nötig) ──────────────
-  var STYLES = [
-    '#cvz-toast-container{',
-      'position:fixed;',
-      'bottom:24px;',
-      'left:50%;',
-      'transform:translateX(-50%);',
-      'z-index:99999;',
-      'display:flex;',
-      'flex-direction:column;',
-      'align-items:center;',
-      'gap:8px;',
-      'pointer-events:none;',
-    '}',
-
-    '.cvz-ms-toast{',
-      'display:inline-flex;',
-      'align-items:center;',
-      'gap:12px;',
-      'padding:13px 18px;',
-      'border-radius:12px;',
-      'font-size:14px;',
-      'font-weight:500;',
-      'font-family:inherit;',
-      'line-height:1.4;',
-      'box-shadow:0 8px 32px rgba(0,0,0,0.5),0 2px 8px rgba(0,0,0,0.3);',
-      'max-width:420px;',
-      'pointer-events:all;',
-      'position:relative;',
-      'overflow:hidden;',
-      'animation:cvzToastIn 0.35s cubic-bezier(0.16,1,0.3,1) both;',
-    '}',
-
-    '@keyframes cvzToastIn{',
-      'from{opacity:0;transform:translateY(12px) scale(0.97)}',
-      'to{opacity:1;transform:translateY(0) scale(1)}',
-    '}',
-
-    '.cvz-ms-toast.success{',
-      'background:#0f1e1c;',
-      'border:1px solid rgba(79,209,197,0.25);',
-      'border-left:3px solid #4fd1c5;',
-      'color:#e8edf5;',
-    '}',
-    '.cvz-ms-toast.error{',
-      'background:#1f1215;',
-      'border:1px solid #4a1f1f;',
-      'border-left:3px solid #f87171;',
-      'color:#e8edf5;',
-    '}',
-    '.cvz-ms-toast.warning{',
-      'background:#1a1505;',
-      'border:1px solid rgba(251,191,36,0.25);',
-      'border-left:3px solid #fbbf24;',
-      'color:#e8edf5;',
-    '}',
-
-    '.cvz-toast-icon{',
-      'width:20px;height:20px;',
-      'border-radius:50%;',
-      'display:flex;align-items:center;justify-content:center;',
-      'flex-shrink:0;',
-    '}',
-    '.cvz-ms-toast.success .cvz-toast-icon{background:rgba(79,209,197,0.15);color:#4fd1c5}',
-    '.cvz-ms-toast.error   .cvz-toast-icon{background:rgba(248,113,113,0.15);color:#f87171}',
-    '.cvz-ms-toast.warning .cvz-toast-icon{background:rgba(251,191,36,0.12);color:#fbbf24}',
-
-    '.cvz-toast-msg{font-size:14px;color:#e8edf5;flex:1}',
-
-    '.cvz-toast-close{',
-      'background:none;border:none;color:#7a8ba8;',
-      'cursor:pointer;font-size:18px;line-height:1;',
-      'padding:0 2px;flex-shrink:0;opacity:0.7;',
-      'transition:opacity 0.15s;',
-    '}',
-    '.cvz-toast-close:hover{opacity:1}',
-
-    '.cvz-toast-bar{',
-      'position:absolute;bottom:0;left:0;height:2px;',
-      'animation:cvzBarShrink 4.5s linear forwards;',
-    '}',
-    '.cvz-ms-toast.success .cvz-toast-bar{background:#4fd1c5}',
-    '.cvz-ms-toast.error   .cvz-toast-bar{background:#f87171}',
-    '.cvz-ms-toast.warning .cvz-toast-bar{background:#fbbf24}',
-
-    '@keyframes cvzBarShrink{from{width:100%}to{width:0%}}',
-
-    // Memberstacks Standard-Toast verstecken (Fallback-Selektor)
-    '[class*="ms-toast"],[class*="memberstack-toast"],[data-ms-toast],.ms-notification{',
-      'display:none!important;visibility:hidden!important;',
-    '}',
-  ].join('');
-
-  function injectStyles() {
-    if (document.getElementById('cvz-toast-styles')) return;
-    var style    = document.createElement('style');
-    style.id     = 'cvz-toast-styles';
-    style.textContent = STYLES;
-    document.head.appendChild(style);
+  // ── Invite-Token als Cookie sichern ───────────────────────────────────────
+  function setInviteCookie(token) {
+    var expires = new Date(Date.now() + 30 * 60 * 1000).toUTCString();
+    document.cookie = 'cvz_invite=' + token + ';expires=' + expires + ';path=/;SameSite=Lax';
   }
 
-  // ── Icons ─────────────────────────────────────────────────────────────────
-  var ICONS = {
-    success: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
-    error:   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
-    warning: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
-  };
-
-  // ── Toast anzeigen ────────────────────────────────────────────────────────
-  function showCvzToast(type, message, duration) {
-    duration = duration || 4500;
-
-    var container = document.getElementById('cvz-toast-container');
-    if (!container) {
-      // Container auto-erstellen falls nicht vorhanden
-      container    = document.createElement('div');
-      container.id = 'cvz-toast-container';
-      document.body.appendChild(container);
-    }
-
-    var toast       = document.createElement('div');
-    toast.className = 'cvz-ms-toast ' + (type || 'success');
-    toast.innerHTML =
-      '<div class="cvz-toast-icon">' + (ICONS[type] || ICONS.success) + '</div>' +
-      '<span class="cvz-toast-msg">' + message + '</span>' +
-      '<button class="cvz-toast-close" aria-label="Schließen">×</button>' +
-      '<div class="cvz-toast-bar"></div>';
-
-    // Schließen-Button
-    toast.querySelector('.cvz-toast-close').addEventListener('click', function () {
-      dismissToast(toast);
-    });
-
-    container.appendChild(toast);
-
-    // Auto-dismiss
-    setTimeout(function () { dismissToast(toast); }, duration);
+  if (inviteToken) {
+    setInviteCookie(inviteToken);
+    console.log('[CVZ] Login: Invite-Token gesichert (Cookie):', inviteToken);
   }
 
-  function dismissToast(toast) {
-    if (!toast.parentNode) return;
-    toast.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-    toast.style.opacity    = '0';
-    toast.style.transform  = 'translateY(8px)';
-    setTimeout(function () { if (toast.parentNode) toast.remove(); }, 300);
-  }
-
-  // ── Memberstack Message Mapping (Passwordless Auth) ───────────────────────
-  var MS_MESSAGES = {
-    // Login-Code / Magic Link
-    'verification email sent': ['success', 'Login-Code gesendet. Bitte prüfe deinen Posteingang.'],
-    'email sent':              ['success', 'Login-Code gesendet. Bitte prüfe deinen Posteingang.'],
-    'magic link sent':         ['success', 'Login-Link gesendet. Bitte prüfe deinen Posteingang.'],
-    'check your email':        ['success', 'Bitte prüfe deinen Posteingang.'],
-    // Login-Code Fehler
-    'invalid token':           ['error', 'Ungültiger oder abgelaufener Code. Bitte fordere einen neuen an.'],
-    'token expired':           ['error', 'Dein Login-Code ist abgelaufen. Bitte fordere einen neuen an.'],
-    'invalid code':            ['error', 'Ungültiger Code. Bitte prüfe deine E-Mail.'],
-    'expired':                 ['error', 'Dein Login-Link ist abgelaufen. Bitte fordere einen neuen an.'],
-    // E-Mail Fehler
-    'invalid email':           ['error', 'Ungültige E-Mail-Adresse. Bitte prüfe deine Eingabe.'],
-    'email already in use':    ['error', 'Diese E-Mail-Adresse wird bereits verwendet.'],
-    'member not found':        ['error', 'Kein Account mit dieser E-Mail gefunden.'],
-    'no member found':         ['error', 'Kein Account mit dieser E-Mail gefunden.'],
-    // Profil-Updates
-    'email updated':           ['success', 'E-Mail-Adresse wurde aktualisiert.'],
-    'profile updated':         ['success', 'Profil wurde gespeichert.'],
-    'member updated':          ['success', 'Profil wurde gespeichert.'],
-    // Session
-    'logged out':              ['success', 'Du wurdest erfolgreich abgemeldet.'],
-    'signed out':              ['success', 'Du wurdest erfolgreich abgemeldet.'],
-    // Rate Limiting
-    'too many requests':       ['warning', 'Zu viele Anfragen. Bitte warte kurz und versuche es erneut.'],
-    'rate limit':              ['warning', 'Zu viele Anfragen. Bitte warte kurz und versuche es erneut.'],
-  };
-
-  function mapMsMessage(rawMsg) {
-    if (!rawMsg) return null;
-    var lower = rawMsg.toLowerCase();
-    for (var key in MS_MESSAGES) {
-      if (lower.indexOf(key) !== -1) return MS_MESSAGES[key];
-    }
-    // Fallback: Rohmeldung anzeigen, Typ aus Inhalt ableiten
-    var isError = lower.indexOf('error')   !== -1 ||
-                  lower.indexOf('invalid') !== -1 ||
-                  lower.indexOf('failed')  !== -1;
-    return [isError ? 'error' : 'success', rawMsg];
-  }
-
-  // ── Memberstack DOM-Events abfangen ───────────────────────────────────────
-  window.addEventListener('memberstack:verificationEmailSent', function () {
-    showCvzToast('success', 'Login-Code gesendet. Bitte prüfe deinen Posteingang.');
-  });
-  window.addEventListener('memberstack:emailSent', function () {
-    showCvzToast('success', 'Login-Code gesendet. Bitte prüfe deinen Posteingang.');
-  });
-  window.addEventListener('memberstack:memberUpdated', function () {
-    showCvzToast('success', 'Profil wurde gespeichert.');
-  });
-  window.addEventListener('memberstack:logout', function () {
-    showCvzToast('success', 'Du wurdest erfolgreich abgemeldet.');
-  });
-  window.addEventListener('memberstack:error', function (e) {
-    var msg    = e.detail && (e.detail.message || e.detail.error || e.detail);
-    var mapped = mapMsMessage(typeof msg === 'string' ? msg : JSON.stringify(msg));
-    if (mapped) showCvzToast(mapped[0], mapped[1]);
-  });
-
-  // ── MutationObserver Fallback ─────────────────────────────────────────────
-  // Versteckt Memberstacks eigenen Toast falls er trotzdem erscheint,
-  // greift den Text ab und zeigt ihn im Convertlyze-Stil an.
-  var observer = new MutationObserver(function (mutations) {
-    mutations.forEach(function (mutation) {
-      mutation.addedNodes.forEach(function (node) {
-        if (node.nodeType !== 1) return;
-        var cls = (node.className || '').toString();
-        var id  = (node.id        || '').toString();
-        if (
-          cls.indexOf('ms-toast')          !== -1 ||
-          cls.indexOf('memberstack-toast') !== -1 ||
-          cls.indexOf('ms-notification')   !== -1 ||
-          id.indexOf('ms-toast')           !== -1
-        ) {
-          var text = node.textContent && node.textContent.trim();
-          node.style.cssText = 'display:none!important;visibility:hidden!important';
-          if (text) {
-            var mapped = mapMsMessage(text);
-            if (mapped) showCvzToast(mapped[0], mapped[1]);
-          }
-        }
+  // ── Memberstack nativen Toast sofort unterdrücken ─────────────────────────
+  function suppressMsToast() {
+    setTimeout(function() {
+      document.querySelectorAll('[class*="ms-toast"], [class*="memberstack-toast"], [id*="ms-toast"], .ms-notification').forEach(function(el) {
+        el.style.cssText = 'display:none!important;visibility:hidden!important';
       });
+    }, 0);
+    // Zweiter Pass nach 100ms als Sicherheit
+    setTimeout(function() {
+      document.querySelectorAll('[class*="ms-toast"], [class*="memberstack-toast"], [id*="ms-toast"], .ms-notification').forEach(function(el) {
+        el.style.cssText = 'display:none!important;visibility:hidden!important';
+      });
+    }, 100);
+  }
+
+  // ── Toast anzeigen (Convertlyze-Stil oder Fallback) ───────────────────────
+  function showToast(type, message) {
+    suppressMsToast();
+    if (window.cvzShowToast) {
+      window.cvzShowToast(type, message);
+    }
+  }
+
+  // ── DOMContentLoaded ───────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', function() {
+    var loginForm = document.querySelector('[data-ms-form="login"]');
+    if (!loginForm) return;
+
+    // E-Mail prefill
+    if (emailParam) {
+      var emailInput = loginForm.querySelector('input[type="email"]');
+      if (emailInput) {
+        emailInput.value = emailParam;
+        emailInput.dispatchEvent(new Event('input',  { bubbles: true }));
+        emailInput.dispatchEvent(new Event('change', { bubbles: true }));
+        console.log('[CVZ] Login: E-Mail prefilled:', emailParam);
+      }
+    }
+
+    // Register-Link anreichern
+    document.querySelectorAll('a[href*="/register"]').forEach(function(link) {
+      var params = [];
+      if (inviteToken) params.push('invite=' + inviteToken);
+      if (emailParam)  params.push('email=' + encodeURIComponent(emailParam));
+      if (plan)        params.push('plan=' + plan + '&billing=' + billing);
+      if (params.length) link.href = '/register?' + params.join('&');
+    });
+
+    // Form Submit (Magic Link / OTP)
+    loginForm.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      var emailInput = loginForm.querySelector('input[type="email"]');
+      var emailValue = emailInput ? emailInput.value.trim() : '';
+
+      // Alte Custom-Messages entfernen
+      var oldMessage = document.querySelector('.memberstack-custom-message');
+      if (oldMessage) oldMessage.remove();
+
+      try {
+        await $memberstackDOM.sendMagicLink({ email: emailValue });
+
+        // Memberstack-Toast unterdrücken + eigenen zeigen
+        showToast('success', 'Login-Code gesendet. Bitte prüfe deinen Posteingang.');
+
+      } catch (error) {
+        console.log('[CVZ] Login error:', error.code, error.message);
+
+        // Memberstack-Toast unterdrücken
+        suppressMsToast();
+
+        if (error.code === 'MEMBER_NOT_FOUND' || (error.message && error.message.toLowerCase().includes('not found'))) {
+          // Kein Account → Info-Nachricht + Registrierungs-Link
+          showToast('error', 'Kein Account mit dieser E-Mail gefunden.');
+          showNotRegisteredMessage(emailValue, loginForm);
+        } else if (error.code === 'INVALID_EMAIL' || (error.message && error.message.toLowerCase().includes('invalid email'))) {
+          showToast('error', 'Ungültige E-Mail-Adresse. Bitte prüfe deine Eingabe.');
+        } else if (error.code === 'TOO_MANY_REQUESTS' || (error.message && error.message.toLowerCase().includes('too many'))) {
+          showToast('warning', 'Zu viele Anfragen. Bitte warte kurz und versuche es erneut.');
+        } else {
+          showToast('error', 'Ein Fehler ist aufgetreten. Bitte erneut versuchen.');
+        }
+      }
     });
   });
 
-  // ── Init ──────────────────────────────────────────────────────────────────
-  function init() {
-    injectStyles();
-    observer.observe(document.body, { childList: true, subtree: true });
-    // Memberstack data-ms-content Targets sicherstellen
-    if (!document.querySelector('[data-ms-content="success"]')) {
-      var s = document.createElement('div');
-      s.setAttribute('data-ms-content', 'success');
-      s.style.display = 'none';
-      document.body.appendChild(s);
-    }
-    if (!document.querySelector('[data-ms-content="error"]')) {
-      var e = document.createElement('div');
-      e.setAttribute('data-ms-content', 'error');
-      e.style.display = 'none';
-      document.body.appendChild(e);
-    }
-  }
+  // ── Helper: Kein Account gefunden ─────────────────────────────────────────
+  function showNotRegisteredMessage(email, formElement) {
+    var div = document.createElement('div');
+    div.className = 'memberstack-custom-message';
+    div.style.cssText = [
+      'margin-top:20px',
+      'padding:16px 20px',
+      'background:#1a2133',
+      'border:1px solid #2a3550',
+      'border-left:3px solid #f87171',
+      'border-radius:10px',
+      'text-align:center',
+      'font-family:inherit',
+    ].join(';');
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+    var registerHref = '/register?email=' + encodeURIComponent(email);
+    if (inviteToken) registerHref += '&invite=' + inviteToken;
+    if (plan)        registerHref += '&plan=' + plan + '&billing=' + billing;
 
-  // ── Public API ────────────────────────────────────────────────────────────
-  window.cvzShowToast = showCvzToast;
+    div.innerHTML =
+      '<p style="margin:0 0 12px;color:#e8edf5;font-size:14px;line-height:1.5">' +
+        'Diese E-Mail-Adresse ist noch nicht registriert.' +
+      '</p>' +
+      '<a href="' + registerHref + '" style="' +
+        'display:inline-block;' +
+        'padding:10px 24px;' +
+        'background:#4fd1c5;' +
+        'color:#0d1117;' +
+        'text-decoration:none;' +
+        'border-radius:8px;' +
+        'font-size:14px;' +
+        'font-weight:600;' +
+      '">Jetzt registrieren →</a>';
+
+    formElement.parentElement.appendChild(div);
+  }
 
 })();
