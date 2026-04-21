@@ -308,7 +308,7 @@ document.addEventListener('DOMContentLoaded', async function () {
           {
             label:   'Analyse starten →',
             primary: true,
-            onClick: function () { window.location.href = '/member/analyse'; }
+            onClick: function () { window.location.href = '/analyse/formular'; }
           }
         ]
       });
