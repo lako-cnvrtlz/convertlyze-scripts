@@ -165,11 +165,13 @@
           var total = calcCredits(res.data);
           if (total <= 0) { window.location.href = '/analyse/fehler'; return; }
 
-          fetch(WEBHOOK_URL, {
-            method: 'POST',
-            headers: { 'x-convertlyze-secret': WEBHOOK_SECRET },
-            body: new FormData(form)
-          })
+          var formData = new FormData(form);
+formData.append('webhook_secret', WEBHOOK_SECRET);
+
+fetch(WEBHOOK_URL, {
+  method: 'POST',
+  body: formData
+})
             .then(function(response) {
               window.location.href = response.ok ? '/analyse/in-arbeit' : '/analyse/fehler';
             })
