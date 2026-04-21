@@ -5,7 +5,6 @@
   var currentMemberId      = null;
   var submitHandlerAttached = false;
 
-  // ── Dropdown befüllen ─────────────────────────────────────────────────────
   function initDropdown() {
     var select = document.getElementById('conversion_goal');
     if (!select) return;
@@ -49,7 +48,6 @@
     `;
   }
 
-  // ── Credit-Berechnung inkl. reserved_ppu_credits ──────────────────────────
   function calcCredits(d) {
     var planCredits = Math.max(0,
       (parseFloat(d.credits_limit) || 0)
@@ -63,7 +61,6 @@
     return planCredits + ppuCredits;
   }
 
-  // ── Credits laden und anzeigen ────────────────────────────────────────────
   function loadCredits() {
     window.$memberstackDom.getCurrentMember().then(function(result) {
       var member = result?.data;
@@ -71,7 +68,7 @@
       currentMemberId = member.id;
 
       window.supabase
-        .from('user_effective_credits')  // ← Owner-Credits für Members
+        .from('user_effective_credits')
         .select('credits_limit, credits_used_current_period, reserved_credits, ppu_credits, reserved_ppu_credits')
         .eq('memberstack_id', member.id)
         .single()
@@ -105,7 +102,6 @@
     }).catch(function() {});
   }
 
-  // ── Memberstack-Felder ins Formular injizieren ────────────────────────────
   function injectMemberstackFields() {
     window.$memberstackDom.getCurrentMember().then(function(result) {
       var member = result?.data;
@@ -126,7 +122,6 @@
     }).catch(function() {});
   }
 
-  // ── Submit-Handler mit Live-Credit-Prüfung ────────────────────────────────
   function initSubmitHandler() {
     if (submitHandlerAttached) return;
     var form = document.querySelector('form');
@@ -138,7 +133,6 @@
 
       var btn = document.querySelector('.analyseformular-button');
 
-      // ── Pflichtfelder validieren ───────────────────────────────────────────
       var urlInput = form.querySelector('input[name="landing_page_url"]');
       var urlValue = urlInput ? urlInput.value.trim() : '';
 
@@ -152,7 +146,6 @@
         return;
       }
 
-      // Button sofort deaktivieren
       if (btn) {
         btn.style.opacity = '0.6';
         btn.style.pointerEvents = 'none';
@@ -161,9 +154,8 @@
 
       if (!currentMemberId) { window.location.href = '/analyse/fehler'; return; }
 
-      // Live Credit-Prüfung vor dem Absenden
       window.supabase
-        .from('user_effective_credits')  // ← Owner-Credits für Members
+        .from('user_effective_credits')
         .select('credits_limit, credits_used_current_period, reserved_credits, ppu_credits, reserved_ppu_credits')
         .eq('memberstack_id', currentMemberId)
         .single()
@@ -174,15 +166,19 @@
           if (total <= 0) { window.location.href = '/analyse/fehler'; return; }
 
           fetch(WEBHOOK_URL, {
-  method: 'POST',
-  headers: { 'x-convertlyze-secret': WEBHOOK_SECRET },
-  body: new FormData(form)
-})
+            method: 'POST',
+            headers: { 'x-convertlyze-secret': WEBHOOK_SECRET },
+            body: new FormData(form)
+          })
             .then(function(response) {
-    window.location.href = response.ok ? '/analyse/in-arbeit' : '/analyse/fehler';
-  })
+              window.location.href = response.ok ? '/analyse/in-arbeit' : '/analyse/fehler';
+            })
+            .catch(function() { window.location.href = '/analyse/fehler'; });
+        })
+        .catch(function() { window.location.href = '/analyse/fehler'; });
+    });
+  }
 
-  // ── Init mit Timing-Fix ───────────────────────────────────────────────────
   var attempts = 0;
   function init() {
     var memberstackReady = !!window.$memberstackDom;
