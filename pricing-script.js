@@ -157,7 +157,6 @@
   window.cvzShowModal    = showModal;
   window.cvzCloseModal   = closeModal;
 
-  // Legacy-Kompatibilität
   window.cvzShowMemberModal = function() {
     showModal({
       icon: '🔒',
@@ -179,18 +178,20 @@
   var SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
   var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
   var PORTAL_ENDPOINT   = SUPABASE_URL + '/functions/v1/stripe-portal';
+  var PPU_PRICE_ID      = 'prc_pay-per-use-14750y0n';
 
   var PLAN_DATA = {
     'starter':     { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
     'pro':         { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
     'enterprise':  { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' },
-    'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      }
+    'pay-per-use': { monthly: PPU_PRICE_ID,                     annual: PPU_PRICE_ID                    }
   };
 
   function startCheckout(priceId) {
+    var isPPU = priceId === PPU_PRICE_ID;
     return window.$memberstackDom.purchasePlansWithCheckout({
       priceId:    priceId,
-      successUrl: window.location.origin + '/member/danke'
+      successUrl: window.location.origin + (isPPU ? '/analyse/formular' : '/member/danke')
     });
   }
 
@@ -213,7 +214,6 @@
     setBtnLoading(btn);
 
     try {
-      // Supabase: hat User aktiven Plan?
       var dbRes = await fetch(
         SUPABASE_URL + '/rest/v1/users?select=current_price_id&memberstack_id=eq.' + memberstackId,
         { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY } }
@@ -221,8 +221,8 @@
       var users = await dbRes.json();
       var hasActivePlan = users?.[0]?.current_price_id;
 
-      if (hasActivePlan) {
-        // Bestehender Plan → Customer Portal für Plan-Wechsel
+      // PPU kann immer direkt gekauft werden – kein Portal nötig
+      if (hasActivePlan && priceId !== PPU_PRICE_ID) {
         var portalRes = await fetch(PORTAL_ENDPOINT, {
           method: 'POST',
           headers: {
@@ -238,7 +238,6 @@
           return;
         }
 
-        // Portal-Fehler
         resetBtn(btn);
         window.cvzShowModal({
           icon: '❌',
@@ -247,7 +246,6 @@
         });
 
       } else {
-        // Kein aktiver Plan → Stripe Checkout
         resetBtn(btn);
         startCheckout(priceId).catch(function(err) {
           console.error('Checkout Fehler:', err);
@@ -274,7 +272,7 @@
     if (!window.$memberstackDom) return;
 
     var member = await window.$memberstackDom.getCurrentMember();
-    if (!member?.data?.id) return; // Nicht eingeloggt → normale Links bleiben
+    if (!member?.data?.id) return;
 
     var memberstackId = member.data.id;
     console.log('User eingeloggt:', memberstackId);
