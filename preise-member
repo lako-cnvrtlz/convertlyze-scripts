@@ -1,0 +1,546 @@
+const SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
+const PORTAL_ENDPOINT   = SUPABASE_URL + '/functions/v1/stripe-portal';
+
+const PLAN_DATA = {
+  'starter':     { monthly: { name: 'Starter',    price: '€149/Monat',  priceId: 'prc_starter-monthly-udf40q28'   }, annual: { name: 'Starter',    price: '€1.490/Jahr', priceId: 'prc_starter-yearly-uu680b3d'   } },
+  'pro':         { monthly: { name: 'Pro',         price: '€299/Monat',  priceId: 'prc_pro-monthly-9q502rg'        }, annual: { name: 'Pro',         price: '€2.990/Jahr', priceId: 'prc_pro-yearly-l4c0gnw'        } },
+  'enterprise':  { monthly: { name: 'Enterprise',  price: '€499/Monat',  priceId: 'prc_enterprise-monthly-ftd0gbp' }, annual: { name: 'Enterprise',  price: '€4.990/Jahr', priceId: 'prc_enterprise-yearly-zv6022j' } },
+  'pay-per-use': { monthly: { name: 'Pay-per-Use', price: '€29',         priceId: 'prc_pay-per-use-14750y0n'       }, annual: { name: 'Pay-per-Use', price: '€29',         priceId: 'prc_pay-per-use-14750y0n'       } }
+};
+
+const PPU_PRICE_ID = 'prc_pay-per-use-14750y0n';
+
+// ── Alle Checkout-Buttons sofort sperren (bevor Seite sichtbar) ───────────────
+document.querySelectorAll('[data-ms-modal="checkout"]').forEach(function (btn) {
+  btn.style.pointerEvents = 'none';
+});
+
+// ── Hilfsfunktionen ───────────────────────────────────────────────────────────
+
+function getParam(key) {
+  return new URLSearchParams(window.location.search).get(key);
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function revealContent() {
+  const heroBlock = document.querySelector('.content_hero');
+  if (heroBlock) {
+    heroBlock.style.transition = 'opacity 0.4s ease';
+    heroBlock.style.opacity    = '1';
+  }
+  document.body.classList.add('content-loaded');
+}
+
+function unlockPlanButtons() {
+  document.querySelectorAll('[data-ms-modal="checkout"]').forEach(function (btn) {
+    btn.style.pointerEvents = 'auto';
+    btn.style.opacity       = '';
+    btn.style.cursor        = '';
+  });
+}
+
+function lockPlanButtonsForMember() {
+  document.querySelectorAll('[data-ms-modal="checkout"]').forEach(function (btn) {
+    btn.style.pointerEvents = 'auto';
+    btn.style.opacity       = '0.5';
+    btn.style.cursor        = 'not-allowed';
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      showMemberBlockModal();
+    }, true);
+  });
+}
+
+// ── Deps-Prüfung mit Retry ────────────────────────────────────────────────────
+
+async function waitForDeps(maxAttempts = 30) {
+  for (let i = 0; i < maxAttempts; i++) {
+    if (
+      window.$memberstackDom &&
+      typeof window.supabase?.from === 'function'
+    ) return true;
+    await sleep(300);
+  }
+  return false;
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+
+(function () {
+  function createModal() {
+    if (document.getElementById('cvz-welcome-modal')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'cvz-welcome-modal';
+    overlay.style.cssText = [
+      'display:none',
+      'position:fixed',
+      'inset:0',
+      'background:rgba(0,0,0,0.6)',
+      'z-index:9999',
+      'align-items:center',
+      'justify-content:center',
+      'backdrop-filter:blur(4px)'
+    ].join(';');
+
+    const box = document.createElement('div');
+    box.id = 'cvz-welcome-modal-box';
+    box.style.cssText = [
+      'background:#0d1117',
+      'border:1px solid #2d3748',
+      'border-radius:12px',
+      'padding:32px',
+      'max-width:440px',
+      'width:90%',
+      'text-align:center',
+      'font-family:Geist,sans-serif',
+      'position:relative'
+    ].join(';');
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) closeModal();
+    });
+  }
+
+  function showModal(cfg) {
+    const overlay = document.getElementById('cvz-welcome-modal');
+    const box     = document.getElementById('cvz-welcome-modal-box');
+    if (!overlay || !box) return;
+
+    box.innerHTML = '';
+
+    const xBtn = document.createElement('button');
+    xBtn.textContent   = '✕';
+    xBtn.style.cssText = 'position:absolute;top:12px;right:16px;background:none;border:none;color:#8b98a5;font-size:16px;cursor:pointer;line-height:1;padding:0;';
+    xBtn.addEventListener('click', function () {
+      closeModal();
+      if (typeof cfg.onClose === 'function') cfg.onClose();
+    });
+
+    const title = document.createElement('h3');
+    title.textContent   = cfg.title || '';
+    title.style.cssText = 'color:#e8edf5;font-size:18px;font-weight:600;margin:0 0 10px;';
+
+    const text = document.createElement('p');
+    text.textContent   = cfg.text || '';
+    text.style.cssText = 'color:#8b98a5;font-size:14px;line-height:1.6;margin:0 0 24px;white-space:pre-line;';
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:10px;justify-content:center;flex-wrap:wrap;';
+
+    (cfg.buttons || []).forEach(function (btnCfg) {
+      const btn = document.createElement('button');
+      btn.textContent   = btnCfg.label;
+      btn.style.cssText = btnCfg.primary
+        ? 'background:#4fd1c5;color:#0d1117;border:none;border-radius:8px;padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer;'
+        : 'background:#252d3d;color:#e8edf5;border:1px solid #2a3550;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:500;cursor:pointer;';
+      btn.addEventListener('click', function () {
+        closeModal();
+        if (typeof btnCfg.onClick === 'function') btnCfg.onClick();
+      });
+      btnRow.appendChild(btn);
+    });
+
+    box.appendChild(xBtn);
+    box.appendChild(title);
+    box.appendChild(text);
+    box.appendChild(btnRow);
+
+    overlay.style.display = 'flex';
+  }
+
+  function closeModal() {
+    const modal = document.getElementById('cvz-welcome-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  window.cvzWelcomeModal    = { show: showModal, close: closeModal };
+  window.cvzShowModal       = showModal;
+  window.cvzCloseModal      = closeModal;
+  window.cvzShowMemberModal = function () {
+    showModal({
+      title: 'Keine Berechtigung',
+      text:  'Plan-Änderungen können nur vom Account-Inhaber vorgenommen werden. Wende dich an deinen Administrator.',
+    });
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', createModal);
+  } else {
+    createModal();
+  }
+})();
+
+// ── Modal für gesperrte Plan-Buttons ─────────────────────────────────────────
+
+function showMemberBlockModal() {
+  cvzShowModal({
+    title: 'Plan-Buchung nicht möglich',
+    text:  'Als Team-Mitglied kannst du keine Abonnements buchen oder verwalten. Das ist ausschließlich dem Account-Inhaber vorbehalten.\n\nFür persönliche Einzelanalysen kannst du Pay-per-Use-Analysen (€29/Stück) unabhängig vom Team-Abo hinzukaufen.',
+    buttons: [
+      {
+        label:   'Pay-per-Use kaufen',
+        primary: false,
+        onClick: function () {
+          window.$memberstackDom.purchasePlansWithCheckout({
+            priceId:    PPU_PRICE_ID,
+            successUrl: window.location.origin + '/analyse/formular'  // ← PPU: direkt zum Formular
+          }).catch(function (err) { console.error('[CVZ] PPU checkout error:', err); });
+        }
+      },
+      {
+        label:   'Zum Dashboard →',
+        primary: true,
+        onClick: function () { window.location.href = '/member/dashboard'; }
+      }
+    ]
+  });
+}
+
+// ── Supabase: User laden ──────────────────────────────────────────────────────
+
+async function fetchUserFast(memberstackId) {
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, firstname, owner_user_id, current_price_id, email')
+    .eq('memberstack_id', memberstackId)
+    .single();
+  if (data) return data;
+  if (error) console.warn('⚠️ fetchUserFast error:', error);
+  return null;
+}
+
+async function fetchUserWithSmartRetry(memberstackId) {
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, firstname, owner_user_id, current_price_id, email')
+      .eq('memberstack_id', memberstackId)
+      .single();
+    if (data) return data;
+    if (error) console.warn(`⚠️ Versuch ${attempt} error:`, error);
+    if (attempt < 5) await sleep(1500);
+  }
+  return null;
+}
+
+// ── Supabase: pending_checkout ────────────────────────────────────────────────
+
+async function getPendingCheckout(email) {
+  if (!email) return null;
+  try {
+    const res = await fetch(
+      SUPABASE_URL + '/rest/v1/pending_checkouts?email=eq.' + encodeURIComponent(email) + '&limit=1',
+      { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY } }
+    );
+    const data = await res.json();
+    return data?.[0] || null;
+  } catch (e) {
+    console.warn('[CVZ] pending_checkout lesen Fehler:', e);
+    return null;
+  }
+}
+
+async function deletePendingCheckout(email) {
+  if (!email) return;
+  try {
+    await fetch(
+      SUPABASE_URL + '/rest/v1/pending_checkouts?email=eq.' + encodeURIComponent(email),
+      {
+        method:  'DELETE',
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY }
+      }
+    );
+  } catch (e) {
+    console.warn('[CVZ] pending_checkout löschen Fehler:', e);
+  }
+}
+
+// ── Stripe Portal ─────────────────────────────────────────────────────────────
+
+async function openStripePortal(memberstackId) {
+  try {
+    const res  = await fetch(PORTAL_ENDPOINT, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+      body:    JSON.stringify({ memberstackId })
+    });
+    const data = await res.json();
+    if (data.url) {
+      window.location.href = data.url;
+    } else {
+      cvzShowModal({
+        title: 'Portal nicht erreichbar',
+        text:  'Das Abrechnungsportal konnte nicht geöffnet werden. Bitte versuche es erneut oder kontaktiere den Support.',
+      });
+    }
+  } catch (e) {
+    console.error('[CVZ] Portal Fehler:', e);
+    cvzShowModal({
+      title: 'Verbindungsfehler',
+      text:  'Es konnte keine Verbindung zum Server hergestellt werden. Bitte prüfe deine Internetverbindung.',
+    });
+  }
+}
+
+// ── Checkout starten ──────────────────────────────────────────────────────────
+
+async function startCheckout(priceId, btn) {
+  if (btn) {
+    btn.textContent         = 'Wird geladen…';
+    btn.style.opacity       = '0.6';
+    btn.style.pointerEvents = 'none';
+  }
+  try {
+    const isPPU = priceId === PPU_PRICE_ID;
+    await window.$memberstackDom.purchasePlansWithCheckout({
+      priceId:    priceId,
+      successUrl: window.location.origin + (isPPU ? '/analyse/formular' : '/member/danke')
+    });
+  } catch (err) {
+    console.error('[CVZ] Checkout Fehler:', err);
+    if (btn) {
+      btn.textContent         = 'Fehler – erneut versuchen';
+      btn.style.opacity       = '1';
+      btn.style.pointerEvents = 'auto';
+    }
+  }
+}
+
+// ── UI-Hilfsfunktionen ────────────────────────────────────────────────────────
+
+function hidePlanSection() {
+  ['[data-welcome="buy-btn"]', '[data-welcome="free-btn"]',
+   '[data-welcome="plan-box"]', '[data-welcome="plan-info"]'].forEach(function (sel) {
+    const el = document.querySelector(sel);
+    if (el) el.style.display = 'none';
+  });
+}
+
+function setFirstName(firstname) {
+  const el = document.querySelector('[data-welcome="firstname"]');
+  if (el) el.textContent = (firstname || 'Member') + '!';
+}
+
+// ── Hauptlogik ────────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', async function () {
+  const heroBlock = document.querySelector('.content_hero');
+  if (heroBlock) heroBlock.style.opacity = '0';
+
+  const ready = await waitForDeps();
+  if (!ready) {
+    console.warn('[CVZ] Abhängigkeiten nicht rechtzeitig geladen.');
+    setFirstName('');
+    unlockPlanButtons();
+    revealContent();
+    return;
+  }
+
+  try {
+    let memberstackId = null;
+    let memberEmail   = null;
+    try {
+      const member = await window.$memberstackDom.getCurrentMember();
+      memberstackId = member?.data?.id || null;
+      memberEmail   = member?.data?.auth?.email || member?.data?.email || null;
+    } catch (e) {
+      console.error('[CVZ] Memberstack Fehler:', e);
+    }
+
+    let currentUser = null;
+    if (memberstackId) {
+      currentUser = await fetchUserFast(memberstackId);
+      if (!currentUser) currentUser = await fetchUserWithSmartRetry(memberstackId);
+    }
+
+    const email = currentUser?.email || memberEmail;
+
+    setFirstName(currentUser?.firstname || '');
+
+    // ── State 1: Team-Member ─────────────────────────────────────────────────
+    if (currentUser?.owner_user_id) {
+      hidePlanSection();
+      lockPlanButtonsForMember();
+      revealContent();
+
+      cvzShowModal({
+        title:   'Du bist als Team-Member eingeladen',
+        text:    'Plan-Buchungen sind nur für den Account-Inhaber möglich.\n\nFür persönliche Einzelanalysen kannst du Pay-per-Use-Analysen (€29/Stück) unabhängig vom Team-Abo hinzukaufen.',
+        buttons: [
+          {
+            label:   'Pay-per-Use kaufen',
+            primary: false,
+            onClick: function () {
+              window.$memberstackDom.purchasePlansWithCheckout({
+                priceId:    PPU_PRICE_ID,
+                successUrl: window.location.origin + '/analyse/formular'  // ← PPU: direkt zum Formular
+              }).catch(function (err) { console.error('[CVZ] PPU checkout error:', err); });
+            }
+          },
+          {
+            label:   'Analyse starten →',
+            primary: true,
+            onClick: function () { window.location.href = '/analyse/formular'; }
+          }
+        ]
+      });
+
+      return;
+    }
+
+    // ── State 2: Aktiver Plan vorhanden ──────────────────────────────────────
+    if (currentUser?.current_price_id) {
+      hidePlanSection();
+      unlockPlanButtons();
+      revealContent();
+
+      cvzShowModal({
+        title:   'Du hast bereits einen aktiven Plan',
+        text:    'Möchtest du deinen Plan ändern oder deine Abrechnung verwalten? Das kannst du direkt im Kundenportal erledigen.',
+        onClose: function () { window.location.href = '/member/dashboard'; },
+        buttons: [
+          {
+            label:   'Abrechnung verwalten →',
+            primary: true,
+            onClick: function () { openStripePortal(memberstackId); }
+          }
+        ]
+      });
+
+      return;
+    }
+
+    // ── State 3: Neuer User ───────────────────────────────────────────────────
+    let planKey = getParam('plan');
+    let billing = getParam('billing') || 'monthly';
+
+    if (!planKey && email) {
+      const pending = await getPendingCheckout(email);
+      if (pending) {
+        planKey = pending.plan;
+        billing = pending.billing || 'monthly';
+        console.log('[CVZ] pending_checkout gefunden:', planKey, billing);
+        await deletePendingCheckout(email);
+      }
+    }
+
+    hidePlanSection();
+    unlockPlanButtons();
+    revealContent();
+
+    if (planKey && PLAN_DATA[planKey]) {
+      // ── State 3a: Mit Plan ───────────────────────────────────────────────
+      const billingKey = billing === 'annual' ? 'annual' : 'monthly';
+      const plan       = PLAN_DATA[planKey][billingKey] || PLAN_DATA[planKey].monthly;
+
+      cvzShowModal({
+        title:   'Willkommen bei Convertlyze!',
+        text:    `Du hast dich für den ${plan.name}-Plan interessiert. Starte direkt oder teste erst eine kostenlose Analyse.`,
+        buttons: [
+          {
+            label:   'Erst kostenlos testen',
+            primary: false,
+            onClick: function () { window.location.href = '/analyse/formular'; }
+          },
+          {
+            label:   `${plan.name} kaufen – ${plan.price}`,
+            primary: true,
+            onClick: function () { startCheckout(plan.priceId); }
+          }
+        ]
+      });
+
+    } else {
+      // ── State 3b: Ohne Plan ──────────────────────────────────────────────
+      const freeBtn = document.querySelector('[data-welcome="free-btn"]');
+      if (freeBtn) {
+        freeBtn.style.display = 'flex';
+        freeBtn.addEventListener('click', function () {
+          window.location.href = '/analyse/formular';
+        });
+      }
+    }
+
+  } catch (err) {
+    console.error('[CVZ] Fehler:', err);
+    setFirstName('');
+    unlockPlanButtons();
+    revealContent();
+  }
+});
+
+// ── Pricing Toggle ────────────────────────────────────────────────────────────
+
+(function () {
+  function initPricingToggle() {
+    var switcher = document.querySelector('.switcher');
+    var leftBtn  = document.querySelector('.switch .left');
+    var rightBtn = document.querySelector('.switch .right');
+    var monthly  = document.querySelector('.monthly');
+    var annually = document.querySelector('.annually');
+
+    if (!switcher || !monthly || !annually) return;
+
+    function showMonthly() {
+      monthly.style.display = 'block';
+      annually.style.display = 'none';
+      if (leftBtn)  leftBtn.classList.add('active');
+      if (rightBtn) rightBtn.classList.remove('active');
+      switcher.style.transform = 'translateX(0px)';
+      switcher.classList.remove('is-annual');
+    }
+
+    function showAnnually() {
+      monthly.style.display = 'none';
+      annually.style.display = 'block';
+      if (leftBtn)  leftBtn.classList.remove('active');
+      if (rightBtn) rightBtn.classList.add('active');
+      var switchWidth   = document.querySelector('.switch').offsetWidth;
+      var switcherWidth = switcher.offsetWidth;
+      switcher.style.transform = 'translateX(' + (switchWidth - switcherWidth - 2) + 'px)';
+      switcher.classList.add('is-annual');
+    }
+
+    switcher.style.position     = 'absolute';
+    switcher.style.top          = '2px';
+    switcher.style.left         = '2px';
+    switcher.style.width        = 'calc(50% - 3px)';
+    switcher.style.height       = 'calc(100% - 4px)';
+    switcher.style.transition   = 'transform 0.3s ease';
+    switcher.style.zIndex       = '1';
+    switcher.style.borderRadius = 'inherit';
+
+    var switchContainer = document.querySelector('.switch');
+    if (switchContainer) {
+      switchContainer.style.position = 'relative';
+      switchContainer.style.overflow = 'hidden';
+    }
+
+    if (leftBtn)  { leftBtn.style.position  = 'relative'; leftBtn.style.zIndex  = '2'; leftBtn.style.cursor  = 'pointer'; }
+    if (rightBtn) { rightBtn.style.position = 'relative'; rightBtn.style.zIndex = '2'; rightBtn.style.cursor = 'pointer'; }
+
+    showMonthly();
+
+    if (leftBtn)  leftBtn.addEventListener('click', showMonthly);
+    if (rightBtn) rightBtn.addEventListener('click', showAnnually);
+    if (switcher) switcher.addEventListener('click', function () {
+      if (switcher.classList.contains('is-annual')) showMonthly();
+      else showAnnually();
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPricingToggle);
+  } else {
+    initPricingToggle();
+  }
+})();
