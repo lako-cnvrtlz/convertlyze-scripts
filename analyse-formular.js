@@ -178,11 +178,9 @@
   headers: { 'x-convertlyze-secret': WEBHOOK_SECRET },
   body: new FormData(form)
 })
-            .catch(function() { window.location.href = '/analyse/fehler'; });
-        })
-        .catch(function() { window.location.href = '/analyse/fehler'; });
-    });
-  }
+            .then(function(response) {
+    window.location.href = response.ok ? '/analyse/in-arbeit' : '/analyse/fehler';
+  })
 
   // ── Init mit Timing-Fix ───────────────────────────────────────────────────
   var attempts = 0;
