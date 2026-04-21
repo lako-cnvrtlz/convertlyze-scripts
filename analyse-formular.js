@@ -1,6 +1,7 @@
 (function() {
 
   var WEBHOOK_URL = 'https://hook.eu2.make.com/2lsybme5qm0fw8cw1ua9a4xcjx94xg29';
+  var WEBHOOK_SECRET = 'cvl_whsec_2f8a9b4e7d1c3f6a';
   var currentMemberId      = null;
   var submitHandlerAttached = false;
 
@@ -172,10 +173,11 @@
           var total = calcCredits(res.data);
           if (total <= 0) { window.location.href = '/analyse/fehler'; return; }
 
-          fetch(WEBHOOK_URL, { method: 'POST', body: new FormData(form) })
-            .then(function(response) {
-              window.location.href = response.ok ? '/analyse/in-arbeit' : '/analyse/fehler';
-            })
+          fetch(WEBHOOK_URL, {
+  method: 'POST',
+  headers: { 'x-convertlyze-secret': WEBHOOK_SECRET },
+  body: new FormData(form)
+})
             .catch(function() { window.location.href = '/analyse/fehler'; });
         })
         .catch(function() { window.location.href = '/analyse/fehler'; });
