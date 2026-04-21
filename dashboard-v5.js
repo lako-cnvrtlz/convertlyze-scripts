@@ -79,7 +79,6 @@
     return false;
   }
 
-  // Globaler PDF-Zugriff: nur für aktive Paid-Plans
   function checkPdfAccess(user) {
     var billingUser = user._billingUser || user;
     var type    = billingUser.license_type   || '';
@@ -95,7 +94,6 @@
     return false;
   }
 
-  // PDF-Zugriff pro Analyse: Paid-Plan ODER PPU-Analyse
   function canAccessPdf(analysis) {
     if (globalHasPdfAccess) return true;
     if (analysis.analysis_source === 'Pay-per-Use') return true;
@@ -331,7 +329,6 @@
       avatarEl.style.justifyContent = 'center';
     }
 
-    // ── Team-Section: nur bei bezahlten Plänen mit Team-Feature ──
     var teamPlans   = ['Starter', 'Pro', 'Professional', 'Enterprise'];
     var hasTeam     = teamPlans.indexOf(billingUser.license_type) !== -1;
     var teamBtn     = document.getElementById('open-team-modal');
@@ -571,7 +568,6 @@
     var maxKeywordLength = isMobile ? 25 : 40;
     if (displayKeyword.length > maxKeywordLength) displayKeyword = displayKeyword.substring(0, maxKeywordLength - 3) + '...';
 
-    // PDF-Zugriff pro Analyse: Paid-Plan global ODER PPU-Analyse
     var canDownload = isCompleted && canAccessPdf(analysis);
 
     var downloadTitle = !isCompleted
@@ -710,7 +706,6 @@
 
       globalMemberstackId = memberstackId;
 
-      // ── Checkout nur für Abo-Pläne – Pay-per-Use NICHT hier ──
       var CHECKOUT_PRICE_IDS = {
         'starter':    { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
         'pro':        { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
@@ -720,7 +715,6 @@
       var savedBilling    = sessionStorage.getItem('selected_billing') || 'monthly';
       var checkoutPriceId = CHECKOUT_PRICE_IDS[savedPlan]?.[savedBilling];
 
-      // Session immer aufräumen
       sessionStorage.removeItem('selected_plan');
       sessionStorage.removeItem('selected_billing');
 
@@ -798,7 +792,8 @@
       btn.addEventListener('click', function(e) {
         e.preventDefault();
         window.$memberstackDom.purchasePlansWithCheckout({
-          priceId: PAY_PER_USE_PRICE_ID
+          priceId:    PAY_PER_USE_PRICE_ID,
+          successUrl: window.location.origin + '/analyse/formular'  // ← PPU: direkt zum Formular
         }).catch(function(err) {
           console.error('Pay-per-Use Checkout error:', err);
         });
