@@ -1,4 +1,4 @@
-// ── Sofort verstecken wenn Plan im sessionStorage ──────────────────────────
+// Sofort verstecken wenn Plan im sessionStorage
 (function() {
   if (sessionStorage.getItem('selected_plan')) {
     document.documentElement.style.visibility = 'hidden';
@@ -63,6 +63,10 @@
 
   var pdfUrlCache = {};
 
+  // PDF-Zugriff basiert auf analysis_source der Analyse.
+  // Muss mit PDF_ACCESS_SOURCES in templateBuilder.js uebereinstimmen.
+  var PDF_ACCESS_SOURCES = ['starter', 'pro', 'enterprise', 'pay-per-use', 'beta', 'agency'];
+
   function sleep(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
 
   async function waitForDependencies() {
@@ -70,12 +74,12 @@
       var supabaseOk    = window.supabase && typeof window.supabase.from === 'function';
       var memberstackOk = window.$memberstackDom && typeof window.$memberstackDom.getCurrentMember === 'function';
       if (supabaseOk && memberstackOk) {
-        console.log('✅ Supabase & Memberstack bereit nach ' + (i * 100) + 'ms');
+        console.log('Supabase & Memberstack bereit nach ' + (i * 100) + 'ms');
         return true;
       }
       await sleep(100);
     }
-    console.warn('⚠️ Timeout nach 10s');
+    console.warn('Timeout nach 10s');
     return false;
   }
 
@@ -94,9 +98,18 @@
     return false;
   }
 
+  // Prueft ob eine spezifische Analyse PDF-Zugriff hat.
+  // Basiert auf analysis_source der Analyse, NICHT auf dem aktuellen Plan des Users.
+  // Gekuendigte User behalten PDF-Zugriff fuer bereits bezahlte Analysen.
   function canAccessPdf(analysis) {
+    // Zugriff ueber analysis_source (primaer)
+    var source = (analysis.analysis_source || '').toLowerCase();
+    if (PDF_ACCESS_SOURCES.indexOf(source) !== -1) return true;
+
+    // Fallback: User hat aktuell aktiven bezahlten Plan
+    // (fuer Analysen ohne gesetzten analysis_source)
     if (globalHasPdfAccess) return true;
-    if (analysis.analysis_source === 'Pay-per-Use') return true;
+
     return false;
   }
 
@@ -116,7 +129,7 @@
       .single();
 
     if (!result.data) {
-      if (result.error) console.warn('⚠️ fetchUserFast error:', result.error);
+      if (result.error) console.warn('fetchUserFast error:', result.error);
       return null;
     }
 
@@ -161,7 +174,7 @@
         return result.data;
       }
 
-      if (result.error) console.warn('⚠️ Versuch ' + attempt + ' error:', result.error);
+      if (result.error) console.warn('Versuch ' + attempt + ' error:', result.error);
       if (attempt < maxAttempts) await sleep(delayMs);
     }
     return null;
@@ -173,7 +186,7 @@
     var result = await supabase.rpc('get_analyses_for_member', { p_memberstack_id: memberstackId });
 
     if (result.error) {
-      console.error('❌ Fehler beim Laden der Analysen (RPC):', result.error);
+      console.error('Fehler beim Laden der Analysen (RPC):', result.error);
       return [];
     }
 
@@ -194,14 +207,14 @@
       var result = await supabase.rpc('reset_user_credits_if_due', { p_user_id: billingUser.id });
 
       if (result.error) {
-        console.warn('⚠️ reset_user_credits_if_due:', result.error);
+        console.warn('reset_user_credits_if_due:', result.error);
         return false;
       }
 
       var row = Array.isArray(result.data) ? result.data[0] : result.data;
       return !!row?.did_reset;
     } catch (e) {
-      console.warn('⚠️ reset_user_credits_if_due exception:', e);
+      console.warn('reset_user_credits_if_due exception:', e);
       return false;
     }
   }
@@ -250,7 +263,7 @@
 
     setText('[data-dashboard="ppu-credits"]', ppuCredits);
     setText('[data-dashboard="ppu-label"]', ppuCredits > 0
-      ? ppuCredits + ' Pay-per-Use Analyse' + (ppuCredits > 1 ? 'n' : '') + ' verfügbar'
+      ? ppuCredits + ' Pay-per-Use Analyse' + (ppuCredits > 1 ? 'n' : '') + ' verfuegbar'
       : 'Keine Pay-per-Use Analysen');
 
     var ppuCard = document.querySelector('[data-dashboard="ppu-card"]');
@@ -275,17 +288,17 @@
         d.setMonth(d.getMonth() + 1);
         renewalDate = d.toLocaleDateString('de-DE');
       }
-      renewalText = renewalDate || '–';
+      renewalText = renewalDate || '-';
     } else if (isFreePlan) {
       renewalLabel = 'Analyse-Status';
       renewalText  = analysesLeft > 0
-        ? '1 kostenlose Analyse verfügbar'
+        ? '1 kostenlose Analyse verfuegbar'
         : 'Kostenlose Analyse bereits genutzt';
     } else if (isPayPerUse) {
       renewalLabel = 'Analyse-Status';
       renewalText  = analysesLeft > 0
-        ? '1 Analyse verfügbar'
-        : 'Analyse bereits genutzt – jetzt neue Analyse kaufen';
+        ? '1 Analyse verfuegbar'
+        : 'Analyse bereits genutzt - jetzt neue Analyse kaufen';
     } else if (isBetaPlan) {
       renewalLabel = 'Analyse-Status';
       renewalText  = 'Beta-Analysen erneuern sich nicht automatisch';
@@ -294,7 +307,7 @@
     setText('[data-dashboard="credits-renewal-label"]', renewalLabel);
     setText('[data-dashboard="credits-renewal"]', renewalText);
 
-    var planName = billingUser.license_type || '–';
+    var planName = billingUser.license_type || '-';
     if (typeof planName === 'string' && planName.length > 0 && !isPayPerUse) {
       planName = planName.charAt(0).toUpperCase() + planName.slice(1);
     }
@@ -368,7 +381,7 @@
     globalContainer.innerHTML =
       '<div style="grid-column: 1 / -1; padding: 60px 20px; text-align: center; color: #7a8ba8;">' +
         '<p style="margin: 0 0 10px 0; font-weight: 500;">Noch keine Analysen vorhanden</p>' +
-        '<p style="margin: 0; font-size: 14px;">Starte deine erste Analyse! 🚀</p>' +
+        '<p style="margin: 0; font-size: 14px;">Starte deine erste Analyse!</p>' +
       '</div>';
   }
 
@@ -378,9 +391,9 @@
     paginationEl = document.createElement('div');
     paginationEl.className = 'pagination-wrapper';
     paginationEl.innerHTML =
-      '<button class="pagination-btn pagination-prev" type="button">« Zurück</button>' +
+      '<button class="pagination-btn pagination-prev" type="button">Zurueck</button>' +
       '<span class="pagination-info"></span>' +
-      '<button class="pagination-btn pagination-next" type="button">Nächste Seite »</button>';
+      '<button class="pagination-btn pagination-next" type="button">Naechste Seite</button>';
 
     container.parentElement.appendChild(paginationEl);
 
@@ -502,9 +515,9 @@
       btn.title = 'Report herunterladen';
 
     } catch (err) {
-      console.error('❌ Report-Download Fehler:', err);
+      console.error('Report-Download Fehler:', err);
       btn.classList.remove('loading');
-      btn.title = 'Fehler – erneut versuchen';
+      btn.title = 'Fehler - erneut versuchen';
       btn.style.backgroundColor = '#1f1215';
       setTimeout(function() { btn.style.backgroundColor = ''; }, 2500);
     }
@@ -573,8 +586,8 @@
     var downloadTitle = !isCompleted
       ? 'Analyse muss abgeschlossen sein'
       : !canAccessPdf(analysis)
-        ? 'PDF-Report nur für kostenpflichtige Pläne oder Pay-per-Use verfügbar'
-        : (pdfUrlCache[analysis.id] ? 'Report öffnen' : 'Report generieren & herunterladen');
+        ? 'PDF-Report nur fuer kostenpflichtige Plaene oder Pay-per-Use verfuegbar'
+        : (pdfUrlCache[analysis.id] ? 'Report oeffnen' : 'Report generieren & herunterladen');
 
     var downloadBtnHtml =
       '<button class="aktion-link download-link ' + (canDownload ? '' : 'action-disabled') + '" ' +
@@ -676,7 +689,7 @@
 
   async function initDashboard() {
     try {
-      console.log('🔍 Dashboard init...');
+      console.log('Dashboard init...');
 
       var ready = await waitForDependencies();
       if (!ready) return;
@@ -684,7 +697,7 @@
       var firstTableList = document.querySelector('.table-list');
       var container = firstTableList ? firstTableList.parentElement : null;
       globalContainer = container;
-      console.log('📋 Container gefunden:', container ? 'ja' : 'nein');
+      console.log('Container gefunden:', container ? 'ja' : 'nein');
 
       if (container) showLoadingSkeleton();
 
@@ -693,10 +706,10 @@
         var member = await window.$memberstackDom.getCurrentMember();
         memberstackId = member?.data?.id || null;
       } catch (e) {
-        console.error('❌ Memberstack Fehler:', e);
+        console.error('Memberstack Fehler:', e);
       }
 
-      console.log('👤 Memberstack ID:', memberstackId || 'KEINE ID');
+      console.log('Memberstack ID:', memberstackId || 'KEINE ID');
 
       if (!memberstackId) {
         if (container) showNoUserMessage();
@@ -730,10 +743,10 @@
 
       document.documentElement.style.visibility = 'visible';
 
-      console.log('📡 Lade User aus Supabase...');
+      console.log('Lade User aus Supabase...');
       var currentUser = await fetchUserFast(memberstackId);
       if (!currentUser) currentUser = await fetchUserWithSmartRetry(memberstackId);
-      console.log('📦 User aus Supabase:', currentUser);
+      console.log('User aus Supabase:', currentUser);
 
       if (!currentUser) {
         if (container) showNoUserMessage();
@@ -745,7 +758,7 @@
       globalLicenseType    = (currentUser._billingUser || currentUser).license_type || '';
       globalHasPdfAccess   = checkPdfAccess(currentUser);
 
-      console.log('✅ User geladen:', currentUser.email, '| Plan:', globalLicenseType, '| PDF-Zugriff global:', globalHasPdfAccess);
+      console.log('User geladen:', currentUser.email, '| Plan:', globalLicenseType, '| PDF-Zugriff global:', globalHasPdfAccess);
 
       var didReset = await triggerCreditResetIfPaid(currentUser);
       if (didReset) {
@@ -754,7 +767,7 @@
       }
 
       renderUserDashboard(currentUser);
-      console.log('✅ Dashboard gerendert');
+      console.log('Dashboard gerendert');
 
       if (container) {
         initPagination(container);
@@ -764,7 +777,7 @@
 
       document.body.classList.add('content-loaded');
     } catch (err) {
-      console.error('❌ Dashboard-Fehler:', err);
+      console.error('Dashboard-Fehler:', err);
       document.body.classList.add('content-loaded');
     }
   }
@@ -793,7 +806,7 @@
         e.preventDefault();
         window.$memberstackDom.purchasePlansWithCheckout({
           priceId:    PAY_PER_USE_PRICE_ID,
-          successUrl: window.location.origin + '/analyse/formular'  // ← PPU: direkt zum Formular
+          successUrl: window.location.origin + '/analyse/formular'
         }).catch(function(err) {
           console.error('Pay-per-Use Checkout error:', err);
         });
