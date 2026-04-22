@@ -272,9 +272,9 @@
     } else if (ppuReserved > 0 && ppuAvailable === 0) {
       ppuLabelText = 'Analyse wird gerade verarbeitet...';
     } else if (ppuReserved > 0) {
-      ppuLabelText = ppuAvailable + ' verfuegbar (' + ppuReserved + ' in Bearbeitung)';
+      ppuLabelText = ppuAvailable + ' verfügbar (' + ppuReserved + ' in Bearbeitung)';
     } else {
-      ppuLabelText = ppuCredits + ' Pay-per-Use Analyse' + (ppuCredits > 1 ? 'n' : '') + ' verfuegbar';
+      ppuLabelText = ppuCredits + ' Pay-per-Use Analyse' + (ppuCredits > 1 ? 'n' : '') + ' verfügbar';
     }
     setText('[data-dashboard="ppu-label"]', ppuLabelText);
 
@@ -304,12 +304,12 @@
     } else if (isFreePlan) {
       renewalLabel = 'Analyse-Status';
       renewalText  = analysesLeft > 0
-        ? '1 kostenlose Analyse verfuegbar'
+        ? '1 kostenlose Analyse verfügbar'
         : 'Kostenlose Analyse bereits genutzt';
     } else if (isPayPerUse) {
       renewalLabel = 'Analyse-Status';
       renewalText  = analysesLeft > 0
-        ? '1 Analyse verfuegbar'
+        ? '1 Analyse verfügbar'
         : 'Analyse bereits genutzt - jetzt neue Analyse kaufen';
     } else if (isBetaPlan) {
       renewalLabel = 'Analyse-Status';
@@ -598,7 +598,7 @@
     var downloadTitle = !isCompleted
       ? 'Analyse muss abgeschlossen sein'
       : !canAccessPdf(analysis)
-        ? 'PDF-Report nur fuer kostenpflichtige Plaene oder Pay-per-Use verfuegbar'
+        ? 'PDF-Report nur fuer kostenpflichtige Plaene oder Pay-per-Use verfügbar'
         : (pdfUrlCache[analysis.id] ? 'Report oeffnen' : 'Report generieren & herunterladen');
 
     var downloadBtnHtml =
