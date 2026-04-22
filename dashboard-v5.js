@@ -124,7 +124,7 @@
   async function fetchUserFast(memberstackId) {
     var result = await supabase
       .from('users')
-      .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits')
+      .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits')
       .eq('memberstack_id', memberstackId)
       .single();
 
@@ -155,7 +155,7 @@
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       var result = await supabase
         .from('users')
-        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits')
+        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits')
         .eq('memberstack_id', memberstackId)
         .single();
 
@@ -261,10 +261,22 @@
     setText('[data-dashboard="chat-messages-remaining"]', chatLeft);
     setText('[data-dashboard="chat-messages-used"]', chatUsed + '/' + chatLimit);
 
-    setText('[data-dashboard="ppu-credits"]', ppuCredits);
-    setText('[data-dashboard="ppu-label"]', ppuCredits > 0
-      ? ppuCredits + ' Pay-per-Use Analyse' + (ppuCredits > 1 ? 'n' : '') + ' verfuegbar'
-      : 'Keine Pay-per-Use Analysen');
+    var ppuReserved  = Math.round(Number(user.reserved_ppu_credits || 0));
+    var ppuAvailable = Math.max(ppuCredits - ppuReserved, 0);
+
+    setText('[data-dashboard="ppu-credits"]', ppuAvailable);
+
+    var ppuLabelText;
+    if (ppuCredits === 0) {
+      ppuLabelText = 'Keine Pay-per-Use Analysen';
+    } else if (ppuReserved > 0 && ppuAvailable === 0) {
+      ppuLabelText = 'Analyse wird gerade verarbeitet...';
+    } else if (ppuReserved > 0) {
+      ppuLabelText = ppuAvailable + ' verfuegbar (' + ppuReserved + ' in Bearbeitung)';
+    } else {
+      ppuLabelText = ppuCredits + ' Pay-per-Use Analyse' + (ppuCredits > 1 ? 'n' : '') + ' verfuegbar';
+    }
+    setText('[data-dashboard="ppu-label"]', ppuLabelText);
 
     var ppuCard = document.querySelector('[data-dashboard="ppu-card"]');
     if (ppuCard) ppuCard.style.display = ppuCredits > 0 ? 'block' : 'none';
