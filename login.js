@@ -84,6 +84,41 @@
     });
   });
 
+  // ── 3. Nach Login: Invite annehmen ────────────────────────────────────────
+  window.addEventListener('memberstack:auth:login', async function() {
+    var match = document.cookie.match(/(^| )cvz_invite=([^;]+)/);
+    var pendingInvite = match ? decodeURIComponent(match[2]) : null;
+    if (!pendingInvite) return;
+
+    try {
+      var member = await window.$memberstackDom.getCurrentMember();
+      var memberstackId = member?.data?.id;
+      if (!memberstackId) return;
+
+      console.log('[CVZ] Login: Invite wird angenommen...', pendingInvite);
+
+      var res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/accept-team-invite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU'
+        },
+        body: JSON.stringify({ token: pendingInvite, memberstack_id: memberstackId })
+      });
+
+      var data = await res.json();
+      if (data.success) {
+        document.cookie = 'cvz_invite=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;SameSite=Lax';
+        console.log('[CVZ] Login: Team-Einladung angenommen');
+      } else {
+        console.warn('[CVZ] Login: Invite fehlgeschlagen:', data.error);
+        document.cookie = 'cvz_invite=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;SameSite=Lax';
+      }
+    } catch(err) {
+      console.error('[CVZ] Login: Invite-Fehler:', err);
+    }
+  });
+
   // ── Helper-Funktionen ──────────────────────────────────────────────────────
   function showNotRegisteredMessage(email, formElement) {
     var div = document.createElement('div');
