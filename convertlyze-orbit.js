@@ -1,4 +1,4 @@
-// convertlyze-orbit.js — v2.2
+// convertlyze-orbit.js — v2.4
 // GitHub: lako-cnvrtlz/convertlyze-scripts
 (function () {
   var CATS = [
@@ -10,16 +10,15 @@
     { label: "Wettbewerb", icon: "🔍", angle: 210,  sev: "MEDIUM",   sevCol: "#4fd1c5", finding: "USP nicht differenziert",    tip: "Konkret benennen was du besser machst." },
   ];
 
-  var W   = 680;
-  var H   = 580;   // height of the orbit SVG area only — panel sits below this
+  var W   = 680;   // design width — never changes
+  var H   = 580;
   var R   = 218;
   var NW  = 92;
   var NH  = 78;
   var MKW = 130;
   var MKH = 178;
 
-  var cx = W / 2;
-  var cy = H / 2;   // centered in orbit area
+  var cx = W / 2, cy = H / 2;
   var active = null, pulseIdx = 0, autoTimer = null;
 
   function init() {
@@ -31,7 +30,10 @@
       "#cvly-orbit-wrap{width:100%;max-width:" + W + "px;margin:0 auto;" +
         "font-family:system-ui,-apple-system,sans-serif;user-select:none;}" +
 
-      // Orbit area — relative container for SVG + nodes
+      // Scaler: fixed design size, scaled down on small screens
+      "#cvly-orbit-scaler{width:" + W + "px;transform-origin:top center;}" +
+
+      // Orbit area
       "#cvly-orbit-area{position:relative;width:100%;}" +
       "#cvly-orbit-area svg{display:block;width:100%;height:auto;}" +
 
@@ -48,7 +50,7 @@
         "letter-spacing:.3px;transition:color .3s;white-space:nowrap;}" +
       ".cvly-node.active .cvly-node-label{color:var(--sc);}" +
 
-      // Center mockup card
+      // Center mockup
       ".cvly-cc{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;}" +
       ".cvly-frame{padding:12px;border-radius:18px;" +
         "background:linear-gradient(135deg,#161b27,#1e2535);" +
@@ -64,21 +66,23 @@
         "transition:all .35s ease;overflow:hidden;}" +
       ".cvly-l{border-radius:2px;margin-bottom:3px;transition:background .35s;}" +
 
-      // Info panel — normal flow block, BELOW orbit area
-      "#cvly-panel{margin:16px auto 0;width:100%;max-width:340px;" +
-        "padding:14px 16px;border-radius:14px;background:#1e2535;" +
+      // Panel — fixed height, outside scaler so it stays readable on mobile
+      "#cvly-panel{margin:14px auto 0;width:100%;max-width:340px;" +
+        "height:90px;padding:14px 16px;border-radius:14px;background:#1e2535;" +
         "border:1px solid rgba(79,209,197,0.2);" +
-        "box-shadow:0 8px 32px rgba(0,0,0,0.4);transition:border-color .3s;" +
-        "min-height:80px;display:flex;flex-direction:column;justify-content:center;}" +
+        "box-shadow:0 8px 32px rgba(0,0,0,0.4);" +
+        "transition:border-color .3s,opacity .3s;" +
+        "box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;" +
+        "visibility:hidden;opacity:0;}" +
+      "#cvly-panel.visible{visibility:visible;opacity:1;}" +
       "#cvly-panel .ph{display:flex;align-items:center;gap:7px;margin-bottom:7px;}" +
       "#cvly-panel .pi{font-size:16px;}" +
       "#cvly-panel .pn{font-size:13px;font-weight:700;color:#e2e8f0;}" +
       ".cvly-badge{display:inline-block;padding:2px 7px;border-radius:5px;" +
         "font-size:9px;font-weight:800;letter-spacing:.8px;}" +
       "#cvly-panel .pf{font-size:13px;font-weight:600;color:#e2e8f0;" +
-        "margin-bottom:6px;line-height:1.4;}" +
-      "#cvly-panel .pt{font-size:12px;color:#94a3b8;line-height:1.5;}" +
-      "#cvly-panel .hint{font-size:12px;color:#64748b;text-align:center;}";
+        "margin-bottom:5px;line-height:1.3;}" +
+      "#cvly-panel .pt{font-size:12px;color:#94a3b8;line-height:1.4;}";
 
     document.head.appendChild(style);
 
@@ -88,43 +92,59 @@
     var ctaH     = Math.round(MKH * 0.14);
 
     wrap.innerHTML =
-      // Orbit area
-      '<div id="cvly-orbit-area">' +
-        '<svg id="cvly-svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '"></svg>' +
-
-        '<div class="cvly-cc"><div class="cvly-frame" id="cvly-frame">' +
-          '<div class="cvly-mock" style="width:' + MKW + 'px;height:' + MKH + 'px;">' +
-            '<div class="cvly-bar">' +
-              '<div class="cvly-dot" style="background:#ef4444"></div>' +
-              '<div class="cvly-dot" style="background:#f59e0b"></div>' +
-              '<div class="cvly-dot" style="background:#4fd1c5"></div>' +
+      // Scaler wraps only the orbit graphic
+      '<div id="cvly-orbit-scaler">' +
+        '<div id="cvly-orbit-area">' +
+          '<svg id="cvly-svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '"></svg>' +
+          '<div class="cvly-cc"><div class="cvly-frame" id="cvly-frame">' +
+            '<div class="cvly-mock" style="width:' + MKW + 'px;height:' + MKH + 'px;">' +
+              '<div class="cvly-bar">' +
+                '<div class="cvly-dot" style="background:#ef4444"></div>' +
+                '<div class="cvly-dot" style="background:#f59e0b"></div>' +
+                '<div class="cvly-dot" style="background:#4fd1c5"></div>' +
+              '</div>' +
+              '<div class="cvly-body">' +
+                '<div class="cvly-s" id="s-hero" style="height:' + heroH + 'px;background:#1e2535;padding:5px;display:flex;flex-direction:column;align-items:flex-start;">' +
+                  '<div class="cvly-l hl" style="height:4px;width:80%;background:#334155;"></div>' +
+                  '<div class="cvly-l hl" style="height:4px;width:60%;background:#334155;"></div>' +
+                  '<div id="s-hcta" style="height:9px;width:52px;border-radius:4px;background:#1e3a5f;transition:background .35s;margin-top:3px;"></div>' +
+                '</div>' +
+                '<div class="cvly-s" id="s-trust" style="height:' + trustH + 'px;display:flex;gap:4px;padding:4px 5px;background:#0a0f1a;">' +
+                  '<div class="tb" style="flex:1;height:7px;border-radius:2px;background:#1e293b;transition:background .35s;"></div>' +
+                  '<div class="tb" style="flex:1;height:7px;border-radius:2px;background:#1e293b;transition:background .35s;"></div>' +
+                  '<div class="tb" style="flex:1;height:7px;border-radius:2px;background:#1e293b;transition:background .35s;"></div>' +
+                '</div>' +
+                '<div class="cvly-s" id="s-content" style="height:' + contentH + 'px;background:#0a0f1a;padding:5px;display:flex;flex-direction:column;align-items:flex-start;">' +
+                  '<div class="cvly-l cl" style="height:3px;width:75%;background:#1e293b;"></div>' +
+                  '<div class="cvly-l cl" style="height:3px;width:90%;background:#1e293b;"></div>' +
+                  '<div class="cvly-l cl" style="height:3px;width:55%;background:#1e293b;"></div>' +
+                '</div>' +
+                '<div class="cvly-s" id="s-cta" style="height:' + ctaH + 'px;background:#0a0f1a;display:flex;align-items:center;justify-content:center;">' +
+                  '<div id="s-ctabtn" style="padding:3px 14px;border-radius:5px;background:rgba(79,209,197,.3);font-size:8px;font-weight:700;color:#4fd1c5;transition:all .3s;font-family:system-ui;">CTA</div>' +
+                '</div>' +
+              '</div>' +
             '</div>' +
-            '<div class="cvly-body">' +
-              '<div class="cvly-s" id="s-hero" style="height:' + heroH + 'px;background:#1e2535;padding:5px;display:flex;flex-direction:column;align-items:flex-start;">' +
-                '<div class="cvly-l hl" style="height:4px;width:80%;background:#334155;"></div>' +
-                '<div class="cvly-l hl" style="height:4px;width:60%;background:#334155;"></div>' +
-                '<div id="s-hcta" style="height:9px;width:52px;border-radius:4px;background:#1e3a5f;transition:background .35s;margin-top:3px;"></div>' +
-              '</div>' +
-              '<div class="cvly-s" id="s-trust" style="height:' + trustH + 'px;display:flex;gap:4px;padding:4px 5px;background:#0a0f1a;">' +
-                '<div class="tb" style="flex:1;height:7px;border-radius:2px;background:#1e293b;transition:background .35s;"></div>' +
-                '<div class="tb" style="flex:1;height:7px;border-radius:2px;background:#1e293b;transition:background .35s;"></div>' +
-                '<div class="tb" style="flex:1;height:7px;border-radius:2px;background:#1e293b;transition:background .35s;"></div>' +
-              '</div>' +
-              '<div class="cvly-s" id="s-content" style="height:' + contentH + 'px;background:#0a0f1a;padding:5px;display:flex;flex-direction:column;align-items:flex-start;">' +
-                '<div class="cvly-l cl" style="height:3px;width:75%;background:#1e293b;"></div>' +
-                '<div class="cvly-l cl" style="height:3px;width:90%;background:#1e293b;"></div>' +
-                '<div class="cvly-l cl" style="height:3px;width:55%;background:#1e293b;"></div>' +
-              '</div>' +
-              '<div class="cvly-s" id="s-cta" style="height:' + ctaH + 'px;background:#0a0f1a;display:flex;align-items:center;justify-content:center;">' +
-                '<div id="s-ctabtn" style="padding:3px 14px;border-radius:5px;background:rgba(79,209,197,.3);font-size:8px;font-weight:700;color:#4fd1c5;transition:all .3s;font-family:system-ui;">CTA</div>' +
-              '</div>' +
-            '</div>' +
-          '</div>' +
-        '</div></div>' +
+          '</div></div>' +
+        '</div>' +
       '</div>' +
 
-      // Panel OUTSIDE orbit area — no overlap possible
-      '<div id="cvly-panel"><span class="hint">Kategorie auswaehlen fuer Findings</span></div>';
+      // Panel outside scaler — always readable, never scaled
+      '<div id="cvly-panel"></div>';
+
+    // ── Responsive scaling ────────────────────────────────────────────────────
+    var scaler = document.getElementById("cvly-orbit-scaler");
+
+    function applyScale() {
+      var available = wrap.offsetWidth;
+      var scale = Math.min(1, available / W);
+      scaler.style.transform = "scale(" + scale + ")";
+      // Shrink the wrapper height to match scaled content, avoid whitespace
+      scaler.style.height = (H * scale) + "px";
+      scaler.style.marginBottom = (-H * (1 - scale)) + "px";
+    }
+
+    applyScale();
+    window.addEventListener("resize", applyScale);
 
     // ── SVG ───────────────────────────────────────────────────────────────────
     var svg = document.getElementById("cvly-svg");
@@ -143,8 +163,8 @@
     CATS.forEach(function (cat) {
       var rad = cat.angle * Math.PI / 180;
       var nx = cx + R * Math.cos(rad), ny = cy + R * Math.sin(rad);
-      var ln = svgEl("line", { x1:cx, y1:cy, x2:nx, y2:ny,
-        stroke:"rgba(79,209,197,0.15)", "stroke-width":"1.2", "stroke-dasharray":"5 7" });
+      var ln = svgEl("line", { x1:cx,y1:cy,x2:nx,y2:ny,
+        stroke:"rgba(79,209,197,0.15)","stroke-width":"1.2","stroke-dasharray":"5 7" });
       svg.appendChild(ln);
       lines.push({ el:ln, nx:nx, ny:ny });
     });
@@ -200,6 +220,7 @@
 
       if (idx !== null) {
         var cat = CATS[idx];
+        panel.classList.add("visible");
         panel.style.borderColor = cat.sevCol + "55";
         panel.innerHTML =
           '<div class="ph">' +
@@ -215,8 +236,8 @@
         hlLP(cat.label, cat.sevCol);
       } else {
         pDot.setAttribute("opacity", "0");
+        panel.classList.remove("visible");
         panel.style.borderColor = "rgba(79,209,197,0.2)";
-        panel.innerHTML = '<span class="hint">Kategorie auswaehlen fuer Findings</span>';
         frame.style.borderColor = "rgba(79,209,197,0.22)";
         frame.style.boxShadow = "0 0 28px rgba(79,209,197,0.18)";
         hlLP(null, null);
