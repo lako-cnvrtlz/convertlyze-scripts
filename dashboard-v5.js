@@ -63,11 +63,19 @@
 
   var pdfUrlCache = {};
 
-  // PDF-Zugriff basiert auf analysis_source der Analyse.
-  // Muss mit PDF_ACCESS_SOURCES in templateBuilder.js uebereinstimmen.
   var PDF_ACCESS_SOURCES = ['starter', 'pro', 'enterprise', 'pay-per-use', 'beta', 'agency'];
 
   function sleep(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+
+  // ── Cookie Helpers ─────────────────────────────────────────────────────────
+  function getCookie(name) {
+    var match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return match ? decodeURIComponent(match[2]) : null;
+  }
+
+  function deleteCookie(name) {
+    document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;SameSite=Lax';
+  }
 
   async function waitForDependencies() {
     for (var i = 0; i < 100; i++) {
@@ -98,18 +106,10 @@
     return false;
   }
 
-  // Prueft ob eine spezifische Analyse PDF-Zugriff hat.
-  // Basiert auf analysis_source der Analyse, NICHT auf dem aktuellen Plan des Users.
-  // Gekuendigte User behalten PDF-Zugriff fuer bereits bezahlte Analysen.
   function canAccessPdf(analysis) {
-    // Zugriff ueber analysis_source (primaer)
     var source = (analysis.analysis_source || '').toLowerCase();
     if (PDF_ACCESS_SOURCES.indexOf(source) !== -1) return true;
-
-    // Fallback: User hat aktuell aktiven bezahlten Plan
-    // (fuer Analysen ohne gesetzten analysis_source)
     if (globalHasPdfAccess) return true;
-
     return false;
   }
 
@@ -771,6 +771,34 @@
       globalHasPdfAccess   = checkPdfAccess(currentUser);
 
       console.log('User geladen:', currentUser.email, '| Plan:', globalLicenseType, '| PDF-Zugriff global:', globalHasPdfAccess);
+
+      // ── Team-Invite nach Login annehmen ──────────────────────────────────
+      var pendingInvite = getCookie('cvz_invite');
+      if (pendingInvite) {
+        console.log('[CVZ] Pending Invite gefunden:', pendingInvite);
+        try {
+          var inviteRes = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/accept-team-invite', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU'
+            },
+            body: JSON.stringify({ token: pendingInvite, memberstack_id: memberstackId })
+          });
+          var inviteData = await inviteRes.json();
+          if (inviteData.success) {
+            deleteCookie('cvz_invite');
+            console.log('[CVZ] Team-Einladung automatisch angenommen');
+            currentUser = await fetchUserFast(memberstackId) || currentUser;
+          } else {
+            console.warn('[CVZ] Invite fehlgeschlagen:', inviteData.error);
+            deleteCookie('cvz_invite');
+          }
+        } catch (inviteErr) {
+          console.error('[CVZ] Invite-Fetch Fehler:', inviteErr);
+        }
+      }
+      // ── Ende Team-Invite ─────────────────────────────────────────────────
 
       var didReset = await triggerCreditResetIfPaid(currentUser);
       if (didReset) {
