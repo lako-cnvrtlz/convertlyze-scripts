@@ -112,7 +112,21 @@
     return false;
   }
 
-  // ── 2. DOMContentLoaded ────────────────────────────────────────────────────
+  // ── 2. Login-Links anreichern (mit Retry für Memberstack-gerenderte Links) ─
+  function enrichLoginLinks() {
+    document.querySelectorAll('a[href*="/login"]').forEach(function(link) {
+      var params = [];
+      if (inviteToken) params.push('invite=' + inviteToken);
+      if (emailParam)  params.push('email=' + encodeURIComponent(emailParam));
+      if (plan)        params.push('plan=' + plan + '&billing=' + billing);
+      if (params.length) {
+        link.href = '/login?' + params.join('&');
+        console.log('[CVZ] Login-Link aktualisiert:', link.href);
+      }
+    });
+  }
+
+  // ── 3. DOMContentLoaded ────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', function() {
 
     if (!prefillEmail()) {
@@ -127,15 +141,11 @@
       console.log('[CVZ] Plan in Cookie gesichert | plan:', plan, '| billing:', billing);
     }
 
-    // Login-Links anreichern
-    document.querySelectorAll('a[href*="/login"]').forEach(function(link) {
-      var params = [];
-      if (inviteToken) params.push('invite=' + inviteToken);
-      if (emailParam)  params.push('email=' + encodeURIComponent(emailParam));
-      if (plan)        params.push('plan=' + plan + '&billing=' + billing);
-      if (params.length) link.href = '/login?' + params.join('&');
-      console.log('[CVZ] Login-Link aktualisiert:', link.href);
-    });
+    // Login-Links sofort + Retry für Memberstack-gerenderte Links
+    enrichLoginLinks();
+    setTimeout(enrichLoginLinks, 500);
+    setTimeout(enrichLoginLinks, 1000);
+    setTimeout(enrichLoginLinks, 2000);
 
     // Form Submit – E-Mail lesen und pending_checkout in Supabase speichern
     if (plan) {
@@ -151,7 +161,7 @@
     }
   });
 
-  // ── 3. Nach Signup: Checkout starten ──────────────────────────────────────
+  // ── 4. Nach Signup: Checkout starten ──────────────────────────────────────
   async function handleAfterSignup() {
     if (window._cvlyCheckoutStarted) return;
     window._cvlyCheckoutStarted = true;
