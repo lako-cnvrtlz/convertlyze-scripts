@@ -1,7 +1,9 @@
 // ==================== LOGIN SCRIPT ====================
-(function() {
+(function () {
   if (window._cvlyLoginInit) return;
   window._cvlyLoginInit = true;
+
+  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
 
   var urlParams   = new URLSearchParams(window.location.search);
   var inviteToken = urlParams.get('invite');
@@ -27,10 +29,56 @@
     console.log('[CVZ] Login: Invite-Token gesichert (Cookie):', inviteToken);
   }
 
-  // ── 2. DOMContentLoaded ────────────────────────────────────────────────────
-  document.addEventListener('DOMContentLoaded', function() {
-    var loginForm = document.querySelector('[data-ms-form="login"]');
-    if (!loginForm) return;
+  // ── Toast Helpers ──────────────────────────────────────────────────────────
+  function suppressMsToast() {
+    [0, 100, 300].forEach(function (delay) {
+      setTimeout(function () {
+        document.querySelectorAll(
+          '[class*="ms-toast"],[class*="memberstack-toast"],[id*="ms-toast"],.ms-notification'
+        ).forEach(function (el) {
+          el.style.cssText = 'display:none!important;visibility:hidden!important';
+        });
+      }, delay);
+    });
+  }
+
+  function showToast(type, message) {
+    suppressMsToast();
+    if (window.cvzShowToast) {
+      window.cvzShowToast(type, message);
+    } else {
+      console.warn('[CVZ] cvzShowToast nicht verfügbar:', type, message);
+    }
+  }
+
+  // ── Helper: Nicht-registriert-Nachricht ───────────────────────────────────
+  function showNotRegisteredMessage(email, formElement) {
+    var existing = document.querySelector('.memberstack-custom-message');
+    if (existing) existing.remove();
+    var div = document.createElement('div');
+    div.className = 'memberstack-custom-message';
+    div.style.cssText = 'margin-top:20px;padding:16px 20px;background:#1a2133;border:1px solid #2a3550;border-left:3px solid #f87171;border-radius:10px;text-align:center;font-family:inherit;';
+    var registerHref = '/register?email=' + encodeURIComponent(email);
+    if (inviteToken) registerHref += '&invite=' + inviteToken;
+    if (plan)        registerHref += '&plan=' + plan + '&billing=' + billing;
+    div.innerHTML =
+      '<p style="margin:0 0 12px;color:#e8edf5;font-size:14px;line-height:1.5">Diese E-Mail-Adresse ist noch nicht registriert.</p>' +
+      '<a href="' + registerHref + '" style="display:inline-block;padding:10px 24px;background:#4fd1c5;color:#0d1117;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;">Jetzt registrieren →</a>';
+    formElement.parentElement.appendChild(div);
+  }
+
+  // ── 2. Form binden ─────────────────────────────────────────────────────────
+  function bindLoginForm() {
+    var loginForm = document.querySelector(
+      '[data-ms-form="login-with-token"], [data-ms-form="login"], [data-ms-form="signup"]'
+    );
+    if (!loginForm) return false;
+    var submitBtn = loginForm.querySelector(
+      '[data-ms-passwordless-login], input[type="submit"], button[type="submit"]'
+    );
+    if (!submitBtn) return false;
+
+    console.log('[CVZ] Form + Button gefunden, binde Handler...');
 
     // E-Mail prefill
     if (emailParam) {
@@ -43,18 +91,14 @@
       }
     }
 
-    // Plan in Cookie sichern
+    // Plan sichern
     if (plan) {
       setPlanCookie(plan, billing);
-      try {
-        localStorage.setItem('selected_plan', plan);
-        localStorage.setItem('selected_billing', billing);
-      } catch(e) {}
       console.log('[CVZ] Login: Plan gesichert | plan:', plan, '| billing:', billing);
     }
 
-    // Register-Link anreichern
-    document.querySelectorAll('a[href*="/register"]').forEach(function(link) {
+    // Register-Links anreichern
+    document.querySelectorAll('a[href*="/register"]').forEach(function (link) {
       var params = [];
       if (inviteToken) params.push('invite=' + inviteToken);
       if (emailParam)  params.push('email=' + encodeURIComponent(emailParam));
@@ -62,30 +106,66 @@
       if (params.length) link.href = '/register?' + params.join('&');
     });
 
-    // Form Submit (Magic Link)
-    loginForm.addEventListener('submit', async function(e) {
+    // Submit-Handler
+    submitBtn.addEventListener('click', async function (e) {
       e.preventDefault();
-      var emailInput = loginForm.querySelector('input[type="email"]');
-      var emailValue = emailInput.value;
+      e.stopImmediatePropagation();
 
-      var oldMessage = document.querySelector('.memberstack-custom-message');
-      if (oldMessage) oldMessage.remove();
+      var emailInput = loginForm.querySelector('input[type="email"]');
+      var emailValue = emailInput ? emailInput.value.trim() : '';
+
+      var oldMsg = document.querySelector('.memberstack-custom-message');
+      if (oldMsg) oldMsg.remove();
+
+      if (!emailValue) {
+        showToast('error', 'Bitte gib deine E-Mail-Adresse ein.');
+        return;
+      }
 
       try {
-        await $memberstackDOM.sendMagicLink({ email: emailValue });
-        showMagicLinkSentMessage(loginForm);
+        await window.$memberstackDom.sendMemberLoginPasswordlessEmail({ email: emailValue });
+        showToast('success', 'Login-Code gesendet. Bitte prüfe deinen Posteingang.');
       } catch (error) {
-        if (error.code === 'MEMBER_NOT_FOUND' || error.message.includes('not found')) {
+        console.log('[CVZ] Error code:',    error.code);
+        console.log('[CVZ] Error message:', error.message);
+        suppressMsToast();
+        var msg  = (error.message || '').toLowerCase();
+        var code = error.code || '';
+        if (code === 'MEMBER_NOT_FOUND' || msg.includes('not found') || msg.includes('no member')) {
+          showToast('error', 'Kein Account mit dieser E-Mail gefunden.');
           showNotRegisteredMessage(emailValue, loginForm);
+        } else if (code === 'INVALID_EMAIL' || msg.includes('invalid email')) {
+          showToast('error', 'Ungültige E-Mail-Adresse. Bitte prüfe deine Eingabe.');
+        } else if (code === 'TOO_MANY_REQUESTS' || msg.includes('too many')) {
+          showToast('warning', 'Zu viele Anfragen. Bitte warte kurz und versuche es erneut.');
+        } else if (code === 'INVALID_TOKEN' || msg.includes('invalid token')) {
+          showToast('error', 'Ungültiger Token. Bitte fordere einen neuen Login-Link an.');
         } else {
-          showErrorMessage(loginForm, error.message);
+          showToast('error', 'Ein Fehler ist aufgetreten. Bitte versuche es erneut.');
         }
       }
     });
-  });
 
-  // ── 3. Nach Login: Invite annehmen ────────────────────────────────────────
-  window.addEventListener('memberstack:auth:login', async function() {
+    return true;
+  }
+
+  // ── 3. Retry-Logik für Memberstack-gerendertes Form ────────────────────────
+  var bindAttempts = 0;
+  function tryBindLoginForm() {
+    bindAttempts++;
+    if (bindLoginForm()) return;
+    if (bindAttempts < 20) setTimeout(tryBindLoginForm, 300);
+    else console.warn('[CVZ] Login: Form nach 6s nicht gefunden');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tryBindLoginForm);
+  } else {
+    tryBindLoginForm();
+  }
+
+  // ── 4. Nach Login: Invite annehmen ────────────────────────────────────────
+  window.addEventListener('memberstack:auth:login', async function () {
     var match = document.cookie.match(/(^| )cvz_invite=([^;]+)/);
     var pendingInvite = match ? decodeURIComponent(match[2]) : null;
     if (!pendingInvite) return;
@@ -101,7 +181,7 @@
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU'
+          'apikey': SUPABASE_ANON_KEY
         },
         body: JSON.stringify({ token: pendingInvite, memberstack_id: memberstackId })
       });
@@ -110,42 +190,18 @@
       if (data.success) {
         document.cookie = 'cvz_invite=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;SameSite=Lax';
         console.log('[CVZ] Login: Team-Einladung angenommen');
+        window.location.href = '/member/dashboard';
       } else {
         console.warn('[CVZ] Login: Invite fehlgeschlagen:', data.error);
         document.cookie = 'cvz_invite=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;SameSite=Lax';
+        window.location.href = '/member/dashboard';
       }
-    } catch(err) {
+    } catch (err) {
       console.error('[CVZ] Login: Invite-Fehler:', err);
+      window.location.href = '/member/dashboard';
     }
   });
 
-  // ── Helper-Funktionen ──────────────────────────────────────────────────────
-  function showNotRegisteredMessage(email, formElement) {
-    var div = document.createElement('div');
-    div.className = 'memberstack-custom-message';
-    div.style.cssText = 'margin-top:20px;padding:20px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px;text-align:center;';
-    var registerHref = '/register?email=' + encodeURIComponent(email);
-    if (inviteToken) registerHref += '&invite=' + inviteToken;
-    div.innerHTML = '<p style="margin:0 0 15px 0;color:#495057;font-size:16px;">Diese E-Mail-Adresse ist noch nicht registriert.</p>'
-      + '<p style="margin:0 0 20px 0;color:#6c757d;font-size:14px;">Möchten Sie ein Konto erstellen?</p>'
-      + '<a href="' + registerHref + '" style="display:inline-block;padding:12px 30px;background:linear-gradient(135deg,#0066FF 0%,#00CC88 100%);color:white;text-decoration:none;border-radius:6px;font-weight:500;">Jetzt registrieren</a>';
-    formElement.parentElement.appendChild(div);
-  }
-
-  function showMagicLinkSentMessage(formElement) {
-    var div = document.createElement('div');
-    div.className = 'memberstack-custom-message';
-    div.style.cssText = 'margin-top:20px;padding:20px;background:#d4edda;border:1px solid #c3e6cb;border-radius:8px;text-align:center;';
-    div.innerHTML = '<p style="margin:0;color:#155724;font-size:16px;">✓ Magic Link wurde versendet! Bitte prüfen Sie Ihr E-Mail-Postfach.</p>';
-    formElement.parentElement.appendChild(div);
-  }
-
-  function showErrorMessage(formElement, errorMsg) {
-    var div = document.createElement('div');
-    div.className = 'memberstack-custom-message';
-    div.style.cssText = 'margin-top:20px;padding:20px;background:#f8d7da;border:1px solid #f5c6cb;border-radius:8px;text-align:center;';
-    div.innerHTML = '<p style="margin:0;color:#721c24;font-size:16px;">Ein Fehler ist aufgetreten. Bitte versuchen Sie es erneut.</p>';
-    formElement.parentElement.appendChild(div);
-  }
+  console.log('[CVZ] Login-Script geladen');
 
 })();
