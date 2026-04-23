@@ -12,10 +12,11 @@
     'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      }
   };
 
-  var urlParams  = new URLSearchParams(window.location.search);
-  var emailParam = urlParams.get('email') ? decodeURIComponent(urlParams.get('email')) : '';
-  var plan       = urlParams.get('plan');
-  var billing    = urlParams.get('billing') || 'monthly';
+  var urlParams   = new URLSearchParams(window.location.search);
+  var emailParam  = urlParams.get('email') ? decodeURIComponent(urlParams.get('email')) : '';
+  var plan        = urlParams.get('plan');
+  var billing     = urlParams.get('billing') || 'monthly';
+  var inviteToken = urlParams.get('invite') || '';
 
   // ── Cookie Helpers ─────────────────────────────────────────────────────────
   function setPlanCookie(p, b) {
@@ -129,8 +130,9 @@
     // Login-Links anreichern
     document.querySelectorAll('a[href*="/login"]').forEach(function(link) {
       var params = [];
-      if (emailParam) params.push('email=' + encodeURIComponent(emailParam));
-      if (plan)       params.push('plan=' + plan + '&billing=' + billing);
+      if (inviteToken) params.push('invite=' + inviteToken);
+      if (emailParam)  params.push('email=' + encodeURIComponent(emailParam));
+      if (plan)        params.push('plan=' + plan + '&billing=' + billing);
       if (params.length) link.href = '/login?' + params.join('&');
       console.log('[CVZ] Login-Link aktualisiert:', link.href);
     });
