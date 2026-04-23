@@ -106,43 +106,41 @@
       if (params.length) link.href = '/register?' + params.join('&');
     });
 
-    // Submit-Handler
-    submitBtn.addEventListener('click', async function (e) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-
+    // Submit-Handler – nur Validierung, Memberstack's eigener Flow bleibt intakt
+    submitBtn.addEventListener('click', function (e) {
       var emailInput = loginForm.querySelector('input[type="email"]');
       var emailValue = emailInput ? emailInput.value.trim() : '';
 
       var oldMsg = document.querySelector('.memberstack-custom-message');
       if (oldMsg) oldMsg.remove();
 
+      // Nur bei leerer E-Mail abbrechen
       if (!emailValue) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
         showToast('error', 'Bitte gib deine E-Mail-Adresse ein.');
         return;
       }
 
-      try {
-        await window.$memberstackDom.sendMemberLoginPasswordlessEmail({ email: emailValue });
-        showToast('success', 'Login-Code gesendet. Bitte prüfe deinen Posteingang.');
-      } catch (error) {
-        console.log('[CVZ] Error code:',    error.code);
-        console.log('[CVZ] Error message:', error.message);
-        suppressMsToast();
-        var msg  = (error.message || '').toLowerCase();
-        var code = error.code || '';
-        if (code === 'MEMBER_NOT_FOUND' || msg.includes('not found') || msg.includes('no member')) {
-          showToast('error', 'Kein Account mit dieser E-Mail gefunden.');
-          showNotRegisteredMessage(emailValue, loginForm);
-        } else if (code === 'INVALID_EMAIL' || msg.includes('invalid email')) {
-          showToast('error', 'Ungültige E-Mail-Adresse. Bitte prüfe deine Eingabe.');
-        } else if (code === 'TOO_MANY_REQUESTS' || msg.includes('too many')) {
-          showToast('warning', 'Zu viele Anfragen. Bitte warte kurz und versuche es erneut.');
-        } else if (code === 'INVALID_TOKEN' || msg.includes('invalid token')) {
-          showToast('error', 'Ungültiger Token. Bitte fordere einen neuen Login-Link an.');
-        } else {
-          showToast('error', 'Ein Fehler ist aufgetreten. Bitte versuche es erneut.');
-        }
+      // Memberstack's eigenen Handler laufen lassen (öffnet Code-Eingabefeld)
+    });
+
+    // Memberstack Fehler abfangen
+    window.addEventListener('memberstack:error', function (evt) {
+      var code = evt?.detail?.code || '';
+      var msg  = (evt?.detail?.message || '').toLowerCase();
+      suppressMsToast();
+      if (code === 'MEMBER_NOT_FOUND' || msg.includes('not found') || msg.includes('no member')) {
+        showToast('error', 'Kein Account mit dieser E-Mail gefunden.');
+        showNotRegisteredMessage(emailParam, loginForm);
+      } else if (code === 'INVALID_EMAIL' || msg.includes('invalid email')) {
+        showToast('error', 'Ungültige E-Mail-Adresse. Bitte prüfe deine Eingabe.');
+      } else if (code === 'TOO_MANY_REQUESTS' || msg.includes('too many')) {
+        showToast('warning', 'Zu viele Anfragen. Bitte warte kurz und versuche es erneut.');
+      } else if (code === 'INVALID_TOKEN' || msg.includes('invalid token')) {
+        showToast('error', 'Ungültiger Token. Bitte fordere einen neuen Login-Link an.');
+      } else {
+        showToast('error', 'Ein Fehler ist aufgetreten. Bitte versuche es erneut.');
       }
     });
 
