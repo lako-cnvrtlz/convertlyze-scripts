@@ -89,6 +89,7 @@
             '<div class="cvly-lp-dot" style="background:#4fd1c5"></div>' +
           '</div>' +
           '<div class="cvly-lp-body">' +
+      '<div style="padding-bottom:6px;">' +
             '<div class="cvly-lp-sec" id="' + prefix + 'hero" style="height:' + heroH + 'px;background:#1e2535;padding:5px;display:flex;flex-direction:column;align-items:flex-start;">' +
               '<div class="cvly-lp-line ' + prefix + 'hl" style="height:4px;width:80%;background:#334155;"></div>' +
               '<div class="cvly-lp-line ' + prefix + 'hl" style="height:4px;width:60%;background:#334155;"></div>' +
