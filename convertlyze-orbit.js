@@ -316,15 +316,15 @@
     s.textContent=
       "#cvly-orbit-wrap{width:100%;height:auto!important;min-height:0!important;padding:0!important;margin:0 auto!important;font-family:system-ui,-apple-system,sans-serif;user-select:none;}" +
       ".cvly-stepper{background:#0d1117;border-radius:20px;border:1px solid rgba(79,209,197,0.15);overflow:hidden;}" +
-      ".cvly-stepper-top{padding:22px;display:flex;gap:18px;align-items:flex-start;min-height:185px;}" +
+      ".cvly-stepper-top{padding:28px 24px;display:flex;gap:20px;align-items:center;height:230px;}" +
       ".cvly-stepper-info{flex:1;}" +
-      ".cvly-step-counter{font-size:10px;color:#4a5568;letter-spacing:.5px;margin-bottom:10px;}" +
-      ".cvly-step-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;}" +
+      ".cvly-step-counter{font-size:10px;color:#4a5568;letter-spacing:.5px;margin-bottom:12px;}" +
+      ".cvly-step-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;}" +
       ".cvly-icon-wrap{width:38px;height:38px;border-radius:10px;background:#161b27;border:1.5px solid var(--sc);box-shadow:0 0 12px color-mix(in srgb,var(--sc) 30%,transparent);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .3s,box-shadow .3s;color:var(--sc);}" +
       ".cvly-step-label{font-size:15px;font-weight:700;color:#e2e8f0;}" +
       ".cvly-step-finding{font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:6px;line-height:1.4;}" +
-      ".cvly-step-tip{font-size:11px;color:#94a3b8;line-height:1.6;}" +
-      ".cvly-stepper-controls{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-top:1px solid rgba(255,255,255,0.05);}" +
+      ".cvly-step-tip{font-size:11px;color:#94a3b8;line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;}" +
+      ".cvly-stepper-controls{display:flex;align-items:center;justify-content:space-between;padding:18px 24px;border-top:1px solid rgba(255,255,255,0.05);}" +
       ".cvly-ctrl{width:40px;height:40px;border-radius:50%;background:#161b27;border:1px solid rgba(79,209,197,0.2);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s;color:#4fd1c5;user-select:none;}" +
       ".cvly-ctrl:hover{background:rgba(79,209,197,0.1);}" +
       ".cvly-pips{display:flex;gap:6px;align-items:center;}" +
@@ -357,9 +357,9 @@
       document.getElementById("cvly-step-info").innerHTML=
         '<div class="cvly-step-counter">'+(idx+1)+' von '+CATS.length+'</div>'+
         '<div class="cvly-step-head" style="--sc:'+cat.sevCol+'"><div class="cvly-icon-wrap">'+ICONS[cat.label]+'</div><span class="cvly-step-label">'+cat.label+'</span></div>'+
-        '<span class="cvly-badge" style="background:'+cat.sevCol+'22;border:1px solid '+cat.sevCol+'55;color:'+cat.sevCol+';margin-bottom:8px;display:inline-block;">'+cat.sev+'</span>'+
+        '<span class="cvly-badge" style="background:'+cat.sevCol+'22;border:1px solid '+cat.sevCol+'55;color:'+cat.sevCol+';margin-bottom:10px;display:inline-block;">'+cat.sev+'</span>'+
         '<div class="cvly-step-finding">'+cat.finding+'</div>'+
-        '<div class="cvly-step-tip">&#8594; '+cat.tip+'</div>';
+        '<div class="cvly-step-tip" style="margin-top:6px;">&#8594; '+cat.tip+'</div>';
       document.querySelectorAll(".cvly-pip").forEach(function(p,i){
         p.classList.toggle("active",i===idx);
         p.style.width=i===idx?"20px":"8px";
