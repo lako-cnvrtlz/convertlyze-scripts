@@ -357,13 +357,11 @@
       var cat=CATS[idx];
       document.getElementById("cvly-step-info").innerHTML=
         '<div style="font-size:10px;color:#4a5568;letter-spacing:.5px;margin-bottom:12px;">'+(idx+1)+' von '+CATS.length+'</div>'+
-        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">'+
-          '<div style="width:38px;height:38px;border-radius:10px;background:#161b27;border:1.5px solid '+cat.sevCol+';display:flex;align-items:center;justify-content:center;flex-shrink:0;color:'+cat.sevCol+';">'+ICONS[cat.label]+'</div>'+
-          '<span style="font-size:15px;font-weight:700;color:#e2e8f0;">'+cat.label+'</span>'+
-        '</div>'+
+        '<div style="width:38px;height:38px;border-radius:10px;background:#161b27;border:1.5px solid '+cat.sevCol+';display:flex;align-items:center;justify-content:center;margin-bottom:8px;color:'+cat.sevCol+';">'+ICONS[cat.label]+'</div>'+
+        '<div style="font-size:15px;font-weight:700;color:#e2e8f0;margin-bottom:8px;width:100%;">'+cat.label+'</div>'+
         '<div style="display:inline-block;padding:2px 7px;border-radius:5px;font-size:9px;font-weight:800;letter-spacing:.8px;background:'+cat.sevCol+'22;border:1px solid '+cat.sevCol+'55;color:'+cat.sevCol+';margin-bottom:10px;">'+cat.sev+'</div>'+
-        '<div style="font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:6px;line-height:1.4;">'+cat.finding+'</div>'+
-        '<div style="font-size:11px;color:#94a3b8;line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;">&#8594; '+cat.tip+'</div>';
+        '<div style="font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:6px;line-height:1.4;width:100%;">'+cat.finding+'</div>'+
+        '<div style="font-size:11px;color:#94a3b8;line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;width:100%;">&#8594; '+cat.tip+'</div>';
       document.querySelectorAll(".cvly-pip").forEach(function(p,i){
         p.classList.toggle("active",i===idx);
         p.style.width=i===idx?"20px":"8px";
