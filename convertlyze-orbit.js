@@ -336,7 +336,7 @@
     wrap.innerHTML=
       '<div class="cvly-stepper" id="cvly-stepper">' +
         '<div class="cvly-stepper-top">' +
-          mockupHTML("m-",100,136) +
+          mockupHTML("m-",100,152) +
           '<div class="cvly-stepper-info" id="cvly-step-info"></div>' +
         '</div>' +
         '<div class="cvly-stepper-controls">' +
