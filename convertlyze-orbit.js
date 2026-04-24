@@ -317,7 +317,7 @@
     s.textContent=
       "#cvly-orbit-wrap{width:100%;height:auto!important;min-height:0!important;padding:0!important;margin:0 auto!important;font-family:system-ui,-apple-system,sans-serif;user-select:none;}" +
       ".cvly-stepper{background:#0d1117;border-radius:20px;border:1px solid rgba(79,209,197,0.15);overflow:hidden;}" +
-      ".cvly-stepper-top{padding:28px 24px;display:flex;gap:20px;align-items:center;height:250px;}" +
+      ".cvly-stepper-top{padding:28px 24px;display:flex;gap:20px;align-items:center;height:280px;}" +
       ".cvly-stepper-info{flex:1;min-width:0;width:100%;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;}" +
       ".cvly-step-counter{font-size:10px;color:#4a5568;letter-spacing:.5px;margin-bottom:12px;}" +
       ".cvly-step-head{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:10px;}" +
