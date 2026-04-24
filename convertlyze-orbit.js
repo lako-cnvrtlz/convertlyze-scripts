@@ -184,9 +184,9 @@
       ".cvly-node-label{font-size:11px;font-weight:700;color:#64748b;letter-spacing:.3px;transition:color .3s;white-space:nowrap;}" +
       ".cvly-node.active .cvly-node-label{color:var(--sc);}" +
       ".cvly-orbit-cc{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;}" +
-      "#cvly-panel{margin:0;width:100%;height:96px;overflow:hidden;padding:16px 20px;border-radius:14px;background:#1e2535;border:1px solid rgba(79,209,197,0.2);box-shadow:0 8px 32px rgba(0,0,0,0.4);transition:border-color .3s,opacity .3s;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;visibility:hidden;opacity:0;}" +
+      "#cvly-panel{margin:0;width:100%;height:116px;overflow:hidden;padding:18px 20px;border-radius:14px;background:#1e2535;border:1px solid rgba(79,209,197,0.2);box-shadow:0 8px 32px rgba(0,0,0,0.4);transition:border-color .3s,opacity .3s;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;visibility:hidden;opacity:0;}" +
       "#cvly-panel.visible{visibility:visible;opacity:1;}" +
-      "#cvly-panel-wrap{margin:20px auto 0;width:100%;max-width:420px;height:96px;box-sizing:border-box;}" +
+      "#cvly-panel-wrap{margin:20px auto 0;width:100%;max-width:420px;height:116px;box-sizing:border-box;}" +
       "#cvly-panel .ph{display:flex;align-items:center;gap:8px;margin-bottom:8px;}" +
       "#cvly-panel .pi{display:flex;align-items:center;}" +
       "#cvly-panel .pn{font-size:13px;font-weight:700;color:#e2e8f0;}" +
@@ -223,7 +223,7 @@
     svg.appendChild(svgEl("circle",{cx:cx,cy:cy,r:R+18,fill:"none",stroke:"#4fd1c5","stroke-width":"0.5",opacity:"0.05"}));
     svg.appendChild(svgEl("circle",{cx:cx,cy:cy,r:R,fill:"none",stroke:"rgba(79,209,197,0.15)","stroke-width":"1.4","stroke-dasharray":"5 14"}));
 
-    var lines=[], pDot=svgEl("circle",{r:"5",opacity:"0"});
+    var lines=[], pDot=svgEl("circle",{r:"0",opacity:"0"});
     svg.appendChild(pDot);
     CATS.forEach(function(cat) {
       var rad=cat.angle*Math.PI/180, nx=cx+R*Math.cos(rad), ny=cy+R*Math.sin(rad);
