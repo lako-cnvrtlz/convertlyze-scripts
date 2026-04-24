@@ -89,7 +89,6 @@
             '<div class="cvly-lp-dot" style="background:#4fd1c5"></div>' +
           '</div>' +
           '<div class="cvly-lp-body">' +
-      '<div style="padding-bottom:6px;">' +
             '<div class="cvly-lp-sec" id="' + prefix + 'hero" style="height:' + heroH + 'px;background:#1e2535;padding:5px;display:flex;flex-direction:column;align-items:flex-start;">' +
               '<div class="cvly-lp-line ' + prefix + 'hl" style="height:4px;width:80%;background:#334155;"></div>' +
               '<div class="cvly-lp-line ' + prefix + 'hl" style="height:4px;width:60%;background:#334155;"></div>' +
@@ -105,7 +104,7 @@
               '<div class="cvly-lp-line ' + prefix + 'cl" style="height:3px;width:90%;background:#1e293b;"></div>' +
               '<div class="cvly-lp-line ' + prefix + 'cl" style="height:3px;width:55%;background:#1e293b;"></div>' +
             '</div>' +
-            '<div class="cvly-lp-sec" id="' + prefix + 'cta" style="height:' + ctaH + 'px;background:#0a0f1a;display:flex;align-items:center;justify-content:center;">' +
+            '<div class="cvly-lp-sec" id="' + prefix + 'cta" style="height:' + ctaH + 'px;background:#0a0f1a;display:flex;align-items:center;justify-content:center;padding-bottom:4px;">' +
               '<div id="' + prefix + 'ctabtn" style="padding:3px 14px;border-radius:5px;background:rgba(79,209,197,.3);font-size:8px;font-weight:700;color:#4fd1c5;transition:all .3s;font-family:system-ui;">CTA</div>' +
             '</div>' +
           '</div>' +
