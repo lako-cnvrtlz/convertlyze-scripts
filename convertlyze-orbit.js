@@ -1,6 +1,5 @@
-// convertlyze-orbit.js — v3.1
-// Desktop: Orbit | Mobile + iPad: Stepper
-// Wechselt automatisch bei Rotation/Resize
+// convertlyze-orbit.js — v3.2
+// Desktop: Orbit (4 Nodes) | Mobile + iPad: Stepper
 // GitHub: lako-cnvrtlz/convertlyze-scripts
 (function () {
 
@@ -10,12 +9,6 @@
       '<svg width="22" height="22" viewBox="0 0 18 18" fill="none">' +
       '<path d="M10 2L4 10H9L8 16L14 8H9L10 2Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>' +
       '</svg>',
-    Conversion:
-      '<svg width="22" height="22" viewBox="0 0 18 18" fill="none">' +
-      '<circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.6"/>' +
-      '<circle cx="9" cy="9" r="3.5" stroke="currentColor" stroke-width="1.6"/>' +
-      '<circle cx="9" cy="9" r="1" fill="currentColor"/>' +
-      '</svg>',
     Zielgruppe:
       '<svg width="22" height="22" viewBox="0 0 18 18" fill="none">' +
       '<circle cx="7" cy="6" r="2.5" stroke="currentColor" stroke-width="1.6"/>' +
@@ -23,39 +16,63 @@
       '<circle cx="13" cy="6" r="2" stroke="currentColor" stroke-width="1.4"/>' +
       '<path d="M13 11c1.8.3 3 1.8 3 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>' +
       '</svg>',
+    Conversion:
+      '<svg width="22" height="22" viewBox="0 0 18 18" fill="none">' +
+      '<circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.6"/>' +
+      '<circle cx="9" cy="9" r="3.5" stroke="currentColor" stroke-width="1.6"/>' +
+      '<circle cx="9" cy="9" r="1" fill="currentColor"/>' +
+      '</svg>',
     Trust:
       '<svg width="22" height="22" viewBox="0 0 18 18" fill="none">' +
       '<path d="M9 2L3 5v5c0 3.5 2.5 6 6 7 3.5-1 6-3.5 6-7V5L9 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' +
       '<path d="M6.5 9l2 2 3-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>' +
       '</svg>',
-    Struktur:
-      '<svg width="22" height="22" viewBox="0 0 18 18" fill="none">' +
-      '<line x1="3" y1="5" x2="15" y2="5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
-      '<line x1="3" y1="9" x2="12" y2="9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
-      '<line x1="3" y1="13" x2="9" y2="13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
-      '</svg>',
-    Wettbewerb:
-      '<svg width="22" height="22" viewBox="0 0 18 18" fill="none">' +
-      '<circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.6"/>' +
-      '<path d="M12 12L16 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
-      '</svg>',
   };
 
-  // ── Category data ───────────────────────────────────────────────────────────
+  // ── 4 Categories ─────────────────────────────────────────────────────────────
+  // Angles: 4 nodes evenly at -90, 0, 90, 180 (top, right, bottom, left)
   var CATS = [
-    { label:"Hero",       angle:-90,  sev:"CRITICAL", sevCol:"#ef4444", finding:"Features statt Outcomes",    tip:"Hero auf Ergebnis umschreiben, nicht auf das Tool.",        sec:"hero" },
-    { label:"Conversion", angle:-30,  sev:"HIGH",     sevCol:"#f59e0b", finding:"CTA unklar positioniert",     tip:"CTA direkt nach dem staerksten Trust-Signal.",              sec:"cta" },
-    { label:"Zielgruppe", angle:30,   sev:"HIGH",     sevCol:"#f59e0b", finding:"Keine Zielgruppe im Hero",    tip:"Zielgruppe explizit im Hero nennen.",                       sec:"hero" },
-    { label:"Trust",      angle:90,   sev:"MEDIUM",   sevCol:"#4fd1c5", finding:"Testimonials zu weit unten", tip:"Mindestens ein Testimonial above the fold.",                 sec:"trust" },
-    { label:"Struktur",   angle:150,  sev:"HIGH",     sevCol:"#f59e0b", finding:"Kein klarer AIDA-Flow",       tip:"Problem - Loesung - Proof - CTA konsequent aufbauen.",      sec:"content" },
-    { label:"Wettbewerb", angle:210,  sev:"MEDIUM",   sevCol:"#4fd1c5", finding:"USP nicht differenziert",    tip:"Konkret benennen was du besser machst als Wettbewerber.",   sec:"content" },
+    {
+      label:   "Hero",
+      angle:   -90,
+      sev:     "CRITICAL",
+      sevCol:  "#ef4444",
+      finding: "Kein Outcome sichtbar",
+      tip:     "Besucher sehen Features — nicht was sich fuer sie konkret aendert.",
+      sec:     "hero",
+    },
+    {
+      label:   "Zielgruppe",
+      angle:   0,
+      sev:     "HIGH",
+      sevCol:  "#f59e0b",
+      finding: "Nur Anwender angesprochen",
+      tip:     "CEO, IT-Leiter und DSGVO-Verantwortliche finden keine Antworten auf ihre Fragen.",
+      sec:     "hero",
+    },
+    {
+      label:   "Conversion",
+      angle:   90,
+      sev:     "HIGH",
+      sevCol:  "#f59e0b",
+      finding: "Kein klarer naechster Schritt",
+      tip:     "Besucher wissen nicht wann und warum sie jetzt handeln sollen.",
+      sec:     "cta",
+    },
+    {
+      label:   "Trust",
+      angle:   180,
+      sev:     "MEDIUM",
+      sevCol:  "#4fd1c5",
+      finding: "Proof ohne Relevanz",
+      tip:     "Logos und Zahlen ohne Bezug zum konkreten Problem des Besuchers.",
+      sec:     "trust",
+    },
   ];
 
-  // Breakpoint: unter 1024px = Stepper (Phone + iPad beides orientations)
-  var MOBILE_BP = 1024;
-
-  var currentMode = null; // "orbit" | "stepper"
-  var resizeTimer = null;
+  var MOBILE_BP    = 1024;
+  var currentMode  = null;
+  var resizeTimer  = null;
 
   // ── Shared: LP mockup HTML ──────────────────────────────────────────────────
   function mockupHTML(prefix, w, h) {
@@ -127,7 +144,7 @@
     }
   }
 
-  // ── Shared base CSS (injected once) ────────────────────────────────────────
+  // ── Base CSS (once) ─────────────────────────────────────────────────────────
   var baseCSSInjected = false;
   function injectBaseCSS() {
     if (baseCSSInjected) return;
@@ -146,28 +163,28 @@
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  //  DESKTOP — Orbit
+  //  DESKTOP — Orbit (4 nodes, more breathing room)
   // ════════════════════════════════════════════════════════════════════════════
   function initOrbit(wrap) {
-    var W=680, H=580, R=218, NW=92, NH=78, MKW=130, MKH=178;
+    var W=640, H=560, R=200, NW=96, NH=82, MKW=130, MKH=178;
     var cx=W/2, cy=H/2;
     var active=null, pulseIdx=0, autoTimer=null, pulseInterval=null;
 
     var s = document.createElement("style");
     s.id = "cvly-orbit-style";
     s.textContent =
-      "#cvly-orbit-wrap{width:100%;max-width:"+W+"px;margin:0 auto;font-family:system-ui,-apple-system,sans-serif;user-select:none;}" +
+      "#cvly-orbit-wrap{width:100%;height:auto!important;min-height:0!important;padding:0!important;max-width:"+W+"px;margin:0 auto!important;font-family:system-ui,-apple-system,sans-serif;user-select:none;}" +
       "#cvly-orbit-scaler{width:"+W+"px;transform-origin:top center;}" +
       "#cvly-orbit-area{position:relative;width:100%;}" +
       "#cvly-orbit-area svg{display:block;width:100%;height:auto;}" +
-      ".cvly-node{position:absolute;border-radius:16px;background:#161b27;border:1.5px solid rgba(79,209,197,0.22);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:all 0.3s ease;box-sizing:border-box;padding:10px 6px;}" +
+      ".cvly-node{position:absolute;border-radius:16px;background:#161b27;border:1.5px solid rgba(79,209,197,0.22);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:all 0.3s ease;box-sizing:border-box;padding:12px 8px;}" +
       ".cvly-node.active{border-color:var(--sc);background:color-mix(in srgb,var(--sc) 14%,#161b27);box-shadow:0 0 28px color-mix(in srgb,var(--sc) 45%,transparent);}" +
       ".cvly-node-icon{display:flex;align-items:center;justify-content:center;color:#64748b;transition:color .3s;}" +
       ".cvly-node.active .cvly-node-icon{color:var(--sc);}" +
       ".cvly-node-label{font-size:11px;font-weight:700;color:#64748b;letter-spacing:.3px;transition:color .3s;white-space:nowrap;}" +
       ".cvly-node.active .cvly-node-label{color:var(--sc);}" +
       ".cvly-orbit-cc{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;}" +
-      "#cvly-panel{margin:16px auto 0;width:100%;max-width:340px;height:90px;padding:14px 16px;border-radius:14px;background:#1e2535;border:1px solid rgba(79,209,197,0.2);box-shadow:0 8px 32px rgba(0,0,0,0.4);transition:border-color .3s,opacity .3s;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;visibility:hidden;opacity:0;}" +
+      "#cvly-panel{margin:16px auto 0;width:100%;max-width:380px;height:90px;padding:14px 18px;border-radius:14px;background:#1e2535;border:1px solid rgba(79,209,197,0.2);box-shadow:0 8px 32px rgba(0,0,0,0.4);transition:border-color .3s,opacity .3s;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;visibility:hidden;opacity:0;}" +
       "#cvly-panel.visible{visibility:visible;opacity:1;}" +
       "#cvly-panel .ph{display:flex;align-items:center;gap:7px;margin-bottom:7px;}" +
       "#cvly-panel .pi{display:flex;align-items:center;}" +
@@ -203,7 +220,7 @@
       return el;
     }
     svg.appendChild(svgEl("circle",{cx:cx,cy:cy,r:R+18,fill:"none",stroke:"#4fd1c5","stroke-width":"0.5",opacity:"0.05"}));
-    svg.appendChild(svgEl("circle",{cx:cx,cy:cy,r:R,fill:"none",stroke:"rgba(79,209,197,0.15)","stroke-width":"1.4","stroke-dasharray":"5 12"}));
+    svg.appendChild(svgEl("circle",{cx:cx,cy:cy,r:R,fill:"none",stroke:"rgba(79,209,197,0.15)","stroke-width":"1.4","stroke-dasharray":"5 14"}));
 
     var lines=[], pDot=svgEl("circle",{r:"5",opacity:"0"});
     svg.appendChild(pDot);
@@ -252,7 +269,14 @@
         var cat=CATS[idx];
         panel.classList.add("visible");
         panel.style.borderColor=cat.sevCol+"55";
-        panel.innerHTML='<div class="ph"><span class="pi" style="color:'+cat.sevCol+'">'+ICONS[cat.label]+'</span><span class="pn">'+cat.label+'</span><span class="cvly-badge" style="background:'+cat.sevCol+'22;border:1px solid '+cat.sevCol+'55;color:'+cat.sevCol+'">'+cat.sev+'</span></div><div class="pf">'+cat.finding+'</div><div class="pt">&#8594; '+cat.tip+'</div>';
+        panel.innerHTML=
+          '<div class="ph">' +
+            '<span class="pi" style="color:'+cat.sevCol+'">'+ICONS[cat.label]+'</span>' +
+            '<span class="pn">'+cat.label+'</span>' +
+            '<span class="cvly-badge" style="background:'+cat.sevCol+'22;border:1px solid '+cat.sevCol+'55;color:'+cat.sevCol+'">'+cat.sev+'</span>' +
+          '</div>' +
+          '<div class="pf">'+cat.finding+'</div>' +
+          '<div class="pt">&#8594; '+cat.tip+'</div>';
         hlLP(wrap,"d-",cat.label,cat.sevCol);
       } else {
         pDot.setAttribute("opacity","0");
@@ -262,7 +286,7 @@
       }
     }
 
-    function startAuto() { autoTimer=setInterval(function(){pulseIdx=(pulseIdx+1)%CATS.length;setActive(pulseIdx);},2200); }
+    function startAuto() { autoTimer=setInterval(function(){pulseIdx=(pulseIdx+1)%CATS.length;setActive(pulseIdx);},2400); }
     wrap.addEventListener("mouseenter",function(){clearInterval(autoTimer);});
     wrap.addEventListener("mouseleave",function(){startAuto();});
 
@@ -273,18 +297,16 @@
       pDot.setAttribute("opacity",pO);
     },40);
 
-    // Store cleanup refs
     wrap._cleanup=function(){
       clearInterval(autoTimer);
       clearInterval(pulseInterval);
       if(wrap._scaleHandler) window.removeEventListener("resize",wrap._scaleHandler);
     };
-
     startAuto();
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  //  MOBILE/IPAD — Stepper
+  //  MOBILE/IPAD — Stepper (4 steps)
   // ════════════════════════════════════════════════════════════════════════════
   function initStepper(wrap) {
     var idx=0;
@@ -292,7 +314,7 @@
     var s=document.createElement("style");
     s.id="cvly-stepper-style";
     s.textContent=
-      "#cvly-orbit-wrap{width:100%;font-family:system-ui,-apple-system,sans-serif;user-select:none;}" +
+      "#cvly-orbit-wrap{width:100%;height:auto!important;min-height:0!important;padding:0!important;margin:0 auto!important;font-family:system-ui,-apple-system,sans-serif;user-select:none;}" +
       ".cvly-stepper{background:#0d1117;border-radius:20px;border:1px solid rgba(79,209,197,0.15);overflow:hidden;}" +
       ".cvly-stepper-top{padding:22px;display:flex;gap:18px;align-items:flex-start;min-height:185px;}" +
       ".cvly-stepper-info{flex:1;}" +
@@ -345,15 +367,16 @@
       hlLP(wrap,"m-",cat.label,cat.sevCol);
     }
 
-    document.getElementById("cvly-next").addEventListener("click",function(){idx=(idx+1)%CATS.length;render();});
-    document.getElementById("cvly-prev").addEventListener("click",function(){idx=(idx+5)%CATS.length;render();});
+    var n=CATS.length;
+    document.getElementById("cvly-next").addEventListener("click",function(){idx=(idx+1)%n;render();});
+    document.getElementById("cvly-prev").addEventListener("click",function(){idx=(idx+n-1)%n;render();});
 
     var tx=0;
     var stepperEl=document.getElementById("cvly-stepper");
     stepperEl.addEventListener("touchstart",function(e){tx=e.touches[0].clientX;},{passive:true});
     stepperEl.addEventListener("touchend",function(e){
       var dx=e.changedTouches[0].clientX-tx;
-      if(Math.abs(dx)>40){idx=dx<0?(idx+1)%CATS.length:(idx+5)%CATS.length;render();}
+      if(Math.abs(dx)>40){idx=dx<0?(idx+1)%n:(idx+n-1)%n;render();}
     },{passive:true});
 
     wrap._cleanup=function(){};
@@ -361,26 +384,24 @@
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  //  Router — renders correct version, re-renders on resize/rotation
+  //  Router
   // ════════════════════════════════════════════════════════════════════════════
   function isMobile() { return window.innerWidth < MOBILE_BP; }
 
-  function render(wrap) {
+  function renderMode(wrap) {
     var mobile = isMobile();
     var mode   = mobile ? "stepper" : "orbit";
-
-    // Already showing the right version — do nothing
     if (currentMode === mode) return;
     currentMode = mode;
 
-    // Cleanup previous version
     if (wrap._cleanup) wrap._cleanup();
-
-    // Remove old injected style tags
     var old = document.getElementById("cvly-orbit-style") || document.getElementById("cvly-stepper-style");
     if (old) old.parentNode.removeChild(old);
 
-    // Clear wrap content
+    wrap.style.height    = "auto";
+    wrap.style.minHeight = "0";
+    wrap.style.maxHeight = "none";
+    wrap.style.padding   = "0";
     wrap.innerHTML = "";
 
     if (mobile) initStepper(wrap);
@@ -391,17 +412,14 @@
     var wrap = document.getElementById("cvly-orbit-wrap");
     if (!wrap) return;
     injectBaseCSS();
-    render(wrap);
+    renderMode(wrap);
 
-    // Re-check on resize with debounce
     window.addEventListener("resize", function() {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(function() { render(wrap); }, 150);
+      resizeTimer = setTimeout(function() { renderMode(wrap); }, 150);
     });
-
-    // Re-check on orientation change (iOS fires this separately)
     window.addEventListener("orientationchange", function() {
-      setTimeout(function() { render(wrap); }, 300);
+      setTimeout(function() { renderMode(wrap); }, 300);
     });
   }
 
