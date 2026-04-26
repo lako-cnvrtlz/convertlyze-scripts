@@ -554,7 +554,7 @@
       '<circle cx="15" cy="12" r="1.5" fill="#252d3d"/>' +
       '<rect x="10" y="15" width="4" height="1.5" rx="0.75" fill="#252d3d"/>' +
       '<rect x="11" y="4" width="2" height="4" rx="1" fill="#e8edf5"/>' +
-      '<circle cx="12" cy="5" r="2" fill="#a78bfa"/>' +
+      '<circle cx="12" cy="5" r="2" fill="#e8edf5"/>' +
     '</svg>';
 
   function createAnalysisRow(analysis) {
