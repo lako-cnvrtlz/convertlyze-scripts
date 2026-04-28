@@ -686,18 +686,23 @@
   }
 
   function subscribeToAnalysisChanges(userId) {
-    if (!supabase?.channel) return;
+  if (!supabase?.channel) return;
 
-    if (realtimeChannel) supabase.removeChannel(realtimeChannel);
+  if (realtimeChannel) supabase.removeChannel(realtimeChannel);
 
-    realtimeChannel = supabase
-      .channel('analyses-realtime-' + userId)
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'analyses', filter: 'user_id=eq.' + userId },
-        async function() { await loadAndRenderAnalyses(true); }
-      )
-      .subscribe();
-  }
+  realtimeChannel = supabase
+    .channel('analyses-realtime-' + userId)
+    .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'analyses', filter: 'user_id=eq.' + userId },
+      async function() { await loadAndRenderAnalyses(true); }
+    )
+    .on('system', {}, function(status) {
+      if (status === 'SUBSCRIBED') {
+        loadAndRenderAnalyses(true);
+      }
+    })
+    .subscribe();
+}
 
   async function initDashboard() {
     try {
