@@ -240,14 +240,17 @@
       hlLP(wrap, "d-", cat.label, cat.sevCol);
     }
 
-    function startAuto() { autoTimer = setInterval(function () { idx = (idx + 1) % n; render(); }, 4000); }
-    function stopAuto()  { clearInterval(autoTimer); }
+    function startAuto() { clearInterval(autoTimer); autoTimer = setInterval(function () { idx = (idx + 1) % n; render(); }, 4000); }
+    function stopAuto()  { clearInterval(autoTimer); autoTimer = null; }
+
+    var onEnter = function () { stopAuto(); };
+    var onLeave = function () { startAuto(); };
 
     document.getElementById("cvly-ds-next").addEventListener("click", function () { stopAuto(); idx = (idx + 1) % n; render(); startAuto(); });
     document.getElementById("cvly-ds-prev").addEventListener("click", function () { stopAuto(); idx = (idx + n - 1) % n; render(); startAuto(); });
 
-    wrap.addEventListener("mouseenter", stopAuto);
-    wrap.addEventListener("mouseleave", startAuto);
+    wrap.addEventListener("mouseenter", onEnter);
+    wrap.addEventListener("mouseleave", onLeave);
 
     var tx = 0;
     wrap.addEventListener("touchstart", function (e) { tx = e.touches[0].clientX; stopAuto(); }, { passive: true });
@@ -257,7 +260,11 @@
       startAuto();
     }, { passive: true });
 
-    wrap._cleanup = function () { stopAuto(); };
+    wrap._cleanup = function () {
+      stopAuto();
+      wrap.removeEventListener("mouseenter", onEnter);
+      wrap.removeEventListener("mouseleave", onLeave);
+    };
     render();
     startAuto();
   }
