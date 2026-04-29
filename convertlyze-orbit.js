@@ -36,7 +36,7 @@
       sev:     "CRITICAL",
       sevCol:  "#ef4444",
       finding: "Kein Outcome sichtbar",
-      tip:     "Besucher sehen Features — nicht was sich fuer sie konkret aendert.",
+      tip:     "Besucher sehen Features — nicht was sich fuer sie konkret ändert.",
       sec:     "hero",
     },
     {
@@ -180,7 +180,7 @@
       ".cvly-ds-label{font-size:18px;font-weight:700;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}" +
       ".cvly-ds-badge-wrap{margin-bottom:12px;margin-left:50px;}" +
       ".cvly-ds-finding{font-size:14px;font-weight:600;color:#e2e8f0;margin-bottom:10px;line-height:1.45;word-break:break-word;}" +
-      ".cvly-ds-tip{font-size:13px;color:#94a3b8;line-height:1.6;word-break:break-word;}" +
+      ".cvly-ds-tip{font-size:13px;color:#94a3b8;line-height:1.6;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}" +
       ".cvly-ds-controls{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-top:1px solid rgba(255,255,255,0.05);}" +
       ".cvly-ds-ctrl{width:36px;height:36px;border-radius:50%;background:#161b27;border:1px solid rgba(79,209,197,0.2);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .2s;color:#4fd1c5;flex-shrink:0;}" +
       ".cvly-ds-ctrl:hover{background:rgba(79,209,197,0.1);}" +
@@ -240,7 +240,7 @@
       hlLP(wrap, "d-", cat.label, cat.sevCol);
     }
 
-    function startAuto() { autoTimer = setInterval(function () { idx = (idx + 1) % n; render(); }, 2600); }
+    function startAuto() { autoTimer = setInterval(function () { idx = (idx + 1) % n; render(); }, 4000); }
     function stopAuto()  { clearInterval(autoTimer); }
 
     document.getElementById("cvly-ds-next").addEventListener("click", function () { stopAuto(); idx = (idx + 1) % n; render(); startAuto(); });
