@@ -1,4 +1,4 @@
-// convertlyze-orbit.js — v4.0
+// convertlyze-orbit.js — v4.1
 // Desktop: Horizontal Stepper | Mobile + iPad: Vertical Stepper
 // GitHub: lako-cnvrtlz/convertlyze-scripts
 (function () {
@@ -32,36 +32,36 @@
   // ── 4 Categories ─────────────────────────────────────────────────────────────
   var CATS = [
     {
-      label:   "Hero",
-      sev:     "CRITICAL",
-      sevCol:  "#ef4444",
-      finding: "Kein Outcome sichtbar",
-      tip:     "Besucher sehen Features — nicht, was sich für sie konkret ändert.",
-      sec:     "hero",
+      label:   'Hero',
+      sev:     'CRITICAL',
+      sevCol:  '#ef4444',
+      finding: 'Kein Outcome sichtbar',
+      tip:     'Besucher sehen Features \u2014 nicht, was sich f\u00fcr sie konkret \u00e4ndert.',
+      sec:     'hero',
     },
     {
-      label:   "Zielgruppe",
-      sev:     "HIGH",
-      sevCol:  "#f59e0b",
-      finding: "Nur Anwender angesprochen",
-      tip:     "CEO, IT-Leiter und DSGVO-Verantwortliche finden keine Antworten auf ihre Fragen.",
-      sec:     "hero",
+      label:   'Zielgruppe',
+      sev:     'HIGH',
+      sevCol:  '#f59e0b',
+      finding: 'Nur Anwender angesprochen',
+      tip:     'CEO, IT-Leiter und DSGVO-Verantwortliche finden keine Antworten auf ihre Fragen.',
+      sec:     'hero',
     },
     {
-      label:   "Conversion",
-      sev:     "HIGH",
-      sevCol:  "#f59e0b",
-      finding: "Kein klarer nächster Schritt",
-      tip:     "Besucher wissen nicht, wann und warum sie jetzt handeln sollen.",
-      sec:     "cta",
+      label:   'Conversion',
+      sev:     'HIGH',
+      sevCol:  '#f59e0b',
+      finding: 'Kein klarer n\u00e4chster Schritt',
+      tip:     'Besucher wissen nicht, wann und warum sie jetzt handeln sollen.',
+      sec:     'cta',
     },
     {
-      label:   "Trust",
-      sev:     "MEDIUM",
-      sevCol:  "#4fd1c5",
-      finding: "Proof ohne Relevanz",
-      tip:     "Logos und Zahlen ohne Bezug zum konkreten Problem des Besuchers.",
-      sec:     "trust",
+      label:   'Trust',
+      sev:     'MEDIUM',
+      sevCol:  '#4fd1c5',
+      finding: 'Proof ohne Relevanz',
+      tip:     'Logos und Zahlen ohne Bezug zum konkreten Problem des Besuchers.',
+      sec:     'trust',
     },
   ];
 
@@ -116,26 +116,26 @@
         if (CATS[i].label === catLabel) { sec = CATS[i].sec; break; }
       }
     }
-    var col = color || "#4fd1c5";
-    ["hero", "trust", "content", "cta"].forEach(function (id) {
+    var col = color || '#4fd1c5';
+    ['hero', 'trust', 'content', 'cta'].forEach(function (id) {
       var el = document.getElementById(prefix + id);
       if (!el) return;
       var isA = id === sec;
-      el.style.borderColor = isA ? col : "transparent";
-      el.style.boxShadow   = isA ? "0 0 10px " + col + "44" : "none";
-      el.style.background  = isA ? col + "28" : (id === "hero" ? "#1e2535" : "#0a0f1a");
+      el.style.borderColor = isA ? col : 'transparent';
+      el.style.boxShadow   = isA ? '0 0 10px ' + col + '44' : 'none';
+      el.style.background  = isA ? col + '28' : (id === 'hero' ? '#1e2535' : '#0a0f1a');
     });
-    wrap.querySelectorAll("." + prefix + "hl").forEach(function (l) { l.style.background = sec === "hero"    ? col + "88" : "#334155"; });
-    wrap.querySelectorAll("." + prefix + "tb").forEach(function (b) { b.style.background = sec === "trust"   ? col       : "#1e293b"; });
-    wrap.querySelectorAll("." + prefix + "cl").forEach(function (l) { l.style.background = sec === "content" ? col + "77" : "#1e293b"; });
-    var hcta = document.getElementById(prefix + "hcta");
-    if (hcta) hcta.style.background = sec === "hero" ? col : "#1e3a5f";
-    var btn = document.getElementById(prefix + "ctabtn");
-    if (btn) { btn.style.background = sec === "cta" ? col : "rgba(79,209,197,.3)"; btn.style.color = sec === "cta" ? "#0d1117" : "#4fd1c5"; }
-    var frame = document.getElementById(prefix + "frame");
+    wrap.querySelectorAll('.' + prefix + 'hl').forEach(function (l) { l.style.background = sec === 'hero'    ? col + '88' : '#334155'; });
+    wrap.querySelectorAll('.' + prefix + 'tb').forEach(function (b) { b.style.background = sec === 'trust'   ? col        : '#1e293b'; });
+    wrap.querySelectorAll('.' + prefix + 'cl').forEach(function (l) { l.style.background = sec === 'content' ? col + '77' : '#1e293b'; });
+    var hcta = document.getElementById(prefix + 'hcta');
+    if (hcta) hcta.style.background = sec === 'hero' ? col : '#1e3a5f';
+    var btn = document.getElementById(prefix + 'ctabtn');
+    if (btn) { btn.style.background = sec === 'cta' ? col : 'rgba(79,209,197,.3)'; btn.style.color = sec === 'cta' ? '#0d1117' : '#4fd1c5'; }
+    var frame = document.getElementById(prefix + 'frame');
     if (frame) {
-      frame.style.borderColor = catLabel ? col + "88" : "rgba(79,209,197,0.22)";
-      frame.style.boxShadow   = catLabel ? "0 0 24px " + col + "33" : "0 0 24px rgba(79,209,197,0.15)";
+      frame.style.borderColor = catLabel ? col + '88' : 'rgba(79,209,197,0.22)';
+      frame.style.boxShadow   = catLabel ? '0 0 24px ' + col + '33' : '0 0 24px rgba(79,209,197,0.15)';
     }
   }
 
@@ -144,57 +144,54 @@
   function injectBaseCSS() {
     if (baseCSSInjected) return;
     baseCSSInjected = true;
-    var s = document.createElement("style");
+    var s = document.createElement('style');
     s.textContent =
-      ".cvly-lp-frame{padding:10px;border-radius:16px;background:linear-gradient(135deg,#161b27,#1e2535);border:1.5px solid rgba(79,209,197,0.22);box-shadow:0 0 24px rgba(79,209,197,0.15);transition:border-color .4s,box-shadow .4s;display:inline-block;}" +
-      ".cvly-lp-mock{border-radius:9px;overflow:hidden;border:1px solid rgba(79,209,197,0.12);background:#0a0f1a;}" +
-      ".cvly-lp-bar{height:12px;background:#1e2535;display:flex;align-items:center;padding-left:6px;gap:3px;}" +
-      ".cvly-lp-dot{width:4px;height:4px;border-radius:50%;opacity:.7;}" +
-      ".cvly-lp-body{padding:4px 4px 0;}" +
-      ".cvly-lp-sec{border-radius:4px;margin-bottom:3px;border:1px solid transparent;transition:all .35s ease;overflow:hidden;}" +
-      ".cvly-lp-line{border-radius:2px;margin-bottom:2px;transition:background .35s;}" +
-      ".cvly-badge{display:inline-block;padding:2px 7px;border-radius:5px;font-size:9px;font-weight:800;letter-spacing:.8px;}";
+      '.cvly-lp-frame{padding:10px;border-radius:16px;background:linear-gradient(135deg,#161b27,#1e2535);border:1.5px solid rgba(79,209,197,0.22);box-shadow:0 0 24px rgba(79,209,197,0.15);transition:border-color .4s,box-shadow .4s;display:inline-block;}' +
+      '.cvly-lp-mock{border-radius:9px;overflow:hidden;border:1px solid rgba(79,209,197,0.12);background:#0a0f1a;}' +
+      '.cvly-lp-bar{height:12px;background:#1e2535;display:flex;align-items:center;padding-left:6px;gap:3px;}' +
+      '.cvly-lp-dot{width:4px;height:4px;border-radius:50%;opacity:.7;}' +
+      '.cvly-lp-body{padding:4px 4px 0;}' +
+      '.cvly-lp-sec{border-radius:4px;margin-bottom:3px;border:1px solid transparent;transition:all .35s ease;overflow:hidden;}' +
+      '.cvly-lp-line{border-radius:2px;margin-bottom:2px;transition:background .35s;}' +
+      '.cvly-badge{display:inline-block;padding:2px 7px;border-radius:5px;font-size:9px;font-weight:800;letter-spacing:.8px;}';
     document.head.appendChild(s);
   }
 
   // ════════════════════════════════════════════════════════════════════════════
   //  DESKTOP — Horizontal Stepper
-  //  Layout: LP mockup left | info panel right
   // ════════════════════════════════════════════════════════════════════════════
   function initDesktopStepper(wrap) {
-    var idx      = 0;
-    var n        = CATS.length;
+    var idx       = 0;
+    var n         = CATS.length;
     var autoTimer = null;
 
-    var s = document.createElement("style");
-    s.id = "cvly-stepper-style";
+    var s = document.createElement('style');
+    s.id = 'cvly-stepper-style';
     s.textContent =
-      "#cvly-orbit-wrap{width:100%;height:auto!important;min-height:0!important;padding:0!important;margin:0!important;font-family:system-ui,-apple-system,sans-serif;user-select:none;box-sizing:border-box;}" +
-      ".cvly-ds-inner{background:#0d1117;border-radius:20px;border:1px solid rgba(79,209,197,0.15);overflow:hidden;width:100%;box-sizing:border-box;}" +
-      ".cvly-ds-body{display:flex;align-items:stretch;gap:0;padding:32px 32px 28px;min-height:340px;width:100%;box-sizing:border-box;}" +
-      ".cvly-ds-mockup-col{flex-shrink:0;display:flex;align-items:center;margin-right:24px;}" +
-      ".cvly-ds-info-col{flex:1;min-width:0;width:0;overflow:hidden;display:flex;flex-direction:column;justify-content:center;}" +
-      ".cvly-ds-counter{font-size:11px;color:#475569;letter-spacing:.6px;margin-bottom:16px;text-transform:uppercase;white-space:nowrap;}" +
-      ".cvly-ds-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;overflow:hidden;}" +
-      ".cvly-ds-icon-wrap{width:40px;height:40px;border-radius:11px;background:#161b27;border:1.5px solid #4fd1c5;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .3s;}" +
-      ".cvly-ds-label{font-size:18px;font-weight:700;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}" +
-      ".cvly-ds-badge-wrap{margin-bottom:12px;margin-left:50px;}" +
-      ".cvly-ds-finding{font-size:14px;font-weight:600;color:#e2e8f0;margin-bottom:10px;line-height:1.45;word-break:break-word;}" +
-      ".cvly-ds-tip{font-size:13px;color:#94a3b8;line-height:1.6;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}" +
-      ".cvly-ds-controls{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-top:1px solid rgba(255,255,255,0.05);}" +
-      ".cvly-ds-ctrl{width:36px;height:36px;border-radius:50%;background:#161b27;border:1px solid rgba(79,209,197,0.2);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .2s;color:#4fd1c5;flex-shrink:0;}" +
-      ".cvly-ds-ctrl:hover{background:rgba(79,209,197,0.1);}" +
-      ".cvly-ds-pips{display:flex;gap:6px;align-items:center;}" +
-      ".cvly-ds-pip{height:3px;border-radius:2px;background:#1e2535;transition:all .3s;width:8px;}" +
-      ".cvly-ds-pip.active{background:#4fd1c5;width:22px;}";
+      '#cvly-orbit-wrap{width:100%;height:auto!important;min-height:0!important;padding:0!important;margin:0!important;font-family:system-ui,-apple-system,sans-serif;user-select:none;box-sizing:border-box;}' +
+      '.cvly-ds-inner{background:#0d1117;border-radius:20px;border:1px solid rgba(79,209,197,0.15);overflow:hidden;width:100%;box-sizing:border-box;}' +
+      '.cvly-ds-body{display:flex;align-items:stretch;gap:0;padding:32px 32px 28px;min-height:340px;width:100%;box-sizing:border-box;}' +
+      '.cvly-ds-mockup-col{flex-shrink:0;display:flex;align-items:center;margin-right:24px;}' +
+      '.cvly-ds-info-col{flex:1;min-width:0;width:0;overflow:hidden;display:flex;flex-direction:column;justify-content:center;}' +
+      '.cvly-ds-counter{font-size:11px;color:#475569;letter-spacing:.6px;margin-bottom:16px;text-transform:uppercase;white-space:nowrap;}' +
+      '.cvly-ds-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;overflow:hidden;}' +
+      '.cvly-ds-icon-wrap{width:40px;height:40px;border-radius:11px;background:#161b27;border:1.5px solid #4fd1c5;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .3s;}' +
+      '.cvly-ds-label{font-size:18px;font-weight:700;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+      '.cvly-ds-badge-wrap{margin-bottom:12px;margin-left:50px;}' +
+      '.cvly-ds-finding{font-size:14px;font-weight:600;color:#e2e8f0;margin-bottom:10px;line-height:1.45;word-break:break-word;}' +
+      '.cvly-ds-tip{font-size:13px;color:#94a3b8;line-height:1.6;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}' +
+      '.cvly-ds-controls{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-top:1px solid rgba(255,255,255,0.05);}' +
+      '.cvly-ds-ctrl{width:36px;height:36px;border-radius:50%;background:#161b27;border:1px solid rgba(79,209,197,0.2);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .2s;color:#4fd1c5;flex-shrink:0;}' +
+      '.cvly-ds-ctrl:hover{background:rgba(79,209,197,0.1);}' +
+      '.cvly-ds-pips{display:flex;gap:6px;align-items:center;}' +
+      '.cvly-ds-pip{height:3px;border-radius:2px;background:#1e2535;transition:all .3s;width:8px;}' +
+      '.cvly-ds-pip.active{background:#4fd1c5;width:22px;}';
     document.head.appendChild(s);
 
     wrap.innerHTML =
       '<div class="cvly-ds-inner">' +
         '<div class="cvly-ds-body">' +
-          '<div class="cvly-ds-mockup-col">' +
-            mockupHTML("d-", 150, 260) +
-          '</div>' +
+          '<div class="cvly-ds-mockup-col">' + mockupHTML('d-', 150, 260) + '</div>' +
           '<div class="cvly-ds-info-col">' +
             '<div class="cvly-ds-counter" id="cvly-ds-counter"></div>' +
             '<div class="cvly-ds-head" id="cvly-ds-head"></div>' +
@@ -204,40 +201,62 @@
           '</div>' +
         '</div>' +
         '<div class="cvly-ds-controls">' +
-          '<div class="cvly-ds-ctrl" id="cvly-ds-prev">' +
-            '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8L10 4" stroke="#4fd1c5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
-          '</div>' +
+          '<div class="cvly-ds-ctrl" id="cvly-ds-prev"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8L10 4" stroke="#4fd1c5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>' +
           '<div class="cvly-ds-pips" id="cvly-ds-pips"></div>' +
-          '<div class="cvly-ds-ctrl" id="cvly-ds-next">' +
-            '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="#4fd1c5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
-          '</div>' +
+          '<div class="cvly-ds-ctrl" id="cvly-ds-next"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="#4fd1c5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>' +
         '</div>' +
       '</div>';
 
-    // Build pips
-    var pipsEl = document.getElementById("cvly-ds-pips");
+    var pipsEl = document.getElementById('cvly-ds-pips');
     CATS.forEach(function (_, i) {
-      var pip = document.createElement("div");
-      pip.className = "cvly-ds-pip" + (i === 0 ? " active" : "");
+      var pip = document.createElement('div');
+      pip.className = 'cvly-ds-pip' + (i === 0 ? ' active' : '');
       pipsEl.appendChild(pip);
     });
 
+    function updatePips() {
+      document.querySelectorAll('.cvly-ds-pip').forEach(function (p, i) {
+        p.classList.toggle('active', i === idx);
+        p.style.width      = i === idx ? '22px' : '8px';
+        p.style.background = i === idx ? '#4fd1c5' : '#1e2535';
+      });
+    }
+
     function render() {
       var cat = CATS[idx];
-      document.getElementById("cvly-ds-counter").textContent = (idx + 1) + " von " + n;
-      document.getElementById("cvly-ds-head").innerHTML =
-        '<div class="cvly-ds-icon-wrap" style="border-color:' + cat.sevCol + ';color:' + cat.sevCol + ';">' + ICONS[cat.label] + '</div>' +
-        '<span class="cvly-ds-label">' + cat.label + '</span>';
-      document.getElementById("cvly-ds-badge-wrap").innerHTML =
-        '<span class="cvly-badge" style="background:' + cat.sevCol + '22;border:1px solid ' + cat.sevCol + '55;color:' + cat.sevCol + ';">' + cat.sev + '</span>';
-      document.getElementById("cvly-ds-finding").textContent = cat.finding;
-      document.getElementById("cvly-ds-tip").innerHTML = "&#8594; " + cat.tip;
-      document.querySelectorAll(".cvly-ds-pip").forEach(function (p, i) {
-        p.classList.toggle("active", i === idx);
-        p.style.width      = i === idx ? "22px" : "8px";
-        p.style.background = i === idx ? "#4fd1c5" : "#1e2535";
-      });
-      hlLP(wrap, "d-", cat.label, cat.sevCol);
+      document.getElementById('cvly-ds-counter').textContent = (idx + 1) + ' von ' + n;
+
+      // Icon + Label – innerHTML nur für SVG (keine User-Daten)
+      var iconWrap = document.getElementById('cvly-ds-head').querySelector('.cvly-ds-icon-wrap');
+      var labelEl  = document.getElementById('cvly-ds-head').querySelector('.cvly-ds-label');
+      if (iconWrap && labelEl) {
+        iconWrap.innerHTML             = ICONS[cat.label];
+        iconWrap.style.borderColor     = cat.sevCol;
+        iconWrap.style.color           = cat.sevCol;
+        labelEl.textContent            = cat.label;
+      } else {
+        document.getElementById('cvly-ds-head').innerHTML =
+          '<div class="cvly-ds-icon-wrap" style="border-color:' + cat.sevCol + ';color:' + cat.sevCol + ';">' + ICONS[cat.label] + '</div>' +
+          '<span class="cvly-ds-label">' + cat.label + '</span>';
+      }
+
+      // Badge – innerHTML nur für static structure
+      var badgeEl = document.getElementById('cvly-ds-badge-wrap').querySelector('.cvly-badge');
+      if (badgeEl) {
+        badgeEl.textContent        = cat.sev;
+        badgeEl.style.background   = cat.sevCol + '22';
+        badgeEl.style.border       = '1px solid ' + cat.sevCol + '55';
+        badgeEl.style.color        = cat.sevCol;
+      } else {
+        document.getElementById('cvly-ds-badge-wrap').innerHTML =
+          '<span class="cvly-badge" style="background:' + cat.sevCol + '22;border:1px solid ' + cat.sevCol + '55;color:' + cat.sevCol + ';">' + cat.sev + '</span>';
+      }
+
+      document.getElementById('cvly-ds-finding').textContent = cat.finding;
+      document.getElementById('cvly-ds-tip').textContent     = '\u2192 ' + cat.tip;
+
+      updatePips();
+      hlLP(wrap, 'd-', cat.label, cat.sevCol);
     }
 
     function startAuto() { clearInterval(autoTimer); autoTimer = setInterval(function () { idx = (idx + 1) % n; render(); }, 4000); }
@@ -246,15 +265,15 @@
     var onEnter = function () { stopAuto(); };
     var onLeave = function () { startAuto(); };
 
-    document.getElementById("cvly-ds-next").addEventListener("click", function () { stopAuto(); idx = (idx + 1) % n; render(); startAuto(); });
-    document.getElementById("cvly-ds-prev").addEventListener("click", function () { stopAuto(); idx = (idx + n - 1) % n; render(); startAuto(); });
+    document.getElementById('cvly-ds-next').addEventListener('click', function () { stopAuto(); idx = (idx + 1) % n; render(); startAuto(); });
+    document.getElementById('cvly-ds-prev').addEventListener('click', function () { stopAuto(); idx = (idx + n - 1) % n; render(); startAuto(); });
 
-    wrap.addEventListener("mouseenter", onEnter);
-    wrap.addEventListener("mouseleave", onLeave);
+    wrap.addEventListener('mouseenter', onEnter);
+    wrap.addEventListener('mouseleave', onLeave);
 
     var tx = 0;
-    wrap.addEventListener("touchstart", function (e) { tx = e.touches[0].clientX; stopAuto(); }, { passive: true });
-    wrap.addEventListener("touchend",   function (e) {
+    wrap.addEventListener('touchstart', function (e) { tx = e.touches[0].clientX; stopAuto(); }, { passive: true });
+    wrap.addEventListener('touchend',   function (e) {
       var dx = e.changedTouches[0].clientX - tx;
       if (Math.abs(dx) > 40) { idx = dx < 0 ? (idx + 1) % n : (idx + n - 1) % n; render(); }
       startAuto();
@@ -262,45 +281,57 @@
 
     wrap._cleanup = function () {
       stopAuto();
-      wrap.removeEventListener("mouseenter", onEnter);
-      wrap.removeEventListener("mouseleave", onLeave);
+      wrap.removeEventListener('mouseenter', onEnter);
+      wrap.removeEventListener('mouseleave', onLeave);
     };
+
     render();
     startAuto();
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  //  MOBILE — Vertical Stepper (stacked: mockup top, info bottom)
+  //  MOBILE — Vertical Stepper
+  //  FIX: DOM einmal aufbauen, bei render() nur Werte aktualisieren (kein
+  //  innerHTML-Rebuild pro Slide — konsistent mit Desktop-Pattern)
   // ════════════════════════════════════════════════════════════════════════════
   function initMobileStepper(wrap) {
-    var idx      = 0;
-    var n        = CATS.length;
+    var idx = 0;
+    var n   = CATS.length;
 
-    var s = document.createElement("style");
-    s.id = "cvly-stepper-style";
+    var s = document.createElement('style');
+    s.id = 'cvly-stepper-style';
     s.textContent =
-      "#cvly-orbit-wrap{width:100%;height:auto!important;min-height:0!important;padding:0!important;margin:0 auto!important;font-family:system-ui,-apple-system,sans-serif;user-select:none;}" +
-      ".cvly-ms-inner{background:#0d1117;border-radius:20px;border:1px solid rgba(79,209,197,0.15);overflow:hidden;}" +
-      ".cvly-ms-top{padding:28px 24px;display:flex;gap:20px;align-items:center;min-height:200px;}" +
-      ".cvly-ms-info{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;}" +
-      ".cvly-ms-counter{font-size:10px;color:#475569;letter-spacing:.5px;margin-bottom:12px;text-transform:uppercase;}" +
-      ".cvly-ms-icon-wrap{width:36px;height:36px;border-radius:10px;background:#161b27;border:1.5px solid #4fd1c5;display:flex;align-items:center;justify-content:center;margin-bottom:8px;transition:border-color .3s;}" +
-      ".cvly-ms-label{font-size:15px;font-weight:700;color:#e2e8f0;margin-bottom:8px;width:100%;}" +
-      ".cvly-ms-finding{font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:6px;line-height:1.4;text-align:left;width:100%;}" +
-      ".cvly-ms-tip{font-size:11px;color:#94a3b8;line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;text-align:left;width:100%;}" +
-      ".cvly-ms-controls{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-top:1px solid rgba(255,255,255,0.05);}" +
-      ".cvly-ms-ctrl{width:38px;height:38px;border-radius:50%;background:#161b27;border:1px solid rgba(79,209,197,0.2);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s;color:#4fd1c5;}" +
-      ".cvly-ms-ctrl:hover{background:rgba(79,209,197,0.1);}" +
-      ".cvly-ms-pips{display:flex;gap:6px;align-items:center;}" +
-      ".cvly-ms-pip{height:3px;border-radius:2px;background:#1e2535;transition:all .3s;width:8px;}" +
-      ".cvly-ms-pip.active{background:#4fd1c5;width:20px;}";
+      '#cvly-orbit-wrap{width:100%;height:auto!important;min-height:0!important;padding:0!important;margin:0 auto!important;font-family:system-ui,-apple-system,sans-serif;user-select:none;}' +
+      '.cvly-ms-inner{background:#0d1117;border-radius:20px;border:1px solid rgba(79,209,197,0.15);overflow:hidden;}' +
+      '.cvly-ms-top{padding:28px 24px;display:flex;gap:20px;align-items:center;min-height:200px;}' +
+      '.cvly-ms-info{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;}' +
+      '.cvly-ms-counter{font-size:10px;color:#475569;letter-spacing:.5px;margin-bottom:12px;text-transform:uppercase;}' +
+      '.cvly-ms-icon-wrap{width:36px;height:36px;border-radius:10px;background:#161b27;border:1.5px solid #4fd1c5;display:flex;align-items:center;justify-content:center;margin-bottom:8px;transition:border-color .3s,color .3s;}' +
+      '.cvly-ms-label{font-size:15px;font-weight:700;color:#e2e8f0;margin-bottom:8px;width:100%;}' +
+      '.cvly-ms-badge{display:inline-block;padding:2px 7px;border-radius:5px;font-size:9px;font-weight:800;letter-spacing:.8px;margin-bottom:10px;}' +
+      '.cvly-ms-finding{font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:6px;line-height:1.4;text-align:left;width:100%;}' +
+      '.cvly-ms-tip{font-size:11px;color:#94a3b8;line-height:1.5;text-align:left;width:100%;}' +
+      '.cvly-ms-controls{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-top:1px solid rgba(255,255,255,0.05);}' +
+      '.cvly-ms-ctrl{width:38px;height:38px;border-radius:50%;background:#161b27;border:1px solid rgba(79,209,197,0.2);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s;color:#4fd1c5;}' +
+      '.cvly-ms-ctrl:hover{background:rgba(79,209,197,0.1);}' +
+      '.cvly-ms-pips{display:flex;gap:6px;align-items:center;}' +
+      '.cvly-ms-pip{height:3px;border-radius:2px;background:#1e2535;transition:all .3s;width:8px;}' +
+      '.cvly-ms-pip.active{background:#4fd1c5;width:20px;}';
     document.head.appendChild(s);
 
+    // DOM einmal aufbauen
     wrap.innerHTML =
       '<div class="cvly-ms-inner" id="cvly-ms-inner">' +
         '<div class="cvly-ms-top">' +
-          mockupHTML("m-", 100, 148) +
-          '<div class="cvly-ms-info" id="cvly-ms-info"></div>' +
+          mockupHTML('m-', 100, 148) +
+          '<div class="cvly-ms-info">' +
+            '<div class="cvly-ms-counter" id="cvly-ms-counter"></div>' +
+            '<div class="cvly-ms-icon-wrap" id="cvly-ms-icon"></div>' +
+            '<div class="cvly-ms-label" id="cvly-ms-label"></div>' +
+            '<span class="cvly-ms-badge" id="cvly-ms-badge"></span>' +
+            '<div class="cvly-ms-finding" id="cvly-ms-finding"></div>' +
+            '<div class="cvly-ms-tip" id="cvly-ms-tip"></div>' +
+          '</div>' +
         '</div>' +
         '<div class="cvly-ms-controls">' +
           '<div class="cvly-ms-ctrl" id="cvly-ms-prev"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8L10 4" stroke="#4fd1c5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>' +
@@ -309,86 +340,100 @@
         '</div>' +
       '</div>';
 
-    var pipsEl = document.getElementById("cvly-ms-pips");
+    var pipsEl = document.getElementById('cvly-ms-pips');
     CATS.forEach(function (_, i) {
-      var pip = document.createElement("div");
-      pip.className = "cvly-ms-pip" + (i === 0 ? " active" : "");
+      var pip = document.createElement('div');
+      pip.className = 'cvly-ms-pip' + (i === 0 ? ' active' : '');
       pipsEl.appendChild(pip);
     });
 
+    // render() aktualisiert nur Werte – kein DOM-Rebuild
     function render() {
       var cat = CATS[idx];
-      document.getElementById("cvly-ms-info").innerHTML =
-        '<div style="font-size:10px;color:#475569;letter-spacing:.5px;margin-bottom:12px;text-transform:uppercase;">' + (idx + 1) + " von " + n + "</div>" +
-        '<div style="width:36px;height:36px;border-radius:10px;background:#161b27;border:1.5px solid ' + cat.sevCol + ';display:flex;align-items:center;justify-content:center;margin-bottom:8px;color:' + cat.sevCol + ';">' + ICONS[cat.label] + "</div>" +
-        '<div style="font-size:15px;font-weight:700;color:#e2e8f0;margin-bottom:8px;width:100%;">' + cat.label + "</div>" +
-        '<span class="cvly-badge" style="background:' + cat.sevCol + '22;border:1px solid ' + cat.sevCol + '55;color:' + cat.sevCol + ';margin-bottom:10px;display:inline-block;">' + cat.sev + "</span>" +
-        '<div style="font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:6px;line-height:1.4;width:100%;">' + cat.finding + "</div>" +
-        '<div style="font-size:11px;color:#94a3b8;line-height:1.5;width:100%;">&#8594; ' + cat.tip + "</div>";
-      document.querySelectorAll(".cvly-ms-pip").forEach(function (p, i) {
-        p.classList.toggle("active", i === idx);
-        p.style.width      = i === idx ? "20px" : "8px";
-        p.style.background = i === idx ? "#4fd1c5" : "#1e2535";
+
+      document.getElementById('cvly-ms-counter').textContent = (idx + 1) + ' von ' + n;
+
+      var iconEl = document.getElementById('cvly-ms-icon');
+      iconEl.innerHTML        = ICONS[cat.label]; // SVG ist sicher – keine User-Daten
+      iconEl.style.borderColor = cat.sevCol;
+      iconEl.style.color       = cat.sevCol;
+
+      document.getElementById('cvly-ms-label').textContent = cat.label;
+
+      var badgeEl = document.getElementById('cvly-ms-badge');
+      badgeEl.textContent      = cat.sev;
+      badgeEl.style.background = cat.sevCol + '22';
+      badgeEl.style.border     = '1px solid ' + cat.sevCol + '55';
+      badgeEl.style.color      = cat.sevCol;
+
+      document.getElementById('cvly-ms-finding').textContent = cat.finding;
+      document.getElementById('cvly-ms-tip').textContent     = '\u2192 ' + cat.tip;
+
+      document.querySelectorAll('.cvly-ms-pip').forEach(function (p, i) {
+        p.classList.toggle('active', i === idx);
+        p.style.width      = i === idx ? '20px' : '8px';
+        p.style.background = i === idx ? '#4fd1c5' : '#1e2535';
       });
-      hlLP(wrap, "m-", cat.label, cat.sevCol);
+
+      hlLP(wrap, 'm-', cat.label, cat.sevCol);
     }
 
-    document.getElementById("cvly-ms-next").addEventListener("click", function () { idx = (idx + 1) % n; render(); });
-    document.getElementById("cvly-ms-prev").addEventListener("click", function () { idx = (idx + n - 1) % n; render(); });
+    document.getElementById('cvly-ms-next').addEventListener('click', function () { idx = (idx + 1) % n; render(); });
+    document.getElementById('cvly-ms-prev').addEventListener('click', function () { idx = (idx + n - 1) % n; render(); });
 
-    var tx = 0;
-    var inner = document.getElementById("cvly-ms-inner");
-    inner.addEventListener("touchstart", function (e) { tx = e.touches[0].clientX; }, { passive: true });
-    inner.addEventListener("touchend",   function (e) {
+    var tx    = 0;
+    var inner = document.getElementById('cvly-ms-inner');
+    inner.addEventListener('touchstart', function (e) { tx = e.touches[0].clientX; }, { passive: true });
+    inner.addEventListener('touchend',   function (e) {
       var dx = e.changedTouches[0].clientX - tx;
       if (Math.abs(dx) > 40) { idx = dx < 0 ? (idx + 1) % n : (idx + n - 1) % n; render(); }
     }, { passive: true });
 
+    // Mobile hat bewusst kein Auto-Play – auf Touch-Geräten ist Auto-Play störend
     wrap._cleanup = function () {};
     render();
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  //  Router — Desktop >= 768px uses horizontal stepper, mobile uses vertical
+  //  Router
   // ════════════════════════════════════════════════════════════════════════════
   function isMobile() { return window.innerWidth < MOBILE_BP; }
 
   function renderMode(wrap) {
-    var mobile = isMobile();
-    var mode   = mobile ? "mobile" : "desktop";
+    var mode = isMobile() ? 'mobile' : 'desktop';
     if (currentMode === mode) return;
     currentMode = mode;
 
     if (wrap._cleanup) wrap._cleanup();
-    var old = document.getElementById("cvly-stepper-style");
+    var old = document.getElementById('cvly-stepper-style');
     if (old) old.parentNode.removeChild(old);
 
-    wrap.style.height    = "auto";
-    wrap.style.minHeight = "0";
-    wrap.style.maxHeight = "none";
-    wrap.style.padding   = "0";
-    wrap.innerHTML = "";
+    wrap.style.height    = 'auto';
+    wrap.style.minHeight = '0';
+    wrap.style.maxHeight = 'none';
+    wrap.style.padding   = '0';
+    wrap.innerHTML       = '';
 
-    if (mobile) initMobileStepper(wrap);
-    else        initDesktopStepper(wrap);
+    if (mode === 'mobile') initMobileStepper(wrap);
+    else                   initDesktopStepper(wrap);
   }
 
   function init() {
-    var wrap = document.getElementById("cvly-orbit-wrap");
+    var wrap = document.getElementById('cvly-orbit-wrap');
     if (!wrap) return;
     injectBaseCSS();
     renderMode(wrap);
 
-    window.addEventListener("resize", function () {
+    window.addEventListener('resize', function () {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(function () { renderMode(wrap); }, 150);
     });
-    window.addEventListener("orientationchange", function () {
+    window.addEventListener('orientationchange', function () {
       setTimeout(function () { renderMode(wrap); }, 300);
     });
   }
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 
 })();
