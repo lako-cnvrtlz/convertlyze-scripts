@@ -117,7 +117,6 @@
       body:    JSON.stringify(payload),
     });
     var data = await res.json();
-    console.log('[CVZ] update-billing response:', JSON.stringify(data, null, 2));
     if (!data.success) throw new Error(data.error || 'Speichern fehlgeschlagen');
     return data;
   }
@@ -154,7 +153,6 @@
       setBtnState(btn, 'loading');
 
       var payload = Object.assign({ memberstackId, stripeCustomerId }, getFormValues());
-      console.log('[CVZ] Billing save payload:', JSON.stringify(payload, null, 2));
 
       try {
         await saveBillingData(payload);
