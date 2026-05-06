@@ -1,60 +1,136 @@
-(async () => {
-  const ms = window.$memberstackDom
-  const member = await ms.getCurrentMember()
-  const memberstackId = member?.data?.id
-  const email = member?.data?.auth?.email
+(function () {
+  'use strict';
 
-  // Felder aus Memberstack Custom Fields befüllen
-  setValue('profile-salutation', member?.data?.customFields?.salutation)
-  setValue('profile-firstname',  member?.data?.customFields?.['first-name'])
-  setValue('profile-lastname',   member?.data?.customFields?.['last-name'])
+  // ── Konfiguration ────────────────────────────────────────────────────────────
 
-  // E-Mail sichtbar aber nicht editierbar
-  const emailField = document.getElementById('profile-email')
-  if (emailField) {
-    emailField.value = email || ''
-    setTimeout(() => {
-      emailField.setAttribute('readonly', '')
-      emailField.style.cssText += '; opacity: 1 !important; cursor: not-allowed; background-color: #1a2234; color: #e8edf5;'
-    }, 500)
+  var CONFIG = {
+    supabaseUrl: 'https://zpkifipmyeunorhtepzq.supabase.co',
+  };
+
+  // ── Utilities ────────────────────────────────────────────────────────────────
+
+  function retry(fn, maxAttempts, intervalMs) {
+    var attempts = 0;
+    return new Promise(function (resolve, reject) {
+      (function attempt() {
+        if (fn()) return resolve();
+        if (++attempts >= maxAttempts) return reject(new Error('Max retry attempts reached'));
+        setTimeout(attempt, intervalMs);
+      })();
+    });
   }
 
-  function setValue(id, value) {
-    const el = document.getElementById(id)
-    if (el && value) el.value = value
+  function depsReady() {
+    return !!window.$memberstackDom;
   }
 
-  document.getElementById('profile-save').addEventListener('click', async (e) => {
-    e.preventDefault()
-    const btn = document.getElementById('profile-save')
-    const originalText = btn.textContent
-    btn.textContent = 'Wird gespeichert...'
-    btn.style.opacity = '0.6'
-    btn.style.pointerEvents = 'none'
+  // ── UI helpers ───────────────────────────────────────────────────────────────
 
-    const res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/update-profile', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        memberstackId,
-        salutation: document.getElementById('profile-salutation')?.value,
-        firstname:  document.getElementById('profile-firstname')?.value,
-        lastname:   document.getElementById('profile-lastname')?.value,
-      })
-    })
+  function setFieldValue(id, value) {
+    var el = document.getElementById(id);
+    if (el && value != null) el.value = value;
+  }
 
-    const data = await res.json()
-    if (data.success) {
-      btn.textContent = 'Gespeichert ✓'
-      btn.style.opacity = '1'
-      setTimeout(() => {
-        btn.textContent = originalText
-        btn.style.pointerEvents = 'auto'
-      }, 2000)
-    } else {
-      btn.textContent = 'Fehler – nochmal versuchen'
-      btn.style.opacity = '1'
-      btn.style.pointerEvents = 'auto'
+  function getFieldValue(id) {
+    var el = document.getElementById(id);
+    return el ? el.value : '';
+  }
+
+  function setBtnState(btn, state) {
+    switch (state) {
+      case 'loading':
+        btn.dataset.originalText = btn.textContent;
+        btn.textContent          = 'Wird gespeichert\u2026';
+        btn.style.opacity        = '0.6';
+        btn.style.pointerEvents  = 'none';
+        break;
+      case 'success':
+        btn.textContent         = 'Gespeichert \u2713';
+        btn.style.opacity       = '1';
+        btn.style.pointerEvents = 'none';
+        setTimeout(function () { setBtnState(btn, 'idle'); }, 2000);
+        break;
+      case 'error':
+        btn.textContent         = 'Fehler \u2013 nochmal versuchen';
+        btn.style.opacity       = '1';
+        btn.style.pointerEvents = 'auto';
+        break;
+      case 'idle':
+        btn.textContent         = btn.dataset.originalText || 'Speichern';
+        btn.style.opacity       = '1';
+        btn.style.pointerEvents = 'auto';
+        break;
     }
-  })
-})()
+  }
+
+  // ── Data layer ───────────────────────────────────────────────────────────────
+
+  async function saveProfile(memberstackId, formData) {
+    var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/update-profile', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(Object.assign({ memberstackId }, formData)),
+    });
+    var data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Speichern fehlgeschlagen');
+    return data;
+  }
+
+  // ── App ──────────────────────────────────────────────────────────────────────
+
+  async function run() {
+    var member        = await window.$memberstackDom.getCurrentMember();
+    var memberstackId = member?.data?.id;
+    if (!memberstackId) throw new Error('No member ID');
+
+    var email        = member?.data?.auth?.email || '';
+    var customFields = member?.data?.customFields || {};
+
+    // Formular befüllen
+    setFieldValue('profile-salutation', customFields.salutation);
+    setFieldValue('profile-firstname',  customFields['first-name']);
+    setFieldValue('profile-lastname',   customFields['last-name']);
+
+    // E-Mail als read-only setzen
+    var emailField = document.getElementById('profile-email');
+    if (emailField) {
+      emailField.value    = email;
+      emailField.readOnly = true;
+      emailField.style.cssText += ';opacity:1!important;cursor:not-allowed;background-color:#1a2234;color:#e8edf5';
+    }
+
+    // Save-Button registrieren
+    var btn = document.getElementById('profile-save');
+    if (!btn) return;
+
+    btn.addEventListener('click', async function (e) {
+      e.preventDefault();
+      setBtnState(btn, 'loading');
+
+      try {
+        await saveProfile(memberstackId, {
+          salutation: getFieldValue('profile-salutation'),
+          firstname:  getFieldValue('profile-firstname'),
+          lastname:   getFieldValue('profile-lastname'),
+        });
+        setBtnState(btn, 'success');
+      } catch (err) {
+        console.error('[CVZ] Profile save error:', err);
+        setBtnState(btn, 'error');
+      }
+    });
+  }
+
+  function init() {
+    retry(depsReady, 30, 300)
+      .then(function () { return run(); })
+      .catch(function (err) { console.error('[CVZ] Profile init failed:', err); });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+})();
