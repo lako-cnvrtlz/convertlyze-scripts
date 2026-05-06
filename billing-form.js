@@ -4,7 +4,8 @@
   // ── Konfiguration ────────────────────────────────────────────────────────────
 
   var CONFIG = {
-    supabaseUrl: 'https://zpkifipmyeunorhtepzq.supabase.co',
+    supabaseUrl:     'https://zpkifipmyeunorhtepzq.supabase.co',
+    supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU',
     fields: [
       'billing-salutation',
       'billing-firstname',
@@ -142,10 +143,11 @@
       e.preventDefault();
       setBtnState(btn, 'loading');
 
+      var payload = Object.assign({ memberstackId, stripeCustomerId }, getFormValues());
+      console.log('[CVZ] Billing save payload:', JSON.stringify(payload, null, 2));
+
       try {
-        await saveBillingData(
-          Object.assign({ memberstackId, stripeCustomerId }, getFormValues())
-        );
+        await saveBillingData(payload);
         setBtnState(btn, 'success');
       } catch (err) {
         console.error('[CVZ] Billing save error:', err);
