@@ -90,20 +90,20 @@
 
   // ── Data layer ───────────────────────────────────────────────────────────────
 
-  async function fetchBillingData(memberstackId, token) {
+  async function fetchBillingData(memberstackId) {
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/get-user-billing', {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CONFIG.supabaseAnonKey },
       body:    JSON.stringify({ memberstackId }),
     });
     var json = await res.json();
     return json.data || null;
   }
 
-  async function saveBillingData(payload, token) {
+  async function saveBillingData(payload) {
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/update-billing', {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CONFIG.supabaseAnonKey },
       body:    JSON.stringify(payload),
     });
     var data = await res.json();
@@ -115,17 +115,13 @@
 
   async function run() {
     // Member + Token einmal laden
-    var member       = await window.$memberstackDom.getCurrentMember();
-    var memberstackId = member?.data?.id;
+    var member           = await window.$memberstackDom.getCurrentMember();
+    var memberstackId    = member?.data?.id;
     var stripeCustomerId = member?.data?.stripeCustomerId;
     if (!memberstackId) throw new Error('No member ID');
 
-    var tokenData    = await window.$memberstackDom.getMemberJSON();
-    var token        = (tokenData && tokenData.data && tokenData.data._token) || (tokenData && tokenData._token) || null;
-    if (!token) throw new Error('No auth token');
-
     // Billing-Daten laden und Formular befüllen
-    var user = await fetchBillingData(memberstackId, token);
+    var user = await fetchBillingData(memberstackId);
     if (user) {
       setFieldValue('billing-salutation', user.salutation);
       setFieldValue('billing-firstname',  user.firstname);
@@ -148,8 +144,7 @@
 
       try {
         await saveBillingData(
-          Object.assign({ memberstackId, stripeCustomerId }, getFormValues()),
-          token
+          Object.assign({ memberstackId, stripeCustomerId }, getFormValues())
         );
         setBtnState(btn, 'success');
       } catch (err) {
