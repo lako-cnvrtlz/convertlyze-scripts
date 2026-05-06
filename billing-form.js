@@ -121,7 +121,7 @@
     if (!memberstackId) throw new Error('No member ID');
 
     var tokenData    = await window.$memberstackDom.getMemberJSON();
-    var token        = tokenData?.data?._token;
+    var token        = (tokenData && tokenData.data && tokenData.data._token) || (tokenData && tokenData._token) || null;
     if (!token) throw new Error('No auth token');
 
     // Billing-Daten laden und Formular befüllen
