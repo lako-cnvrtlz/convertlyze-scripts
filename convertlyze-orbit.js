@@ -36,7 +36,7 @@
       sev:     "CRITICAL",
       sevCol:  "#ef4444",
       finding: "Kein Outcome sichtbar",
-      tip:     "Besucher sehen Features — nicht, was sich fuer sie konkret ändert.",
+      tip:     "Besucher sehen Features — nicht, was sich für sie konkret ändert.",
       sec:     "hero",
     },
     {
@@ -51,7 +51,7 @@
       label:   "Conversion",
       sev:     "HIGH",
       sevCol:  "#f59e0b",
-      finding: "Kein klarer naechster Schritt",
+      finding: "Kein klarer nächster Schritt",
       tip:     "Besucher wissen nicht, wann und warum sie jetzt handeln sollen.",
       sec:     "cta",
     },
