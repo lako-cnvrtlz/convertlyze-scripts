@@ -1,0 +1,479 @@
+(function () {
+
+  var SUPABASE_URL      = window.cvlSupabaseUrl     || '';
+  var SUPABASE_ANON_KEY = window.cvlSupabaseAnonKey || '';
+  var EDGE_BASE         = SUPABASE_URL + '/functions/v1';
+
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    console.error('[CVZ] Team Modal: cvlSupabaseUrl oder cvlSupabaseAnonKey nicht gesetzt.');
+  }
+
+  var currentUserId        = null;
+  var currentTeamId        = null;
+  var currentMemberstackId = null;
+  var currentUserIsOwner   = false;
+
+  // ── Utilities ────────────────────────────────────────────────────────────────
+
+  function qs(sel) { return document.querySelector(sel); }
+
+  // FIX 1: XSS-sichere Textsetzung – nie innerHTML mit User-Daten
+  function setText(el, text) {
+    if (el) el.textContent = text;
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function getInitials(name) {
+    if (!name) return '?';
+    var p = name.trim().split(/\s+/);
+    if (p.length === 1) return p[0][0].toUpperCase();
+    return (p[0][0] + p[p.length - 1][0]).toUpperCase();
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
+  // ── UI helpers ───────────────────────────────────────────────────────────────
+
+  function showConfirm(title, text, onConfirm) {
+    var modal   = document.getElementById('cvl-confirm-modal');
+    var okBtn   = document.getElementById('cvl-confirm-ok');
+    var cancel  = document.getElementById('cvl-confirm-cancel');
+    var titleEl = document.getElementById('cvl-confirm-title');
+    var textEl  = document.getElementById('cvl-confirm-text');
+    if (!modal) { onConfirm(); return; }
+    setText(titleEl, title);
+    setText(textEl, text);
+    modal.style.display = 'flex';
+    function close() { modal.style.display = 'none'; }
+    okBtn.onclick  = function () { close(); onConfirm(); };
+    cancel.onclick = close;
+  }
+
+  function showToast(msg, type) {
+    var t = qs('#cvl-toast');
+    t.textContent = msg;
+    t.className   = type === 'error' ? 'is-error' : 'is-success';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function () { t.className = ''; }, 4000);
+  }
+
+  function updateSeatBar(used, max) {
+    var pct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
+    qs('#cvl-seat-bar').style.width    = pct + '%';
+    qs('#cvl-seat-count').textContent  = used + ' / ' + max;
+  }
+
+  // FIX 7: Invite-Button zurücksetzen ohne innerHTML
+  function resetInviteBtn(btn) {
+    btn.classList.remove('is-loading');
+    btn.disabled     = false;
+    var icon         = document.createElement('span');
+    icon.innerHTML   = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    btn.textContent  = '';
+    btn.appendChild(icon.firstChild);
+    btn.appendChild(document.createTextNode(' Einladung senden'));
+  }
+
+  // ── API layer ────────────────────────────────────────────────────────────────
+
+  async function edgeFetch(endpoint, body) {
+    var res = await fetch(EDGE_BASE + endpoint, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+      body:    JSON.stringify(body),
+    });
+    return res.json();
+  }
+
+  async function supabaseGet(path) {
+    var res = await fetch(SUPABASE_URL + '/rest/v1' + path, {
+      headers: {
+        'apikey':        SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+        'Content-Type':  'application/json',
+      },
+    });
+    return res.json();
+  }
+
+  // ── Member row builder (XSS-safe, kein innerHTML mit User-Daten) ─────────────
+
+  function buildMemberRow(m) {
+    var user    = m.users || {};
+    var isOwner = (m.role === 'admin' && user.id === currentUserId);
+    var isMe    = (user.memberstack_id === currentMemberstackId);
+
+    var row = document.createElement('div');
+    row.className = 'cvl-member-row';
+
+    // Avatar
+    var avatar = document.createElement('div');
+    avatar.className = 'cvl-avatar';
+    avatar.textContent = getInitials(user.full_name || user.email);
+    row.appendChild(avatar);
+
+    // Info
+    var info     = document.createElement('div');
+    info.className = 'cvl-member-info';
+    var nameEl   = document.createElement('div');
+    nameEl.className = 'cvl-member-name';
+    nameEl.textContent = user.full_name || '–';
+    if (isMe) {
+      var meBadge = document.createElement('span');
+      meBadge.textContent = ' (Du)';
+      meBadge.style.cssText = 'color:var(--cvl-muted);font-size:11px';
+      nameEl.appendChild(meBadge);
+    }
+    var emailEl = document.createElement('div');
+    emailEl.className   = 'cvl-member-email';
+    emailEl.textContent = user.email || '';
+    info.append(nameEl, emailEl);
+    row.appendChild(info);
+
+    // Actions
+    var actions = document.createElement('div');
+    actions.className = 'cvl-member-actions';
+
+    var tag = document.createElement('span');
+    tag.className   = 'cvl-tag ' + (isOwner ? 'cvl-tag-owner' : 'cvl-tag-member');
+    tag.textContent = isOwner ? 'Owner' : 'Member';
+    actions.appendChild(tag);
+
+    // FIX 2: Remove-Button nur anzeigen wenn eingeloggter User Owner ist
+    if (!isOwner && !isMe && currentUserIsOwner) {
+      var removeBtn = document.createElement('button');
+      removeBtn.className = 'cvl-btn-icon';
+      removeBtn.title     = 'Entfernen';
+      removeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+      // FIX 8: ID als Closure-Variable, nicht als data-Attribut im DOM
+      var userId = m.user_id;
+      removeBtn.addEventListener('click', function () {
+        showConfirm(
+          'Mitglied entfernen?',
+          'Mitglied wirklich aus dem Team entfernen? Der Zugang geht sofort verloren.',
+          async function () {
+            removeBtn.disabled = true;
+            try {
+              var res = await edgeFetch('/remove-team-member', {
+                requester_memberstack_id: currentMemberstackId,
+                target_user_id:          userId,
+              });
+              if (res.success) {
+                showToast('Mitglied wurde entfernt.', 'success');
+                loadMembers();
+              } else {
+                showToast(res.error || 'Fehler beim Entfernen.', 'error');
+                removeBtn.disabled = false;
+              }
+            } catch (e) {
+              showToast('Verbindungsfehler.', 'error');
+              removeBtn.disabled = false;
+            }
+          }
+        );
+      });
+      actions.appendChild(removeBtn);
+    }
+
+    if (isMe && !isOwner) {
+      var leaveBtn = document.createElement('button');
+      leaveBtn.className   = 'cvl-btn-leave';
+      leaveBtn.textContent = 'Team verlassen';
+      leaveBtn.addEventListener('click', function () {
+        showConfirm(
+          'Team verlassen?',
+          'Du wirst auf den kostenlosen Free-Plan zur\u00fcckgesetzt. Deine bisherigen Analysen bleiben erhalten.',
+          async function () {
+            leaveBtn.disabled = true;
+            try {
+              var res = await edgeFetch('/leave-team', { memberstack_id: currentMemberstackId });
+              if (res.success) {
+                showToast('Du hast das Team verlassen.', 'success');
+                closeModal();
+                setTimeout(function () { window.location.reload(); }, 1200);
+              } else {
+                showToast(res.error || 'Fehler beim Verlassen.', 'error');
+                leaveBtn.disabled = false;
+              }
+            } catch (e) {
+              showToast('Verbindungsfehler.', 'error');
+              leaveBtn.disabled = false;
+            }
+          }
+        );
+      });
+      actions.appendChild(leaveBtn);
+    }
+
+    row.appendChild(actions);
+    return row;
+  }
+
+  // ── Member laden ─────────────────────────────────────────────────────────────
+
+  async function loadMembers() {
+    var spinner = qs('#cvl-members-spinner');
+    var list    = qs('#cvl-member-list');
+
+    spinner.style.display = 'block';
+    list.style.display    = 'none';
+    list.innerHTML        = '';
+
+    try {
+      var result      = await edgeFetch('/get-team-members', { memberstack_id: currentMemberstackId });
+      var data        = result.members    || [];
+      var planMax     = result.max_seats  ?? 0;
+      var memberCount = result.used_seats ?? 0;
+
+      if (result.owner_id) currentUserId = result.owner_id;
+      if (result.team_id)  currentTeamId = result.team_id;
+
+      updateSeatBar(memberCount, planMax);
+      spinner.style.display = 'none';
+      list.style.display    = 'flex';
+
+      if (!data.length) {
+        var empty = document.createElement('div');
+        empty.className   = 'cvl-empty';
+        empty.innerHTML   = '<div class="cvl-empty-icon">\uD83D\uDC65</div>';
+        empty.appendChild(document.createTextNode('Noch keine Team-Mitglieder. Lade jemanden ein!'));
+        list.appendChild(empty);
+        return;
+      }
+
+      data.forEach(function (m) { list.appendChild(buildMemberRow(m)); });
+
+    } catch (e) {
+      console.error('[CVZ] loadMembers error:', e);
+      spinner.style.display = 'none';
+      list.style.display    = 'flex';
+      list.innerHTML        = '<div class="cvl-empty" style="color:var(--cvl-danger)">Fehler beim Laden. Bitte erneut versuchen.</div>';
+    }
+  }
+
+  // ── Pending Invites laden ────────────────────────────────────────────────────
+
+  async function loadPending() {
+    var spinner = qs('#cvl-pending-spinner');
+    var list    = qs('#cvl-pending-list');
+
+    spinner.style.display = 'block';
+    list.style.display    = 'none';
+    list.innerHTML        = '';
+
+    try {
+      var data = [];
+      if (currentTeamId) {
+        var now = new Date().toISOString();
+        data = await supabaseGet(
+          '/team_invites?team_id=eq.' + currentTeamId +
+          '&accepted_at=is.null&expires_at=gt.' + now +
+          '&select=id,email,created_at,expires_at'
+        );
+      }
+
+      spinner.style.display = 'none';
+      list.style.display    = 'block';
+
+      var badge = qs('#cvl-pending-badge');
+      if (data && data.length > 0) {
+        badge.textContent   = data.length;
+        badge.style.display = 'inline-flex';
+      } else {
+        badge.style.display = 'none';
+      }
+
+      if (!data || !data.length) {
+        list.innerHTML = '<div class="cvl-empty"><div class="cvl-empty-icon">\u2709\uFE0F</div>Keine offenen Einladungen.</div>';
+        return;
+      }
+
+      data.forEach(function (inv) {
+        var row = document.createElement('div');
+        row.className = 'cvl-invite-row';
+
+        // FIX 1: E-Mail per textContent, nicht innerHTML
+        row.innerHTML =
+          '<div class="cvl-invite-icon">' +
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="#f6ad55" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+          '</div>' +
+          '<div class="cvl-invite-info">' +
+            '<div class="cvl-invite-email"></div>' +
+            '<div class="cvl-invite-meta"></div>' +
+          '</div>' +
+          '<div class="cvl-invite-actions">' +
+            '<button class="cvl-btn-ghost cvl-btn-resend">Erneut senden</button>' +
+            '<button class="cvl-btn-ghost cvl-btn-revoke">Zur\u00fcckziehen</button>' +
+          '</div>';
+
+        // XSS-safe: textContent nach dem Bauen setzen
+        row.querySelector('.cvl-invite-email').textContent = inv.email;
+        row.querySelector('.cvl-invite-meta').textContent  = 'L\u00e4uft ab am ' + formatDate(inv.expires_at);
+
+        // FIX 8: IDs als Closure-Variablen
+        var inviteId = inv.id;
+        var email    = inv.email;
+
+        row.querySelector('.cvl-btn-resend').addEventListener('click', async function () {
+          var btn = this;
+          btn.disabled    = true;
+          btn.textContent = '\u2026';
+          try {
+            await edgeFetch('/revoke-team-invite', { invite_id: inviteId, memberstack_id: currentMemberstackId });
+            var res = await edgeFetch('/invite-team-member', { inviter_user_id: currentUserId, email: email });
+            if (res.success) {
+              showToast('Einladung erneut gesendet! \u2713', 'success');
+              loadPending();
+            } else {
+              showToast(res.error || 'Fehler beim Senden.', 'error');
+              btn.disabled    = false;
+              btn.textContent = 'Erneut senden';
+            }
+          } catch (e) {
+            showToast('Verbindungsfehler.', 'error');
+            btn.disabled    = false;
+            btn.textContent = 'Erneut senden';
+          }
+        });
+
+        row.querySelector('.cvl-btn-revoke').addEventListener('click', async function () {
+          var btn = this;
+          btn.disabled    = true;
+          btn.textContent = '\u2026';
+          try {
+            var res = await edgeFetch('/revoke-team-invite', { invite_id: inviteId, memberstack_id: currentMemberstackId });
+            if (res.success) {
+              showToast('Einladung wurde zur\u00fcckgezogen.', 'success');
+              loadPending();
+            } else {
+              showToast(res.error || 'Fehler beim Zur\u00fcckziehen.', 'error');
+              btn.disabled    = false;
+              btn.textContent = 'Zur\u00fcckziehen';
+            }
+          } catch (e) {
+            showToast('Verbindungsfehler.', 'error');
+            btn.disabled    = false;
+            btn.textContent = 'Zur\u00fcckziehen';
+          }
+        });
+
+        list.appendChild(row);
+      });
+
+    } catch (e) {
+      console.error('[CVZ] loadPending error:', e);
+      spinner.style.display = 'none';
+      list.style.display    = 'block';
+      list.innerHTML = '<div class="cvl-empty" style="color:var(--cvl-danger)">Fehler beim Laden.</div>';
+    }
+  }
+
+  // ── Tabs ─────────────────────────────────────────────────────────────────────
+
+  document.querySelectorAll('.cvl-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      document.querySelectorAll('.cvl-tab').forEach(function (t) { t.classList.remove('is-active'); });
+      document.querySelectorAll('.cvl-panel').forEach(function (p) { p.classList.remove('is-active'); });
+      tab.classList.add('is-active');
+      var panel = qs('#cvl-panel-' + tab.getAttribute('data-tab'));
+      if (panel) panel.classList.add('is-active');
+      if (tab.getAttribute('data-tab') === 'pending') loadPending();
+    });
+  });
+
+  // ── Invite senden ─────────────────────────────────────────────────────────────
+
+  qs('#cvl-invite-btn').addEventListener('click', async function () {
+    var emailInput = qs('#cvl-invite-email');
+    var email      = emailInput.value.trim();
+    var btn        = qs('#cvl-invite-btn');
+
+    if (!email)              { showToast('Bitte E-Mail eingeben.', 'error'); return; }
+    if (!email.includes('@')){ showToast('Ung\u00fcltige E-Mail-Adresse.', 'error'); return; }
+
+    btn.classList.add('is-loading');
+    btn.disabled    = true;
+    btn.textContent = 'Wird gesendet\u2026';
+
+    try {
+      var res = await edgeFetch('/invite-team-member', { inviter_user_id: currentUserId, email: email });
+      resetInviteBtn(btn);
+      if (res.success) {
+        showToast('Einladung wurde gesendet! \u2713', 'success');
+        emailInput.value = '';
+        loadPending();
+      } else {
+        showToast(res.error || 'Fehler beim Senden.', 'error');
+      }
+    } catch (e) {
+      resetInviteBtn(btn);
+      showToast('Verbindungsfehler.', 'error');
+    }
+  });
+
+  // ── Modal öffnen / schließen ──────────────────────────────────────────────────
+
+  async function openModal() {
+    if (!window.$memberstackDom) { showToast('Nicht eingeloggt.', 'error'); return; }
+
+    try {
+      var member = await window.$memberstackDom.getCurrentMember();
+      if (!member?.data?.id) { showToast('Nicht eingeloggt.', 'error'); return; }
+
+      var users = await supabaseGet(
+        '/users?memberstack_id=eq.' + member.data.id +
+        '&select=id,team_id,owner_user_id'
+      );
+      var user = users?.[0];
+      if (!user) { showToast('User nicht gefunden.', 'error'); return; }
+
+      currentUserId        = user.owner_user_id || user.id;
+      currentTeamId        = user.team_id       || null;
+      currentMemberstackId = member.data.id;
+      currentUserIsOwner   = !user.owner_user_id; // FIX 2
+
+      var overlay = qs('#cvl-team-overlay');
+      overlay.classList.add('is-open');
+      document.body.style.overflow = 'hidden';
+
+      document.querySelectorAll('.cvl-tab').forEach(function (t) { t.classList.remove('is-active'); });
+      document.querySelectorAll('.cvl-panel').forEach(function (p) { p.classList.remove('is-active'); });
+      document.querySelector('[data-tab="members"]').classList.add('is-active');
+      qs('#cvl-panel-members').classList.add('is-active');
+      qs('#cvl-members-spinner').style.display = 'block';
+      qs('#cvl-member-list').style.display     = 'none';
+
+      loadMembers();
+
+    } catch (e) {
+      console.error('[CVZ] openModal error:', e);
+      showToast('Fehler beim \u00d6ffnen. Bitte erneut versuchen.', 'error');
+    }
+  }
+
+  function closeModal() {
+    qs('#cvl-team-overlay').classList.remove('is-open');
+    document.body.style.overflow = '';
+  }
+
+  var openBtn = document.getElementById('open-team-modal');
+  if (openBtn) openBtn.addEventListener('click', openModal);
+  qs('#cvl-close-btn').addEventListener('click', closeModal);
+  qs('#cvl-team-overlay').addEventListener('click', function (e) { if (e.target === this) closeModal(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
+
+  window.openTeamModal = openModal;
+
+})();
