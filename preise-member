@@ -11,7 +11,7 @@ const PLAN_DATA = {
 
 const PPU_PRICE_ID = 'prc_pay-per-use-14750y0n';
 
-// ── Alle Checkout-Buttons sofort sperren (bevor Seite sichtbar) ───────────────
+// ── Alle Checkout-Buttons sofort sperren ──────────────────────────────────────
 document.querySelectorAll('[data-ms-modal="checkout"]').forEach(function (btn) {
   btn.style.pointerEvents = 'none';
 });
@@ -192,7 +192,7 @@ function showMemberBlockModal() {
         onClick: function () {
           window.$memberstackDom.purchasePlansWithCheckout({
             priceId:    PPU_PRICE_ID,
-            successUrl: window.location.origin + '/analyse/formular'  // ← PPU: direkt zum Formular
+            successUrl: window.location.origin + '/analyse/formular'
           }).catch(function (err) { console.error('[CVZ] PPU checkout error:', err); });
         }
       },
@@ -205,10 +205,53 @@ function showMemberBlockModal() {
   });
 }
 
+// ── Credits berechnen ─────────────────────────────────────────────────────────
+
+function calcCredits(d) {
+  var planCredits = Math.max(0,
+    (parseFloat(d.credits_limit) || 0)
+    - (parseFloat(d.credits_used_current_period) || 0)
+    - (parseFloat(d.reserved_credits) || 0)
+  );
+  var ppuCredits = Math.max(0,
+    (parseInt(d.ppu_credits) || 0)
+    - (parseInt(d.reserved_ppu_credits) || 0)
+  );
+  return planCredits + ppuCredits;
+}
+
+// ── Credits anzeigen ──────────────────────────────────────────────────────────
+
+function loadCredits(memberstackId) {
+  window.supabase
+    .from('user_effective_credits')
+    .select('credits_limit, credits_used_current_period, reserved_credits, ppu_credits, reserved_ppu_credits')
+    .eq('memberstack_id', memberstackId)
+    .single()
+    .then(function (res) {
+      if (!res.data) return;
+      var total = calcCredits(res.data);
+
+      var display = document.querySelector('[data-field="credits_remaining"]');
+      if (display) {
+        display.textContent = total;
+        display.style.color = total === 0 ? '#f87171' : total <= 3 ? '#fbbf24' : '#34d399';
+      }
+
+      var box = document.getElementById('credits-info');
+      if (box) box.style.opacity = '1';
+    })
+    .catch(function (err) {
+      console.warn('[CVZ] Credits laden fehlgeschlagen:', err);
+      var box = document.getElementById('credits-info');
+      if (box) box.style.opacity = '1';
+    });
+}
+
 // ── Supabase: User laden ──────────────────────────────────────────────────────
 
 async function fetchUserFast(memberstackId) {
-  const { data, error } = await supabase
+  const { data, error } = await window.supabase
     .from('users')
     .select('id, firstname, owner_user_id, current_price_id, email')
     .eq('memberstack_id', memberstackId)
@@ -220,7 +263,7 @@ async function fetchUserFast(memberstackId) {
 
 async function fetchUserWithSmartRetry(memberstackId) {
   for (let attempt = 1; attempt <= 5; attempt++) {
-    const { data, error } = await supabase
+    const { data, error } = await window.supabase
       .from('users')
       .select('id, firstname, owner_user_id, current_price_id, email')
       .eq('memberstack_id', memberstackId)
@@ -364,7 +407,13 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     const email = currentUser?.email || memberEmail;
 
+    // Name setzen
     setFirstName(currentUser?.firstname || '');
+
+    // Credits laden (unabhängig vom State)
+    if (memberstackId) {
+      loadCredits(memberstackId);
+    }
 
     // ── State 1: Team-Member ─────────────────────────────────────────────────
     if (currentUser?.owner_user_id) {
@@ -382,7 +431,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             onClick: function () {
               window.$memberstackDom.purchasePlansWithCheckout({
                 priceId:    PPU_PRICE_ID,
-                successUrl: window.location.origin + '/analyse/formular'  // ← PPU: direkt zum Formular
+                successUrl: window.location.origin + '/analyse/formular'
               }).catch(function (err) { console.error('[CVZ] PPU checkout error:', err); });
             }
           },
