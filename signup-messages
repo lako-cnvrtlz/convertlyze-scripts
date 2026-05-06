@@ -1,159 +1,165 @@
-(function() {
-  if (window._cvlyLoginInit) return;
-  window._cvlyLoginInit = true;
+(function () {
+  'use strict';
 
-  var urlParams   = new URLSearchParams(window.location.search);
-  var inviteToken = urlParams.get('invite');
-  var emailParam  = urlParams.get('email') ? decodeURIComponent(urlParams.get('email')) : '';
-  var plan        = urlParams.get('plan');
-  var billing     = urlParams.get('billing') || 'monthly';
+  // ── Guard ────────────────────────────────────────────────────────────────────
 
-  // ── Invite-Token als Cookie sichern ───────────────────────────────────────
-  function setInviteCookie(token) {
-    var expires = new Date(Date.now() + 30 * 60 * 1000).toUTCString();
-    document.cookie = 'cvz_invite=' + token + ';expires=' + expires + ';path=/;SameSite=Lax';
+  var initialized = false;
+
+  // ── Konfiguration ────────────────────────────────────────────────────────────
+
+  var CONFIG = {
+    cookieMaxAgeMs: 30 * 60 * 1000, // 30 Minuten
+  };
+
+  // ── URL-Parameter ────────────────────────────────────────────────────────────
+
+  var params       = new URLSearchParams(window.location.search);
+  var urlInvite    = params.get('invite')  || '';
+  var urlEmail     = params.get('email')   ? decodeURIComponent(params.get('email')) : '';
+  var urlPlan      = params.get('plan')    || '';
+  var urlBilling   = params.get('billing') || 'monthly';
+
+  // ── Cookie layer ─────────────────────────────────────────────────────────────
+
+  function setCookie(name, value) {
+    var expires = new Date(Date.now() + CONFIG.cookieMaxAgeMs).toUTCString();
+    document.cookie = name + '=' + value + ';expires=' + expires + ';path=/;SameSite=Lax';
   }
 
-  if (inviteToken) {
-    setInviteCookie(inviteToken);
-    console.log('[CVZ] Login: Invite-Token gesichert (Cookie):', inviteToken);
-  }
+  // ── UI layer ─────────────────────────────────────────────────────────────────
 
-  // ── Memberstack nativen Toast sofort unterdrücken ─────────────────────────
   function suppressMsToast() {
-    setTimeout(function() {
-      document.querySelectorAll('[class*="ms-toast"], [class*="memberstack-toast"], [id*="ms-toast"], .ms-notification').forEach(function(el) {
-        el.style.cssText = 'display:none!important;visibility:hidden!important';
-      });
-    }, 0);
-    // Zweiter Pass nach 100ms als Sicherheit
-    setTimeout(function() {
-      document.querySelectorAll('[class*="ms-toast"], [class*="memberstack-toast"], [id*="ms-toast"], .ms-notification').forEach(function(el) {
-        el.style.cssText = 'display:none!important;visibility:hidden!important';
-      });
-    }, 100);
+    document.querySelectorAll('[class*="ms-toast"], [class*="memberstack-toast"], [id*="ms-toast"], .ms-notification')
+      .forEach(function (el) { el.style.cssText = 'display:none!important;visibility:hidden!important'; });
   }
 
-  // ── Toast anzeigen (Convertlyze-Stil oder Fallback) ───────────────────────
   function showToast(type, message) {
     suppressMsToast();
-    if (window.cvzShowToast) {
+    if (typeof window.cvzShowToast === 'function') {
       window.cvzShowToast(type, message);
     }
   }
 
-  // ── DOMContentLoaded ───────────────────────────────────────────────────────
-  document.addEventListener('DOMContentLoaded', function() {
-    // data-ms-form="login" UND data-ms-form="signup" abfangen
-    // (Webflow/Memberstack nutzt je nach Konfiguration unterschiedliche Werte)
-    var loginForm = document.querySelector('[data-ms-form="login"], [data-ms-form="signup"]');
-    if (!loginForm) return;
+  function prefillEmail(formEl) {
+    if (!urlEmail) return;
+    var input = formEl.querySelector('input[type="email"]');
+    if (!input) return;
+    input.value = urlEmail;
+    input.dispatchEvent(new Event('input',  { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
 
-    // E-Mail prefill
-    if (emailParam) {
-      var emailInput = loginForm.querySelector('input[type="email"]');
-      if (emailInput) {
-        emailInput.value = emailParam;
-        emailInput.dispatchEvent(new Event('input',  { bubbles: true }));
-        emailInput.dispatchEvent(new Event('change', { bubbles: true }));
-        console.log('[CVZ] Login: E-Mail prefilled:', emailParam);
-      }
-    }
-
-    // Register-Link anreichern
-    document.querySelectorAll('a[href*="/register"]').forEach(function(link) {
-      var params = [];
-      if (inviteToken) params.push('invite=' + inviteToken);
-      if (emailParam)  params.push('email=' + encodeURIComponent(emailParam));
-      if (plan)        params.push('plan=' + plan + '&billing=' + billing);
-      if (params.length) link.href = '/register?' + params.join('&');
+  function enrichRegisterLinks() {
+    document.querySelectorAll('a[href*="/register"]').forEach(function (link) {
+      var parts = [];
+      if (urlInvite)  parts.push('invite=' + urlInvite);
+      if (urlEmail)   parts.push('email=' + encodeURIComponent(urlEmail));
+      if (urlPlan)    parts.push('plan=' + urlPlan + '&billing=' + urlBilling);
+      if (parts.length) link.href = '/register?' + parts.join('&');
     });
+  }
 
-    // ── Button-Handler mit capture:true ───────────────────────────────────
-    // Memberstack bindet seinen Handler an data-ms-passwordless-login.
-    // capture:true stellt sicher dass unser Handler ZUERST läuft –
-    // vor Memberstacks Bubble-Phase-Handler.
-    var submitBtn = loginForm.querySelector('[data-ms-passwordless-login], [type="submit"]');
+  function showNotRegisteredMessage(email, formEl) {
+    // Alten Block entfernen falls vorhanden
+    var existing = document.querySelector('.cvz-not-registered');
+    if (existing) existing.remove();
+
+    var registerHref = '/register?email=' + encodeURIComponent(email);
+    if (urlInvite) registerHref += '&invite=' + urlInvite;
+    if (urlPlan)   registerHref += '&plan=' + urlPlan + '&billing=' + urlBilling;
+
+    var div = document.createElement('div');
+    div.className = 'cvz-not-registered';
+    div.style.cssText = 'margin-top:20px;padding:16px 20px;background:#1a2133;border:1px solid #2a3550;border-left:3px solid #f87171;border-radius:10px;text-align:center;font-family:inherit';
+
+    var p = document.createElement('p');
+    p.textContent = 'Diese E-Mail-Adresse ist noch nicht registriert.';
+    p.style.cssText = 'margin:0 0 12px;color:#e8edf5;font-size:14px;line-height:1.5';
+
+    var a = document.createElement('a');
+    a.href = registerHref;
+    a.textContent = 'Jetzt registrieren \u2192';
+    a.style.cssText = 'display:inline-block;padding:10px 24px;background:#4fd1c5;color:#0d1117;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600';
+
+    div.append(p, a);
+    formEl.parentElement.appendChild(div);
+  }
+
+  function clearNotRegisteredMessage() {
+    var existing = document.querySelector('.cvz-not-registered');
+    if (existing) existing.remove();
+  }
+
+  // ── Error handling ───────────────────────────────────────────────────────────
+
+  function handleLoginError(error, email, formEl) {
+    suppressMsToast();
+    var msg    = (error.message || '').toLowerCase();
+    var code   = error.code || '';
+
+    if (code === 'MEMBER_NOT_FOUND' || msg.includes('not found')) {
+      showToast('error', 'Kein Account mit dieser E-Mail gefunden.');
+      showNotRegisteredMessage(email, formEl);
+    } else if (code === 'INVALID_EMAIL' || msg.includes('invalid email')) {
+      showToast('error', 'Ungültige E-Mail-Adresse. Bitte prüfe deine Eingabe.');
+    } else if (code === 'TOO_MANY_REQUESTS' || msg.includes('too many')) {
+      showToast('warning', 'Zu viele Anfragen. Bitte warte kurz und versuche es erneut.');
+    } else {
+      showToast('error', 'Ein Fehler ist aufgetreten. Bitte erneut versuchen.');
+    }
+  }
+
+  // ── Submit handler ───────────────────────────────────────────────────────────
+
+  function initSubmitHandler(formEl) {
+    // capture:true stellt sicher dass unser Handler VOR Memberstacks Handler läuft
+    var submitBtn = formEl.querySelector('[data-ms-passwordless-login], [type="submit"]');
     if (!submitBtn) return;
 
-    submitBtn.addEventListener('click', async function(e) {
+    submitBtn.addEventListener('click', async function (e) {
       e.preventDefault();
-      e.stopImmediatePropagation(); // alle nachfolgenden Handler blockieren
+      e.stopImmediatePropagation();
 
-      var emailInput = loginForm.querySelector('input[type="email"]');
-      var emailValue = emailInput ? emailInput.value.trim() : '';
+      clearNotRegisteredMessage();
 
-      // Alte Custom-Messages entfernen
-      var oldMessage = document.querySelector('.memberstack-custom-message');
-      if (oldMessage) oldMessage.remove();
+      var emailInput = formEl.querySelector('input[type="email"]');
+      var email      = emailInput ? emailInput.value.trim() : '';
 
-      // Leere E-Mail abfangen
-      if (!emailValue) {
+      if (!email) {
         showToast('error', 'Bitte gib deine E-Mail-Adresse ein.');
         return;
       }
 
       try {
-        await $memberstackDOM.sendMagicLink({ email: emailValue });
-
-        // Memberstack-Toast unterdrücken + eigenen zeigen
+        await window.$memberstackDom.sendMagicLink({ email: email });
         showToast('success', 'Login-Code gesendet. Bitte prüfe deinen Posteingang.');
-
       } catch (error) {
-        console.log('[CVZ] Login error:', error.code, error.message);
-
-        // Memberstack-Toast unterdrücken
-        suppressMsToast();
-
-        if (error.code === 'MEMBER_NOT_FOUND' || (error.message && error.message.toLowerCase().includes('not found'))) {
-          showToast('error', 'Kein Account mit dieser E-Mail gefunden.');
-          showNotRegisteredMessage(emailValue, loginForm);
-        } else if (error.code === 'INVALID_EMAIL' || (error.message && error.message.toLowerCase().includes('invalid email'))) {
-          showToast('error', 'Ungültige E-Mail-Adresse. Bitte prüfe deine Eingabe.');
-        } else if (error.code === 'TOO_MANY_REQUESTS' || (error.message && error.message.toLowerCase().includes('too many'))) {
-          showToast('warning', 'Zu viele Anfragen. Bitte warte kurz und versuche es erneut.');
-        } else {
-          showToast('error', 'Ein Fehler ist aufgetreten. Bitte erneut versuchen.');
-        }
+        handleLoginError(error, email, formEl);
       }
-    }, true); // capture: true → läuft VOR Memberstacks Handler
-  });
+    }, true); // capture: true
+  }
 
-  // ── Helper: Kein Account gefunden ─────────────────────────────────────────
-  function showNotRegisteredMessage(email, formElement) {
-    var div = document.createElement('div');
-    div.className = 'memberstack-custom-message';
-    div.style.cssText = [
-      'margin-top:20px',
-      'padding:16px 20px',
-      'background:#1a2133',
-      'border:1px solid #2a3550',
-      'border-left:3px solid #f87171',
-      'border-radius:10px',
-      'text-align:center',
-      'font-family:inherit',
-    ].join(';');
+  // ── Init ─────────────────────────────────────────────────────────────────────
 
-    var registerHref = '/register?email=' + encodeURIComponent(email);
-    if (inviteToken) registerHref += '&invite=' + inviteToken;
-    if (plan)        registerHref += '&plan=' + plan + '&billing=' + billing;
+  function init() {
+    if (initialized) return;
+    initialized = true;
 
-    div.innerHTML =
-      '<p style="margin:0 0 12px;color:#e8edf5;font-size:14px;line-height:1.5">' +
-        'Diese E-Mail-Adresse ist noch nicht registriert.' +
-      '</p>' +
-      '<a href="' + registerHref + '" style="' +
-        'display:inline-block;' +
-        'padding:10px 24px;' +
-        'background:#4fd1c5;' +
-        'color:#0d1117;' +
-        'text-decoration:none;' +
-        'border-radius:8px;' +
-        'font-size:14px;' +
-        'font-weight:600;' +
-      '">Jetzt registrieren →</a>';
+    // Invite-Token als Cookie sichern damit er nach dem Login noch verfügbar ist
+    if (urlInvite) setCookie('cvz_invite', urlInvite);
 
-    formElement.parentElement.appendChild(div);
+    var formEl = document.querySelector('[data-ms-form="login"], [data-ms-form="signup"]');
+    if (!formEl) return;
+
+    prefillEmail(formEl);
+    enrichRegisterLinks();
+    initSubmitHandler(formEl);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
   }
 
 })();
