@@ -62,27 +62,36 @@
     };
   }
 
+  function getBtnText(btn) {
+    return btn.tagName === 'INPUT' ? btn.value : btn.textContent;
+  }
+
+  function setBtnText(btn, text) {
+    if (btn.tagName === 'INPUT') btn.value = text;
+    else btn.textContent = text;
+  }
+
   function setBtnState(btn, state) {
     switch (state) {
       case 'loading':
-        btn.dataset.originalText = btn.textContent;
-        btn.textContent          = 'Wird gespeichert\u2026';
+        btn.dataset.originalText = getBtnText(btn);
+        setBtnText(btn, 'Wird gespeichert…');
         btn.style.opacity        = '0.6';
         btn.style.pointerEvents  = 'none';
         break;
       case 'success':
-        btn.textContent         = 'Gespeichert \u2713';
+        setBtnText(btn, 'Gespeichert ✓');
         btn.style.opacity       = '1';
         btn.style.pointerEvents = 'none';
         setTimeout(function () { setBtnState(btn, 'idle'); }, 2000);
         break;
       case 'error':
-        btn.textContent         = 'Fehler \u2013 nochmal versuchen';
+        setBtnText(btn, 'Fehler – nochmal versuchen');
         btn.style.opacity       = '1';
         btn.style.pointerEvents = 'auto';
         break;
       case 'idle':
-        btn.textContent         = btn.dataset.originalText || 'Speichern';
+        setBtnText(btn, btn.dataset.originalText || 'Speichern');
         btn.style.opacity       = '1';
         btn.style.pointerEvents = 'auto';
         break;
