@@ -1,80 +1,174 @@
-(async () => {
-  const ms = window.$memberstackDom
-  const member = await ms.getCurrentMember()
-  const memberstackId = member?.data?.id
-  const stripeCustomerId = member?.data?.stripeCustomerId
+(function () {
+  'use strict';
 
-  const { data: tokenData } = await ms.getMemberJSON()
-  const token = tokenData?._token
+  // ── Konfiguration ────────────────────────────────────────────────────────────
 
-  // Billing-Daten laden – memberstackId im Body als Fallback
-  const res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/get-user-billing', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify({ memberstackId })
-  })
-  const { data: user } = await res.json()
-  if (user) {
-    setValue('billing-salutation', user.salutation)
-    setValue('billing-firstname', user.firstname)
-    setValue('billing-lastname', user.lastname)
-    setValue('billing-company', user.billing_company)
-    setValue('billing-vat', user.billing_vat_id)
-    setValue('billing-street', user.billing_street)
-    setValue('billing-zip', user.billing_zip)
-    setValue('billing-city', user.billing_city)
-    setValue('billing-country', user.billing_country)
+  var CONFIG = {
+    supabaseUrl: 'https://zpkifipmyeunorhtepzq.supabase.co',
+    fields: [
+      'billing-salutation',
+      'billing-firstname',
+      'billing-lastname',
+      'billing-company',
+      'billing-vat',
+      'billing-street',
+      'billing-zip',
+      'billing-city',
+      'billing-country',
+    ],
+  };
+
+  // ── Utilities ────────────────────────────────────────────────────────────────
+
+  function retry(fn, maxAttempts, intervalMs) {
+    var attempts = 0;
+    return new Promise(function (resolve, reject) {
+      (function attempt() {
+        if (fn()) return resolve();
+        if (++attempts >= maxAttempts) return reject(new Error('Max retry attempts reached'));
+        setTimeout(attempt, intervalMs);
+      })();
+    });
   }
 
-  function setValue(id, value) {
-    const el = document.getElementById(id)
-    if (el && value) el.value = value
+  function depsReady() {
+    return !!window.$memberstackDom;
   }
 
-  document.getElementById('billing-save').addEventListener('click', async (e) => {
-    e.preventDefault()
-    const btn = document.getElementById('billing-save')
-    const originalText = btn.textContent
-    btn.textContent = 'Wird gespeichert...'
-    btn.style.opacity = '0.6'
-    btn.style.pointerEvents = 'none'
+  // ── UI helpers ───────────────────────────────────────────────────────────────
 
-    const saveRes = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/update-billing', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        memberstackId,
-        stripeCustomerId,
-        salutation: document.getElementById('billing-salutation')?.value,
-        firstname:  document.getElementById('billing-firstname')?.value,
-        lastname:   document.getElementById('billing-lastname')?.value,
-        company:    document.getElementById('billing-company')?.value,
-        vat_id:     document.getElementById('billing-vat')?.value,
-        street:     document.getElementById('billing-street')?.value,
-        zip:        document.getElementById('billing-zip')?.value,
-        city:       document.getElementById('billing-city')?.value,
-        country:    document.getElementById('billing-country')?.value,
-      })
-    })
+  function getFieldValue(id) {
+    var el = document.getElementById(id);
+    return el ? el.value : '';
+  }
 
-    const data = await saveRes.json()
-    if (data.success) {
-      btn.textContent = 'Gespeichert ✓'
-      btn.style.opacity = '1'
-      setTimeout(() => {
-        btn.textContent = originalText
-        btn.style.pointerEvents = 'auto'
-      }, 2000)
-    } else {
-      btn.textContent = 'Fehler – nochmal versuchen'
-      btn.style.opacity = '1'
-      btn.style.pointerEvents = 'auto'
+  function setFieldValue(id, value) {
+    var el = document.getElementById(id);
+    if (el && value != null) el.value = value;
+  }
+
+  function getFormValues() {
+    return {
+      salutation: getFieldValue('billing-salutation'),
+      firstname:  getFieldValue('billing-firstname'),
+      lastname:   getFieldValue('billing-lastname'),
+      company:    getFieldValue('billing-company'),
+      vat_id:     getFieldValue('billing-vat'),
+      street:     getFieldValue('billing-street'),
+      zip:        getFieldValue('billing-zip'),
+      city:       getFieldValue('billing-city'),
+      country:    getFieldValue('billing-country'),
+    };
+  }
+
+  function setBtnState(btn, state) {
+    switch (state) {
+      case 'loading':
+        btn.dataset.originalText = btn.textContent;
+        btn.textContent          = 'Wird gespeichert\u2026';
+        btn.style.opacity        = '0.6';
+        btn.style.pointerEvents  = 'none';
+        break;
+      case 'success':
+        btn.textContent         = 'Gespeichert \u2713';
+        btn.style.opacity       = '1';
+        btn.style.pointerEvents = 'none';
+        setTimeout(function () { setBtnState(btn, 'idle'); }, 2000);
+        break;
+      case 'error':
+        btn.textContent         = 'Fehler \u2013 nochmal versuchen';
+        btn.style.opacity       = '1';
+        btn.style.pointerEvents = 'auto';
+        break;
+      case 'idle':
+        btn.textContent         = btn.dataset.originalText || 'Speichern';
+        btn.style.opacity       = '1';
+        btn.style.pointerEvents = 'auto';
+        break;
     }
-  })
-})()
+  }
+
+  // ── Data layer ───────────────────────────────────────────────────────────────
+
+  async function fetchBillingData(memberstackId, token) {
+    var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/get-user-billing', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body:    JSON.stringify({ memberstackId }),
+    });
+    var json = await res.json();
+    return json.data || null;
+  }
+
+  async function saveBillingData(payload, token) {
+    var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/update-billing', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body:    JSON.stringify(payload),
+    });
+    var data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Speichern fehlgeschlagen');
+    return data;
+  }
+
+  // ── App ──────────────────────────────────────────────────────────────────────
+
+  async function run() {
+    // Member + Token einmal laden
+    var member       = await window.$memberstackDom.getCurrentMember();
+    var memberstackId = member?.data?.id;
+    var stripeCustomerId = member?.data?.stripeCustomerId;
+    if (!memberstackId) throw new Error('No member ID');
+
+    var tokenData    = await window.$memberstackDom.getMemberJSON();
+    var token        = tokenData?.data?._token;
+    if (!token) throw new Error('No auth token');
+
+    // Billing-Daten laden und Formular befüllen
+    var user = await fetchBillingData(memberstackId, token);
+    if (user) {
+      setFieldValue('billing-salutation', user.salutation);
+      setFieldValue('billing-firstname',  user.firstname);
+      setFieldValue('billing-lastname',   user.lastname);
+      setFieldValue('billing-company',    user.billing_company);
+      setFieldValue('billing-vat',        user.billing_vat_id);
+      setFieldValue('billing-street',     user.billing_street);
+      setFieldValue('billing-zip',        user.billing_zip);
+      setFieldValue('billing-city',       user.billing_city);
+      setFieldValue('billing-country',    user.billing_country);
+    }
+
+    // Save-Button registrieren
+    var btn = document.getElementById('billing-save');
+    if (!btn) return;
+
+    btn.addEventListener('click', async function (e) {
+      e.preventDefault();
+      setBtnState(btn, 'loading');
+
+      try {
+        await saveBillingData(
+          Object.assign({ memberstackId, stripeCustomerId }, getFormValues()),
+          token
+        );
+        setBtnState(btn, 'success');
+      } catch (err) {
+        console.error('[CVZ] Billing save error:', err);
+        setBtnState(btn, 'error');
+      }
+    });
+  }
+
+  function init() {
+    retry(depsReady, 30, 300)
+      .then(function () { return run(); })
+      .catch(function (err) { console.error('[CVZ] Billing init failed:', err); });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+})();
