@@ -117,6 +117,7 @@
       body:    JSON.stringify(payload),
     });
     var data = await res.json();
+    console.log('[CVZ] update-billing response:', JSON.stringify(data, null, 2));
     if (!data.success) throw new Error(data.error || 'Speichern fehlgeschlagen');
     return data;
   }
