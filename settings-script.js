@@ -1,285 +1,295 @@
-<script>
-(function() {
-  console.log('🚀 Settings Page Script loaded');
+(function () {
+  'use strict';
 
-  const SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
+  // ── Konfiguration ────────────────────────────────────────────────────────────
 
-  async function getMemberData() {
-    try {
-      const memberstack = window.$memberstackDom;
-      if (!memberstack) throw new Error('Memberstack not loaded');
-      await new Promise(resolve => setTimeout(resolve, 500));
-      const member = await memberstack.getCurrentMember();
-      if (!member?.data) throw new Error('No member data');
-      return member.data;
-    } catch (error) {
-      console.error('❌ Member auth failed:', error);
-      throw error;
-    }
+  var CONFIG = {
+    supabaseUrl:     'https://zpkifipmyeunorhtepzq.supabase.co',
+    supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU',
+    teamPlans:       ['Starter', 'Pro', 'Professional', 'Enterprise'],
+  };
+
+  // ── Utilities ────────────────────────────────────────────────────────────────
+
+  function retry(fn, maxAttempts, intervalMs) {
+    var attempts = 0;
+    return new Promise(function (resolve, reject) {
+      (function attempt() {
+        if (fn()) return resolve();
+        if (++attempts >= maxAttempts) return reject(new Error('Max retry attempts reached'));
+        setTimeout(attempt, intervalMs);
+      })();
+    });
+  }
+
+  function depsReady() {
+    return !!window.$memberstackDom && document.querySelectorAll('form').length > 0;
+  }
+
+  // ── Data layer ───────────────────────────────────────────────────────────────
+
+  async function getCurrentMember() {
+    var result = await window.$memberstackDom.getCurrentMember();
+    if (!result?.data) throw new Error('No member data');
+    return {
+      id:    result.data.id,
+      email: result.data.auth?.email || result.data.email || '',
+    };
+  }
+
+  async function fetchUserBilling(memberstackId) {
+    var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/get-user-billing', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ memberstackId }),
+    });
+    var json = await res.json();
+    return json.data || null;
+  }
+
+  async function updateProfile(memberstackId, formData) {
+    var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/update-profile', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ memberstackId, ...formData }),
+    });
+    var data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Update fehlgeschlagen');
+    return data;
+  }
+
+  async function updateEmailPreferences(memberstackId, preferences) {
+    var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/update-email-preferences', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ memberstackId, ...preferences }),
+    });
+    var data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Speichern fehlgeschlagen');
+    return data;
+  }
+
+  // ── UI layer ─────────────────────────────────────────────────────────────────
+
+  function getBtnText(btn) {
+    return btn.tagName === 'INPUT' ? btn.value : btn.textContent;
   }
 
   function setBtnText(btn, text) {
-    if (btn.value !== undefined && btn.value !== '') btn.value = text;
+    if (btn.tagName === 'INPUT') btn.value = text;
     else btn.textContent = text;
   }
 
-  function getBtnText(btn) {
-    return (btn.value !== undefined && btn.value !== '') ? btn.value : btn.textContent;
-  }
-
-  // ── Team Section: über Edge Function laden ────────────────────────────────
-  async function initTeamSection() {
-    try {
-      const memberData = await getMemberData();
-      const memberstackId = memberData.id;
-
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/get-user-billing`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ memberstackId })
-      });
-
-      const { data: user } = await res.json();
-      if (!user) return;
-
-      const teamPlans = ['Starter', 'Pro', 'Professional', 'Enterprise'];
-      const isOwner   = !user.owner_user_id;
-      const hasTeam   = isOwner && teamPlans.indexOf(user.license_type) !== -1;
-
-      const teamBtn     = document.getElementById('open-team-modal');
-      const teamSection = document.getElementById('team-section');
-      if (teamBtn)     teamBtn.style.display     = hasTeam ? '' : 'none';
-      if (teamSection) teamSection.style.display = hasTeam ? '' : 'none';
-
-      console.log('✅ Team section:', hasTeam ? 'sichtbar' : 'ausgeblendet');
-    } catch (err) {
-      console.warn('⚠️ initTeamSection error:', err);
+  function setBtnState(btn, state, label) {
+    switch (state) {
+      case 'loading':
+        btn.dataset.originalText = getBtnText(btn);
+        btn.dataset.originalBg   = btn.style.backgroundColor;
+        btn.dataset.originalColor = btn.style.color;
+        setBtnText(btn, label || 'Wird gespeichert\u2026');
+        btn.disabled            = true;
+        btn.style.opacity       = '0.7';
+        break;
+      case 'success':
+        setBtnText(btn, label || '\u2713 Gespeichert!');
+        btn.style.backgroundColor = '#10b981';
+        btn.style.color           = '#ffffff';
+        break;
+      case 'error':
+        setBtnText(btn, label || '\u2717 Fehler');
+        btn.style.backgroundColor = '#ef4444';
+        btn.style.color           = '#ffffff';
+        break;
+      case 'idle':
+        setBtnText(btn, btn.dataset.originalText || getBtnText(btn));
+        btn.style.backgroundColor = btn.dataset.originalBg   || '';
+        btn.style.color           = btn.dataset.originalColor || '';
+        btn.style.opacity         = '';
+        btn.disabled              = false;
+        break;
     }
   }
 
-  // ── Profil Update: über Edge Function ────────────────────────────────────
-  async function initProfileForm() {
-    const form = document.querySelector('[data-profile-form]') ||
-                 document.querySelector('#profile-form') ||
-                 document.querySelector('form');
+  function resetBtnAfter(btn, ms) {
+    setTimeout(function () { setBtnState(btn, 'idle'); }, ms || 2000);
+  }
 
-    const submitBtn = document.getElementById('submit') ||
-                      form?.querySelector('[type="submit"]') ||
-                      form?.querySelector('button');
+  function showToast(type, message) {
+    if (typeof window.cvzShowToast === 'function') {
+      window.cvzShowToast(type, message);
+    } else {
+      console.warn('[CVZ] Toast not available:', type, message);
+    }
+  }
 
-    if (!form || !submitBtn) return;
+  // ── Profile form ─────────────────────────────────────────────────────────────
 
-    const emailInput = form.querySelector('input[type="email"]');
-    if (emailInput) {
-      try {
-        const memberData = await getMemberData();
-        const email = memberData.auth?.email || memberData.email || '';
-        if (email) {
-          emailInput.value = email;
-          emailInput.readOnly = true;
-          emailInput.style.backgroundColor = '#f3f4f6';
-          emailInput.style.cursor = 'not-allowed';
-          emailInput.style.opacity = '0.7';
-        }
-      } catch (error) {
-        console.error('❌ Email setup failed:', error);
-      }
+  async function initProfileForm(member) {
+    var form = document.querySelector('[data-profile-form]')
+            || document.querySelector('#profile-form')
+            || document.querySelector('form');
+    if (!form) return;
+
+    var submitBtn = document.getElementById('submit')
+                 || form.querySelector('[type="submit"]')
+                 || form.querySelector('button');
+    if (!submitBtn) return;
+
+    // E-Mail als read-only prefüllen
+    var emailInput = form.querySelector('input[type="email"]');
+    if (emailInput && member.email) {
+      emailInput.value           = member.email;
+      emailInput.readOnly        = true;
+      emailInput.style.cssText  += ';background-color:#f3f4f6;cursor:not-allowed;opacity:0.7';
     }
 
-    const handleProfileSubmit = async (e) => {
+    // Submit nur einmal registrieren – auf form, nicht zusätzlich auf button
+    form.addEventListener('submit', async function (e) {
       e.preventDefault();
       e.stopPropagation();
 
-      const originalText = getBtnText(submitBtn);
-      const originalBg   = submitBtn.style.backgroundColor;
-      setBtnText(submitBtn, 'Wird gespeichert...');
-      submitBtn.disabled = true;
+      // Felder per data-Attribut oder Fallback per Position
+      var salutationEl = form.querySelector('[name="salutation"], select');
+      var firstnameEl  = form.querySelector('[name="firstname"]') || form.querySelectorAll('input[type="text"], input:not([type])')[0];
+      var lastnameEl   = form.querySelector('[name="lastname"]')  || form.querySelectorAll('input[type="text"], input:not([type])')[1];
+
+      var formData = {
+        salutation: salutationEl?.value || '',
+        firstname:  firstnameEl?.value  || '',
+        lastname:   lastnameEl?.value   || '',
+      };
+
+      if (!formData.firstname || !formData.lastname) {
+        showToast('error', 'Vorname und Nachname sind erforderlich.');
+        return;
+      }
+
+      setBtnState(submitBtn, 'loading');
 
       try {
-        const memberData    = await getMemberData();
-        const memberstackId = memberData.id;
-        const inputs        = form.querySelectorAll('input[type="text"], input:not([type])');
-        const select        = form.querySelector('select');
-
-        const formData = {
-          salutation: select?.value || '',
-          firstname:  inputs[0]?.value || '',
-          lastname:   inputs[1]?.value || '',
-        };
-
-        if (!formData.firstname || !formData.lastname) throw new Error('Vorname und Nachname sind erforderlich');
-
-        const res = await fetch(`${SUPABASE_URL}/functions/v1/update-profile`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ memberstackId, ...formData })
-        });
-
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error || 'Update fehlgeschlagen');
-
-        setBtnText(submitBtn, '✓ Gespeichert!');
-        submitBtn.style.backgroundColor = '#10b981';
-        submitBtn.style.color = '#ffffff';
-        setTimeout(() => {
-          setBtnText(submitBtn, originalText);
-          submitBtn.style.backgroundColor = originalBg;
-          submitBtn.style.color = '';
-          submitBtn.disabled = false;
-        }, 2000);
-
-      } catch (error) {
-        console.error('❌ Profile update error:', error);
-        setBtnText(submitBtn, '✗ Fehler');
-        submitBtn.style.backgroundColor = '#ef4444';
-        submitBtn.style.color = '#ffffff';
-        alert('Fehler: ' + error.message);
-        setTimeout(() => {
-          setBtnText(submitBtn, originalText);
-          submitBtn.style.backgroundColor = originalBg;
-          submitBtn.style.color = '';
-          submitBtn.disabled = false;
-        }, 2000);
+        await updateProfile(member.id, formData);
+        setBtnState(submitBtn, 'success');
+        resetBtnAfter(submitBtn);
+      } catch (err) {
+        console.error('[CVZ] Profile update error:', err);
+        setBtnState(submitBtn, 'error');
+        showToast('error', 'Fehler beim Speichern: ' + err.message);
+        resetBtnAfter(submitBtn);
       }
-    };
-
-    form.addEventListener('submit', handleProfileSubmit);
-    submitBtn.addEventListener('click', handleProfileSubmit);
+    });
   }
 
-  // ── E-Mail Präferenzen: über Edge Function ────────────────────────────────
-  async function initPreferencesForm() {
-    const allForms = Array.from(document.querySelectorAll('form'));
-    const preferencesForm = allForms.find(form => {
-      return form.querySelectorAll('input[type="checkbox"]').length > 0
-          && form.querySelector('#save-preferences') !== null;
+  // ── Preferences form ─────────────────────────────────────────────────────────
+
+  async function initPreferencesForm(member) {
+    // Preferences-Formular: hat Checkboxes und einen #save-preferences Button
+    var form = Array.from(document.querySelectorAll('form')).find(function (f) {
+      return f.querySelectorAll('input[type="checkbox"]').length >= 4
+          && f.querySelector('#save-preferences') !== null;
     });
+    if (!form) return;
 
-    if (!preferencesForm) return;
-
-    preferencesForm.style.opacity = '0';
-    preferencesForm.style.transition = 'opacity 0.3s ease-in';
-
-    const allCheckboxes = Array.from(preferencesForm.querySelectorAll('input[type="checkbox"]'));
-    if (allCheckboxes.length < 4) {
-      preferencesForm.style.opacity = '1';
-      return;
-    }
-
-    const emailCheckboxes = {
-      analysis:  allCheckboxes[allCheckboxes.length - 4],
-      account:   allCheckboxes[allCheckboxes.length - 3],
-      updates:   allCheckboxes[allCheckboxes.length - 2],
-      marketing: allCheckboxes[allCheckboxes.length - 1]
+    var checkboxes = Array.from(form.querySelectorAll('input[type="checkbox"]'));
+    var map = {
+      analysis:  checkboxes[checkboxes.length - 4],
+      account:   checkboxes[checkboxes.length - 3],
+      updates:   checkboxes[checkboxes.length - 2],
+      marketing: checkboxes[checkboxes.length - 1],
     };
 
-    const preferencesBtn = preferencesForm.querySelector('#save-preferences') ||
-                           preferencesForm.querySelector('[type="submit"]');
-    if (!preferencesBtn) {
-      preferencesForm.style.opacity = '1';
-      return;
-    }
+    var saveBtn = form.querySelector('#save-preferences') || form.querySelector('[type="submit"]');
+    if (!saveBtn) return;
 
-    let isSaving = false;
+    form.style.opacity    = '0';
+    form.style.transition = 'opacity 0.3s ease-in';
 
-    // Präferenzen laden
+    // Gespeicherte Präferenzen laden
     try {
-      const memberData    = await getMemberData();
-      const memberstackId = memberData.id;
-
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/get-user-billing`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ memberstackId })
-      });
-      const { data: user } = await res.json();
-
+      var user = await fetchUserBilling(member.id);
       if (user?.email_preferences) {
-        emailCheckboxes.analysis.checked  = user.email_preferences.analysis_notifications ?? true;
-        emailCheckboxes.account.checked   = user.email_preferences.account_notifications  ?? true;
-        emailCheckboxes.updates.checked   = user.email_preferences.product_updates        ?? false;
-        emailCheckboxes.marketing.checked = user.email_preferences.marketing_tips         ?? false;
+        map.analysis.checked  = user.email_preferences.analysis_notifications ?? true;
+        map.account.checked   = user.email_preferences.account_notifications  ?? true;
+        map.updates.checked   = user.email_preferences.product_updates        ?? false;
+        map.marketing.checked = user.email_preferences.marketing_tips         ?? false;
       }
-    } catch (error) {
-      console.error('❌ Load preferences error:', error);
+    } catch (err) {
+      console.warn('[CVZ] Load preferences error:', err);
     }
 
-    preferencesForm.style.opacity = '1';
+    form.style.opacity = '1';
 
-    // Präferenzen speichern
+    var isSaving = false;
+
     async function savePreferences() {
       if (isSaving) return;
       isSaving = true;
-
-      const originalValue = getBtnText(preferencesBtn);
-      const originalBg    = preferencesBtn.style.backgroundColor;
-      setBtnText(preferencesBtn, 'Wird gespeichert...');
-      preferencesBtn.disabled = true;
+      setBtnState(saveBtn, 'loading');
 
       try {
-        const memberData    = await getMemberData();
-        const memberstackId = memberData.id;
-
-        const res = await fetch(`${SUPABASE_URL}/functions/v1/update-email-preferences`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            memberstackId,
-            product_updates: emailCheckboxes.updates.checked,
-            marketing_tips:  emailCheckboxes.marketing.checked,
-          })
+        await updateEmailPreferences(member.id, {
+          product_updates: map.updates.checked,
+          marketing_tips:  map.marketing.checked,
         });
-
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error || 'Speichern fehlgeschlagen');
-
-        setBtnText(preferencesBtn, '✓ Gespeichert!');
-        preferencesBtn.style.backgroundColor = '#10b981';
-        preferencesBtn.style.color = '#ffffff';
-        setTimeout(() => {
-          setBtnText(preferencesBtn, originalValue);
-          preferencesBtn.style.backgroundColor = originalBg;
-          preferencesBtn.style.color = '';
-          preferencesBtn.disabled = false;
-          isSaving = false;
-        }, 2000);
-
-      } catch (error) {
-        console.error('❌ Save error:', error);
-        setBtnText(preferencesBtn, '✗ Fehler');
-        preferencesBtn.style.backgroundColor = '#ef4444';
-        preferencesBtn.style.color = '#ffffff';
-        setTimeout(() => {
-          setBtnText(preferencesBtn, originalValue);
-          preferencesBtn.style.backgroundColor = originalBg;
-          preferencesBtn.style.color = '';
-          preferencesBtn.disabled = false;
-          isSaving = false;
-        }, 2000);
+        setBtnState(saveBtn, 'success');
+        resetBtnAfter(saveBtn, 2000);
+      } catch (err) {
+        console.error('[CVZ] Save preferences error:', err);
+        setBtnState(saveBtn, 'error');
+        showToast('error', 'Fehler beim Speichern: ' + err.message);
+        resetBtnAfter(saveBtn, 2000);
+      } finally {
+        isSaving = false;
       }
     }
 
-    preferencesBtn.addEventListener('click', async (e) => { e.preventDefault(); e.stopPropagation(); await savePreferences(); });
-    preferencesForm.addEventListener('submit', async (e) => { e.preventDefault(); e.stopPropagation(); await savePreferences(); });
+    saveBtn.addEventListener('click',  function (e) { e.preventDefault(); e.stopPropagation(); savePreferences(); });
+    form.addEventListener('submit',    function (e) { e.preventDefault(); e.stopPropagation(); savePreferences(); });
   }
 
-  // ── Init ─────────────────────────────────────────────────────────────────
-  function tryInit(attempts = 0) {
-    if (attempts > 15) return;
-    if (!window.$memberstackDom || document.querySelectorAll('form').length === 0) {
-      setTimeout(() => tryInit(attempts + 1), 500);
-      return;
+  // ── Team section ─────────────────────────────────────────────────────────────
+
+  async function initTeamSection(member) {
+    try {
+      var user     = await fetchUserBilling(member.id);
+      if (!user) return;
+
+      var isOwner  = !user.owner_user_id;
+      var hasTeam  = isOwner && CONFIG.teamPlans.indexOf(user.license_type) !== -1;
+
+      var teamBtn     = document.getElementById('open-team-modal');
+      var teamSection = document.getElementById('team-section');
+      if (teamBtn)     teamBtn.style.display     = hasTeam ? '' : 'none';
+      if (teamSection) teamSection.style.display = hasTeam ? '' : 'none';
+    } catch (err) {
+      console.warn('[CVZ] initTeamSection error:', err);
     }
-    initProfileForm();
-    initPreferencesForm();
-    initTeamSection();
+  }
+
+  // ── Init ─────────────────────────────────────────────────────────────────────
+
+  async function run() {
+    // Member einmal laden – ID an alle Sektionen weitergeben
+    var member = await getCurrentMember();
+
+    // Parallel initialisieren – fetchUserBilling wird intern je einmal pro Sektion aufgerufen
+    // Team und Preferences teilen sich denselben Billing-Call nicht, aber beide sind fire-and-forget
+    await Promise.all([
+      initProfileForm(member),
+      initPreferencesForm(member),
+      initTeamSection(member),
+    ]);
+  }
+
+  function init() {
+    retry(depsReady, 30, 300)
+      .then(function () { return run(); })
+      .catch(function (err) { console.error('[CVZ] Settings init failed:', err); });
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(tryInit, 1000));
+    document.addEventListener('DOMContentLoaded', init);
   } else {
-    setTimeout(tryInit, 1000);
+    init();
   }
+
 })();
-</script>
