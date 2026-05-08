@@ -620,13 +620,23 @@
 
   function renderAnalysesPage(container, page) {
     currentPage = page;
-    ensureHeaderExists(container);
+    var header = ensureHeaderExists(container);
+    // Header sichtbar machen
+    if (header) {
+      header.style.display     = '';
+      header.style.visibility  = '';
+      header.style.opacity     = '';
+    }
     var rows = container.querySelectorAll('.table-list');
     for (var i = 0; i < rows.length; i++) rows[i].remove();
     var items = analysesData.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
     for (var j = 0; j < items.length; j++) {
       var row = createAnalysisRow(items[j]);
       row.setAttribute('data-analysis-id', items[j].id);
+      // Explizit sichtbar machen – CSS setzt display:none initial
+      row.style.display     = '';
+      row.style.visibility  = '';
+      row.style.opacity     = '';
       container.appendChild(row);
     }
     updatePaginationInfo();
@@ -882,10 +892,6 @@
       var firstTableList = document.querySelector('.table-list');
       globalContainer    = firstTableList ? firstTableList.parentElement : null;
       if (globalContainer) {
-        // Platzhalter-Elemente und Header sofort verstecken
-        globalContainer.querySelectorAll('.table-list, .analysis-row-header').forEach(function (el) {
-          el.style.display = 'none';
-        });
         showLoadingSkeleton();
       }
 
