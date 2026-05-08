@@ -882,8 +882,8 @@
       var firstTableList = document.querySelector('.table-list');
       globalContainer    = firstTableList ? firstTableList.parentElement : null;
       if (globalContainer) {
-        // Platzhalter-Elemente sofort verstecken bevor Spinner gesetzt wird
-        globalContainer.querySelectorAll('.table-list').forEach(function (el) {
+        // Platzhalter-Elemente und Header sofort verstecken
+        globalContainer.querySelectorAll('.table-list, .analysis-row-header').forEach(function (el) {
           el.style.display = 'none';
         });
         showLoadingSkeleton();
