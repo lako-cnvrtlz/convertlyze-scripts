@@ -447,6 +447,14 @@
       '</div>';
   }
 
+  // Skeleton sofort beim Scriptstart setzen – vor waitForDependencies()
+  // Verhindert dass Webflow-Platzhalter sichtbar werden
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { showDashboardSkeletons(); });
+  } else {
+    showDashboardSkeletons();
+  }
+
   // ── UI: Sticky header fix ─────────────────────────────────────────────────────
 
   function fixStickyHeader() {
@@ -870,8 +878,6 @@
       var firstTableList = document.querySelector('.table-list');
       globalContainer    = firstTableList ? firstTableList.parentElement : null;
       if (globalContainer) showLoadingSkeleton();
-      // Skeleton auf Dashboard-Cards sofort zeigen
-      showDashboardSkeletons();
 
       var memberstackId = null;
       try {
