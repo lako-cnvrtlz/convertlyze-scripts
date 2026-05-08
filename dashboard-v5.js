@@ -342,36 +342,79 @@
     document.head.appendChild(s);
   }
 
+  var SHIMMER_BG = 'linear-gradient(90deg,#1a2133 25%,#252d3d 50%,#1a2133 75%)';
+  var SHIMMER_ANIM = 'cvz-shimmer 1.4s infinite';
+
+  function applySkeletonStyle(el, minWidth) {
+    el.dataset.cvzOrigColor      = el.style.color      || '';
+    el.dataset.cvzOrigBackground = el.style.background || '';
+    el.dataset.cvzOrigMinWidth   = el.style.minWidth   || '';
+    el.dataset.cvzOrigAnim       = el.style.animation  || '';
+    el.dataset.cvzOrigBgSize     = el.style.backgroundSize || '';
+    el.dataset.cvzOrigRadius     = el.style.borderRadius   || '';
+    el.dataset.cvzSkeleton       = '1';
+
+    el.style.color           = 'transparent';
+    el.style.background      = SHIMMER_BG;
+    el.style.backgroundSize  = '400px 100%';
+    el.style.animation       = SHIMMER_ANIM;
+    el.style.borderRadius    = '6px';
+    el.style.minWidth        = minWidth || '60px';
+    el.style.display         = el.style.display || 'inline-block';
+  }
+
+  function removeSkeletonStyle(el) {
+    if (!el.dataset.cvzSkeleton) return;
+    el.style.color           = el.dataset.cvzOrigColor;
+    el.style.background      = el.dataset.cvzOrigBackground;
+    el.style.backgroundSize  = el.dataset.cvzOrigBgSize;
+    el.style.animation       = el.dataset.cvzOrigAnim;
+    el.style.borderRadius    = el.dataset.cvzOrigRadius;
+    el.style.minWidth        = el.dataset.cvzOrigMinWidth;
+    delete el.dataset.cvzSkeleton;
+  }
+
   function showDashboardSkeletons() {
     injectSkeletonStyle();
     document.querySelectorAll('[data-dashboard]').forEach(function (el) {
       var key = el.getAttribute('data-dashboard');
       if (key === 'progress-bar') {
-        el.classList.add('cvz-skeleton-bar');
+        // Progress bar: shimmer op de track zelf
+        el.style.background     = SHIMMER_BG;
+        el.style.backgroundSize = '400px 100%';
+        el.style.animation      = SHIMMER_ANIM;
+        el.style.width          = '30%';
+        el.dataset.cvzSkeleton  = '1';
       } else {
-        el.classList.add('cvz-skeleton');
-        // Mindestbreite je nach Feldtyp
-        if (key === 'credits_used_current_period') el.style.minWidth = '140px';
-        else if (key === 'analyses-percent')       el.style.minWidth = '120px';
-        else if (key === 'credits-remaining')      el.style.minWidth = '40px';
-        else if (key === 'credits-renewal')        el.style.minWidth = '80px';
-        else if (key === 'plan-name')              el.style.minWidth = '80px';
-        else if (key === 'plan-description')       el.style.minWidth = '120px';
-        else if (key === 'ppu-credits')            el.style.minWidth = '40px';
-        else if (key === 'ppu-label')              el.style.minWidth = '100px';
+        var widths = {
+          'credits_used_current_period': '140px',
+          'analyses-percent':            '120px',
+          'credits-remaining':           '40px',
+          'credits-renewal':             '80px',
+          'plan-name':                   '80px',
+          'plan-description':            '120px',
+          'ppu-credits':                 '40px',
+          'ppu-label':                   '100px',
+        };
+        applySkeletonStyle(el, widths[key] || '80px');
       }
     });
-    // User-Felder ebenfalls
     document.querySelectorAll('[data-user="name"], [data-user="email"]').forEach(function (el) {
-      el.classList.add('cvz-skeleton');
-      el.style.minWidth = el.getAttribute('data-user') === 'name' ? '100px' : '140px';
+      applySkeletonStyle(el, el.getAttribute('data-user') === 'name' ? '100px' : '140px');
     });
   }
 
   function hideDashboardSkeletons() {
-    document.querySelectorAll('.cvz-skeleton, .cvz-skeleton-bar').forEach(function (el) {
-      el.classList.remove('cvz-skeleton', 'cvz-skeleton-bar');
-      el.style.minWidth = '';
+    document.querySelectorAll('[data-cvz-skeleton="1"]').forEach(function (el) {
+      if (el.getAttribute('data-dashboard') === 'progress-bar') {
+        el.style.background     = '';
+        el.style.backgroundSize = '';
+        el.style.animation      = '';
+        el.style.width          = '';
+        delete el.dataset.cvzSkeleton;
+      } else {
+        removeSkeletonStyle(el);
+      }
     });
   }
 
