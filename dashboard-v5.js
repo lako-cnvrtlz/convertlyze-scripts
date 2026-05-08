@@ -168,6 +168,7 @@
   // ── UI: Dashboard render ──────────────────────────────────────────────────────
 
   function renderUserDashboard(user) {
+    hideDashboardSkeletons();
     var billingUser    = user._billingUser || user;
     var isTeamMember   = !!user.owner_user_id;
     var reservedCredits = Math.round(Number(billingUser.reserved_credits || 0));
@@ -324,6 +325,54 @@
         '<path d="M 74 31 A 30 30 0 1 0 74 69" stroke="#7ee8e0" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.35"/>' +
       '</g>' +
     '</svg>';
+
+  // Skeleton-Shimmer für data-dashboard Felder
+  var SKELETON_STYLE_ID = 'cvz-skeleton-style';
+
+  function injectSkeletonStyle() {
+    if (document.getElementById(SKELETON_STYLE_ID)) return;
+    var s = document.createElement('style');
+    s.id = SKELETON_STYLE_ID;
+    s.textContent =
+      '@keyframes cvz-shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}' +
+      '.cvz-skeleton{color:transparent!important;background:linear-gradient(90deg,#1a2133 25%,#252d3d 50%,#1a2133 75%)!important;background-size:400px 100%!important;animation:cvz-shimmer 1.4s infinite!important;border-radius:6px!important;min-width:60px!important;min-height:1em!important;display:inline-block!important;pointer-events:none!important;}' +
+      '.cvz-skeleton *{visibility:hidden!important;}' +
+      '.cvz-skeleton-bar{background:linear-gradient(90deg,#1a2133 25%,#252d3d 50%,#1a2133 75%)!important;background-size:400px 100%!important;animation:cvz-shimmer 1.4s infinite!important;border-radius:99px!important;width:0%!important;}';
+    document.head.appendChild(s);
+  }
+
+  function showDashboardSkeletons() {
+    injectSkeletonStyle();
+    document.querySelectorAll('[data-dashboard]').forEach(function (el) {
+      var key = el.getAttribute('data-dashboard');
+      if (key === 'progress-bar') {
+        el.classList.add('cvz-skeleton-bar');
+      } else {
+        el.classList.add('cvz-skeleton');
+        // Mindestbreite je nach Feldtyp
+        if (key === 'credits_used_current_period') el.style.minWidth = '140px';
+        else if (key === 'analyses-percent')       el.style.minWidth = '120px';
+        else if (key === 'credits-remaining')      el.style.minWidth = '40px';
+        else if (key === 'credits-renewal')        el.style.minWidth = '80px';
+        else if (key === 'plan-name')              el.style.minWidth = '80px';
+        else if (key === 'plan-description')       el.style.minWidth = '120px';
+        else if (key === 'ppu-credits')            el.style.minWidth = '40px';
+        else if (key === 'ppu-label')              el.style.minWidth = '100px';
+      }
+    });
+    // User-Felder ebenfalls
+    document.querySelectorAll('[data-user="name"], [data-user="email"]').forEach(function (el) {
+      el.classList.add('cvz-skeleton');
+      el.style.minWidth = el.getAttribute('data-user') === 'name' ? '100px' : '140px';
+    });
+  }
+
+  function hideDashboardSkeletons() {
+    document.querySelectorAll('.cvz-skeleton, .cvz-skeleton-bar').forEach(function (el) {
+      el.classList.remove('cvz-skeleton', 'cvz-skeleton-bar');
+      el.style.minWidth = '';
+    });
+  }
 
   function showLoadingSkeleton() {
     if (!globalContainer) return;
@@ -777,6 +826,8 @@
       var firstTableList = document.querySelector('.table-list');
       globalContainer    = firstTableList ? firstTableList.parentElement : null;
       if (globalContainer) showLoadingSkeleton();
+      // Skeleton auf Dashboard-Cards sofort zeigen
+      showDashboardSkeletons();
 
       var memberstackId = null;
       try {
