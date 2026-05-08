@@ -169,6 +169,7 @@
 
   function renderUserDashboard(user) {
     hideDashboardSkeletons();
+    console.log('[CVZ] renderUserDashboard called – skeletons hidden');
     var billingUser    = user._billingUser || user;
     var isTeamMember   = !!user.owner_user_id;
     var reservedCredits = Math.round(Number(billingUser.reserved_credits || 0));
@@ -828,6 +829,7 @@
       if (globalContainer) showLoadingSkeleton();
       // Skeleton auf Dashboard-Cards sofort zeigen
       showDashboardSkeletons();
+      console.log('[CVZ] showDashboardSkeletons called – elements:', document.querySelectorAll('[data-dashboard]').length);
 
       var memberstackId = null;
       try {
