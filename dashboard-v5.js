@@ -295,12 +295,42 @@
     if (skeleton) skeleton.remove();
   }
 
+  // SVG-Spinner: Convertlyze C-Logo mit Rotation und Pulse-Glow
+  var CVZ_SPINNER_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="52" height="52" viewBox="0 0 100 100" fill="none">' +
+      '<defs>' +
+        '<style>' +
+          '@keyframes cvz-spin { 0%{transform-origin:50% 50%;transform:rotate(0deg)} 100%{transform-origin:50% 50%;transform:rotate(360deg)} }' +
+          '@keyframes cvz-pulse { 0%,100%{opacity:1} 50%{opacity:0.55} }' +
+          '.cvz-c-group { animation: cvz-spin 1.4s cubic-bezier(0.4,0,0.6,1) infinite; }' +
+          '.cvz-c-glow  { animation: cvz-pulse 1.4s ease-in-out infinite; }' +
+        '</style>' +
+        '<filter id="cvz-glow" x="-30%" y="-30%" width="160%" height="160%">' +
+          '<feGaussianBlur stdDeviation="3.5" result="blur"/>' +
+          '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>' +
+        '</filter>' +
+      '</defs>' +
+      // Outer glow ring
+      '<circle class="cvz-c-glow" cx="50" cy="50" r="44" stroke="#4fd1c5" stroke-width="1.5" stroke-dasharray="180 96" stroke-linecap="round" opacity="0.25"/>' +
+      // C arc – outer stroke
+      '<g class="cvz-c-group" filter="url(#cvz-glow)">' +
+        // Main C arc path: open circle from ~40° to ~320° (clockwise gap on right)
+        '<path d="M 78 28 A 36 36 0 1 0 78 72" stroke="#4fd1c5" stroke-width="10" stroke-linecap="butt" fill="none" opacity="0.9"/>' +
+        // Crystal spike top-right
+        '<polygon points="76,20 85,28 76,28" fill="#4fd1c5" opacity="0.95"/>' +
+        // Crystal spike bottom-right
+        '<polygon points="76,80 85,72 76,72" fill="#38b2a8" opacity="0.85"/>' +
+        // Inner highlight arc (depth effect)
+        '<path d="M 74 31 A 30 30 0 1 0 74 69" stroke="#7ee8e0" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.35"/>' +
+      '</g>' +
+    '</svg>';
+
   function showLoadingSkeleton() {
     if (!globalContainer) return;
     globalContainer.innerHTML =
-      '<div class="loading-skeleton">' +
-        '<div class="spinner"></div>' +
-        '<p style="margin-top:16px;color:#7a8ba8;">Lade Dashboard...</p>' +
+      '<div class="loading-skeleton" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;">' +
+        CVZ_SPINNER_SVG +
+        '<p style="margin-top:20px;color:#7a8ba8;font-size:14px;">Lade Dashboard...</p>' +
       '</div>';
   }
 
@@ -489,15 +519,63 @@
     var rows = container.querySelectorAll('.table-list');
     for (var i = 0; i < rows.length; i++) rows[i].remove();
     var items = analysesData.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-    for (var j = 0; j < items.length; j++) container.appendChild(createAnalysisRow(items[j]));
+    for (var j = 0; j < items.length; j++) {
+      var row = createAnalysisRow(items[j]);
+      row.setAttribute('data-analysis-id', items[j].id);
+      container.appendChild(row);
+    }
     updatePaginationInfo();
+  }
+
+  // Dots-Micro-Loader (Option D) für Analyse-Listen-Updates
+  var CVZ_DOTS_LOADER =
+    '<div id="cvz-dots-loader" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;grid-column:1/-1;">' +
+      '<svg xmlns="http://www.w3.org/2000/svg" width="52" height="16" viewBox="0 0 80 20" fill="none">' +
+        '<defs><style>' +
+          '@keyframes cvz-dot{0%,80%,100%{transform:scale(0.6);opacity:0.3}40%{transform:scale(1);opacity:1}}' +
+          '.cvzd1{animation:cvz-dot 1.2s ease-in-out 0s infinite;transform-origin:10px 10px;}' +
+          '.cvzd2{animation:cvz-dot 1.2s ease-in-out 0.2s infinite;transform-origin:40px 10px;}' +
+          '.cvzd3{animation:cvz-dot 1.2s ease-in-out 0.4s infinite;transform-origin:70px 10px;}' +
+        '</style>' +
+        '<filter id="cvz-df"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>' +
+        '</defs>' +
+        '<g filter="url(#cvz-df)">' +
+          '<circle class="cvzd1" cx="10" cy="10" r="7" fill="#4fd1c5"/>' +
+          '<circle class="cvzd2" cx="40" cy="10" r="7" fill="#4fd1c5"/>' +
+          '<circle class="cvzd3" cx="70" cy="10" r="7" fill="#4fd1c5"/>' +
+        '</g>' +
+      '</svg>' +
+    '</div>';
+
+  function showDotsLoader() {
+    if (!globalContainer) return;
+    var existing = document.getElementById('cvz-dots-loader');
+    if (existing) return;
+    var rows = globalContainer.querySelectorAll('.table-list');
+    for (var i = 0; i < rows.length; i++) rows[i].style.opacity = '0.4';
+    globalContainer.insertAdjacentHTML('afterbegin', CVZ_DOTS_LOADER);
+  }
+
+  function hideDotsLoader() {
+    var loader = document.getElementById('cvz-dots-loader');
+    if (loader) loader.remove();
+    if (!globalContainer) return;
+    var rows = globalContainer.querySelectorAll('.table-list');
+    for (var i = 0; i < rows.length; i++) rows[i].style.opacity = '';
   }
 
   async function loadAndRenderAnalyses(keepPage) {
     if (!globalContainer || !globalMemberstackId) { showEmptyState(); return; }
+
+    // Beim Realtime-Update: Dots-Loader zeigen statt alles zu ersetzen
+    if (keepPage) showDotsLoader();
+
     var data   = await fetchAnalysesForMember(globalMemberstackId);
     analysesData = data || [];
     totalPages   = Math.max(1, Math.ceil(analysesData.length / PAGE_SIZE));
+
+    hideDotsLoader();
+
     if (!analysesData.length) { showEmptyState(); return; }
     removeLoadingSkeleton();
     currentPage = keepPage ? Math.min(currentPage, totalPages) : 1;
@@ -581,7 +659,94 @@
     }
   }
 
-  // ── Realtime ──────────────────────────────────────────────────────────────────
+  // ── Realtime + Polling ───────────────────────────────────────────────────────
+  //
+  // Zwei parallele Mechanismen:
+  // 1. Supabase Realtime  – sofortige Updates wenn Tab aktiv und WS-Verbindung steht
+  // 2. Polling            – Fallback wenn User von anderer Seite ins Dashboard kommt
+  //    Polling läuft nur solange processing-Analysen in der Liste sind,
+  //    stoppt automatisch wenn alle abgeschlossen sind.
+
+  var pollingTimer    = null;
+  var POLL_INTERVAL_MS = 10000; // 10 Sekunden
+
+  function hasProcessingAnalyses() {
+    return analysesData.some(function (a) { return a.status === 'processing'; });
+  }
+
+  // Stilles Update: Daten im Hintergrund laden und nur geänderte Zeilen patchen
+  // – kein Loader, kein Flackern, kein DOM-Rebuild für unveränderte Rows
+  async function silentRefresh() {
+    if (!globalMemberstackId) return;
+    var freshData = await fetchAnalysesForMember(globalMemberstackId);
+    if (!freshData) return;
+
+    var changed = false;
+    freshData.forEach(function (fresh) {
+      var idx = analysesData.findIndex(function (a) { return a.id === fresh.id; });
+      if (idx === -1) {
+        // Neue Analyse aufgetaucht
+        analysesData.unshift(fresh);
+        changed = true;
+        return;
+      }
+      if (analysesData[idx].status !== fresh.status) {
+        // Status hat sich geändert – nur diese Zeile im DOM aktualisieren
+        analysesData[idx] = fresh;
+        changed = true;
+        var row = globalContainer
+          ? globalContainer.querySelector('[data-analysis-id="' + fresh.id + '"]')
+          : null;
+        if (row) {
+          // Status-Badge direkt patchen ohne ganzen Row-Rebuild
+          var badge = row.querySelector('.status-badge');
+          if (badge) {
+            var newText  = fresh.status === 'completed' ? 'Abgeschlossen'
+                         : fresh.status === 'processing' ? 'In Bearbeitung' : 'Fehler';
+            var newClass = fresh.status === 'completed' ? 'status-badge status-completed'
+                         : fresh.status === 'processing' ? 'status-badge status-processing'
+                         : 'status-badge status-error';
+            badge.textContent = newText;
+            badge.className   = newClass;
+          }
+          // Wenn abgeschlossen: Action-Buttons aktivieren und Row neu bauen
+          if (fresh.status === 'completed' || fresh.status === 'error') {
+            var newRow = createAnalysisRow(fresh);
+            newRow.setAttribute('data-analysis-id', fresh.id);
+            row.parentNode.replaceChild(newRow, row);
+          }
+        }
+      }
+    });
+
+    // Totals aktualisieren falls sich was geändert hat
+    if (changed) {
+      totalPages = Math.max(1, Math.ceil(analysesData.length / PAGE_SIZE));
+      updatePaginationInfo();
+    }
+
+    // Polling stoppen wenn keine processing-Analysen mehr da
+    if (!hasProcessingAnalyses()) stopPolling();
+  }
+
+  function startPolling() {
+    stopPolling();
+    if (!hasProcessingAnalyses()) return;
+    pollingTimer = setInterval(function () { silentRefresh(); }, POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    if (pollingTimer) { clearInterval(pollingTimer); pollingTimer = null; }
+  }
+
+  // Polling pausieren wenn Tab inaktiv, fortsetzen wenn Tab wieder aktiv
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      stopPolling();
+    } else if (hasProcessingAnalyses()) {
+      silentRefresh().then(function () { startPolling(); });
+    }
+  });
 
   function subscribeToAnalysisChanges(userId) {
     try {
@@ -698,6 +863,8 @@
         initPagination(globalContainer);
         await loadAndRenderAnalyses(false);
         subscribeToAnalysisChanges(currentUser.id);
+        // Polling starten falls processing-Analysen vorhanden
+        startPolling();
       }
 
       document.body.classList.add('content-loaded');
