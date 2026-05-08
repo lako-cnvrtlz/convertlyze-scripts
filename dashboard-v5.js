@@ -169,7 +169,6 @@
 
   function renderUserDashboard(user) {
     hideDashboardSkeletons();
-    console.log('[CVZ] renderUserDashboard called – skeletons hidden');
     var billingUser    = user._billingUser || user;
     var isTeamMember   = !!user.owner_user_id;
     var reservedCredits = Math.round(Number(billingUser.reserved_credits || 0));
@@ -405,7 +404,8 @@
   }
 
   function hideDashboardSkeletons() {
-    document.querySelectorAll('[data-cvz-skeleton="1"]').forEach(function (el) {
+    document.querySelectorAll('[data-dashboard], [data-user]').forEach(function (el) {
+      if (!el.dataset.cvzSkeleton) return;
       if (el.getAttribute('data-dashboard') === 'progress-bar') {
         el.style.background     = '';
         el.style.backgroundSize = '';
@@ -872,7 +872,6 @@
       if (globalContainer) showLoadingSkeleton();
       // Skeleton auf Dashboard-Cards sofort zeigen
       showDashboardSkeletons();
-      console.log('[CVZ] showDashboardSkeletons called – elements:', document.querySelectorAll('[data-dashboard]').length);
 
       var memberstackId = null;
       try {
