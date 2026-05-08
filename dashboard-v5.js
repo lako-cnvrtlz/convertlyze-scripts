@@ -351,8 +351,10 @@
     el.dataset.cvzOrigAnim       = el.style.animation  || '';
     el.dataset.cvzOrigBgSize     = el.style.backgroundSize || '';
     el.dataset.cvzOrigRadius     = el.style.borderRadius   || '';
+    el.dataset.cvzOrigOpacity    = el.style.opacity    || '';
     el.dataset.cvzSkeleton       = '1';
 
+    el.style.opacity         = '1';  // sichtbar machen (CSS setzt es auf 0)
     el.style.color           = 'transparent';
     el.style.background      = SHIMMER_BG;
     el.style.backgroundSize  = '400px 100%';
@@ -364,6 +366,7 @@
 
   function removeSkeletonStyle(el) {
     if (!el.dataset.cvzSkeleton) return;
+    el.style.opacity         = el.dataset.cvzOrigOpacity || '';
     el.style.color           = el.dataset.cvzOrigColor;
     el.style.background      = el.dataset.cvzOrigBackground;
     el.style.backgroundSize  = el.dataset.cvzOrigBgSize;
@@ -379,6 +382,7 @@
       var key = el.getAttribute('data-dashboard');
       if (key === 'progress-bar') {
         // Progress bar: shimmer op de track zelf
+        el.style.opacity        = '1';
         el.style.background     = SHIMMER_BG;
         el.style.backgroundSize = '400px 100%';
         el.style.animation      = SHIMMER_ANIM;
