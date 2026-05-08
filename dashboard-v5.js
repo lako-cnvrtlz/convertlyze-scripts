@@ -881,7 +881,13 @@
 
       var firstTableList = document.querySelector('.table-list');
       globalContainer    = firstTableList ? firstTableList.parentElement : null;
-      if (globalContainer) showLoadingSkeleton();
+      if (globalContainer) {
+        // Platzhalter-Elemente sofort verstecken bevor Spinner gesetzt wird
+        globalContainer.querySelectorAll('.table-list').forEach(function (el) {
+          el.style.display = 'none';
+        });
+        showLoadingSkeleton();
+      }
 
       var memberstackId = null;
       try {
