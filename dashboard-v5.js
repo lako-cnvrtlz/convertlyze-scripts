@@ -1,5 +1,3 @@
-'use strict';
-
 // ── Sofort verstecken wenn Plan im sessionStorage ─────────────────────────────
 (function () {
   if (sessionStorage.getItem('selected_plan')) {
@@ -9,6 +7,7 @@
 
 // ==================== DASHBOARD LOGIK ====================
 (function () {
+  'use strict';
 
   // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -182,7 +181,7 @@
       var result = await window.supabase.rpc('reset_user_credits_if_due', { p_user_id: bu.id });
       if (result.error) { console.warn('[CVZ] reset_user_credits_if_due:', result.error); return false; }
       var row = Array.isArray(result.data) ? result.data[0] : result.data;
-      return !!row?.did_reset;
+      return !!(row && row.did_reset);
     } catch (e) {
       console.warn('[CVZ] reset_user_credits_if_due exception:', e);
       return false;
@@ -857,7 +856,7 @@
 
   function subscribeToAnalysisChanges(userId) {
     try {
-      if (!window.supabase?.channel) return;
+      if (!window.supabase || !window.supabase.channel) return;
       if (state.realtimeChannel) window.supabase.removeChannel(state.realtimeChannel);
       state.realtimeChannel = window.supabase
         .channel('analyses-realtime-' + userId)
@@ -888,7 +887,7 @@
       var memberstackId = null;
       try {
         var member    = await window.$memberstackDom.getCurrentMember();
-        memberstackId = member?.data?.id || null;
+        memberstackId = (member && member.data && member.data.id) ? member.data.id : null;
       } catch (e) {
         console.error('[CVZ] Memberstack Fehler:', e);
       }
@@ -904,7 +903,7 @@
       // Checkout aus sessionStorage
       var savedPlan       = sessionStorage.getItem('selected_plan');
       var savedBilling    = sessionStorage.getItem('selected_billing') || 'monthly';
-      var checkoutPriceId = CONFIG.CHECKOUT_PRICE_IDS[savedPlan]?.[savedBilling];
+      var checkoutPriceId = (savedPlan && CONFIG.CHECKOUT_PRICE_IDS[savedPlan]) ? CONFIG.CHECKOUT_PRICE_IDS[savedPlan][savedBilling] : null;
       sessionStorage.removeItem('selected_plan');
       sessionStorage.removeItem('selected_billing');
 
@@ -983,6 +982,7 @@
 
 // ==================== PAY-PER-USE BUTTON ====================
 (function () {
+  'use strict';
 
   var PAY_PER_USE_PRICE_ID = 'prc_pay-per-use-14750y0n';
 
