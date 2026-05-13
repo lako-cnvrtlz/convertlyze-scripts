@@ -295,6 +295,9 @@
     var hasTeam = CONFIG.TEAM_PLANS.indexOf(bu.license_type) !== -1;
     showEl(document.getElementById('open-team-modal'), hasTeam);
     showEl(document.getElementById('team-section'),    hasTeam);
+
+    // Pre-Shimmer deaktivieren – echte Werte sind jetzt gesetzt
+    document.body.classList.add('content-loaded');
   }
 
   // ── UI: Skeleton ──────────────────────────────────────────────────────────────
