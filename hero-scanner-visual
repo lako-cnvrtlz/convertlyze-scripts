@@ -1,0 +1,318 @@
+(function () {
+  'use strict';
+
+  // ── Config ──────────────────────────────────────────────────────────────
+  var MOUNT_ID = 'cvly-hero-visual';
+
+  // ── Inject styles ────────────────────────────────────────────────────────
+  var css = `
+    #${MOUNT_ID} {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+    }
+
+    .cvly-wf-outer {
+      position: relative;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+    }
+
+    .cvly-wf-device {
+      width: 220px;
+      background: #ffffff;
+      border-radius: 12px;
+      border: 1.5px solid rgba(15,158,148,0.40);
+      box-shadow:
+        0 0 0 1px rgba(15,158,148,0.10),
+        0 0 32px rgba(15,158,148,0.18),
+        0 8px 32px rgba(0,0,0,0.10);
+      overflow: hidden;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .cvly-wf-topbar {
+      height: 20px;
+      background: #f0faf9;
+      border-bottom: 1px solid rgba(15,158,148,0.15);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0 9px;
+    }
+
+    .cvly-wf-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .cvly-wf-urlbar {
+      flex: 1;
+      height: 8px;
+      background: rgba(15,158,148,0.15);
+      border-radius: 3px;
+      margin: 0 5px;
+    }
+
+    .cvly-wf-body {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .cvly-wf-section {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-bottom: 4px;
+    }
+
+    .cvly-wf-block {
+      height: 5px;
+      border-radius: 2px;
+      background: #e8f0ef;
+    }
+
+    .cvly-wf-block.h    { height: 9px; }
+    .cvly-wf-block.btn  { height: 12px; width: 50px; border-radius: 4px; }
+    .cvly-wf-block.red   { background: rgba(232,93,74,0.28); }
+    .cvly-wf-block.amber { background: rgba(227,160,8,0.28); }
+    .cvly-wf-block.green { background: rgba(15,158,148,0.28); }
+    .cvly-wf-block.btn   { background: rgba(15,158,148,0.30); }
+
+    .cvly-wf-divider {
+      height: 1px;
+      background: rgba(15,158,148,0.10);
+      margin: 4px 0;
+    }
+
+    /* Scan beam */
+    .cvly-wf-beam {
+      position: absolute;
+      left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(15,158,148,0.15) 15%,
+        rgba(15,158,148,0.75) 50%,
+        rgba(15,158,148,0.15) 85%,
+        transparent 100%
+      );
+      box-shadow: 0 0 10px rgba(15,158,148,0.50);
+      pointer-events: none;
+    }
+
+    /* Section highlight overlays */
+    .cvly-wf-highlight {
+      position: absolute;
+      left: 10px; right: 10px;
+      border-radius: 4px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+
+    /* Finding labels */
+    .cvly-wf-finding {
+      position: absolute;
+      right: -148px;
+      background: #ffffff;
+      border-radius: 8px;
+      padding: 5px 10px;
+      font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.10);
+      border-left: 2.5px solid;
+      opacity: 0;
+      transform: translateX(-6px);
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      pointer-events: none;
+    }
+
+    .cvly-wf-finding.f-critical { border-color: #e85d4a; color: #e85d4a; }
+    .cvly-wf-finding.f-warning  { border-color: #e3a008; color: #c47f00; }
+    .cvly-wf-finding.f-good     { border-color: #0f9e94; color: #0f9e94; }
+
+    .cvly-wf-finding.visible {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .cvly-wf-device { width: 180px; }
+      .cvly-wf-finding { right: -130px; font-size: 10px; }
+    }
+
+    @media (max-width: 400px) {
+      .cvly-wf-finding { display: none; }
+    }
+  `;
+
+  var styleEl = document.createElement('style');
+  styleEl.textContent = css;
+  document.head.appendChild(styleEl);
+
+  // ── Build HTML ────────────────────────────────────────────────────────────
+  var mount = document.getElementById(MOUNT_ID);
+  if (!mount) {
+    console.warn('[Convertlyze Hero Visual] Mount element #' + MOUNT_ID + ' not found.');
+    return;
+  }
+
+  mount.innerHTML = `
+    <div class="cvly-wf-outer">
+      <div class="cvly-wf-device" id="cvly-device">
+
+        <div class="cvly-wf-topbar">
+          <div class="cvly-wf-dot" style="background:#ff5f57"></div>
+          <div class="cvly-wf-dot" style="background:#ffbd2e"></div>
+          <div class="cvly-wf-dot" style="background:#28c840"></div>
+          <div class="cvly-wf-urlbar"></div>
+        </div>
+
+        <div class="cvly-wf-body">
+          <div class="cvly-wf-section" id="cvly-s1">
+            <div class="cvly-wf-block h red" style="width:85%"></div>
+            <div class="cvly-wf-block red" style="width:62%"></div>
+            <div class="cvly-wf-block btn"></div>
+          </div>
+          <div class="cvly-wf-divider"></div>
+          <div class="cvly-wf-section" id="cvly-s2">
+            <div class="cvly-wf-block amber" style="width:90%"></div>
+            <div class="cvly-wf-block amber" style="width:72%"></div>
+            <div class="cvly-wf-block amber" style="width:55%"></div>
+          </div>
+          <div class="cvly-wf-divider"></div>
+          <div class="cvly-wf-section" id="cvly-s3">
+            <div class="cvly-wf-block green" style="width:80%"></div>
+            <div class="cvly-wf-block green" style="width:60%"></div>
+          </div>
+        </div>
+
+        <!-- Scan beam (position controlled by JS) -->
+        <div class="cvly-wf-beam" id="cvly-beam"></div>
+
+        <!-- Section highlight overlays -->
+        <div class="cvly-wf-highlight" id="cvly-h1"
+          style="background:rgba(232,93,74,0.07);border:1px solid rgba(232,93,74,0.20)"></div>
+        <div class="cvly-wf-highlight" id="cvly-h2"
+          style="background:rgba(227,160,8,0.07);border:1px solid rgba(227,160,8,0.20)"></div>
+        <div class="cvly-wf-highlight" id="cvly-h3"
+          style="background:rgba(15,158,148,0.07);border:1px solid rgba(15,158,148,0.20)"></div>
+
+        <!-- Finding labels -->
+        <div class="cvly-wf-finding f-critical" id="cvly-f1">Critical: Kein Outcome</div>
+        <div class="cvly-wf-finding f-warning"  id="cvly-f2">Warning: CTA unklar</div>
+        <div class="cvly-wf-finding f-good"     id="cvly-f3">Good: SEO-Struktur</div>
+      </div>
+    </div>
+  `;
+
+  // ── Animation ─────────────────────────────────────────────────────────────
+  var device   = document.getElementById('cvly-device');
+  var beam     = document.getElementById('cvly-beam');
+
+  // Section references for highlight positioning
+  var sections = [
+    { el: document.getElementById('cvly-s1'), highlight: document.getElementById('cvly-h1'), finding: document.getElementById('cvly-f1') },
+    { el: document.getElementById('cvly-s2'), highlight: document.getElementById('cvly-h2'), finding: document.getElementById('cvly-f2') },
+    { el: document.getElementById('cvly-s3'), highlight: document.getElementById('cvly-h3'), finding: document.getElementById('cvly-f3') },
+  ];
+
+  var TOPBAR_H  = 20;   // px – matches .cvly-wf-topbar height
+  var CYCLE_MS  = 2600; // full scan cycle duration
+  var PAUSE_MS  = 800;  // pause at bottom before restart
+
+  var startTime = null;
+  var rafId     = null;
+
+  function getDeviceContentHeight() {
+    return device.offsetHeight - TOPBAR_H;
+  }
+
+  function positionHighlightsAndFindings() {
+    sections.forEach(function (s) {
+      var rect   = s.el.getBoundingClientRect();
+      var devRect = device.getBoundingClientRect();
+      var top    = rect.top - devRect.top;
+      var height = rect.height;
+
+      s.highlight.style.top    = top + 'px';
+      s.highlight.style.height = height + 'px';
+
+      s.finding.style.top = (top + height / 2 - 12) + 'px';
+    });
+  }
+
+  function animate(ts) {
+    if (!startTime) startTime = ts;
+    var elapsed  = (ts - startTime) % (CYCLE_MS + PAUSE_MS);
+    var progress = Math.min(elapsed / CYCLE_MS, 1); // 0 → 1
+
+    var contentH = getDeviceContentHeight();
+    var beamTop  = TOPBAR_H + progress * contentH;
+    beam.style.top = beamTop + 'px';
+
+    // Update highlights & findings based on beam position
+    positionHighlightsAndFindings();
+
+    sections.forEach(function (s) {
+      var rect    = s.el.getBoundingClientRect();
+      var devRect = device.getBoundingClientRect();
+      var sTop    = rect.top - devRect.top;
+      var sBot    = sTop + rect.height;
+      var bPos    = beamTop;
+
+      var active = bPos >= sTop - 4 && bPos <= sBot + 20;
+      var passed = bPos > sBot + 20;
+
+      // highlight
+      s.highlight.style.opacity = (active || passed) ? '1' : '0';
+
+      // finding label: show when beam passes midpoint of section, keep visible
+      var mid = sTop + rect.height / 2;
+      if (bPos >= mid) {
+        s.finding.classList.add('visible');
+      } else {
+        s.finding.classList.remove('visible');
+      }
+    });
+
+    // Reset findings at start of new cycle
+    if (elapsed < 80) {
+      sections.forEach(function (s) {
+        s.finding.classList.remove('visible');
+        s.highlight.style.opacity = '0';
+      });
+    }
+
+    rafId = requestAnimationFrame(animate);
+  }
+
+  // Start when visible (IntersectionObserver for performance)
+  if ('IntersectionObserver' in window) {
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          if (!rafId) rafId = requestAnimationFrame(animate);
+        } else {
+          if (rafId) { cancelAnimationFrame(rafId); rafId = null; startTime = null; }
+        }
+      });
+    }, { threshold: 0.1 });
+    observer.observe(mount);
+  } else {
+    rafId = requestAnimationFrame(animate);
+  }
+
+})();
