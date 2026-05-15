@@ -1,178 +1,318 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #f5f7fa; }
-  canvas { display: block; width: 100%; height: 100%; }
-</style>
-</head>
-<body>
-<canvas id="c"></canvas>
-<script>
-(function() {
-  var canvas = document.getElementById('c');
-  var ctx    = canvas.getContext('2d');
+(function () {
+  'use strict';
 
-  var W, H;
-  var nodes  = [];
-  var mouse  = { x: -999, y: -999 };
+  // ── Config ──────────────────────────────────────────────────────────────
+  var MOUNT_ID = 'cvly-hero-visual';
 
-  var CONFIG = {
-    nodeCount:       90,
-    maxDist:         160,
-    nodeRadius:      2.8,
-    nodeRadiusLarge: 4.5,
-    largeEvery:      7,
-    speed:           0.35,
-    color:           '15,158,148',
-    bgColor:         '#f5f7fa',
-    mouseRadius:     140,
-    lineAlphaMax:    0.18,
-    dotAlphaBase:    0.45,
-    dotAlphaLarge:   0.75,
-    vignetteX:       0.35,
-    vignetteY:       0.50,
-    vignetteR:       0.55,
-  };
-
-  function resize() {
-    W = canvas.width  = canvas.offsetWidth;
-    H = canvas.height = canvas.offsetHeight;
-    nodes.forEach(function(n) {
-      if (n.x > W) n.x = Math.random() * W;
-      if (n.y > H) n.y = Math.random() * H;
-    });
-  }
-
-  function createNode(i) {
-    var large = (i % CONFIG.largeEvery === 0);
-    return {
-      x:   Math.random() * (W || window.innerWidth),
-      y:   Math.random() * (H || window.innerHeight),
-      vx:  (Math.random() - 0.5) * CONFIG.speed,
-      vy:  (Math.random() - 0.5) * CONFIG.speed,
-      r:   large ? CONFIG.nodeRadiusLarge : CONFIG.nodeRadius,
-      a:   large ? CONFIG.dotAlphaLarge   : CONFIG.dotAlphaBase,
-      large: large,
-      pulse: Math.random() * Math.PI * 2,
-      pulseSpeed: 0.018 + Math.random() * 0.012,
-    };
-  }
-
-  function init() {
-    resize();
-    nodes = [];
-    for (var i = 0; i < CONFIG.nodeCount; i++) {
-      nodes.push(createNode(i));
+  // ── Inject styles ────────────────────────────────────────────────────────
+  var css = `
+    #${MOUNT_ID} {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
     }
+
+    .cvly-wf-outer {
+      position: relative;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+    }
+
+    .cvly-wf-device {
+      width: 220px;
+      background: #ffffff;
+      border-radius: 12px;
+      border: 1.5px solid rgba(15,158,148,0.40);
+      box-shadow:
+        0 0 0 1px rgba(15,158,148,0.10),
+        0 0 32px rgba(15,158,148,0.18),
+        0 8px 32px rgba(0,0,0,0.10);
+      overflow: hidden;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .cvly-wf-topbar {
+      height: 20px;
+      background: #f0faf9;
+      border-bottom: 1px solid rgba(15,158,148,0.15);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0 9px;
+    }
+
+    .cvly-wf-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .cvly-wf-urlbar {
+      flex: 1;
+      height: 8px;
+      background: rgba(15,158,148,0.15);
+      border-radius: 3px;
+      margin: 0 5px;
+    }
+
+    .cvly-wf-body {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .cvly-wf-section {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-bottom: 4px;
+    }
+
+    .cvly-wf-block {
+      height: 5px;
+      border-radius: 2px;
+      background: #e8f0ef;
+    }
+
+    .cvly-wf-block.h    { height: 9px; }
+    .cvly-wf-block.btn  { height: 12px; width: 50px; border-radius: 4px; }
+    .cvly-wf-block.red   { background: rgba(232,93,74,0.28); }
+    .cvly-wf-block.amber { background: rgba(227,160,8,0.28); }
+    .cvly-wf-block.green { background: rgba(15,158,148,0.28); }
+    .cvly-wf-block.btn   { background: rgba(15,158,148,0.30); }
+
+    .cvly-wf-divider {
+      height: 1px;
+      background: rgba(15,158,148,0.10);
+      margin: 4px 0;
+    }
+
+    /* Scan beam */
+    .cvly-wf-beam {
+      position: absolute;
+      left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(15,158,148,0.15) 15%,
+        rgba(15,158,148,0.75) 50%,
+        rgba(15,158,148,0.15) 85%,
+        transparent 100%
+      );
+      box-shadow: 0 0 10px rgba(15,158,148,0.50);
+      pointer-events: none;
+    }
+
+    /* Section highlight overlays */
+    .cvly-wf-highlight {
+      position: absolute;
+      left: 10px; right: 10px;
+      border-radius: 4px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+
+    /* Finding labels */
+    .cvly-wf-finding {
+      position: absolute;
+      right: -148px;
+      background: #ffffff;
+      border-radius: 8px;
+      padding: 5px 10px;
+      font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.10);
+      border-left: 2.5px solid;
+      opacity: 0;
+      transform: translateX(-6px);
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      pointer-events: none;
+    }
+
+    .cvly-wf-finding.f-critical { border-color: #e85d4a; color: #e85d4a; }
+    .cvly-wf-finding.f-warning  { border-color: #e3a008; color: #c47f00; }
+    .cvly-wf-finding.f-good     { border-color: #0f9e94; color: #0f9e94; }
+
+    .cvly-wf-finding.visible {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .cvly-wf-device { width: 180px; }
+      .cvly-wf-finding { right: -130px; font-size: 10px; }
+    }
+
+    @media (max-width: 400px) {
+      .cvly-wf-finding { display: none; }
+    }
+  `;
+
+  var styleEl = document.createElement('style');
+  styleEl.textContent = css;
+  document.head.appendChild(styleEl);
+
+  // ── Build HTML ────────────────────────────────────────────────────────────
+  var mount = document.getElementById(MOUNT_ID);
+  if (!mount) {
+    console.warn('[Convertlyze Hero Visual] Mount element #' + MOUNT_ID + ' not found.');
+    return;
   }
 
-  function drawVignette() {
-    var grd = ctx.createRadialGradient(
-      W * CONFIG.vignetteX, H * CONFIG.vignetteY, 0,
-      W * CONFIG.vignetteX, H * CONFIG.vignetteY, Math.max(W, H) * CONFIG.vignetteR
-    );
-    grd.addColorStop(0,    'rgba(245,247,250,0.88)');
-    grd.addColorStop(0.45, 'rgba(245,247,250,0.50)');
-    grd.addColorStop(1,    'rgba(245,247,250,0)');
-    ctx.fillStyle = grd;
-    ctx.fillRect(0, 0, W, H);
+  mount.innerHTML = `
+    <div class="cvly-wf-outer">
+      <div class="cvly-wf-device" id="cvly-device">
+
+        <div class="cvly-wf-topbar">
+          <div class="cvly-wf-dot" style="background:#ff5f57"></div>
+          <div class="cvly-wf-dot" style="background:#ffbd2e"></div>
+          <div class="cvly-wf-dot" style="background:#28c840"></div>
+          <div class="cvly-wf-urlbar"></div>
+        </div>
+
+        <div class="cvly-wf-body">
+          <div class="cvly-wf-section" id="cvly-s1">
+            <div class="cvly-wf-block h red" style="width:85%"></div>
+            <div class="cvly-wf-block red" style="width:62%"></div>
+            <div class="cvly-wf-block btn"></div>
+          </div>
+          <div class="cvly-wf-divider"></div>
+          <div class="cvly-wf-section" id="cvly-s2">
+            <div class="cvly-wf-block amber" style="width:90%"></div>
+            <div class="cvly-wf-block amber" style="width:72%"></div>
+            <div class="cvly-wf-block amber" style="width:55%"></div>
+          </div>
+          <div class="cvly-wf-divider"></div>
+          <div class="cvly-wf-section" id="cvly-s3">
+            <div class="cvly-wf-block green" style="width:80%"></div>
+            <div class="cvly-wf-block green" style="width:60%"></div>
+          </div>
+        </div>
+
+        <!-- Scan beam (position controlled by JS) -->
+        <div class="cvly-wf-beam" id="cvly-beam"></div>
+
+        <!-- Section highlight overlays -->
+        <div class="cvly-wf-highlight" id="cvly-h1"
+          style="background:rgba(232,93,74,0.07);border:1px solid rgba(232,93,74,0.20)"></div>
+        <div class="cvly-wf-highlight" id="cvly-h2"
+          style="background:rgba(227,160,8,0.07);border:1px solid rgba(227,160,8,0.20)"></div>
+        <div class="cvly-wf-highlight" id="cvly-h3"
+          style="background:rgba(15,158,148,0.07);border:1px solid rgba(15,158,148,0.20)"></div>
+
+        <!-- Finding labels -->
+        <div class="cvly-wf-finding f-critical" id="cvly-f1">Critical: Kein Outcome</div>
+        <div class="cvly-wf-finding f-warning"  id="cvly-f2">Warning: CTA unklar</div>
+        <div class="cvly-wf-finding f-good"     id="cvly-f3">Good: SEO-Struktur</div>
+      </div>
+    </div>
+  `;
+
+  // ── Animation ─────────────────────────────────────────────────────────────
+  var device   = document.getElementById('cvly-device');
+  var beam     = document.getElementById('cvly-beam');
+
+  // Section references for highlight positioning
+  var sections = [
+    { el: document.getElementById('cvly-s1'), highlight: document.getElementById('cvly-h1'), finding: document.getElementById('cvly-f1') },
+    { el: document.getElementById('cvly-s2'), highlight: document.getElementById('cvly-h2'), finding: document.getElementById('cvly-f2') },
+    { el: document.getElementById('cvly-s3'), highlight: document.getElementById('cvly-h3'), finding: document.getElementById('cvly-f3') },
+  ];
+
+  var TOPBAR_H  = 20;   // px – matches .cvly-wf-topbar height
+  var CYCLE_MS  = 2600; // full scan cycle duration
+  var PAUSE_MS  = 800;  // pause at bottom before restart
+
+  var startTime = null;
+  var rafId     = null;
+
+  function getDeviceContentHeight() {
+    return device.offsetHeight - TOPBAR_H;
   }
 
-  function tick() {
-    ctx.clearRect(0, 0, W, H);
+  function positionHighlightsAndFindings() {
+    sections.forEach(function (s) {
+      var rect   = s.el.getBoundingClientRect();
+      var devRect = device.getBoundingClientRect();
+      var top    = rect.top - devRect.top;
+      var height = rect.height;
 
-    ctx.fillStyle = CONFIG.bgColor;
-    ctx.fillRect(0, 0, W, H);
+      s.highlight.style.top    = top + 'px';
+      s.highlight.style.height = height + 'px';
 
-    nodes.forEach(function(n) {
-      n.pulse += n.pulseSpeed;
-      n.x += n.vx;
-      n.y += n.vy;
-      if (n.x < 0)  { n.x = 0;  n.vx *= -1; }
-      if (n.x > W)  { n.x = W;  n.vx *= -1; }
-      if (n.y < 0)  { n.y = 0;  n.vy *= -1; }
-      if (n.y > H)  { n.y = H;  n.vy *= -1; }
+      s.finding.style.top = (top + height / 2 - 12) + 'px';
+    });
+  }
+
+  function animate(ts) {
+    if (!startTime) startTime = ts;
+    var elapsed  = (ts - startTime) % (CYCLE_MS + PAUSE_MS);
+    var progress = Math.min(elapsed / CYCLE_MS, 1); // 0 → 1
+
+    var contentH = getDeviceContentHeight();
+    var beamTop  = TOPBAR_H + progress * contentH;
+    beam.style.top = beamTop + 'px';
+
+    // Update highlights & findings based on beam position
+    positionHighlightsAndFindings();
+
+    sections.forEach(function (s) {
+      var rect    = s.el.getBoundingClientRect();
+      var devRect = device.getBoundingClientRect();
+      var sTop    = rect.top - devRect.top;
+      var sBot    = sTop + rect.height;
+      var bPos    = beamTop;
+
+      var active = bPos >= sTop - 4 && bPos <= sBot + 20;
+      var passed = bPos > sBot + 20;
+
+      // highlight
+      s.highlight.style.opacity = (active || passed) ? '1' : '0';
+
+      // finding label: show when beam passes midpoint of section, keep visible
+      var mid = sTop + rect.height / 2;
+      if (bPos >= mid) {
+        s.finding.classList.add('visible');
+      } else {
+        s.finding.classList.remove('visible');
+      }
     });
 
-    // connections
-    for (var i = 0; i < nodes.length; i++) {
-      for (var j = i + 1; j < nodes.length; j++) {
-        var a = nodes[i];
-        var b = nodes[j];
-        var dx = a.x - b.x;
-        var dy = a.y - b.y;
-        var dist = Math.sqrt(dx*dx + dy*dy);
+    // Reset findings at start of new cycle
+    if (elapsed < 80) {
+      sections.forEach(function (s) {
+        s.finding.classList.remove('visible');
+        s.highlight.style.opacity = '0';
+      });
+    }
 
-        if (dist < CONFIG.maxDist) {
-          var alpha = CONFIG.lineAlphaMax * (1 - dist / CONFIG.maxDist);
-          var mx = (a.x + b.x) / 2 - mouse.x;
-          var my = (a.y + b.y) / 2 - mouse.y;
-          var mouseDist = Math.sqrt(mx*mx + my*my);
-          if (mouseDist < CONFIG.mouseRadius) {
-            alpha *= 1 + 1.5 * (1 - mouseDist / CONFIG.mouseRadius);
-          }
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.strokeStyle = 'rgba(' + CONFIG.color + ',' + alpha + ')';
-          ctx.lineWidth = 0.8;
-          ctx.stroke();
+    rafId = requestAnimationFrame(animate);
+  }
+
+  // Start when visible (IntersectionObserver for performance)
+  if ('IntersectionObserver' in window) {
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          if (!rafId) rafId = requestAnimationFrame(animate);
+        } else {
+          if (rafId) { cancelAnimationFrame(rafId); rafId = null; startTime = null; }
         }
-      }
-    }
-
-    // nodes
-    nodes.forEach(function(n) {
-      var pulse = 0.75 + 0.25 * Math.sin(n.pulse);
-      var r = n.r * pulse;
-      var a = n.a * pulse;
-
-      var mdx = n.x - mouse.x;
-      var mdy = n.y - mouse.y;
-      var md  = Math.sqrt(mdx*mdx + mdy*mdy);
-      if (md < CONFIG.mouseRadius) {
-        var boost = 1 - md / CONFIG.mouseRadius;
-        a = Math.min(1, a + boost * 0.5);
-        r = r + boost * 2;
-      }
-
-      if (n.large) {
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, r + 5, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(' + CONFIG.color + ',' + (a * 0.15) + ')';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, r + 2, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(' + CONFIG.color + ',' + (a * 0.30) + ')';
-        ctx.fill();
-      }
-
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(' + CONFIG.color + ',' + a + ')';
-      ctx.fill();
-    });
-
-    drawVignette();
-    requestAnimationFrame(tick);
+      });
+    }, { threshold: 0.1 });
+    observer.observe(mount);
+  } else {
+    rafId = requestAnimationFrame(animate);
   }
 
-  window.addEventListener('mousemove', function(e) {
-    var rect = canvas.getBoundingClientRect();
-    mouse.x = e.clientX - rect.left;
-    mouse.y = e.clientY - rect.top;
-  });
-  window.addEventListener('mouseleave', function() {
-    mouse.x = -999; mouse.y = -999;
-  });
-  window.addEventListener('resize', resize);
-
-  init();
-  tick();
 })();
-</script>
-</body>
-</html>
