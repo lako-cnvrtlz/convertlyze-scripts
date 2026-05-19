@@ -287,11 +287,12 @@
     }).catch(function (e) { console.error('[CVZ] PPU checkout error:', e); });
   }
 
+  // ── ÄNDERUNG: successUrl leitet nach Kauf direkt aufs Dashboard mit purchase=success ──
   function startCheckout(priceId) {
     var isPPU = priceId === CONFIG.ppuPriceId;
     window.$memberstackDom.purchasePlansWithCheckout({
       priceId:    priceId,
-      successUrl: window.location.origin + (isPPU ? '/analyse/formular' : '/member/danke'),
+      successUrl: window.location.origin + (isPPU ? '/analyse/formular' : '/member/dashboard?purchase=success'),
     }).catch(function (e) { console.error('[CVZ] Checkout error:', e); });
   }
 
