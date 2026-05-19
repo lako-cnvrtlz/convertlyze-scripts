@@ -86,6 +86,10 @@
     if (el) el.style.display = show ? (displayValue || '') : 'none';
   }
 
+  function getParam(key) {
+    return new URLSearchParams(window.location.search).get(key);
+  }
+
   // ── Cookie helpers ────────────────────────────────────────────────────────────
 
   function getCookie(name) {
@@ -186,6 +190,58 @@
       console.warn('[CVZ] reset_user_credits_if_due exception:', e);
       return false;
     }
+  }
+
+  // ── Purchase Success Modal ────────────────────────────────────────────────────
+
+  function showPurchaseSuccessModal(licenseType) {
+    var planName = licenseType || 'deinen neuen Plan';
+
+    var overlay = document.createElement('div');
+    overlay.id = 'cvz-purchase-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+
+    var box = document.createElement('div');
+    box.style.cssText = 'background:#161b22;border:1px solid #30363d;border-radius:12px;padding:40px;max-width:480px;width:90%;text-align:center;font-family:Geist,sans-serif;position:relative';
+
+    var xBtn = document.createElement('button');
+    xBtn.textContent = '\u2715';
+    xBtn.style.cssText = 'position:absolute;top:12px;right:16px;background:none;border:none;color:#8b98a5;font-size:16px;cursor:pointer;line-height:1;padding:0';
+    xBtn.onclick = function () { overlay.remove(); };
+
+    var emoji = document.createElement('div');
+    emoji.textContent = '\uD83C\uDF89';
+    emoji.style.cssText = 'font-size:48px;margin-bottom:16px';
+
+    var h = document.createElement('h2');
+    h.textContent = 'Willkommen an Bord!';
+    h.style.cssText = 'margin:0 0 12px;font-size:22px;color:#4fd1c5;font-weight:700';
+
+    var p1 = document.createElement('p');
+    p1.style.cssText = 'margin:0 0 8px;color:#8b98a5;font-size:15px';
+    var strong = document.createElement('strong');
+    strong.textContent = planName + '-Plan';
+    strong.style.color = '#e6edf3';
+    p1.appendChild(document.createTextNode('Du hast erfolgreich den '));
+    p1.appendChild(strong);
+    p1.appendChild(document.createTextNode(' gebucht.'));
+
+    var p2 = document.createElement('p');
+    p2.textContent = 'Dein Konto ist jetzt aktiv \u2013 analysiere deine erste Landing Page.';
+    p2.style.cssText = 'margin:0 0 28px;color:#8b98a5;font-size:14px';
+
+    var ctaBtn = document.createElement('button');
+    ctaBtn.textContent = 'Erste Analyse starten';
+    ctaBtn.style.cssText = 'background:#4fd1c5;color:#0d1117;border:none;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:600;cursor:pointer;width:100%';
+    ctaBtn.onclick = function () {
+      overlay.remove();
+      window.location.href = '/analyse/formular';
+    };
+
+    box.append(xBtn, emoji, h, p1, p2, ctaBtn);
+    overlay.appendChild(box);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
   }
 
   // ── UI: Dashboard render ──────────────────────────────────────────────────────
@@ -910,12 +966,18 @@
       if (checkoutPriceId) {
         window.$memberstackDom.purchasePlansWithCheckout({
           priceId:    checkoutPriceId,
-          successUrl: window.location.origin + '/member/danke',
+          successUrl: window.location.origin + '/member/dashboard?purchase=success',
         }).catch(function () { document.documentElement.style.visibility = 'visible'; });
         return;
       }
 
       document.documentElement.style.visibility = 'visible';
+
+      // ── Purchase Success Modal ─────────────────────────────────────────────
+      var isPurchaseSuccess = getParam('purchase') === 'success';
+      if (isPurchaseSuccess) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
 
       var currentUser = await fetchUser(memberstackId, 1) || await fetchUser(memberstackId, 5);
       if (!currentUser) {
@@ -927,6 +989,11 @@
       state.supabaseUserId = currentUser.id;
       state.licenseType    = (currentUser._billingUser || currentUser).license_type || '';
       state.hasPdfAccess   = checkPdfAccess(currentUser);
+
+      // Modal nach fetchUser zeigen, damit Plan-Name verfügbar ist
+      if (isPurchaseSuccess) {
+        showPurchaseSuccessModal(state.licenseType);
+      }
 
       // Team-Invite annehmen
       var pendingInvite = getCookie('cvz_invite');
