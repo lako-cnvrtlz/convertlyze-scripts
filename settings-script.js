@@ -69,6 +69,17 @@
     return data;
   }
 
+  async function resendDoiEmail(memberstackId) {
+    var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/resend-doi-email', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ memberstackId }),
+    });
+    var data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Fehler beim Senden');
+    return data;
+  }
+
   // ── UI layer ─────────────────────────────────────────────────────────────────
 
   function getBtnText(btn) {
@@ -83,12 +94,12 @@
   function setBtnState(btn, state, label) {
     switch (state) {
       case 'loading':
-        btn.dataset.originalText = getBtnText(btn);
-        btn.dataset.originalBg   = btn.style.backgroundColor;
+        btn.dataset.originalText  = getBtnText(btn);
+        btn.dataset.originalBg    = btn.style.backgroundColor;
         btn.dataset.originalColor = btn.style.color;
         setBtnText(btn, label || 'Wird gespeichert\u2026');
-        btn.disabled            = true;
-        btn.style.opacity       = '0.7';
+        btn.disabled        = true;
+        btn.style.opacity   = '0.7';
         break;
       case 'success':
         setBtnText(btn, label || '\u2713 Gespeichert!');
@@ -122,6 +133,85 @@
     }
   }
 
+  // ── DOI Pending Hinweis ───────────────────────────────────────────────────────
+
+  function renderDoiPendingHint(form, memberstackId) {
+    // Bereits vorhanden?
+    if (form.querySelector('#cvz-doi-pending')) return;
+
+    var hint = document.createElement('div');
+    hint.id = 'cvz-doi-pending';
+    hint.style.cssText = [
+      'margin-top:16px',
+      'padding:14px 16px',
+      'background:#fffbeb',
+      'border:1px solid #fde68a',
+      'border-left:3px solid #f59e0b',
+      'border-radius:8px',
+      'font-size:13px',
+      'color:#92400e',
+      'line-height:1.6',
+    ].join(';');
+
+    var text = document.createElement('p');
+    text.style.cssText = 'margin:0 0 10px 0;';
+    text.textContent   = 'Bitte bestätige deine Auswahl per E-Mail. Schau kurz in deinen Posteingang.';
+
+    var resendBtn = document.createElement('button');
+    resendBtn.type      = 'button';
+    resendBtn.textContent = 'Bestätigungs-E-Mail erneut senden';
+    resendBtn.style.cssText = [
+      'display:inline-block',
+      'padding:8px 16px',
+      'background:#f59e0b',
+      'color:#ffffff',
+      'border:none',
+      'border-radius:6px',
+      'font-size:13px',
+      'font-weight:600',
+      'cursor:pointer',
+    ].join(';');
+
+    var isSending = false;
+
+    resendBtn.addEventListener('click', async function () {
+      if (isSending) return;
+      isSending = true;
+      resendBtn.disabled     = true;
+      resendBtn.style.opacity = '0.7';
+      resendBtn.textContent  = 'Wird gesendet\u2026';
+
+      try {
+        await resendDoiEmail(memberstackId);
+        resendBtn.textContent   = '\u2713 E-Mail gesendet';
+        resendBtn.style.background = '#10b981';
+      } catch (err) {
+        console.error('[CVZ] Resend DOI error:', err);
+        resendBtn.textContent  = '\u2717 Fehler – bitte erneut versuchen';
+        resendBtn.style.background = '#ef4444';
+        setTimeout(function () {
+          resendBtn.textContent      = 'Bestätigungs-E-Mail erneut senden';
+          resendBtn.style.background = '#f59e0b';
+          resendBtn.style.opacity    = '';
+          resendBtn.disabled         = false;
+          isSending                  = false;
+        }, 3000);
+        return;
+      }
+
+      isSending = false;
+    });
+
+    hint.appendChild(text);
+    hint.appendChild(resendBtn);
+    form.appendChild(hint);
+  }
+
+  function removeDoiPendingHint(form) {
+    var hint = form.querySelector('#cvz-doi-pending');
+    if (hint) hint.remove();
+  }
+
   // ── Profile form ─────────────────────────────────────────────────────────────
 
   async function initProfileForm(member) {
@@ -135,20 +225,17 @@
                  || form.querySelector('button');
     if (!submitBtn) return;
 
-    // E-Mail als read-only prefüllen
     var emailInput = form.querySelector('input[type="email"]');
     if (emailInput && member.email) {
-      emailInput.value           = member.email;
-      emailInput.readOnly        = true;
-      emailInput.style.cssText  += ';background-color:#f3f4f6;cursor:not-allowed;opacity:0.7';
+      emailInput.value          = member.email;
+      emailInput.readOnly       = true;
+      emailInput.style.cssText += ';background-color:#f3f4f6;cursor:not-allowed;opacity:0.7';
     }
 
-    // Submit nur einmal registrieren – auf form, nicht zusätzlich auf button
     form.addEventListener('submit', async function (e) {
       e.preventDefault();
       e.stopPropagation();
 
-      // Felder per data-Attribut oder Fallback per Position
       var salutationEl = form.querySelector('[name="salutation"], select');
       var firstnameEl  = form.querySelector('[name="firstname"]') || form.querySelectorAll('input[type="text"], input:not([type])')[0];
       var lastnameEl   = form.querySelector('[name="lastname"]')  || form.querySelectorAll('input[type="text"], input:not([type])')[1];
@@ -182,7 +269,6 @@
   // ── Preferences form ─────────────────────────────────────────────────────────
 
   async function initPreferencesForm(member) {
-    // Preferences-Formular: hat Checkboxes und einen #save-preferences Button
     var form = Array.from(document.querySelectorAll('form')).find(function (f) {
       return f.querySelectorAll('input[type="checkbox"]').length >= 4
           && f.querySelector('#save-preferences') !== null;
@@ -204,6 +290,8 @@
     form.style.transition = 'opacity 0.3s ease-in';
 
     // Gespeicherte Präferenzen laden
+    var doiConfirmedAt = null;
+
     try {
       var user = await fetchUserBilling(member.id);
       if (user?.email_preferences) {
@@ -211,6 +299,13 @@
         map.account.checked   = user.email_preferences.account_notifications  ?? true;
         map.updates.checked   = user.email_preferences.product_updates        ?? false;
         map.marketing.checked = user.email_preferences.marketing_tips         ?? false;
+      }
+      doiConfirmedAt = user?.doi_confirmed_at || null;
+
+      // DOI pending: Marketing aktiviert aber noch nicht bestätigt
+      var marketingActive = map.updates.checked || map.marketing.checked;
+      if (marketingActive && !doiConfirmedAt) {
+        renderDoiPendingHint(form, member.id);
       }
     } catch (err) {
       console.warn('[CVZ] Load preferences error:', err);
@@ -232,6 +327,14 @@
         });
         setBtnState(saveBtn, 'success');
         resetBtnAfter(saveBtn, 2000);
+
+        // Hinweis anzeigen/ausblenden je nach aktuellem Status
+        var marketingNowActive = map.updates.checked || map.marketing.checked;
+        if (marketingNowActive && !doiConfirmedAt) {
+          renderDoiPendingHint(form, member.id);
+        } else {
+          removeDoiPendingHint(form);
+        }
       } catch (err) {
         console.error('[CVZ] Save preferences error:', err);
         setBtnState(saveBtn, 'error');
@@ -250,7 +353,7 @@
 
   async function initTeamSection(member) {
     try {
-      var user     = await fetchUserBilling(member.id);
+      var user = await fetchUserBilling(member.id);
       if (!user) return;
 
       var isOwner  = !user.owner_user_id;
@@ -268,11 +371,7 @@
   // ── Init ─────────────────────────────────────────────────────────────────────
 
   async function run() {
-    // Member einmal laden – ID an alle Sektionen weitergeben
     var member = await getCurrentMember();
-
-    // Parallel initialisieren – fetchUserBilling wird intern je einmal pro Sektion aufgerufen
-    // Team und Preferences teilen sich denselben Billing-Call nicht, aber beide sind fire-and-forget
     await Promise.all([
       initProfileForm(member),
       initPreferencesForm(member),
