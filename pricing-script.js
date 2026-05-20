@@ -186,9 +186,9 @@
     return { show: show, close: close, showMemberError: showMemberError };
   })();
 
-  // Für externe Scripts zugänglich machen (toast.js etc.)
-  window.cvzShowModal      = Modal.show;
-  window.cvzCloseModal     = Modal.close;
+  // Fuer externe Scripts zugaenglich machen (toast.js etc.)
+  window.cvzShowModal       = Modal.show;
+  window.cvzCloseModal      = Modal.close;
   window.cvzShowMemberModal = Modal.showMemberError;
 
   // ── UI: Plan Buttons ─────────────────────────────────────────────────────────
@@ -213,7 +213,7 @@
       var currentPriceId = await fetchCurrentPriceId(memberstackId);
       var isPPU          = priceId === CONFIG.ppuPriceId;
 
-      // PPU kann immer direkt gekauft werden – kein Portal nötig
+      // PPU kann immer direkt gekauft werden - kein Portal noetig
       if (currentPriceId && !isPPU) {
         var portalUrl = await fetchStripePortalUrl(memberstackId);
         if (portalUrl) {
@@ -245,16 +245,24 @@
   }
 
   async function initPlanButtons() {
-    var member = await window.$memberstackDom.getCurrentMember();
-    if (!member?.data?.id) return;
+    // Member-Status ermitteln – null wenn nicht eingeloggt (oeffentliche Seite)
+    var member        = await window.$memberstackDom.getCurrentMember();
+    var memberstackId = member?.data?.id || null;
 
-    var memberstackId = member.data.id;
-
+    // Handler immer anhaengen, unabhaengig vom Login-Status
     document.querySelectorAll('a[href*="/register?plan="]').forEach(function (btn) {
       btn.dataset.originalText = btn.textContent;
 
       btn.addEventListener('click', async function (e) {
         e.preventDefault();
+
+        // Nicht eingeloggt → normaler Redirect auf Register/Checkout
+        if (!memberstackId) {
+          window.location.href = btn.href;
+          return;
+        }
+
+        // Eingeloggt → Plan-Flow
         var url        = new URL(btn.href);
         var plan       = url.searchParams.get('plan');
         var billing    = url.searchParams.get('billing') || 'monthly';
