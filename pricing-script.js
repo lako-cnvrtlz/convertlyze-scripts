@@ -15,6 +15,9 @@
     },
   };
 
+  // Supabase-Client – wird in init() erstellt sobald SDK geladen ist
+  var sb = null;
+
   // ── Utilities ────────────────────────────────────────────────────────────────
 
   function retry(fn, maxAttempts, intervalMs) {
@@ -29,13 +32,13 @@
   }
 
   function depsReady() {
-    return !!window.$memberstackDom && typeof window.supabase?.from === 'function';
+    return !!window.$memberstackDom && !!window.supabase?.createClient;
   }
 
   // ── Data layer ───────────────────────────────────────────────────────────────
 
   async function fetchCurrentPriceId(memberstackId) {
-    var res = await window.supabase
+    var res = await sb
       .from('users')
       .select('current_price_id')
       .eq('memberstack_id', memberstackId)
@@ -245,7 +248,7 @@
   }
 
   async function initPlanButtons() {
-    // Member-Status ermitteln – null wenn nicht eingeloggt (oeffentliche Seite)
+    // Member-Status ermitteln - null wenn nicht eingeloggt
     var member        = await window.$memberstackDom.getCurrentMember();
     var memberstackId = member?.data?.id || null;
 
@@ -256,7 +259,7 @@
       btn.addEventListener('click', async function (e) {
         e.preventDefault();
 
-        // Nicht eingeloggt → normaler Redirect auf Register/Checkout
+        // Nicht eingeloggt → normaler Redirect auf Register
         if (!memberstackId) {
           window.location.href = btn.href;
           return;
@@ -279,7 +282,11 @@
   function init() {
     initPricingToggle();
     retry(depsReady, 30, 300)
-      .then(function () { return initPlanButtons(); })
+      .then(function () {
+        // Supabase-Client initialisieren sobald SDK bereit ist
+        sb = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey);
+        return initPlanButtons();
+      })
       .catch(function (err) { console.warn('[CVZ] Init failed:', err); });
   }
 
