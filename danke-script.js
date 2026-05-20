@@ -148,7 +148,7 @@ async function fetchUserFast(memberstackId) {
     .eq('memberstack_id', memberstackId)
     .single();
   if (data) return data;
-  if (error) console.warn('⚠️ fetchUserFast error:', error);
+  if (error) console.warn('fetchUserFast error:', error);
   return null;
 }
 
@@ -160,7 +160,7 @@ async function fetchUserWithSmartRetry(memberstackId) {
       .eq('memberstack_id', memberstackId)
       .single();
     if (data) return data;
-    if (error) console.warn(`⚠️ Versuch ${attempt} error:`, error);
+    if (error) console.warn(`Versuch ${attempt} error:`, error);
     if (attempt < 5) await sleep(1500);
   }
   return null;
@@ -267,6 +267,9 @@ document.addEventListener('DOMContentLoaded', async function () {
   const heroBlock = document.querySelector('.content_hero');
   if (heroBlock) heroBlock.style.opacity = '0';
 
+  // Direkt nach Checkout → kein Modal, Seite normal anzeigen
+  const fromCheckout = getParam('fromCheckout') === 'true';
+
   try {
     let memberstackId = null;
     let memberEmail   = null;
@@ -290,7 +293,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     setFirstName(currentUser?.firstname || '');
 
-    // ── State 1: Team-Member ─────────────────────────────────────────────────
+    // ── State 1: Team-Member ──────────────────────────────────────────────────
     if (currentUser?.owner_user_id) {
       hidePlanSection();
       revealContent();
@@ -316,10 +319,13 @@ document.addEventListener('DOMContentLoaded', async function () {
       return;
     }
 
-    // ── State 2: Aktiver Plan vorhanden ──────────────────────────────────────
+    // ── State 2: Aktiver Plan vorhanden ───────────────────────────────────────
     if (currentUser?.current_price_id) {
       hidePlanSection();
       revealContent();
+
+      // Gerade gekauft → kein Modal, Danke-Seite normal anzeigen
+      if (fromCheckout) return;
 
       cvzShowModal({
         title:      'Du hast bereits einen aktiven Plan',
@@ -338,7 +344,7 @@ document.addEventListener('DOMContentLoaded', async function () {
       return;
     }
 
-    // ── State 3: Neuer User – kein Modal, Plan-Section sichtbar ─────────────
+    // ── State 3: Neuer User – kein Modal, Plan-Section sichtbar ──────────────
     let planKey = getParam('plan');
     let billing = getParam('billing') || 'monthly';
 
