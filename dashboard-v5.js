@@ -1,3 +1,31 @@
+/**
+ * dashboard-v5.js
+ * ----------------
+ * Member-Dashboard: Analysen-Liste, User-Stats, PDF-Download, Team-Einladungen.
+ *
+ * Seite: /member/dashboard
+ * Embedding: jsDelivr
+ * Dependencies: window.supabase (global), window.$memberstackDom
+ *
+ * Features:
+ * - Skeleton-Loading (Shimmer-Effekt) bis Daten geladen
+ * - Pagination (10 Analysen pro Seite)
+ * - Realtime-Updates via Supabase Postgres Changes
+ * - Polling-Fallback (10s) wenn Analysen im Status "processing"
+ * - PDF/Word Download via convertlyze-pdf-service
+ * - Team-Einladungen annehmen (Cookie cvz_invite)
+ * - PPU Pay-per-Use Checkout Button
+ * - Purchase Success Modal nach Kauf
+ *
+ * KRITISCH: PDF_SECRET liegt hier als Klartext.
+ * Bei Rotation: dashboard-v5.js + Railway PDF Service ENV aktualisieren.
+ *
+ * Webflow-Selektoren:
+ * - Container: erstes .table-list parent
+ * - Analyse-Rows: .table-list
+ * - User-Daten: [data-dashboard="..."], [data-user="..."]
+ */
+
 // ── Sofort verstecken wenn Plan im sessionStorage ─────────────────────────────
 (function () {
   if (sessionStorage.getItem('selected_plan')) {
@@ -12,8 +40,10 @@
   // ── Config ────────────────────────────────────────────────────────────────────
 
   var CONFIG = {
-    PDF_SERVICE_URL:  'https://convertlyze-pdf-service-production.up.railway.app',
-    PDF_SECRET:       'cvl-pdf-2026-geheim',
+    // WHY: PDF_SERVICE_URL und PDF_SECRET wurden aus dem Frontend entfernt.
+    // generate-pdf-report Edge Function fügt das Secret serverseitig hinzu.
+    // Analog zu trigger-analysis.ts für den Webhook-Secret (2026-05).
+    generateReportUrl: 'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/generate-pdf-report',
     SUPABASE_URL:     'https://zpkifipmyeunorhtepzq.supabase.co',
     SUPABASE_ANON:    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU',
     PAGE_SIZE:        10,
@@ -62,6 +92,8 @@
     });
   }
 
+  // WHY escapeHtml: User-Daten (URLs, Keywords) nie direkt als innerHTML setzen.
+  // XSS-Schutz — alle User-Inhalte werden durch diese Funktion gefiltert.
   function escapeHtml(str) {
     if (!str) return '';
     return String(str)
@@ -117,12 +149,16 @@
 
   // ── Data layer ────────────────────────────────────────────────────────────────
 
+  // WHY _billingUser: Bei Team-Members läuft Billing über den Owner.
+  // Plan-Felder müssen vom Owner geholt werden, nicht vom Member selbst.
   function checkPdfAccess(user) {
     var bu     = user._billingUser || user;
     var type   = bu.license_type   || '';
     var status = bu.license_status || '';
     if (CONFIG.PAID_PLANS.concat(['Agency']).indexOf(type) === -1) return false;
     if (status === 'active') return true;
+    // WHY canceling-Check: Gekündigte User behalten PDF-Zugang bis license_expires_at.
+    // Entspricht ADR 009 — Zugang bis Periodenende.
     if (status === 'canceling' && bu.license_expires_at && new Date(bu.license_expires_at) > new Date()) return true;
     return false;
   }
@@ -806,11 +842,18 @@
       }
 
       var response = await fetch(
-        CONFIG.PDF_SERVICE_URL + (isAgency ? '/generate-word' : '/generate-pdf'),
+        CONFIG.generateReportUrl,
         {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json', 'x-pdf-secret': CONFIG.PDF_SECRET },
-          body:    JSON.stringify({ userId: state.supabaseUserId, analysisId: analysisId }),
+          headers: {
+            'Content-Type':    'application/json',
+            'x-memberstack-id': state.memberstackId,
+          },
+          body: JSON.stringify({
+            userId:     state.supabaseUserId,
+            analysisId: analysisId,
+            type:       isAgency ? 'word' : 'pdf',
+          }),
         }
       );
       if (!response.ok) {
@@ -843,6 +886,9 @@
 
   // ── Realtime + Polling ────────────────────────────────────────────────────────
 
+  // WHY Polling als Fallback: Supabase Realtime kann bei Verbindungsproblemen
+  // ausfallen. Polling alle 10s stellt sicher dass Status-Updates ankommen.
+  // Polling stoppt automatisch wenn keine Analysen mehr processing sind.
   function hasProcessingAnalyses() {
     return state.analysesData.some(function (a) { return a.status === 'processing'; });
   }
