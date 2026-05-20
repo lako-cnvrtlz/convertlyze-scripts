@@ -6,8 +6,9 @@
   var CONFIG = {
     supabaseUrl:     'https://zpkifipmyeunorhtepzq.supabase.co',
     supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU',
-    webhookUrl:      'https://hook.eu2.make.com/2lsybme5qm0fw8cw1ua9a4xcjx94xg29',
-    webhookSecret:   'cvl_whsec_2f8a9b4e7d1c3f6a',
+    // WHY: Webhook-URL und Secret wurden aus dem Frontend entfernt.
+    // trigger-analysis Edge Function fügt das Secret serverseitig hinzu.
+    triggerUrl:      'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/trigger-analysis',
     maxInitAttempts: 30,
     initRetryMs:     300,
   };
@@ -70,10 +71,16 @@
       return;
     }
 
-    var formData = new FormData(formEl);
-    formData.append('webhook_secret', CONFIG.webhookSecret);
+    // WHY: FormData → JSON damit trigger-analysis Edge Function das
+    // Webhook-Secret serverseitig anhängen kann (nie im Browser-Source).
+    var payload = {};
+    new FormData(formEl).forEach(function(v, k) { payload[k] = v; });
 
-    var res = await fetch(CONFIG.webhookUrl, { method: 'POST', body: formData });
+    var res = await fetch(CONFIG.triggerUrl, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    });
     window.location.href = res.ok ? '/analyse/in-arbeit' : '/analyse/fehler';
   }
 
