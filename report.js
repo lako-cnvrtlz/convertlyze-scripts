@@ -76,7 +76,7 @@
         padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:20px;
       }
       .cvz-cat-name{font-size:18px;font-weight:700;color:#f0f4f8;letter-spacing:-.01em;}
-      .cvz-cat-score{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;}
+      .cvz-cat-score{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#e8edf5;}
 
       /* Karten */
       .cvz-cards{display:flex;flex-direction:column;gap:12px;margin-bottom:8px;}
@@ -91,6 +91,7 @@
       }
       .cvz-card-label-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
       .cvz-card-body{font-size:13px;color:#c4cdd6;line-height:1.65;}
+      .cvz-card-empfehlungen .cvz-card-body{font-size:14px;color:#e8edf5;}
       .cvz-card-body p{margin:0 0 6px}.cvz-card-body p:last-child{margin-bottom:0}
       .cvz-card-body ul,.cvz-card-body ol{padding-left:18px;margin:0}
       .cvz-card-body li{margin-bottom:6px}
@@ -101,8 +102,8 @@
       .cvz-card-staerken   .cvz-card-label-dot{background:#4fd1c5}
       .cvz-card-schwaechen .cvz-card-label{color:#ff6b6b}
       .cvz-card-schwaechen .cvz-card-label-dot{background:#ff6b6b}
-      .cvz-card-empfehlungen .cvz-card-label{color:#f6c90e}
-      .cvz-card-empfehlungen .cvz-card-label-dot{background:#f6c90e}
+      .cvz-card-empfehlungen .cvz-card-label{color:#718096}
+      .cvz-card-empfehlungen .cvz-card-label-dot{background:#718096}
 
       /* Executive Summary: Score Panel */
       .cvz-exec-panel{
@@ -145,13 +146,20 @@
 
       /* Info Grid (Hero Block) */
       .cvz-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;}
+      .section-hero-info{margin-bottom:-24px;}
+      .section-hero-info .cvz-card{
+        background:#0d1117!important;
+        border:1px solid rgba(255,255,255,.07)!important;
+        color:#e2e8f0!important;
+      }
+      .cvz-info-label{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#4a5568!important;}
+      .cvz-info-value{font-size:13px;color:#c4cdd6!important;line-height:1.5;word-break:break-all;}
       .cvz-info-row{
         padding:12px 0;border-bottom:1px solid rgba(255,255,255,.05);
         display:flex;flex-direction:column;gap:4px;padding-right:24px;
       }
       .cvz-info-row:nth-last-child(-n+2){border-bottom:none;}
-      .cvz-info-label{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#4a5568;}
-      .cvz-info-value{font-size:13px;color:#c4cdd6;line-height:1.5;word-break:break-all;}
+      /* cvz-info-label and cvz-info-value defined above with !important */
 
       /* KI-Agent Button */
       .cvz-ki-btn-wrap{text-align:center;padding:32px 24px;max-width:1200px;margin:0 auto;}
