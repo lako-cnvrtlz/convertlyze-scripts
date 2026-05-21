@@ -144,6 +144,15 @@
       .cvz-badge-t{font-size:11px;font-weight:600;color:#4fd1c5;letter-spacing:.05em;text-transform:uppercase;}
       .cvz-badge-tx{font-size:12px;color:#718096;line-height:1.55;}
 
+      /* Sektions-Überschriften */
+      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:48px 24px 8px;text-align:center;}
+      .cvz-heading-wrap.cvz-heading-top{padding-top:24px;}
+      .cvz-heading-title{
+        font-size:clamp(36px,6vw,80px);font-weight:800;letter-spacing:-.02em;
+        color:rgba(148,163,184,.25);text-transform:uppercase;line-height:1;margin-bottom:12px;
+      }
+      .cvz-heading-sub{font-size:14px;color:#718096;line-height:1.6;max-width:640px;margin:0 auto;}
+
       /* Info Grid (Hero Block) */
       .cvz-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;}
       .section-hero-info{margin-bottom:-24px;}
@@ -401,6 +410,24 @@
       link.setAttribute('href', link.getAttribute('href').replace('{ANALYSIS_ID}', analysisId));
     });
 
+    // Sektions-Überschriften injizieren
+    (function injectHeadings() {
+      function heading(selector, title, sub, topPad) {
+        const el = document.querySelector(selector);
+        if (!el) return;
+        const wrap = document.createElement('div');
+        wrap.className = 'cvz-heading-wrap' + (topPad ? ' cvz-heading-top' : '');
+        wrap.innerHTML = `<div class="cvz-heading-title">${title}</div>` +
+          (sub ? `<div class="cvz-heading-sub">${sub}</div>` : '');
+        el.parentNode.insertBefore(wrap, el);
+      }
+      heading('.section-hero-info',            'Deine Analyse', '', true);
+      heading('.section-executive-summary',    'Executive Summary', 'Die wichtigsten Erkenntnisse auf einen Blick');
+      heading('.section-deep-dive-hero',       'Deep Dive', 'Detaillierte Analyse jeder Kategorie');
+      heading('.section-deep-dive-performance','Performance &amp; AI Sichtbarkeit', 'Performance und AI Readiness fließen nicht in den Gesamt-Score ein. Performance-Optimierungen erfordern meist hauptsächlich technische Umsetzung. Bei AI Readiness ist es gemischt – strukturierte Daten brauchen Entwicklungs-Support, Inhaltsstruktur und Semantik kannst du direkt selbst angehen.');
+      heading('.section-roadmap',              'Roadmap', 'Die wichtigsten Maßnahmen, sortiert nach Impact und Aufwand.');
+    })();
+
     // Hero Info Block
     (function renderHeroInfo() {
       const c = document.querySelector('.section-hero-info');
@@ -511,7 +538,7 @@
     document.querySelectorAll('.section-ki-agent-btn').forEach(el => {
       el.innerHTML = `
         <div class="cvz-ki-btn-wrap">
-          <a href="/ki-agent?id=${analysisId}" class="cvz-ki-btn">Mit KI-Agent optimieren →</a>
+          <a href="https://www.convertlyze.com/analyse/optimization-agent?analysis_id=${analysisId}" class="cvz-ki-btn">Mit KI-Agent optimieren →</a>
         </div>`;
     });
 
