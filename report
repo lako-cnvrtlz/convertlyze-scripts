@@ -143,6 +143,16 @@
       .cvz-badge-t{font-size:11px;font-weight:600;color:#4fd1c5;letter-spacing:.05em;text-transform:uppercase;}
       .cvz-badge-tx{font-size:12px;color:#718096;line-height:1.55;}
 
+      /* Info Grid (Hero Block) */
+      .cvz-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;}
+      .cvz-info-row{
+        padding:12px 0;border-bottom:1px solid rgba(255,255,255,.05);
+        display:flex;flex-direction:column;gap:4px;padding-right:24px;
+      }
+      .cvz-info-row:nth-last-child(-n+2){border-bottom:none;}
+      .cvz-info-label{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#4a5568;}
+      .cvz-info-value{font-size:13px;color:#c4cdd6;line-height:1.5;word-break:break-all;}
+
       /* KI-Agent Button */
       .cvz-ki-btn-wrap{text-align:center;padding:32px 24px;max-width:1200px;margin:0 auto;}
       .cvz-ki-btn{
@@ -162,6 +172,9 @@
         .cvz-badges{flex-direction:column;}
         .cvz-badge{min-width:100%;flex:1 1 100%;}
         .cvz-bl{width:76px;}
+        .cvz-info-grid{grid-template-columns:1fr;}
+        .cvz-info-row:nth-last-child(-n+2){border-bottom:1px solid rgba(255,255,255,.05);}
+        .cvz-info-row:last-child{border-bottom:none;}
       }
     `;
     document.head.appendChild(s);
@@ -379,6 +392,39 @@
     document.querySelectorAll('a[href*="{ANALYSIS_ID}"]').forEach(link => {
       link.setAttribute('href', link.getAttribute('href').replace('{ANALYSIS_ID}', analysisId));
     });
+
+    // Hero Info Block
+    (function renderHeroInfo() {
+      const c = document.querySelector('.section-hero-info');
+      if (!c) return;
+
+      function infoRow(label, value) {
+        if (!value || value === '-') return '';
+        return `
+          <div class="cvz-info-row">
+            <div class="cvz-info-label">${label}</div>
+            <div class="cvz-info-value">${value}</div>
+          </div>`;
+      }
+
+      c.innerHTML = `
+        <div class="cvz-section cvz-fi cvz-fi-1">
+          <div class="cvz-card" style="padding:20px 24px;">
+            <div class="cvz-info-grid">
+              ${infoRow('Keyword',         analysis.keyword)}
+              ${infoRow('URL',             analysis.landing_page_url)}
+              ${infoRow('Zielgruppe',      analysis.target_audience)}
+              ${infoRow('Conversion-Ziel', analysis.conversion_goal)}
+              ${infoRow('Branche',         analysis.analysis_industry || analysis.industry_detected)}
+              ${infoRow('Angebotstyp',     analysis.business_type)}
+              ${infoRow('Search Intent',   analysis.search_intent_primary)}
+              ${infoRow('Analyse vom',     formatDate(analysis.created_at))}
+            </div>
+          </div>
+        </div>`;
+
+      console.log('✅ Hero Info gerendert');
+    })();
 
     // Executive Summary
     renderExecSummary(analysis);
