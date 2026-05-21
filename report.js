@@ -57,7 +57,7 @@
 
       /* ── Design System ── */
       .cvz-section{
-        max-width:1200px;margin:0 auto;padding:0 24px 24px;
+        max-width:1200px;margin:0 auto;padding:0 24px 32px;
         font-family:'DM Sans','Segoe UI',sans-serif;color:#e2e8f0;
       }
 
@@ -154,7 +154,7 @@
       .cvz-badge-tx{font-size:14px;color:#718096;line-height:1.55;}
 
       /* Sektions-Überschriften */
-      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:48px 24px 0;text-align:center;}
+      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:56px 24px 24px;text-align:center;}
       .cvz-heading-wrap.cvz-heading-top{border-top:none!important;}
       .cvz-heading-title{
         font-size:clamp(36px,6vw,80px);font-weight:800;letter-spacing:-.02em;
@@ -178,6 +178,7 @@
       .section-ki-agent-btn {
         padding: 0 !important;
         margin: 0 !important;
+        display: block !important;
       }
       .cvz-heading-sub{font-size:14px;color:#718096;line-height:1.6;max-width:640px;margin:8px auto 0;}
 
