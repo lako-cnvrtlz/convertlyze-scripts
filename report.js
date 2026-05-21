@@ -57,7 +57,7 @@
 
       /* ── Design System ── */
       .cvz-section{
-        max-width:1200px;margin:0 auto;padding:8px 24px 24px;
+        max-width:1200px;margin:0 auto;padding:4px 24px 24px;
         font-family:'DM Sans','Segoe UI',sans-serif;color:#e2e8f0;
       }
 
@@ -154,13 +154,13 @@
       .cvz-badge-tx{font-size:14px;color:#718096;line-height:1.55;}
 
       /* Sektions-Überschriften */
-      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:80px 24px 0;text-align:center;border-top:1px solid rgba(255,255,255,.06);}
+      .cvz-heading-wrap{max-width:1200px;margin:48px auto 0;padding:48px 24px 0;text-align:center;border-top:1px solid rgba(255,255,255,.06);}
       .cvz-heading-wrap.cvz-heading-top{padding-top:40px;border-top:none;}
       .cvz-heading-title{
         font-size:clamp(36px,6vw,80px);font-weight:800;letter-spacing:-.02em;
         color:rgba(148,163,184,.25);text-transform:uppercase;line-height:1;margin-bottom:12px;
       }
-      .cvz-heading-sub{font-size:14px;color:#718096;line-height:1.6;max-width:640px;margin:0 auto;}
+      .cvz-heading-sub{font-size:14px;color:#718096;line-height:1.6;max-width:640px;margin:8px auto 0;}
 
       /* Info Grid (Hero Block) */
       .cvz-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;}
