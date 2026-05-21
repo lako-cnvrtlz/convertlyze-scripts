@@ -57,7 +57,7 @@
 
       /* ── Design System ── */
       .cvz-section{
-        max-width:1200px;margin:0 auto;padding:24px;
+        max-width:1200px;margin:0 auto;padding:16px 24px 24px;
         font-family:'DM Sans','Segoe UI',sans-serif;color:#e2e8f0;
       }
 
@@ -94,8 +94,13 @@
       .cvz-card-empfehlungen .cvz-card-body{font-size:14px;color:#e8edf5;}
       .cvz-card-empfehlungen .cvz-card-body li{color:#e8edf5;font-size:14px;}
       .cvz-card-empfehlungen .cvz-card-body li li,
-      .cvz-card-empfehlungen .cvz-card-body ul ul li{color:#c4cdd6;font-size:13px;}
+      .cvz-card-empfehlungen .cvz-card-body ul ul li,
+      .cvz-card-empfehlungen .cvz-card-body ol ol li{color:#e8edf5!important;font-size:14px!important;}
       .cvz-card-body li{color:#e8edf5;font-size:14px;}
+      .cvz-card-body *{color:inherit;}
+      .cvz-card-empfehlungen .cvz-card-body,
+      .cvz-card-empfehlungen .cvz-card-body *{color:#e8edf5!important;font-size:14px!important;}
+      .cvz-card-empfehlungen .cvz-card-body strong{color:#ffffff!important;}
       .cvz-card-body p{margin:0 0 6px}.cvz-card-body p:last-child{margin-bottom:0}
       .cvz-card-body ul,.cvz-card-body ol{padding-left:18px;margin:0}
       .cvz-card-body li{margin-bottom:6px}
@@ -149,7 +154,7 @@
       .cvz-badge-tx{font-size:12px;color:#718096;line-height:1.55;}
 
       /* Sektions-Überschriften */
-      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:64px 24px 8px;text-align:center;border-top:1px solid rgba(255,255,255,.06);}
+      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:72px 24px 4px;text-align:center;border-top:1px solid rgba(255,255,255,.06);}
       .cvz-heading-wrap.cvz-heading-top{padding-top:40px;border-top:none;}
       .cvz-heading-title{
         font-size:clamp(36px,6vw,80px);font-weight:800;letter-spacing:-.02em;
@@ -172,6 +177,7 @@
         display:flex;flex-direction:column;gap:4px;padding-right:24px;
       }
       .cvz-info-row:nth-last-child(-n+2){border-bottom:none;}
+      .cvz-info-row:last-child{border-bottom:none!important;}
       /* cvz-info-label and cvz-info-value defined above with !important */
 
       /* KI-Agent Button */
