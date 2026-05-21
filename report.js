@@ -57,7 +57,7 @@
 
       /* ── Design System ── */
       .cvz-section{
-        max-width:1200px;margin:0 auto;padding:16px 24px 24px;
+        max-width:1200px;margin:0 auto;padding:8px 24px 24px;
         font-family:'DM Sans','Segoe UI',sans-serif;color:#e2e8f0;
       }
 
@@ -90,7 +90,7 @@
         margin-bottom:10px;display:flex;align-items:center;gap:7px;
       }
       .cvz-card-label-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
-      .cvz-card-body{font-size:13px;color:#c4cdd6;line-height:1.65;}
+      .cvz-card-body{font-size:14px;color:#c4cdd6;line-height:1.65;}
       .cvz-card-empfehlungen .cvz-card-body{font-size:14px;color:#e8edf5;}
       .cvz-card-empfehlungen .cvz-card-body li{color:#e8edf5;font-size:14px;}
       .cvz-card-empfehlungen .cvz-card-body li li,
@@ -131,13 +131,13 @@
       .cvz-bars{flex:1;min-width:200px;}
       .cvz-br{display:flex;align-items:center;gap:8px;margin-bottom:7px;cursor:default;}
       .cvz-br:last-child{margin-bottom:0}
-      .cvz-bl{font-size:11px;color:#718096;width:90px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .15s;}
+      .cvz-bl{font-size:13px;color:#718096;width:100px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .15s;}
       .cvz-br:hover .cvz-bl{color:#e2e8f0}
       .cvz-bt{flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;}
       .cvz-bf{height:100%;border-radius:3px;width:0;background:#4fd1c5;opacity:.75;
               animation:cvzBar 1s cubic-bezier(.4,0,.2,1) .65s forwards;transition:opacity .15s,filter .15s;}
       .cvz-br:hover .cvz-bf{opacity:1;filter:brightness(1.15)}
-      .cvz-bv{font-size:11px;font-family:'DM Mono',monospace;width:26px;text-align:right;flex-shrink:0;color:#4fd1c5;}
+      .cvz-bv{font-size:14px;font-family:'DM Mono',monospace;width:32px;text-align:right;flex-shrink:0;color:#4fd1c5;}
 
       /* Executive Summary: Badges */
       .cvz-badges{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;}
@@ -151,10 +151,10 @@
       .cvz-badge-h{display:flex;align-items:center;gap:7px;margin-bottom:7px;}
       .cvz-badge-dot{width:6px;height:6px;border-radius:50%;background:#4fd1c5;flex-shrink:0;}
       .cvz-badge-t{font-size:11px;font-weight:600;color:#4fd1c5;letter-spacing:.05em;text-transform:uppercase;}
-      .cvz-badge-tx{font-size:12px;color:#718096;line-height:1.55;}
+      .cvz-badge-tx{font-size:14px;color:#718096;line-height:1.55;}
 
       /* Sektions-Überschriften */
-      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:72px 24px 4px;text-align:center;border-top:1px solid rgba(255,255,255,.06);}
+      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:80px 24px 0;text-align:center;border-top:1px solid rgba(255,255,255,.06);}
       .cvz-heading-wrap.cvz-heading-top{padding-top:40px;border-top:none;}
       .cvz-heading-title{
         font-size:clamp(36px,6vw,80px);font-weight:800;letter-spacing:-.02em;
@@ -164,14 +164,14 @@
 
       /* Info Grid (Hero Block) */
       .cvz-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;}
-      .section-hero-info{margin-bottom:-24px;}
+      .section-hero-info .cvz-card{border-bottom:none!important;}
       .section-hero-info .cvz-card{
         background:#0d1117!important;
         border:1px solid rgba(255,255,255,.07)!important;
         color:#e2e8f0!important;
       }
-      .cvz-info-label{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#4a5568!important;}
-      .cvz-info-value{font-size:13px;color:#c4cdd6!important;line-height:1.5;word-break:break-all;}
+      .cvz-info-label{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#4a5568!important;}
+      .cvz-info-value{font-size:14px;color:#c4cdd6!important;line-height:1.5;word-break:break-all;}
       .cvz-info-row{
         padding:12px 0;border-bottom:1px solid rgba(255,255,255,.05);
         display:flex;flex-direction:column;gap:4px;padding-right:24px;
