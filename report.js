@@ -154,13 +154,31 @@
       .cvz-badge-tx{font-size:14px;color:#718096;line-height:1.55;}
 
       /* Sektions-Überschriften */
-      .cvz-heading-wrap{max-width:1200px;margin:40px auto 0;padding:32px 24px 0;text-align:center;border-top:1px solid rgba(255,255,255,.06);}
-      .cvz-heading-wrap.cvz-heading-top{padding-top:40px;border-top:none;}
+      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:48px 24px 0;text-align:center;}
+      .cvz-heading-wrap.cvz-heading-top{border-top:none!important;}
       .cvz-heading-title{
         font-size:clamp(36px,6vw,80px);font-weight:800;letter-spacing:-.02em;
         color:rgba(148,163,184,.25);text-transform:uppercase;line-height:1!important;margin-bottom:12px;
       }
       .cvz-heading-wrap,.cvz-heading-wrap *{line-height:1.2!important;}
+
+      /* Webflow Section-Wrapper resetten */
+      .section-hero-info,
+      .section-executive-summary,
+      .section-deep-dive-hero,
+      .section-deep-dive-content,
+      .section-deep-dive-zielgruppe,
+      .section-deep-dive-conversion,
+      .section-deep-dive-struktur,
+      .section-deep-dive-searchintent,
+      .section-deep-dive-differenzierung,
+      .section-deep-dive-performance,
+      .section-deep-dive-ai,
+      .section-roadmap,
+      .section-ki-agent-btn {
+        padding: 0 !important;
+        margin: 0 !important;
+      }
       .cvz-heading-sub{font-size:14px;color:#718096;line-height:1.6;max-width:640px;margin:8px auto 0;}
 
       /* Info Grid (Hero Block) */
@@ -423,16 +441,16 @@
 
     // Sektions-Überschriften injizieren
     (function injectHeadings() {
-      function heading(selector, title, sub, topPad) {
+      function heading(selector, title, sub) {
         const el = document.querySelector(selector);
         if (!el) return;
         const wrap = document.createElement('div');
-        wrap.className = 'cvz-heading-wrap' + (topPad ? ' cvz-heading-top' : '');
+        wrap.className = 'cvz-heading-wrap';
         wrap.innerHTML = `<div class="cvz-heading-title">${title}</div>` +
           (sub ? `<div class="cvz-heading-sub">${sub}</div>` : '');
-        el.parentNode.insertBefore(wrap, el);
+        el.insertBefore(wrap, el.firstChild);
       }
-      heading('.section-hero-info',            'Deine Analyse', '', true);
+      heading('.section-hero-info',            'Deine Analyse', '');
       heading('.section-executive-summary',    'Executive Summary', 'Die wichtigsten Erkenntnisse auf einen Blick');
       heading('.section-deep-dive-hero',       'Deep Dive', 'Detaillierte Analyse jeder Kategorie');
       heading('.section-deep-dive-performance','Performance &amp; AI Sichtbarkeit', 'Performance und AI Readiness fließen nicht in den Gesamt-Score ein. Performance-Optimierungen erfordern meist hauptsächlich technische Umsetzung. Bei AI Readiness ist es gemischt – strukturierte Daten brauchen Entwicklungs-Support, Inhaltsstruktur und Semantik kannst du direkt selbst angehen.');
