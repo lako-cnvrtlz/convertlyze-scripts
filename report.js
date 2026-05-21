@@ -57,7 +57,7 @@
 
       /* ── Design System ── */
       .cvz-section{
-        max-width:1200px;margin:0 auto;padding:4px 24px 24px;
+        max-width:1200px;margin:0 auto;padding:0 24px 24px;
         font-family:'DM Sans','Segoe UI',sans-serif;color:#e2e8f0;
       }
 
@@ -118,7 +118,7 @@
       .cvz-exec-panel{
         background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);
         border-radius:16px;padding:24px 28px;
-        display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px;
+        display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px;
       }
       .cvz-ring{flex-shrink:0;text-align:center;animation:cvzRing .75s cubic-bezier(.34,1.56,.64,1) .15s both;}
       .cvz-ring-c{
@@ -154,7 +154,7 @@
       .cvz-badge-tx{font-size:14px;color:#718096;line-height:1.55;}
 
       /* Sektions-Überschriften */
-      .cvz-heading-wrap{max-width:1200px;margin:48px auto 0;padding:48px 24px 0;text-align:center;border-top:1px solid rgba(255,255,255,.06);}
+      .cvz-heading-wrap{max-width:1200px;margin:40px auto 0;padding:32px 24px 0;text-align:center;border-top:1px solid rgba(255,255,255,.06);}
       .cvz-heading-wrap.cvz-heading-top{padding-top:40px;border-top:none;}
       .cvz-heading-title{
         font-size:clamp(36px,6vw,80px);font-weight:800;letter-spacing:-.02em;
