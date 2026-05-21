@@ -76,7 +76,7 @@
         padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:20px;
       }
       .cvz-cat-name{font-size:18px;font-weight:700;color:#f0f4f8;letter-spacing:-.01em;}
-      .cvz-cat-score{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#e8edf5;}
+      .cvz-cat-score{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#e8edf5!important;}
 
       /* Karten */
       .cvz-cards{display:flex;flex-direction:column;gap:12px;margin-bottom:8px;}
@@ -92,6 +92,10 @@
       .cvz-card-label-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
       .cvz-card-body{font-size:13px;color:#c4cdd6;line-height:1.65;}
       .cvz-card-empfehlungen .cvz-card-body{font-size:14px;color:#e8edf5;}
+      .cvz-card-empfehlungen .cvz-card-body li{color:#e8edf5;font-size:14px;}
+      .cvz-card-empfehlungen .cvz-card-body li li,
+      .cvz-card-empfehlungen .cvz-card-body ul ul li{color:#c4cdd6;font-size:13px;}
+      .cvz-card-body li{color:#e8edf5;font-size:14px;}
       .cvz-card-body p{margin:0 0 6px}.cvz-card-body p:last-child{margin-bottom:0}
       .cvz-card-body ul,.cvz-card-body ol{padding-left:18px;margin:0}
       .cvz-card-body li{margin-bottom:6px}
@@ -145,8 +149,8 @@
       .cvz-badge-tx{font-size:12px;color:#718096;line-height:1.55;}
 
       /* Sektions-Überschriften */
-      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:48px 24px 8px;text-align:center;}
-      .cvz-heading-wrap.cvz-heading-top{padding-top:24px;}
+      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:64px 24px 8px;text-align:center;border-top:1px solid rgba(255,255,255,.06);}
+      .cvz-heading-wrap.cvz-heading-top{padding-top:40px;border-top:none;}
       .cvz-heading-title{
         font-size:clamp(36px,6vw,80px);font-weight:800;letter-spacing:-.02em;
         color:rgba(148,163,184,.25);text-transform:uppercase;line-height:1;margin-bottom:12px;
@@ -237,7 +241,7 @@
       <div class="cvz-section cvz-fi cvz-fi-2">
         <div class="cvz-cat-header">
           <div class="cvz-cat-name">${name}</div>
-          <div class="cvz-cat-score" style="color:${color};">${scoreDisplay}</div>
+          <div class="cvz-cat-score">${scoreDisplay}</div>
         </div>
         <div class="cvz-cards">${cards}</div>
       </div>`;
