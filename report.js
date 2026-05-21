@@ -439,24 +439,6 @@
       link.setAttribute('href', link.getAttribute('href').replace('{ANALYSIS_ID}', analysisId));
     });
 
-    // Sektions-Überschriften injizieren
-    (function injectHeadings() {
-      function heading(selector, title, sub) {
-        const el = document.querySelector(selector);
-        if (!el) return;
-        const wrap = document.createElement('div');
-        wrap.className = 'cvz-heading-wrap';
-        wrap.innerHTML = `<div class="cvz-heading-title">${title}</div>` +
-          (sub ? `<div class="cvz-heading-sub">${sub}</div>` : '');
-        el.insertBefore(wrap, el.firstChild);
-      }
-      heading('.section-hero-info',            'Deine Analyse', '');
-      heading('.section-executive-summary',    'Executive Summary', 'Die wichtigsten Erkenntnisse auf einen Blick');
-      heading('.section-deep-dive-hero',       'Deep Dive', 'Detaillierte Analyse jeder Kategorie');
-      heading('.section-deep-dive-performance','Performance &amp; AI Sichtbarkeit', 'Performance und AI Readiness fließen nicht in den Gesamt-Score ein. Performance-Optimierungen erfordern meist hauptsächlich technische Umsetzung. Bei AI Readiness ist es gemischt – strukturierte Daten brauchen Entwicklungs-Support, Inhaltsstruktur und Semantik kannst du direkt selbst angehen.');
-      heading('.section-roadmap',              'Roadmap', 'Die wichtigsten Maßnahmen, sortiert nach Impact und Aufwand.');
-    })();
-
     // Hero Info Block
     (function renderHeroInfo() {
       const c = document.querySelector('.section-hero-info');
@@ -570,6 +552,24 @@
           <a href="https://www.convertlyze.com/analyse/optimization-agent?analysis_id=${analysisId}" class="cvz-ki-btn">Mit KI-Agent optimieren →</a>
         </div>`;
     });
+
+    // Sektions-Überschriften – nach allen Renders einfügen
+    (function injectHeadings() {
+      function heading(selector, title, sub) {
+        const el = document.querySelector(selector);
+        if (!el) return;
+        const wrap = document.createElement('div');
+        wrap.className = 'cvz-heading-wrap';
+        wrap.innerHTML = '<div class="cvz-heading-title">' + title + '</div>' +
+          (sub ? '<div class="cvz-heading-sub">' + sub + '</div>' : '');
+        el.insertBefore(wrap, el.firstChild);
+      }
+      heading('.section-hero-info',            'Deine Analyse', '');
+      heading('.section-executive-summary',    'Executive Summary', 'Die wichtigsten Erkenntnisse auf einen Blick');
+      heading('.section-deep-dive-hero',       'Deep Dive', 'Detaillierte Analyse jeder Kategorie');
+      heading('.section-deep-dive-performance','Performance &amp; AI Sichtbarkeit', 'Performance und AI Readiness fließen nicht in den Gesamt-Score ein. Performance-Optimierungen erfordern meist hauptsächlich technische Umsetzung. Bei AI Readiness ist es gemischt – strukturierte Daten brauchen Entwicklungs-Support, Inhaltsstruktur und Semantik kannst du direkt selbst angehen.');
+      heading('.section-roadmap',              'Roadmap', 'Die wichtigsten Maßnahmen, sortiert nach Impact und Aufwand.');
+    })();
 
     // Share Button
     const shareUrl = window.location.href;
