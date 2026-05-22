@@ -109,8 +109,8 @@
       .cvz-card-summary    .cvz-card-label-dot{background:#718096}
       .cvz-card-staerken   .cvz-card-label{color:#4fd1c5}
       .cvz-card-staerken   .cvz-card-label-dot{background:#4fd1c5}
-      .cvz-card-schwaechen .cvz-card-label{color:#ff6b6b}
-      .cvz-card-schwaechen .cvz-card-label-dot{background:#ff6b6b}
+      .cvz-card-schwaechen .cvz-card-label{color:#ef4444}
+      .cvz-card-schwaechen .cvz-card-label-dot{background:#ef4444}
       .cvz-card-empfehlungen .cvz-card-label{color:#718096}
       .cvz-card-empfehlungen .cvz-card-label-dot{background:#718096}
 
@@ -179,6 +179,11 @@
         padding: 0 !important;
         margin: 0 !important;
         display: block !important;
+        width: 100% !important;
+        flex-direction: unset !important;
+        align-items: unset !important;
+        justify-content: unset !important;
+        gap: unset !important;
       }
       .cvz-heading-sub{font-size:14px;color:#718096;line-height:1.6;max-width:640px;margin:8px auto 0;}
 
@@ -230,15 +235,17 @@
   // ── Design System Helpers ───────────────────────────────────────────────────
   function getRingColor(s) {
     if (s === null) return '#4a5568';
-    if (s >= 7.5)   return '#4fd1c5';
-    if (s >= 5.5)   return '#f6c90e';
-    return '#ff6b6b';
+    if (s >= 8)    return '#10b981';
+    if (s >= 6)    return '#3b82f6';
+    if (s >= 4)    return '#f59e0b';
+    return '#ef4444';
   }
   function getRingBg(s) {
     if (s === null) return 'rgba(74,85,104,0.08)';
-    if (s >= 7.5)   return 'rgba(79,209,197,0.08)';
-    if (s >= 5.5)   return 'rgba(246,201,14,0.08)';
-    return 'rgba(255,107,107,0.08)';
+    if (s >= 8)    return 'rgba(16,185,129,0.08)';
+    if (s >= 6)    return 'rgba(59,130,246,0.08)';
+    if (s >= 4)    return 'rgba(245,158,11,0.08)';
+    return 'rgba(239,68,68,0.08)';
   }
   function sc(v) { const n = parseFloat(v); return isNaN(n) ? null : n; }
 
@@ -356,8 +363,8 @@
 
     function execSection(type, items) {
       const isS     = type === 'staerken';
-      const color   = isS ? '#4fd1c5' : '#ff6b6b';
-      const iconBg  = isS ? 'rgba(79,209,197,.14)' : 'rgba(255,107,107,.14)';
+      const color   = isS ? '#4fd1c5' : '#ef4444';
+      const iconBg  = isS ? 'rgba(79,209,197,.14)' : 'rgba(239,68,68,.14)';
       const icon    = isS ? '✓' : '▲';
       const title   = isS ? 'Stärken' : 'Größte Hebel';
       const cardCls = isS ? 'cvz-card-staerken' : 'cvz-card-schwaechen';
