@@ -210,7 +210,7 @@
       .cvz-ki-btn{
         display:inline-block;background:#4fd1c5;color:#0d1117;
         font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-        text-decoration:none;padding:14px 32px;border-radius:8px;
+        text-decoration:none;padding:14px 32px;border-radius:36px;
         transition:background .2s,transform .2s,box-shadow .2s;cursor:pointer;
       }
       .cvz-ki-btn:hover{background:#38b2ac;transform:translateY(-2px);box-shadow:0 8px 24px rgba(79,209,197,.25);}
