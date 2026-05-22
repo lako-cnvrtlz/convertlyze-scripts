@@ -292,6 +292,8 @@
       .section-deep-dive-struktur,.section-deep-dive-searchintent,.section-deep-dive-differenzierung,
       .section-deep-dive-performance,.section-deep-dive-ai,.section-roadmap,.section-ki-agent-btn{
         padding:0!important;margin:0!important;display:block!important;
+        width:100%!important;flex-direction:unset!important;align-items:unset!important;
+        justify-content:unset!important;gap:unset!important;
       }
 
       /* Responsive */
