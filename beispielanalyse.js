@@ -206,7 +206,7 @@
     s.id = 'cvz-bsp-styles';
     s.textContent = `
       /* ── Design System ── */
-      .cvz-section{max-width:1200px;margin:0 auto;padding:0 24px 32px;font-family:'DM Sans','Segoe UI',sans-serif;color:#e2e8f0;}
+      .cvz-section{max-width:1200px;margin:0 auto;padding:0 24px 32px;font-family:'Geist','DM Sans','Segoe UI',sans-serif;color:#e2e8f0;}
       .cvz-section *{box-sizing:border-box;}
 
       /* Fade-in */
