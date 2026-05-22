@@ -242,7 +242,7 @@
       .cvz-card-body strong{color:#e2e8f0}
       .cvz-card-summary .cvz-card-label{color:#718096}.cvz-card-summary .cvz-card-label-dot{background:#718096}
       .cvz-card-staerken .cvz-card-label{color:#4fd1c5}.cvz-card-staerken .cvz-card-label-dot{background:#4fd1c5}
-      .cvz-card-schwaechen .cvz-card-label{color:#ff6b6b}.cvz-card-schwaechen .cvz-card-label-dot{background:#ff6b6b}
+      .cvz-card-schwaechen .cvz-card-label{color:#ef4444}.cvz-card-schwaechen .cvz-card-label-dot{background:#ef4444}
       .cvz-card-empfehlungen .cvz-card-label{color:#718096}.cvz-card-empfehlungen .cvz-card-label-dot{background:#718096}
       .cvz-card-empfehlungen .cvz-card-body,.cvz-card-empfehlungen .cvz-card-body *{color:#e8edf5!important;font-size:14px!important;}
       .cvz-card-empfehlungen .cvz-card-body strong{color:#fff!important;}
@@ -317,15 +317,17 @@
   // ── Helpers ─────────────────────────────────────────────────────────────────
   function getRingColor(s) {
     if (!s) return '#4a5568';
-    if (s >= 7.5) return '#4fd1c5';
-    if (s >= 5.5) return '#f6c90e';
-    return '#ff6b6b';
+    if (s >= 8)   return '#10b981';
+    if (s >= 6)   return '#3b82f6';
+    if (s >= 4)   return '#f59e0b';
+    return '#ef4444';
   }
   function getRingBg(s) {
     if (!s) return 'rgba(74,85,104,0.08)';
-    if (s >= 7.5) return 'rgba(79,209,197,0.08)';
-    if (s >= 5.5) return 'rgba(246,201,14,0.08)';
-    return 'rgba(255,107,107,0.08)';
+    if (s >= 8)   return 'rgba(16,185,129,0.08)';
+    if (s >= 6)   return 'rgba(59,130,246,0.08)';
+    if (s >= 4)   return 'rgba(245,158,11,0.08)';
+    return 'rgba(239,68,68,0.08)';
   }
 
   function card(type, label, content) {
@@ -389,8 +391,8 @@
 
     function execSec(type, items) {
       var isS = type==='staerken';
-      var color = isS?'#4fd1c5':'#ff6b6b';
-      var iconBg = isS?'rgba(79,209,197,.14)':'rgba(255,107,107,.14)';
+      var color = isS?'#4fd1c5':'#ef4444';
+      var iconBg = isS?'rgba(79,209,197,.14)':'rgba(239,68,68,.14)';
       var icon = isS?'✓':'▲';
       var title = isS?'Stärken':'Größte Hebel';
       var cardCls = isS?'cvz-card-staerken':'cvz-card-schwaechen';
