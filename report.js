@@ -61,6 +61,14 @@
         font-family:'Geist','DM Sans','Segoe UI',sans-serif;color:#e2e8f0;
       }
 
+      /* Reduced motion */
+      @media(prefers-reduced-motion:reduce){
+        .cvz-fi{animation:none!important;opacity:1!important;transform:none!important;}
+        .cvz-bf{animation:none!important;width:var(--bw)!important;}
+        .cvz-ring{animation:none!important;opacity:1!important;transform:none!important;}
+        *{transition:none!important;}
+      }
+
       /* Fade-in */
       .cvz-fi{opacity:0;transform:translateY(14px);animation:cvzFI .55s ease forwards;}
       .cvz-fi-1{animation-delay:.05s}.cvz-fi-2{animation-delay:.15s}
@@ -69,6 +77,42 @@
       @keyframes cvzFI{to{opacity:1;transform:translateY(0)}}
       @keyframes cvzBar{from{width:0}to{width:var(--bw)}}
       @keyframes cvzRing{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:scale(1)}}
+
+      /* Anker-Navigation */
+      .cvz-anchor-nav{
+        background:#0d1117;
+        border-top:1px solid rgba(255,255,255,.06);
+        border-bottom:1px solid rgba(255,255,255,.06);
+        position:sticky;top:0;z-index:100;
+        width:100%;overflow:hidden;
+      }
+      .cvz-anchor-nav-inner{
+        display:flex;align-items:center;justify-content:center;
+        gap:0;width:100%;padding:0 24px;
+        overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;
+      }
+      .cvz-anchor-nav-inner::-webkit-scrollbar{display:none;}
+      .cvz-anchor-nav a{
+        display:inline-flex;align-items:center;flex-shrink:0;
+        padding:14px 22px;
+        font-family:'Geist','DM Sans',sans-serif;font-size:13px;font-weight:500;
+        color:#6e7681;text-decoration:none;white-space:nowrap;
+        border-bottom:2px solid transparent;
+        transition:color .15s ease,border-color .15s ease;
+        position:relative;
+      }
+      .cvz-anchor-nav a:hover{color:#e6edf3;border-bottom-color:rgba(79,209,197,.4);}
+      .cvz-anchor-nav a.cvz-nav-active{color:#6e7681;border-bottom-color:transparent;}
+      .cvz-anchor-nav a+a::before{
+        content:'';position:absolute;left:0;top:25%;
+        height:50%;width:1px;background:rgba(255,255,255,.06);
+      }
+      .cvz-anchor-nav a:focus-visible{outline:2px solid #4fd1c5;outline-offset:2px;border-radius:2px;}
+      @media(max-width:600px){
+        .cvz-anchor-nav-inner{justify-content:flex-start;padding:0;}
+        .cvz-anchor-nav a{font-size:12px;padding:12px 16px;}
+        .cvz-anchor-nav a:first-child{padding-left:16px;}
+      }
 
       /* Kategorie-Header */
       .cvz-cat-header{
@@ -257,12 +301,14 @@
       schwaechen:   'cvz-card-schwaechen',
       empfehlungen: 'cvz-card-empfehlungen',
     }[type] || '';
+    const safeContent = sanitize(content);
+    const safeLabel   = label.replace(/</g,'&lt;').replace(/>/g,'&gt;');
     return `
       <div class="cvz-card ${cls} cvz-fi cvz-fi-3">
         <div class="cvz-card-label">
-          <div class="cvz-card-label-dot"></div>${label}
+          <div class="cvz-card-label-dot"></div>${safeLabel}
         </div>
-        <div class="cvz-card-body">${content}</div>
+        <div class="cvz-card-body">${safeContent}</div>
       </div>`;
   }
 
@@ -280,7 +326,31 @@
       </div>`;
   }
 
-  function txt(v) { return v ? `<p>${v}</p>` : ''; }
+  // ── XSS-Sanitization ──────────────────────────────────────────────────────
+  // Erlaubt nur sichere HTML-Tags aus Claude-Output (Listen, Bold, Paragraphen)
+  function sanitize(html) {
+    if (!html) return '';
+    const allowed = {
+      'p':true,'br':true,'strong':true,'b':true,'em':true,'i':true,
+      'ul':true,'ol':true,'li':true,'span':true,'small':true,
+    };
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    // Entferne alle nicht erlaubten Tags und gefährliche Attribute
+    tmp.querySelectorAll('*').forEach(el => {
+      if (!allowed[el.tagName.toLowerCase()]) {
+        el.replaceWith(document.createTextNode(el.textContent));
+        return;
+      }
+      // Entferne alle Attribute außer class
+      Array.from(el.attributes).forEach(attr => {
+        if (attr.name !== 'class') el.removeAttribute(attr.name);
+      });
+    });
+    return tmp.innerHTML;
+  }
+
+  function txt(v) { return v ? `<p>${sanitize(String(v))}</p>` : ''; }
 
   // ── DOM Helpers ─────────────────────────────────────────────────────────────
   function setText(sel, val, fb = '-') {
@@ -447,6 +517,66 @@
       link.setAttribute('href', link.getAttribute('href').replace('{ANALYSIS_ID}', analysisId));
     });
 
+    // Anker-Navigation einfügen
+    (function injectAnchorNav() {
+      const nav = document.createElement('nav');
+      nav.className = 'cvz-anchor-nav';
+      nav.setAttribute('aria-label', 'Analyse-Navigation');
+      const links = [
+        {href:'#cvz-exec',    label:'Executive Summary'},
+        {href:'#cvz-hero',    label:'Hero'},
+        {href:'#cvz-content', label:'Content'},
+        {href:'#cvz-zielgruppe', label:'Zielgruppe'},
+        {href:'#cvz-conversion', label:'Conversion'},
+        {href:'#cvz-struktur', label:'Struktur'},
+        {href:'#cvz-search',  label:'Search Intent'},
+        {href:'#cvz-diff',    label:'Differenzierung'},
+        {href:'#cvz-perf',    label:'Performance & AI'},
+        {href:'#cvz-roadmap', label:'Roadmap'},
+      ];
+      nav.innerHTML = '<div class="cvz-anchor-nav-inner">'+
+        links.map(l => `<a href="${l.href}">${l.label}</a>`).join('')+
+        '</div>';
+      // Smooth scroll mit Nav-Offset
+      nav.querySelectorAll('a').forEach(a => {
+        a.addEventListener('click', e => {
+          const id = a.getAttribute('href').replace('#','');
+          const target = document.getElementById(id);
+          if (!target) return;
+          e.preventDefault();
+          const offset = nav.offsetHeight + 16;
+          const top = target.getBoundingClientRect().top + window.scrollY - offset;
+          window.scrollTo({top, behavior:'smooth'});
+        });
+      });
+      // Vor dem ersten Section-Wrapper einfügen
+      const firstSection = document.querySelector('.section-hero-info') ||
+                           document.querySelector('.section-executive-summary');
+      if (firstSection) firstSection.parentNode.insertBefore(nav, firstSection);
+
+      // Active-State beim Scrollen
+      const sectionIds = ['cvz-exec','cvz-hero','cvz-content','cvz-zielgruppe',
+        'cvz-conversion','cvz-struktur','cvz-search','cvz-diff','cvz-perf','cvz-roadmap'];
+      const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            nav.querySelectorAll('a').forEach(a => a.classList.remove('cvz-nav-active'));
+            const activeLink = nav.querySelector(`a[href="#${entry.target.id}"]`);
+            if (activeLink) {
+              activeLink.classList.add('cvz-nav-active');
+              // Nav horizontal zum aktiven Link scrollen
+              activeLink.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
+            }
+          }
+        });
+      }, {rootMargin:'-20% 0px -70% 0px'});
+
+      sectionIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) observer.observe(el);
+      });
+    })();
+
     // Hero Info Block
     (function renderHeroInfo() {
       const c = document.querySelector('.section-hero-info');
@@ -577,6 +707,24 @@
       heading('.section-deep-dive-hero',       'Deep Dive', 'Detaillierte Analyse jeder Kategorie');
       heading('.section-deep-dive-performance','Performance &amp; AI Sichtbarkeit', 'Performance und AI Readiness fließen nicht in den Gesamt-Score ein. Performance-Optimierungen erfordern meist hauptsächlich technische Umsetzung. Bei AI Readiness ist es gemischt – strukturierte Daten brauchen Entwicklungs-Support, Inhaltsstruktur und Semantik kannst du direkt selbst angehen.');
       heading('.section-roadmap',              'Roadmap', 'Die wichtigsten Maßnahmen, sortiert nach Impact und Aufwand.');
+
+      // Anker-IDs auf Section-Wrapper setzen
+      const anchorMap = {
+        '.section-executive-summary':     'cvz-exec',
+        '.section-deep-dive-hero':        'cvz-hero',
+        '.section-deep-dive-content':     'cvz-content',
+        '.section-deep-dive-zielgruppe':  'cvz-zielgruppe',
+        '.section-deep-dive-conversion':  'cvz-conversion',
+        '.section-deep-dive-struktur':    'cvz-struktur',
+        '.section-deep-dive-searchintent':'cvz-search',
+        '.section-deep-dive-differenzierung':'cvz-diff',
+        '.section-deep-dive-performance': 'cvz-perf',
+        '.section-roadmap':               'cvz-roadmap',
+      };
+      Object.entries(anchorMap).forEach(([sel, id]) => {
+        const el = document.querySelector(sel);
+        if (el) el.id = id;
+      });
 
     // EU AI Act Hinweis
     var kiBtn = document.querySelector('.section-ki-agent-btn');
