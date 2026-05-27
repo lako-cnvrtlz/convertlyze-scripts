@@ -233,29 +233,39 @@
       .cvz-heading-title{font-size:clamp(36px,6vw,80px);font-weight:800;letter-spacing:-.02em;color:rgba(148,163,184,.25);text-transform:uppercase;line-height:1!important;margin-bottom:12px;}
       .cvz-heading-sub{font-size:14px;color:#718096;line-height:1.6!important;max-width:640px;margin:8px auto 0;}
       .cvz-anchor-nav{
+        background:#0d1117;
+        border-top:1px solid rgba(255,255,255,.06);
+        border-bottom:1px solid rgba(255,255,255,.06);
         position:sticky;top:0;z-index:100;
-        background:rgba(13,17,23,.92);backdrop-filter:blur(12px);
-        border-bottom:1px solid rgba(255,255,255,.07);
-        padding:0;max-width:100%;overflow-x:auto;
-        scrollbar-width:none;-ms-overflow-style:none;
-        font-family:'Geist','DM Sans','Segoe UI',sans-serif;
+        width:100%;overflow:hidden;
       }
-      .cvz-anchor-nav::-webkit-scrollbar{display:none;}
       .cvz-anchor-nav-inner{
-        display:flex;align-items:center;gap:0;
-        max-width:1200px;margin:0 auto;padding:0 24px;
-        min-width:max-content;
+        display:flex;align-items:center;justify-content:center;
+        gap:0;width:100%;padding:0 24px;
+        overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;
       }
+      .cvz-anchor-nav-inner::-webkit-scrollbar{display:none;}
       .cvz-anchor-nav a{
-        display:inline-block;padding:12px 14px;
-        font-size:12px;font-weight:500;color:#718096;
-        text-decoration:none;white-space:nowrap;
+        display:inline-flex;align-items:center;flex-shrink:0;
+        padding:14px 22px;
+        font-family:'Geist','DM Sans',sans-serif;font-size:13px;font-weight:500;
+        color:#6e7681;text-decoration:none;white-space:nowrap;
         border-bottom:2px solid transparent;
-        transition:color .15s,border-color .15s;
+        transition:color .15s ease,border-color .15s ease;
+        position:relative;
       }
-      .cvz-anchor-nav a:hover{color:#e2e8f0;border-bottom-color:rgba(79,209,197,.4);}
-      .cvz-anchor-nav a.cvz-nav-active{color:#4fd1c5;border-bottom-color:#4fd1c5;}
+      .cvz-anchor-nav a:hover{color:#e6edf3;border-bottom-color:rgba(79,209,197,.4);}
+      .cvz-anchor-nav a.cvz-nav-active{color:#6e7681;border-bottom-color:transparent;}
+      .cvz-anchor-nav a+a::before{
+        content:'';position:absolute;left:0;top:25%;
+        height:50%;width:1px;background:rgba(255,255,255,.06);
+      }
       .cvz-anchor-nav a:focus-visible{outline:2px solid #4fd1c5;outline-offset:2px;border-radius:2px;}
+      @media(max-width:600px){
+        .cvz-anchor-nav-inner{justify-content:flex-start;padding:0;}
+        .cvz-anchor-nav a{font-size:12px;padding:12px 16px;}
+        .cvz-anchor-nav a:first-child{padding-left:16px;}
+      }
       .cvz-cat-header{display:flex;align-items:center;justify-content:space-between;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:20px;}
       .cvz-cat-name{font-size:18px;font-weight:700;color:#f0f4f8;letter-spacing:-.01em;}
       .cvz-cat-score{font-size:22px;font-weight:700;font-family:'Geist','DM Mono',monospace;color:#e8edf5!important;}
@@ -415,6 +425,18 @@
       nav.innerHTML = '<div class="cvz-anchor-nav-inner">'+
         links.map(function(l){ return '<a href="'+l.href+'">'+l.label+'</a>'; }).join('')+
         '</div>';
+      // Smooth scroll mit Nav-Offset
+      nav.querySelectorAll('a').forEach(function(a) {
+        a.addEventListener('click', function(e) {
+          var id = a.getAttribute('href').replace('#','');
+          var target = document.getElementById(id);
+          if (!target) return;
+          e.preventDefault();
+          var offset = nav.offsetHeight + 16;
+          var top = target.getBoundingClientRect().top + window.scrollY - offset;
+          window.scrollTo({top:top, behavior:'smooth'});
+        });
+      });
       var first = document.querySelector('.section-hero-info') ||
                   document.querySelector('.section-executive-summary');
       if (first) first.parentNode.insertBefore(nav, first);
