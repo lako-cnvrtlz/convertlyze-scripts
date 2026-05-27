@@ -251,14 +251,35 @@
       /* cvz-info-label and cvz-info-value defined above with !important */
 
       /* KI-Agent Button */
-      .cvz-ki-btn-wrap{text-align:center;padding:32px 24px;max-width:1200px;margin:0 auto;}
+      .cvz-ki-btn-wrap{
+        text-align:center;padding:32px 24px;max-width:1200px;margin:0 auto;
+        display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;
+      }
       .cvz-ki-btn{
-        display:inline-block;background:#4fd1c5;color:#0d1117;
+        display:inline-flex;align-items:center;gap:8px;
+        background:#4fd1c5;color:#0d1117;
+        font-family:'Geist','DM Sans',sans-serif;
         font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
         text-decoration:none;padding:14px 32px;border-radius:8px;
-        transition:background .2s,transform .2s,box-shadow .2s;cursor:pointer;
+        transition:background .2s,transform .2s,box-shadow .2s;cursor:pointer;border:none;
       }
       .cvz-ki-btn:hover{background:#38b2ac;transform:translateY(-2px);box-shadow:0 8px 24px rgba(79,209,197,.25);}
+      .cvz-pdf-btn{
+        display:inline-flex;align-items:center;gap:8px;
+        background:transparent;color:#e2e8f0;
+        font-family:'Geist','DM Sans',sans-serif;
+        font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+        text-decoration:none;padding:14px 32px;border-radius:8px;
+        border:1px solid rgba(255,255,255,.15);
+        transition:border-color .2s,color .2s,transform .2s;cursor:pointer;
+      }
+      .cvz-pdf-btn:hover{border-color:rgba(255,255,255,.35);color:#fff;transform:translateY(-2px);}
+      .cvz-pdf-btn:disabled,.cvz-pdf-btn.loading{opacity:.5;cursor:not-allowed;transform:none;}
+      .cvz-pdf-btn svg{flex-shrink:0;}
+      @media(max-width:480px){
+        .cvz-ki-btn-wrap{flex-direction:column;}
+        .cvz-ki-btn,.cvz-pdf-btn{width:100%;justify-content:center;}
+      }
 
       /* Responsive */
       @media(max-width:768px){
@@ -710,8 +731,64 @@
     document.querySelectorAll('.section-ki-agent-btn').forEach(el => {
       el.innerHTML = `
         <div class="cvz-ki-btn-wrap">
-          <a href="https://www.convertlyze.com/analyse/optimization-agent?analysis_id=${analysisId}" class="cvz-ki-btn">Mit KI-Agent optimieren →</a>
+          <a href="https://www.convertlyze.com/analyse/optimization-agent?analysis_id=${analysisId}"
+             class="cvz-ki-btn"
+             aria-label="Mit KI-Agent optimieren">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="6" y="8" width="12" height="10" rx="2" fill="currentColor" opacity=".9"/><circle cx="9" cy="12" r="1.5" fill="#0d1117"/><circle cx="15" cy="12" r="1.5" fill="#0d1117"/><rect x="10" y="15" width="4" height="1.5" rx=".75" fill="#0d1117"/><rect x="11" y="4" width="2" height="4" rx="1" fill="currentColor" opacity=".9"/><circle cx="12" cy="5" r="2" fill="currentColor" opacity=".9"/></svg> Mit KI-Agent optimieren
+          </a>
+          <button class="cvz-pdf-btn"
+                  data-analysis-id="${analysisId}"
+                  aria-label="PDF-Report herunterladen"
+                  title="PDF-Report herunterladen">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> PDF-Report
+          </button>
         </div>`;
+
+      // PDF-Button Click-Handler
+      const pdfBtn = el.querySelector('.cvz-pdf-btn');
+      if (pdfBtn) {
+        pdfBtn.addEventListener('click', async () => {
+          pdfBtn.disabled = true;
+          pdfBtn.classList.add('loading');
+          const origText = pdfBtn.innerHTML;
+          pdfBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Wird generiert...';
+          try {
+            const memberstackId = (await window.$memberstackDom.getCurrentMember())?.data?.id;
+            if (!memberstackId) throw new Error('Nicht eingeloggt');
+            const resp = await fetch(
+              'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/generate-pdf-report',
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-memberstack-id': memberstackId },
+                body: JSON.stringify({ analysisId: analysisId, type: 'pdf' }),
+              }
+            );
+            if (!resp.ok) {
+              const e = await resp.json();
+              throw new Error(e.error || 'Generierung fehlgeschlagen');
+            }
+            const { downloadUrl } = await resp.json();
+            // Blob-Download
+            const blob    = await (await fetch(downloadUrl)).blob();
+            const blobUrl = URL.createObjectURL(blob);
+            const a       = document.createElement('a');
+            a.href        = blobUrl;
+            a.download    = 'convertlyze-report.pdf';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+            pdfBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> PDF-Report';
+          } catch (err) {
+            console.error('[CVZ] PDF-Download:', err);
+            pdfBtn.innerHTML = '⚠ Fehler – erneut versuchen';
+            setTimeout(() => { pdfBtn.innerHTML = origText; }, 3000);
+          } finally {
+            pdfBtn.disabled = false;
+            pdfBtn.classList.remove('loading');
+          }
+        });
+      }
     });
 
     // Sektions-Überschriften – nach allen Renders einfügen
