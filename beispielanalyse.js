@@ -215,6 +215,12 @@
     s.textContent = `
       .cvz-section{max-width:1200px;margin:0 auto;padding:0 24px 32px;font-family:'Geist','DM Sans','Segoe UI',sans-serif;color:#e2e8f0;}
       .cvz-section *{box-sizing:border-box;}
+      @media(prefers-reduced-motion:reduce){
+        .cvz-fi{animation:none!important;opacity:1!important;transform:none!important;}
+        .cvz-bf{animation:none!important;width:var(--bw)!important;}
+        .cvz-ring{animation:none!important;opacity:1!important;transform:none!important;}
+        *{transition:none!important;}
+      }
       .cvz-fi{opacity:0;transform:translateY(14px);animation:cvzFI .55s ease forwards;}
       .cvz-fi-1{animation-delay:.05s}.cvz-fi-2{animation-delay:.15s}
       .cvz-fi-3{animation-delay:.25s}.cvz-fi-4{animation-delay:.35s}
@@ -226,6 +232,30 @@
       .cvz-heading-wrap,.cvz-heading-wrap *{line-height:1.2!important;}
       .cvz-heading-title{font-size:clamp(36px,6vw,80px);font-weight:800;letter-spacing:-.02em;color:rgba(148,163,184,.25);text-transform:uppercase;line-height:1!important;margin-bottom:12px;}
       .cvz-heading-sub{font-size:14px;color:#718096;line-height:1.6!important;max-width:640px;margin:8px auto 0;}
+      .cvz-anchor-nav{
+        position:sticky;top:0;z-index:100;
+        background:rgba(13,17,23,.92);backdrop-filter:blur(12px);
+        border-bottom:1px solid rgba(255,255,255,.07);
+        padding:0;max-width:100%;overflow-x:auto;
+        scrollbar-width:none;-ms-overflow-style:none;
+        font-family:'Geist','DM Sans','Segoe UI',sans-serif;
+      }
+      .cvz-anchor-nav::-webkit-scrollbar{display:none;}
+      .cvz-anchor-nav-inner{
+        display:flex;align-items:center;gap:0;
+        max-width:1200px;margin:0 auto;padding:0 24px;
+        min-width:max-content;
+      }
+      .cvz-anchor-nav a{
+        display:inline-block;padding:12px 14px;
+        font-size:12px;font-weight:500;color:#718096;
+        text-decoration:none;white-space:nowrap;
+        border-bottom:2px solid transparent;
+        transition:color .15s,border-color .15s;
+      }
+      .cvz-anchor-nav a:hover{color:#e2e8f0;border-bottom-color:rgba(79,209,197,.4);}
+      .cvz-anchor-nav a.cvz-nav-active{color:#4fd1c5;border-bottom-color:#4fd1c5;}
+      .cvz-anchor-nav a:focus-visible{outline:2px solid #4fd1c5;outline-offset:2px;border-radius:2px;}
       .cvz-cat-header{display:flex;align-items:center;justify-content:space-between;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:20px;}
       .cvz-cat-name{font-size:18px;font-weight:700;color:#f0f4f8;letter-spacing:-.01em;}
       .cvz-cat-score{font-size:22px;font-weight:700;font-family:'Geist','DM Mono',monospace;color:#e8edf5!important;}
@@ -301,6 +331,23 @@
     document.head.appendChild(s);
   }
 
+  // ── XSS-Sanitization ────────────────────────────────────────────────────────
+  function sanitize(html) {
+    if (!html) return '';
+    var allowed = {p:1,br:1,strong:1,b:1,em:1,i:1,ul:1,ol:1,li:1,span:1,small:1};
+    var tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    tmp.querySelectorAll('*').forEach(function(el) {
+      if (!allowed[el.tagName.toLowerCase()]) {
+        el.replaceWith(document.createTextNode(el.textContent)); return;
+      }
+      Array.from(el.attributes).forEach(function(attr) {
+        if (attr.name !== 'class') el.removeAttribute(attr.name);
+      });
+    });
+    return tmp.innerHTML;
+  }
+
   // ── Helpers ─────────────────────────────────────────────────────────────────
   function getRingColor(s) {
     if (!s) return '#4a5568';
@@ -320,7 +367,7 @@
   function card(type, label, content) {
     if (!content) return '';
     var cls = {summary:'cvz-card-summary',staerken:'cvz-card-staerken',schwaechen:'cvz-card-schwaechen',empfehlungen:'cvz-card-empfehlungen'}[type]||'';
-    return '<div class="cvz-card '+cls+' cvz-fi cvz-fi-3"><div class="cvz-card-label"><div class="cvz-card-label-dot"></div>'+label+'</div><div class="cvz-card-body">'+content+'</div></div>';
+    return '<div class="cvz-card '+cls+' cvz-fi cvz-fi-3"><div class="cvz-card-label"><div class="cvz-card-label-dot"></div>'+label.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div><div class="cvz-card-body">'+sanitize(content)+'</div></div>';
   }
 
   function buildCatSection(name, score, cards) {
@@ -347,6 +394,50 @@
   function render() {
     injectStyles();
     var d = DATA;
+
+    // Anker-Navigation
+    (function() {
+      var nav = document.createElement('nav');
+      nav.className = 'cvz-anchor-nav';
+      nav.setAttribute('aria-label', 'Analyse-Navigation');
+      var links = [
+        {href:'#cvz-exec',    label:'Executive Summary'},
+        {href:'#cvz-hero',    label:'Hero'},
+        {href:'#cvz-content', label:'Content'},
+        {href:'#cvz-zielgruppe', label:'Zielgruppe'},
+        {href:'#cvz-conversion', label:'Conversion'},
+        {href:'#cvz-struktur', label:'Struktur'},
+        {href:'#cvz-search',  label:'Search Intent'},
+        {href:'#cvz-diff',    label:'Differenzierung'},
+        {href:'#cvz-perf',    label:'Performance & AI'},
+        {href:'#cvz-roadmap', label:'Roadmap'},
+      ];
+      nav.innerHTML = '<div class="cvz-anchor-nav-inner">'+
+        links.map(function(l){ return '<a href="'+l.href+'">'+l.label+'</a>'; }).join('')+
+        '</div>';
+      var first = document.querySelector('.section-hero-info') ||
+                  document.querySelector('.section-executive-summary');
+      if (first) first.parentNode.insertBefore(nav, first);
+
+      var observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          if (entry.isIntersecting) {
+            nav.querySelectorAll('a').forEach(function(a){ a.classList.remove('cvz-nav-active'); });
+            var active = nav.querySelector('a[href="#'+entry.target.id+'"]');
+            if (active) {
+              active.classList.add('cvz-nav-active');
+              active.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
+            }
+          }
+        });
+      }, {rootMargin:'-20% 0px -70% 0px'});
+
+      ['cvz-exec','cvz-hero','cvz-content','cvz-zielgruppe','cvz-conversion',
+       'cvz-struktur','cvz-search','cvz-diff','cvz-perf','cvz-roadmap'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) observer.observe(el);
+      });
+    })();
 
     // Hero Info
     inject('.section-hero-info',
@@ -465,6 +556,24 @@
     heading('.section-deep-dive-hero',       'Deep Dive', 'Detaillierte Analyse jeder Kategorie');
     heading('.section-deep-dive-performance','Performance &amp; AI Sichtbarkeit', 'Performance und AI Readiness fließen nicht in den Gesamt-Score ein. Performance-Optimierungen erfordern meist hauptsächlich technische Umsetzung. Bei AI Readiness ist es gemischt – strukturierte Daten brauchen Entwicklungs-Support, Inhaltsstruktur und Semantik kannst du direkt selbst angehen.');
     heading('.section-roadmap',              'Roadmap', 'Die wichtigsten Maßnahmen, sortiert nach Impact und Aufwand.');
+
+    // Anker-IDs setzen
+    var anchorMap = {
+      '.section-executive-summary':     'cvz-exec',
+      '.section-deep-dive-hero':        'cvz-hero',
+      '.section-deep-dive-content':     'cvz-content',
+      '.section-deep-dive-zielgruppe':  'cvz-zielgruppe',
+      '.section-deep-dive-conversion':  'cvz-conversion',
+      '.section-deep-dive-struktur':    'cvz-struktur',
+      '.section-deep-dive-searchintent':'cvz-search',
+      '.section-deep-dive-differenzierung':'cvz-diff',
+      '.section-deep-dive-performance': 'cvz-perf',
+      '.section-roadmap':               'cvz-roadmap',
+    };
+    Object.keys(anchorMap).forEach(function(sel) {
+      var el = document.querySelector(sel);
+      if (el) el.id = anchorMap[sel];
+    });
 
     // EU AI Act Hinweis
     var kiBtn = document.querySelector('.section-ki-agent-btn');
