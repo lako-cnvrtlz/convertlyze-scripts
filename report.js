@@ -760,7 +760,7 @@
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-memberstack-id': memberstackId },
-                body: JSON.stringify({ analysisId: analysisId, type: 'pdf' }),
+                body: JSON.stringify({ analysisId: analysisId, userId: analysis.user_id, type: 'pdf' }),
               }
             );
             if (!resp.ok) {
@@ -773,7 +773,11 @@
             const blobUrl = URL.createObjectURL(blob);
             const a       = document.createElement('a');
             a.href        = blobUrl;
-            a.download    = 'convertlyze-report.pdf';
+            try {
+              const domain = new URL(analysis.landing_page_url).hostname.replace('www.','');
+              const date   = new Date(analysis.created_at).toISOString().slice(0,10);
+              a.download   = 'convertlyze-' + domain + '-' + date + '.pdf';
+            } catch(e) { a.download = 'convertlyze-report.pdf'; }
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
