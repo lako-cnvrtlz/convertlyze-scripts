@@ -86,6 +86,7 @@
         position:sticky;top:0;z-index:100;
         width:100%;overflow:hidden;
       }
+      /* top wird per JS gesetzt sobald Nav-Höhe bekannt ist */
       .cvz-anchor-nav-inner{
         display:flex;align-items:center;justify-content:center;
         gap:0;width:100%;padding:0 24px;
@@ -519,6 +520,16 @@
 
     // Anker-Navigation einfügen
     (function injectAnchorNav() {
+      // Webflow-Nav-Höhe messen und als top setzen
+      function setNavTop(anchorNav) {
+        const webflowNav = document.querySelector('.navbar-2-member');
+        if (webflowNav) {
+          anchorNav.style.top = webflowNav.offsetHeight + 'px';
+        } else {
+          anchorNav.style.top = '0px';
+        }
+      }
+
       const nav = document.createElement('nav');
       nav.className = 'cvz-anchor-nav';
       nav.setAttribute('aria-label', 'Analyse-Navigation');
@@ -553,6 +564,18 @@
       const firstSection = document.querySelector('.section-hero-info') ||
                            document.querySelector('.section-executive-summary');
       if (firstSection) firstSection.parentNode.insertBefore(nav, firstSection);
+
+      // Initiale Höhe setzen
+      setNavTop(nav);
+
+      // Bei Resize neu messen
+      window.addEventListener('resize', function() { setNavTop(nav); });
+
+      // ResizeObserver auf Webflow-Nav für dynamische Änderungen (z.B. mobile Menu öffnet)
+      const webflowNav = document.querySelector('.navbar-2-member');
+      if (webflowNav && window.ResizeObserver) {
+        new ResizeObserver(function() { setNavTop(nav); }).observe(webflowNav);
+      }
 
       // Active-State beim Scrollen
       const sectionIds = ['cvz-exec','cvz-hero','cvz-content','cvz-zielgruppe',
