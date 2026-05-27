@@ -611,7 +611,7 @@
 
     // ── Beispiel-PDF URL hier eintragen nach Upload ────────────────────────
     // Einfach die URL ersetzen, dann pushen + Cache leeren.
-    var BEISPIEL_PDF_URL = 'PLACEHOLDER';
+    var BEISPIEL_PDF_URL = 'https://cdn.prod.website-files.com/68aa0ecac3a6a586fee94df1/6a1741fa7607ff99c484a389_Convertlyze%20%E2%80%93%20Beispielanalyse.pdf';
 
     var pdfBtnHtml = BEISPIEL_PDF_URL !== 'PLACEHOLDER'
       ? '<a href="' + BEISPIEL_PDF_URL + '" class="cvz-pdf-btn" target="_blank" rel="noopener" aria-label="Beispiel-PDF herunterladen">'+
