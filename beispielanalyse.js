@@ -239,6 +239,7 @@
         position:sticky;top:0;z-index:100;
         width:100%;overflow:hidden;
       }
+      /* top wird per JS gesetzt sobald Nav-Höhe bekannt ist */
       .cvz-anchor-nav-inner{
         display:flex;align-items:center;justify-content:center;
         gap:0;width:100%;padding:0 24px;
@@ -407,6 +408,12 @@
 
     // Anker-Navigation
     (function() {
+      // Webflow-Nav-Höhe messen und als top setzen
+      function setNavTop(anchorNav) {
+        var webflowNav = document.querySelector('.navbar-2-member');
+        anchorNav.style.top = webflowNav ? webflowNav.offsetHeight + 'px' : '0px';
+      }
+
       var nav = document.createElement('nav');
       nav.className = 'cvz-anchor-nav';
       nav.setAttribute('aria-label', 'Analyse-Navigation');
@@ -440,6 +447,13 @@
       var first = document.querySelector('.section-hero-info') ||
                   document.querySelector('.section-executive-summary');
       if (first) first.parentNode.insertBefore(nav, first);
+
+      setNavTop(nav);
+      window.addEventListener('resize', function() { setNavTop(nav); });
+      var wfNav = document.querySelector('.navbar-2-member');
+      if (wfNav && window.ResizeObserver) {
+        new ResizeObserver(function() { setNavTop(nav); }).observe(wfNav);
+      }
 
       var observer = new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
