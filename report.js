@@ -577,6 +577,20 @@
       heading('.section-deep-dive-hero',       'Deep Dive', 'Detaillierte Analyse jeder Kategorie');
       heading('.section-deep-dive-performance','Performance &amp; AI Sichtbarkeit', 'Performance und AI Readiness fließen nicht in den Gesamt-Score ein. Performance-Optimierungen erfordern meist hauptsächlich technische Umsetzung. Bei AI Readiness ist es gemischt – strukturierte Daten brauchen Entwicklungs-Support, Inhaltsstruktur und Semantik kannst du direkt selbst angehen.');
       heading('.section-roadmap',              'Roadmap', 'Die wichtigsten Maßnahmen, sortiert nach Impact und Aufwand.');
+
+    // EU AI Act Hinweis
+    var kiBtn = document.querySelector('.section-ki-agent-btn');
+    if (kiBtn) {
+      var aiNotice = document.createElement('div');
+      aiNotice.style.cssText = 'max-width:1200px;margin:0 auto;padding:16px 24px 32px;text-align:center;font-family:Geist,DM Sans,sans-serif;';
+      aiNotice.innerHTML = '<p style="font-size:12px;color:#4a5568;line-height:1.6;margin:0;">'+
+        'KI-generierter Bericht · Erstellt mit Claude (Anthropic) · '+
+        'Diese Analyse wurde vollständig durch ein KI-System erstellt. '+
+        'Alle Empfehlungen sollten durch eine qualifizierte Fachperson geprüft werden. '+
+        'Alle Angaben ohne Gewähr.'+
+        '</p>';
+      kiBtn.parentNode.insertBefore(aiNotice, kiBtn.nextSibling);
+    }
     })();
 
     // Share Button
