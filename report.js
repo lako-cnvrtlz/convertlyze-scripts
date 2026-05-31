@@ -834,26 +834,26 @@ function buildPrioCard(field) {
         card('summary','Zusammenfassung', txt(analysis.content_summary)) +
         card('staerken','Stärken', analysis.content_staerken_html) +
         card('schwaechen','Schwächen', analysis.content_schwaechen_html) +
-        card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.content_schwaechen_prioritized_html)),
+        buildPrioCard(analysis.content_schwaechen_prioritized_html)),
 
       '.section-deep-dive-zielgruppe': () => buildCatSection('Zielgruppe', analysis.zielgruppe_score,
         card('summary','Zusammenfassung', txt(analysis.zielgruppe_summary)) +
         card('staerken','Stärken', analysis.zielgruppe_staerken_html) +
         card('schwaechen','Schwächen', analysis.zielgruppe_schwaechen_html) +
-        card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.zielgruppe_schwaechen_prioritized_html)),
+        buildPrioCard(analysis.zielgruppe_schwaechen_prioritized_html)),
 
-      '.section-deep-dive-conversion': () => buildCatSection('Conversion', analysis.conversion_score,
+     '.section-deep-dive-conversion': () => buildCatSection('Conversion', analysis.conversion_score,
         card('summary','Zusammenfassung', txt(analysis.conversion_summary)) +
         card('staerken','Stärken', analysis.conversion_staerken_html) +
         card('schwaechen','Schwächen', analysis.conversion_schwaechen_html) +
-        card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.conversion_schwaechen_prioritized_html)),
+        buildPrioCard(analysis.conversion_schwaechen_prioritized_html)),
 
-      '.section-deep-dive-struktur': () => buildCatSection('Struktur', analysis.struktur_score,
+     '.section-deep-dive-struktur': () => buildCatSection('Struktur', analysis.struktur_score,
         card('summary','Zusammenfassung', txt(analysis.struktur_summary)) +
         card('staerken','Stärken', analysis.struktur_staerken_html) +
         card('schwaechen','Schwächen', analysis.struktur_schwaechen_html) +
-        card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.struktur_schwaechen_prioritized_html)),
-
+        buildPrioCard(analysis.struktur_schwaechen_prioritized_html)),
+      
       '.section-deep-dive-searchintent': () => buildCatSection('Search Intent', analysis.search_intent_score,
         card('summary','Bewertung', txt(analysis.search_intent_bewertung)) +
         card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.search_intent_content_gaps)),
@@ -862,20 +862,20 @@ function buildPrioCard(field) {
         card('summary','Zusammenfassung', txt(analysis.wettbewerb_summary)) +
         card('staerken','Stärken', analysis.wettbewerb_staerken_html) +
         card('schwaechen','Schwächen', analysis.wettbewerb_schwaechen_html) +
-        card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.wettbewerb_schwaechen_prioritized_html)),
+        buildPrioCard(analysis.wettbewerb_schwaechen_prioritized_html)),
 
       '.section-deep-dive-performance': () => buildCatSection('Performance', analysis.performance_score,
         card('summary','Zusammenfassung', txt(analysis.performance_summary)) +
         card('summary','Desktop', txt(analysis.performance_desktop_zusammenfassung)) +
         card('summary','Mobil', txt(analysis.performance_mobile_zusammenfassung)) +
-        card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.performance_opportunities_html)),
+        buildPrioCard(analysis.performance_opportunities_html)),
 
       '.section-deep-dive-ai': () => buildCatSection('AI Sichtbarkeit', analysis.ai_readiness_score,
         card('summary','Zusammenfassung', txt(analysis.ai_readiness_bewertung)) +
         card('staerken','Stärken', analysis.ai_readiness_staerken_html) +
         card('schwaechen','Schwächen', analysis.ai_readiness_schwaechen_html) +
-        card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.ai_readiness_optimierungspotenziale_html)),
-
+        buildPrioCard(analysis.ai_readiness_optimierungspotenziale_html)),
+      
       // === GEÄNDERT: nutzt buildRoadmap (JSON mit HTML-Fallback) ===
       '.section-roadmap': () => buildRoadmap(analysis),
     };
