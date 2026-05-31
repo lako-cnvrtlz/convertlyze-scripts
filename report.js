@@ -1,6 +1,12 @@
 /**
- * Convertlyze – Report Script v2
+ * Convertlyze – Report Script v3
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
+ *
+ * ÄNDERUNGEN ggü. v2:
+ *   - toArray()-Helfer (robust gegen Objekt/Array/fehlend)
+ *   - buildRoadmap(): rendert priority_matrix aus JSON, Fallback auf priority_matrix_html
+ *   - .section-roadmap nutzt buildRoadmap() statt direktem HTML
+ *   - CSS für .cvz-roadmap / .cvz-rm-* ergänzt
  *
  * Embed in Webflow Before </body>:
  * <script src="https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js"></script>
@@ -248,7 +254,6 @@
       }
       .cvz-info-row:nth-last-child(-n+2){border-bottom:none;}
       .cvz-info-row:last-child{border-bottom:none!important;}
-      /* cvz-info-label and cvz-info-value defined above with !important */
 
       /* KI-Agent Button */
       .cvz-ki-btn-wrap{
@@ -280,6 +285,31 @@
         .cvz-ki-btn-wrap{flex-direction:column;}
         .cvz-ki-btn,.cvz-pdf-btn{width:100%;justify-content:center;}
       }
+
+      /* === NEU: Roadmap aus priority_matrix-JSON === */
+      .cvz-roadmap{display:flex;flex-direction:column;gap:16px;}
+      .cvz-rm-group{
+        background:rgba(255,255,255,.03);
+        border:1px solid rgba(255,255,255,.07);
+        border-radius:12px;overflow:hidden;
+      }
+      .cvz-rm-head{
+        padding:12px 18px;font-size:11px;font-weight:700;
+        letter-spacing:.08em;text-transform:uppercase;
+        border-bottom:1px solid rgba(255,255,255,.06);
+      }
+      .cvz-rm-sofort    .cvz-rm-head{color:#ef4444;background:rgba(239,68,68,.06);}
+      .cvz-rm-naechstes .cvz-rm-head{color:#f59e0b;background:rgba(245,158,11,.06);}
+      .cvz-rm-quickwins .cvz-rm-head{color:#10b981;background:rgba(16,185,129,.06);}
+      .cvz-rm-spaeter   .cvz-rm-head{color:#718096;background:rgba(113,128,150,.06);}
+      .cvz-rm-item{padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.05);}
+      .cvz-rm-item:last-child{border-bottom:none;}
+      .cvz-rm-item-cat{
+        font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+        color:#4a5568;margin-bottom:4px;
+      }
+      .cvz-rm-item-title{font-size:14px;font-weight:600;color:#e8edf5;line-height:1.5;}
+      .cvz-rm-rea{font-size:13px;color:#c4cdd6;line-height:1.6;margin-top:6px;}
 
       /* Responsive */
       @media(max-width:768px){
@@ -315,6 +345,13 @@
   }
   function sc(v) { const n = parseFloat(v); return isNaN(n) ? null : n; }
 
+  // === NEU: robust gegen Objekt/Array/fehlend (gleiche Logik wie Agent-Fix) ===
+  function toArray(v) {
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === 'object') return [v];
+    return [];
+  }
+
   function card(type, label, content) {
     if (!content) return '';
     const cls = {
@@ -345,6 +382,64 @@
           <div class="cvz-cat-score">${scoreDisplay}</div>
         </div>
         <div class="cvz-cards">${cards}</div>
+      </div>`;
+  }
+
+  // === NEU: Defensiver Roadmap-Renderer ===
+  // Nutzt priority_matrix (JSON) wenn befüllt, sonst Fallback auf priority_matrix_html.
+  // Dadurch funktioniert der Report mit ALTEN (HTML) und NEUEN (JSON) Analysen.
+  function buildRoadmap(analysis) {
+    const pm = analysis.priority_matrix;
+    const hasData = pm && typeof pm === 'object' &&
+      (toArray(pm.sofort_umsetzen).length || toArray(pm.als_naechstes).length ||
+       toArray(pm.quick_wins).length      || toArray(pm.spaeter).length);
+
+    // FALLBACK: kein verwertbares JSON -> altes HTML-Feld
+    if (!hasData) {
+      return `
+        <div class="cvz-section cvz-fi cvz-fi-2">
+          <div class="cvz-cat-header"><div class="cvz-cat-name">Roadmap</div></div>
+          <div class="cvz-cards">
+            ${card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.priority_matrix_html)}
+          </div>
+        </div>`;
+    }
+
+    // NEU: aus JSON rendern
+    const gruppen = [
+      { key:'sofort_umsetzen', label:'Sofort umsetzen', cls:'sofort'    },
+      { key:'als_naechstes',   label:'Als Nächstes',    cls:'naechstes' },
+      { key:'quick_wins',      label:'Quick Wins',      cls:'quickwins' },
+      { key:'spaeter',         label:'Später',          cls:'spaeter'   },
+    ];
+
+    let gruppenHtml = '';
+    for (const g of gruppen) {
+      const items = toArray(pm[g.key]);
+      if (items.length === 0) continue;
+      let itemsHtml = '';
+      for (const it of items) {
+        const cat = sanitize(String(it.category || 'Optimierung'));
+        const iss = sanitize(String(it.issue || ''));
+        const rea = sanitize(String(it.reasoning || ''));
+        itemsHtml += `
+          <div class="cvz-rm-item">
+            <div class="cvz-rm-item-cat">${cat}</div>
+            <div class="cvz-rm-item-title">${iss}</div>
+            ${rea ? `<div class="cvz-rm-rea">${rea}</div>` : ''}
+          </div>`;
+      }
+      gruppenHtml += `
+        <div class="cvz-rm-group cvz-rm-${g.cls}">
+          <div class="cvz-rm-head">${g.label}</div>
+          <div class="cvz-rm-items">${itemsHtml}</div>
+        </div>`;
+    }
+
+    return `
+      <div class="cvz-section cvz-fi cvz-fi-2">
+        <div class="cvz-cat-header"><div class="cvz-cat-name">Roadmap</div></div>
+        <div class="cvz-roadmap">${gruppenHtml}</div>
       </div>`;
   }
 
@@ -711,15 +806,8 @@
         card('schwaechen','Schwächen', analysis.ai_readiness_schwaechen_html) +
         card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.ai_readiness_optimierungspotenziale_html)),
 
-      '.section-roadmap': () => `
-        <div class="cvz-section cvz-fi cvz-fi-2">
-          <div class="cvz-cat-header">
-            <div class="cvz-cat-name">Roadmap</div>
-          </div>
-          <div class="cvz-cards">
-            ${card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.priority_matrix_html)}
-          </div>
-        </div>`,
+      // === GEÄNDERT: nutzt buildRoadmap (JSON mit HTML-Fallback) ===
+      '.section-roadmap': () => buildRoadmap(analysis),
     };
 
     Object.entries(sections).forEach(([selector, builder]) => {
