@@ -56,7 +56,7 @@
       .w-dropdown-list [data-analysis]{
         white-space:normal!important;overflow:visible!important;display:block!important;
       }
-
+      
       /* Share feedback */
       .share-success{animation:cvzShare .3s ease}
       @keyframes cvzShare{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
@@ -310,6 +310,10 @@
       }
       .cvz-rm-item-title{font-size:14px;font-weight:600;color:#e8edf5;line-height:1.5;}
       .cvz-rm-rea{font-size:13px;color:#c4cdd6;line-height:1.6;margin-top:6px;}
+      .cvz-rm-meta{
+      font-size:11px;font-weight:600;color:#718096;
+      margin-top:4px;letter-spacing:.02em;  
+      }
 
       /* Responsive */
       @media(max-width:768px){
@@ -384,8 +388,8 @@
         <div class="cvz-cards">${cards}</div>
       </div>`;
   }
-
-  // === NEU: Defensiver Roadmap-Renderer ===
+  
+// === NEU: Defensiver Roadmap-Renderer ===
   // Nutzt priority_matrix (JSON) wenn befüllt, sonst Fallback auf priority_matrix_html.
   // Dadurch funktioniert der Report mit ALTEN (HTML) und NEUEN (JSON) Analysen.
   function buildRoadmap(analysis) {
@@ -393,7 +397,6 @@
     const hasData = pm && typeof pm === 'object' &&
       (toArray(pm.sofort_umsetzen).length || toArray(pm.als_naechstes).length ||
        toArray(pm.quick_wins).length      || toArray(pm.spaeter).length);
-
     // FALLBACK: kein verwertbares JSON -> altes HTML-Feld
     if (!hasData) {
       return `
@@ -404,7 +407,6 @@
           </div>
         </div>`;
     }
-
     // NEU: aus JSON rendern
     const gruppen = [
       { key:'sofort_umsetzen', label:'Sofort umsetzen', cls:'sofort'    },
@@ -412,20 +414,27 @@
       { key:'quick_wins',      label:'Quick Wins',      cls:'quickwins' },
       { key:'spaeter',         label:'Später',          cls:'spaeter'   },
     ];
-
+    // Impact/Effort lesbar machen (SEHR_HOCH -> Sehr hoch)
+    const pretty = s => s.replace(/_/g,' ').toLowerCase().replace(/^\w/, c => c.toUpperCase());
     let gruppenHtml = '';
     for (const g of gruppen) {
       const items = toArray(pm[g.key]);
       if (items.length === 0) continue;
       let itemsHtml = '';
       for (const it of items) {
-        const cat = sanitize(String(it.category || 'Optimierung'));
-        const iss = sanitize(String(it.issue || ''));
-        const rea = sanitize(String(it.reasoning || ''));
+        const cat    = sanitize(String(it.category || 'Optimierung'));
+        const iss    = sanitize(String(it.issue || ''));
+        const rea    = sanitize(String(it.reasoning || ''));
+        const impact = sanitize(String(it.impact || ''));
+        const effort = sanitize(String(it.effort || ''));
+        const meta = (impact || effort)
+          ? `<div class="cvz-rm-meta">${impact ? 'Impact: ' + pretty(impact) : ''}${impact && effort ? ' · ' : ''}${effort ? 'Aufwand: ' + pretty(effort) : ''}</div>`
+          : '';
         itemsHtml += `
           <div class="cvz-rm-item">
             <div class="cvz-rm-item-cat">${cat}</div>
             <div class="cvz-rm-item-title">${iss}</div>
+            ${meta}
             ${rea ? `<div class="cvz-rm-rea">${rea}</div>` : ''}
           </div>`;
       }
@@ -435,7 +444,6 @@
           <div class="cvz-rm-items">${itemsHtml}</div>
         </div>`;
     }
-
     return `
       <div class="cvz-section cvz-fi cvz-fi-2">
         <div class="cvz-cat-header"><div class="cvz-cat-name">Roadmap</div></div>
