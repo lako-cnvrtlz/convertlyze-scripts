@@ -854,9 +854,9 @@ function buildPrioCard(field) {
         card('schwaechen','Schwächen', analysis.struktur_schwaechen_html) +
         buildPrioCard(analysis.struktur_schwaechen_prioritized_html)),
       
-      '.section-deep-dive-searchintent': () => buildCatSection('Search Intent', analysis.search_intent_score,
-        card('summary','Bewertung', txt(analysis.search_intent_bewertung)) +
-        card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.search_intent_content_gaps)),
+    '.section-deep-dive-searchintent': () => buildCatSection('Search Intent', analysis.search_intent_score,
+      card('summary','Bewertung', txt(analysis.search_intent_bewertung)) +
+      buildPrioCard(analysis.search_intent_content_gaps)
 
       '.section-deep-dive-differenzierung': () => buildCatSection('Differenzierung', analysis.wettbewerb_score,
         card('summary','Zusammenfassung', txt(analysis.wettbewerb_summary)) +
