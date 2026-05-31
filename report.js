@@ -314,6 +314,18 @@
       font-size:11px;font-weight:600;color:#718096;
       margin-top:4px;letter-spacing:.02em;  
       }
+      .cvz-prio{display:flex;flex-direction:column;gap:14px;}
+      .cvz-pr-item{padding-left:14px;border-left:3px solid #718096;}
+      .cvz-pr-crit{border-left-color:#ef4444;}
+      .cvz-pr-high{border-left-color:#f59e0b;}
+      .cvz-pr-med{border-left-color:#10b981;}
+      .cvz-pr-badge{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+      .cvz-pr-crit .cvz-pr-badge{color:#ef4444;}
+      .cvz-pr-high .cvz-pr-badge{color:#f59e0b;}
+      .cvz-pr-med .cvz-pr-badge{color:#10b981;}
+      .cvz-pr-problem{font-size:14px;font-weight:600;color:#e8edf5;line-height:1.5;}
+      .cvz-pr-loesung{font-size:13px;color:#c4cdd6;line-height:1.6;margin-top:6px;}
+      .cvz-pr-aufwand{color:#718096;font-weight:600;}
 
       /* Responsive */
       @media(max-width:768px){
@@ -450,6 +462,56 @@
         <div class="cvz-roadmap">${gruppenHtml}</div>
       </div>`;
   }
+
+  const CVZ_SEV = {
+  critical: { label: 'CRITICAL', cls: 'crit' },
+  high:     { label: 'HIGH',     cls: 'high' },
+  medium:   { label: 'MEDIUM',   cls: 'med'  },
+};
+function cvzAufwand(s) {
+  const m = { gering:'Gering', mittel:'Mittel', hoch:'Hoch' };
+  return m[String(s).toLowerCase()] || sanitize(String(s||''));
+}
+
+// ⚠️ Felder *_schwaechen_prioritized_html enthalten trotz "_html"-Suffix
+// JSON-DATEN (Array), KEIN HTML. Niemals direkt via innerHTML rendern —
+// immer über buildPrioCard().
+function buildPrioCard(field) {
+  let data = field;
+  if (typeof field === 'string') {
+    const t = field.trim();
+    if (t.startsWith('[') || t.startsWith('{')) {
+      try { data = JSON.parse(t); } catch (e) { data = null; }
+    } else {
+      // Alte Analyse: echtes HTML -> Fallback
+      return t ? card('empfehlungen', 'Priorisierte Handlungsempfehlungen', field) : '';
+    }
+  }
+  const items = toArray(data);
+  if (items.length === 0) return '';
+  let inner = '';
+  for (const it of items) {
+    const sevKey = String(it.severity || '').toLowerCase();
+    const sev = CVZ_SEV[sevKey] || { label: String(it.severity||'').toUpperCase(), cls: 'med' };
+    const problem = sanitize(String(it.problem || it.issue || ''));
+    const loesung = sanitize(String(it.loesung || ''));
+    const aufwand = it.aufwand ? cvzAufwand(it.aufwand) : '';
+    inner += `<div class="cvz-pr-item cvz-pr-${sev.cls}">`
+      + `<div class="cvz-pr-badge">${sev.label}</div>`
+      + `<div class="cvz-pr-problem">${problem}</div>`
+      + (loesung
+          ? `<div class="cvz-pr-loesung">💡 ${loesung}`
+            + (aufwand ? ` <span class="cvz-pr-aufwand">Aufwand: ${aufwand}</span>` : '')
+            + `</div>`
+          : '')
+      + `</div>`;
+  }
+  return `
+    <div class="cvz-card cvz-card-empfehlungen cvz-fi cvz-fi-3">
+      <div class="cvz-card-label"><div class="cvz-card-label-dot"></div>Priorisierte Handlungsempfehlungen</div>
+      <div class="cvz-card-body"><div class="cvz-prio">${inner}</div></div>
+    </div>`;
+}
 
   // ── XSS-Sanitization ──────────────────────────────────────────────────────
   // Erlaubt nur sichere HTML-Tags aus Claude-Output (Listen, Bold, Paragraphen)
@@ -766,7 +828,7 @@
         card('summary','Zusammenfassung', txt(analysis.hero_summary)) +
         card('staerken','Stärken', analysis.hero_staerken_html) +
         card('schwaechen','Schwächen', analysis.hero_schwaechen_html) +
-        card('empfehlungen','Priorisierte Handlungsempfehlungen', analysis.hero_schwaechen_prioritized_html)),
+        buildPrioCard(analysis.hero_schwaechen_prioritized_html)),
 
       '.section-deep-dive-content': () => buildCatSection('Content', analysis.content_score,
         card('summary','Zusammenfassung', txt(analysis.content_summary)) +
