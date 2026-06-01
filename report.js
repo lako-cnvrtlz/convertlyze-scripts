@@ -36,6 +36,12 @@
 (function () {
   'use strict';
 
+  // ── CTA-Selektor ────────────────────────────────────────────────────────────
+  // Der CTA-Button ist ein Webflow-Element (NICHT vom Script erzeugt).
+  // In Webflow dem Button die zusaetzliche Klasse "cvz-report-cta" geben,
+  // ODER hier den vorhandenen Selektor eintragen (z.B. '#mein-cta' / '.meine-klasse').
+  const CTA_SELECTOR = '.footer-cta-hell';
+
   // ── Supabase Config ─────────────────────────────────────────────────────────
   const SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
@@ -67,6 +73,21 @@
       /* Share feedback */
       .share-success{animation:cvzShare .3s ease}
       @keyframes cvzShare{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+
+      /* CTA erst nach vollstaendigem Laden sichtbar (Webflow-Element) */
+      ${CTA_SELECTOR}{visibility:hidden!important;opacity:0!important;}
+      .analysis-loaded ${CTA_SELECTOR}{
+        visibility:visible!important;opacity:1!important;transition:opacity .3s ease;
+      }
+      /* Report-Loader (Spinner) - sichtbar bis .analysis-loaded gesetzt ist */
+      #cvz-report-loader{
+        display:flex;flex-direction:column;align-items:center;justify-content:center;
+        padding:40px 20px;
+      }
+      .analysis-loaded #cvz-report-loader{display:none;}
+      /* Keyframes fuer den Spinner (analog Dashboard) */
+      @keyframes cvz-spin{0%{transform-origin:50% 50%;transform:rotate(0deg)}100%{transform-origin:50% 50%;transform:rotate(360deg)}}
+      @keyframes cvz-pulse{0%,100%{opacity:1}50%{opacity:0.55}}
 
       /* ── Design System ── */
       .cvz-section{
@@ -630,6 +651,65 @@ function buildPrioCard(field) {
     });
   }
 
+  // ── Report-Loader (Spinner identisch zum Dashboard) ─────────────────────────
+  // Wird waehrend des Ladens ANSTELLE des CTA-Buttons angezeigt.
+  const CVZ_SPINNER_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="52" height="52" viewBox="0 0 100 100" fill="none">' +
+      '<defs><style>' +
+        '.cvz-c-group{animation:cvz-spin 1.4s cubic-bezier(0.4,0,0.6,1) infinite}' +
+        '.cvz-c-glow{animation:cvz-pulse 1.4s ease-in-out infinite}' +
+      '</style>' +
+      '<filter id="cvz-glow" x="-30%" y="-30%" width="160%" height="160%">' +
+        '<feGaussianBlur stdDeviation="3.5" result="blur"/>' +
+        '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>' +
+      '</filter></defs>' +
+      '<circle class="cvz-c-glow" cx="50" cy="50" r="44" stroke="#4fd1c5" stroke-width="1.5" stroke-dasharray="180 96" stroke-linecap="round" opacity="0.25"/>' +
+      '<g class="cvz-c-group" filter="url(#cvz-glow)">' +
+        '<path d="M 78 28 A 36 36 0 1 0 78 72" stroke="#4fd1c5" stroke-width="10" stroke-linecap="butt" fill="none" opacity="0.9"/>' +
+        '<polygon points="76,20 85,28 76,28" fill="#4fd1c5" opacity="0.95"/>' +
+        '<polygon points="76,80 85,72 76,72" fill="#38b2a8" opacity="0.85"/>' +
+        '<path d="M 74 31 A 30 30 0 1 0 74 69" stroke="#7ee8e0" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.35"/>' +
+      '</g>' +
+    '</svg>';
+
+  // Versteckt den CTA-Button (Webflow) und zeigt an seiner Stelle den Spinner.
+  function showReportLoader() {
+    // CTA per Inline-Style verstecken (zusaetzlich zur CSS-Regel, robust falls
+    // Webflow eigene visibility-Styles setzt)
+    document.querySelectorAll(CTA_SELECTOR).forEach(function (el) {
+      el.style.visibility = 'hidden';
+      el.style.opacity    = '0';
+    });
+
+    if (document.getElementById('cvz-report-loader')) return;
+
+    var loader = document.createElement('div');
+    loader.id = 'cvz-report-loader';
+    loader.innerHTML = CVZ_SPINNER_SVG +
+      '<p style="margin-top:16px;color:#7a8ba8;font-size:14px;font-family:Geist,sans-serif;">Report wird geladen...</p>';
+
+    // Loader an die Stelle des CTA setzen (direkt davor im selben Container).
+    var cta = document.querySelector(CTA_SELECTOR);
+    if (cta && cta.parentNode) {
+      cta.parentNode.insertBefore(loader, cta);
+    } else {
+      // Fallback: kein CTA gefunden -> Loader unten anhaengen, damit zumindest
+      // ein Ladezustand sichtbar ist (CTA-Klasse vermutlich noch nicht gesetzt).
+      console.warn('[CVZ] CTA-Element (' + CTA_SELECTOR + ') nicht gefunden - Loader als Fallback an body.');
+      document.body.appendChild(loader);
+    }
+  }
+
+  // Entfernt den Spinner und macht den CTA sichtbar.
+  function hideReportLoader() {
+    var loader = document.getElementById('cvz-report-loader');
+    if (loader) loader.remove();
+    document.querySelectorAll(CTA_SELECTOR).forEach(function (el) {
+      el.style.visibility = 'visible';
+      el.style.opacity    = '1';
+    });
+  }
+
   // ── Render: Executive Summary ───────────────────────────────────────────────
   function renderExecSummary(analysis) {
     const container = document.querySelector('.section-executive-summary');
@@ -1141,6 +1221,9 @@ function buildPrioCard(field) {
     injectStyles();
     initTabs();
 
+    // CTA verstecken + Spinner zeigen, sobald CSS bereit ist
+    showReportLoader();
+
     // Warten bis Supabase SDK + Memberstack bereit
     let attempts = 0;
     while (attempts < 50) {
@@ -1150,10 +1233,10 @@ function buildPrioCard(field) {
     }
 
     const supabase = await initSupabase();
-    if (!supabase) { console.error('❌ Supabase nicht verfügbar'); return; }
+    if (!supabase) { console.error('❌ Supabase nicht verfügbar'); hideReportLoader(); return; }
 
     const analysisId = new URLSearchParams(window.location.search).get('id');
-    if (!analysisId) { console.error('❌ Keine Analysis ID in URL'); return; }
+    if (!analysisId) { console.error('❌ Keine Analysis ID in URL'); hideReportLoader(); return; }
 
     console.log('📊 Lade Analyse:', analysisId);
 
@@ -1168,15 +1251,21 @@ function buildPrioCard(field) {
         if (error.code === 'PGRST116') alert('Analyse nicht gefunden. Bitte überprüfe den Link.');
         else if (error.message.includes('JWT')) alert('Zugriff verweigert.');
         else alert('Fehler: ' + error.message);
+        hideReportLoader();
         return;
       }
-      if (!analysis) { alert('Analyse nicht gefunden'); return; }
+      if (!analysis) { alert('Analyse nicht gefunden'); hideReportLoader(); return; }
 
       console.log('✅ Analyse geladen:', analysis);
       renderAll(analysis, analysisId, currentUserId);
 
+      // renderAll setzt .analysis-loaded am Ende -> CTA wird per CSS sichtbar.
+      // Loader-Element zusaetzlich explizit entfernen (CSS blendet es nur aus).
+      hideReportLoader();
+
     } catch(err) {
       console.error('❌ Unerwarteter Fehler:', err);
+      hideReportLoader();
       alert('Ein unerwarteter Fehler ist aufgetreten: ' + err.message);
     }
   }
