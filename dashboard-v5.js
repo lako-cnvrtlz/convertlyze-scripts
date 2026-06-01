@@ -866,10 +866,12 @@
 
       // Async persistieren – kein await nötig
       window.supabase
-        .from('analyses')
-        .update({ pdf_url: downloadUrl, pdf_generated_at: new Date().toISOString() })
-        .eq('id', analysisId)
-        .then(function () {});
+      .rpc('set_analysis_pdf_url', {
+      p_memberstack_id: state.memberstackId,
+      p_analysis_id:    analysisId,
+      p_pdf_url:        downloadUrl,
+      })
+      .then(function () {});
 
       await triggerBlobDownload(downloadUrl, fileName);
       btn.classList.remove('loading');
