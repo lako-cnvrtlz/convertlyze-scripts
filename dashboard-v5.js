@@ -26,7 +26,7 @@
  * - User-Daten: [data-dashboard="..."], [data-user="..."]
  */
 
-// ── Sofort verstecken wenn Plan im sessionStorage ─────────────────────────────
+// -- Sofort verstecken wenn Plan im sessionStorage --------------------------
 (function () {
   if (sessionStorage.getItem('selected_plan')) {
     document.documentElement.style.visibility = 'hidden';
@@ -37,12 +37,12 @@
 (function () {
   'use strict';
 
-  // ── Config ────────────────────────────────────────────────────────────────────
+  // -- Config -----------------------------------------------------------------
 
   var CONFIG = {
     // WHY: PDF_SERVICE_URL und PDF_SECRET wurden aus dem Frontend entfernt.
-    // generate-pdf-report Edge Function fügt das Secret serverseitig hinzu.
-    // Analog zu trigger-analysis.ts für den Webhook-Secret (2026-05).
+    // generate-pdf-report Edge Function fuegt das Secret serverseitig hinzu.
+    // Analog zu trigger-analysis.ts fuer den Webhook-Secret (2026-05).
     generateReportUrl: 'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/generate-pdf-report',
     SUPABASE_URL:     'https://zpkifipmyeunorhtepzq.supabase.co',
     SUPABASE_ANON:    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU',
@@ -58,7 +58,7 @@
     },
   };
 
-  // ── State ─────────────────────────────────────────────────────────────────────
+  // -- State ------------------------------------------------------------------
 
   var state = {
     analysesData:    [],
@@ -75,7 +75,7 @@
     pollingTimer:    null,
   };
 
-  // ── Utilities ─────────────────────────────────────────────────────────────────
+  // -- Utilities --------------------------------------------------------------
 
   function sleep(ms) {
     return new Promise(function (r) { setTimeout(r, ms); });
@@ -93,7 +93,7 @@
   }
 
   // WHY escapeHtml: User-Daten (URLs, Keywords) nie direkt als innerHTML setzen.
-  // XSS-Schutz — alle User-Inhalte werden durch diese Funktion gefiltert.
+  // XSS-Schutz - alle User-Inhalte werden durch diese Funktion gefiltert.
   function escapeHtml(str) {
     if (!str) return '';
     return String(str)
@@ -122,7 +122,7 @@
     return new URLSearchParams(window.location.search).get(key);
   }
 
-  // ── Cookie helpers ────────────────────────────────────────────────────────────
+  // -- Cookie helpers ---------------------------------------------------------
 
   function getCookie(name) {
     var match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
@@ -133,7 +133,7 @@
     document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;SameSite=Lax';
   }
 
-  // ── Deps ──────────────────────────────────────────────────────────────────────
+  // -- Deps -------------------------------------------------------------------
 
   async function waitForDependencies() {
     for (var i = 0; i < 100; i++) {
@@ -147,18 +147,18 @@
     return false;
   }
 
-  // ── Data layer ────────────────────────────────────────────────────────────────
+  // -- Data layer -------------------------------------------------------------
 
-  // WHY _billingUser: Bei Team-Members läuft Billing über den Owner.
-  // Plan-Felder müssen vom Owner geholt werden, nicht vom Member selbst.
+  // WHY _billingUser: Bei Team-Members laeuft Billing ueber den Owner.
+  // Plan-Felder muessen vom Owner geholt werden, nicht vom Member selbst.
   function checkPdfAccess(user) {
     var bu     = user._billingUser || user;
     var type   = bu.license_type   || '';
     var status = bu.license_status || '';
     if (CONFIG.PAID_PLANS.concat(['Agency']).indexOf(type) === -1) return false;
     if (status === 'active') return true;
-    // WHY canceling-Check: Gekündigte User behalten PDF-Zugang bis license_expires_at.
-    // Entspricht ADR 009 — Zugang bis Periodenende.
+    // WHY canceling-Check: Gekuendigte User behalten PDF-Zugang bis license_expires_at.
+    // Entspricht ADR 009 - Zugang bis Periodenende.
     if (status === 'canceling' && bu.license_expires_at && new Date(bu.license_expires_at) > new Date()) return true;
     return false;
   }
@@ -228,7 +228,7 @@
     }
   }
 
-  // ── Purchase Success Modal ────────────────────────────────────────────────────
+  // -- Purchase Success Modal -------------------------------------------------
 
   function showPurchaseSuccessModal(licenseType) {
     var planName = licenseType || 'deinen neuen Plan';
@@ -263,7 +263,7 @@
     p1.appendChild(document.createTextNode(' gebucht.'));
 
     var p2 = document.createElement('p');
-    p2.textContent = 'Dein Konto ist jetzt aktiv \u2013 analysiere deine erste Landing Page.';
+    p2.textContent = 'Dein Konto ist jetzt aktiv \u2013 analysiere deine erste Landingpage.';
     p2.style.cssText = 'margin:0 0 28px;color:#8b98a5;font-size:14px';
 
     var ctaBtn = document.createElement('button');
@@ -280,7 +280,7 @@
     document.body.appendChild(overlay);
   }
 
-  // ── UI: Dashboard render ──────────────────────────────────────────────────────
+  // -- UI: Dashboard render ---------------------------------------------------
 
   function renderUserDashboard(user) {
     // FIX: skeletons verbergen bevor Daten gesetzt werden (mobil critical)
@@ -326,8 +326,8 @@
       : ppuReserved > 0 && ppuAvailable === 0
         ? 'Analyse wird gerade verarbeitet...'
         : ppuReserved > 0
-          ? ppuAvailable + ' verfügbar (' + ppuReserved + ' in Bearbeitung)'
-          : ppuCredits + ' Pay-per-Use Analyse' + (ppuCredits > 1 ? 'n' : '') + ' verfügbar';
+          ? ppuAvailable + ' verfuegbar (' + ppuReserved + ' in Bearbeitung)'
+          : ppuCredits + ' Pay-per-Use Analyse' + (ppuCredits > 1 ? 'n' : '') + ' verfuegbar';
     setText('[data-dashboard="ppu-label"]', ppuLabelText);
     showEl(document.querySelector('[data-dashboard="ppu-card"]'), ppuCredits > 0, 'block');
 
@@ -352,10 +352,10 @@
       renewalText = renewalDate || '-';
     } else if (isFreePlan) {
       renewalLabel = 'Analyse-Status';
-      renewalText  = analysesLeft > 0 ? '1 kostenlose Analyse verfügbar' : 'Kostenlose Analyse bereits genutzt';
+      renewalText  = analysesLeft > 0 ? '1 kostenlose Analyse verfuegbar' : 'Kostenlose Analyse bereits genutzt';
     } else if (isPayPerUse) {
       renewalLabel = 'Analyse-Status';
-      renewalText  = analysesLeft > 0 ? '1 Analyse verfügbar' : 'Analyse bereits genutzt - jetzt neue Analyse kaufen';
+      renewalText  = analysesLeft > 0 ? '1 Analyse verfuegbar' : 'Analyse bereits genutzt - jetzt neue Analyse kaufen';
     } else if (isBetaPlan) {
       renewalLabel = 'Analyse-Status';
       renewalText  = 'Beta-Analysen erneuern sich nicht automatisch';
@@ -387,11 +387,11 @@
     showEl(document.getElementById('open-team-modal'), hasTeam);
     showEl(document.getElementById('team-section'),    hasTeam);
 
-    // Pre-Shimmer deaktivieren – echte Werte sind jetzt gesetzt
+    // Pre-Shimmer deaktivieren - echte Werte sind jetzt gesetzt
     document.body.classList.add('content-loaded');
   }
 
-  // ── UI: Skeleton ──────────────────────────────────────────────────────────────
+  // -- UI: Skeleton -----------------------------------------------------------
 
   var SKELETON_STYLE_ID = 'cvz-skeleton-style';
   var SHIMMER_BG   = 'linear-gradient(90deg,#1a2133 25%,#252d3d 50%,#1a2133 75%)';
@@ -524,7 +524,7 @@
       '</svg>' +
     '</div>';
 
-  // ── UI: Empty / error states ──────────────────────────────────────────────────
+  // -- UI: Empty / error states -----------------------------------------------
 
   function removeLoadingSkeleton() {
     if (!state.container) return;
@@ -561,14 +561,14 @@
       '</div>';
   }
 
-  // Skeleton beim Scriptstart setzen – verhindert dass Webflow-Platzhalter sichtbar werden
+  // Skeleton beim Scriptstart setzen - verhindert dass Webflow-Platzhalter sichtbar werden
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', showDashboardSkeletons);
   } else {
     showDashboardSkeletons();
   }
 
-  // ── UI: Sticky header ─────────────────────────────────────────────────────────
+  // -- UI: Sticky header ------------------------------------------------------
 
   function fixStickyHeader() {
     var header = document.querySelector('.analysis-row-header');
@@ -600,16 +600,16 @@
   setTimeout(fixStickyHeader, 500);
   setTimeout(fixStickyHeader, 1500);
 
-  // ── UI: Pagination ────────────────────────────────────────────────────────────
+  // -- UI: Pagination ---------------------------------------------------------
 
   function initPagination(container) {
     if (state.paginationEl) return;
     state.paginationEl = document.createElement('div');
     state.paginationEl.className = 'pagination-wrapper';
     state.paginationEl.innerHTML =
-      '<button class="pagination-btn pagination-prev" type="button">Zurück</button>' +
+      '<button class="pagination-btn pagination-prev" type="button">Zurueck</button>' +
       '<span class="pagination-info"></span>' +
-      '<button class="pagination-btn pagination-next" type="button">Nächste Seite</button>';
+      '<button class="pagination-btn pagination-next" type="button">Naechste Seite</button>';
     container.parentElement.appendChild(state.paginationEl);
     state.paginationEl.querySelector('.pagination-prev').addEventListener('click', function () {
       if (state.currentPage > 1) renderAnalysesPage(state.container, state.currentPage - 1);
@@ -630,7 +630,7 @@
     nextBtn.disabled = state.currentPage >= state.totalPages;
   }
 
-  // ── UI: Analysis rows ─────────────────────────────────────────────────────────
+  // -- UI: Analysis rows ------------------------------------------------------
 
   function ensureHeaderExists(container) {
     var header = container.querySelector('.analysis-row-header');
@@ -669,6 +669,12 @@
     var canDownload = isCompleted && canAccessPdf(analysis);
     var actionClass = isCompleted ? '' : 'action-disabled';
 
+    // NEU: Ist der eingeloggte User der Ersteller dieser Analyse?
+    // KI-Agent ist NUR fuer den Ersteller (Backend erzwingt das ohnehin via
+    // verifyAnalysisOwnership -> 403 NOT_ANALYSIS_OWNER). Hier nur UX: Button sperren,
+    // damit Team-Mitglieder gar nicht erst auf einen Button klicken, der ablehnt.
+    var isCreator = !!state.supabaseUserId && analysis.user_id === state.supabaseUserId;
+
     var statusInfo  = STATUS_MAP[analysis.status] || STATUS_MAP.completed;
     var formattedDate = '-';
     try {
@@ -680,13 +686,17 @@
     var downloadTitle = !isCompleted
       ? 'Analyse muss abgeschlossen sein'
       : !canAccessPdf(analysis)
-        ? 'PDF-Report nur für kostenpflichtige Pläne oder Pay-per-Use verfügbar'
-        : (state.pdfUrlCache[analysis.id] ? 'Report öffnen' : 'Report generieren & herunterladen');
+        ? 'PDF-Report nur fuer kostenpflichtige Plaene oder Pay-per-Use verfuegbar'
+        : (state.pdfUrlCache[analysis.id] ? 'Report oeffnen' : 'Report generieren & herunterladen');
 
     var dlBtnHtml =
       '<button class="aktion-link download-link ' + (canDownload ? '' : 'action-disabled') + '"' +
       ' aria-label="Report herunterladen" title="' + escapeHtml(downloadTitle) + '"' +
       (canDownload ? '' : ' disabled') + '>' + ICONS.download + '</button>';
+
+    // KI-Agent: bekommt zusaetzlich action-disabled, wenn nicht abgeschlossen ODER nicht Ersteller
+    var agentEnabled   = isCompleted && isCreator;
+    var agentClass     = agentEnabled ? '' : 'action-disabled';
 
     var row = document.createElement('div');
     row.className = 'table-list';
@@ -699,7 +709,7 @@
         '<div class="analysis-date"><div class="text-block-date"></div></div>' +
         '<div class="action-cell" style="display:flex;justify-content:center;gap:16px;width:100%;margin-top:8px;">' +
           '<a href="#" class="aktion-link w-inline-block ' + actionClass + '" target="_blank">' + ICONS.eye + '</a>' +
-          '<a href="#" class="aktion-link w-inline-block ' + actionClass + '" target="_blank">' + ICONS.agent + '</a>' +
+          '<a href="#" class="aktion-link w-inline-block ' + agentClass + '" target="_blank">' + ICONS.agent + '</a>' +
           dlBtnHtml +
         '</div>';
     } else {
@@ -709,7 +719,7 @@
         '<div class="analysis-status"><div class="status-badge ' + statusInfo.cls + '"></div></div>' +
         '<div class="analysis-date"><div class="text-block-date"></div></div>' +
         '<div class="action-cell"><a href="#" class="aktion-link w-inline-block ' + actionClass + '" target="_blank">' + ICONS.eye + '</a></div>' +
-        '<div class="action-cell"><a href="#" class="aktion-link w-inline-block ' + actionClass + '" target="_blank">' + ICONS.agent + '</a></div>' +
+        '<div class="action-cell"><a href="#" class="aktion-link w-inline-block ' + agentClass + '" target="_blank">' + ICONS.agent + '</a></div>' +
         '<div class="action-cell">' + dlBtnHtml + '</div>';
     }
 
@@ -723,10 +733,26 @@
 
     // Links per href (kein innerHTML)
     var links = row.querySelectorAll('a.aktion-link');
-    if (links[0]) links[0].href = '/analyse/resultat?id=' + encodeURIComponent(analysis.id);
-    if (links[1]) links[1].href = '/analyse/optimization-agent?analysis_id=' + encodeURIComponent(analysis.id);
-    if (!isCompleted) {
-      Array.from(links).forEach(function (l) { l.title = 'Analyse ist noch nicht abgeschlossen'; });
+
+    // links[0] = Ansicht (Report) -> fuer alle Team-Mitglieder verfuegbar
+    if (links[0]) {
+      links[0].href = '/analyse/resultat?id=' + encodeURIComponent(analysis.id);
+      if (!isCompleted) links[0].title = 'Analyse ist noch nicht abgeschlossen';
+    }
+
+    // links[1] = KI-Agent -> nur Ersteller + nur wenn abgeschlossen
+    if (links[1]) {
+      if (agentEnabled) {
+        links[1].href = '/analyse/optimization-agent?analysis_id=' + encodeURIComponent(analysis.id);
+      } else {
+        links[1].href = '#';
+        links[1].setAttribute('aria-disabled', 'true');
+        links[1].title = !isCompleted
+          ? 'Analyse ist noch nicht abgeschlossen'
+          : 'Der KI-Agent steht nur dem Ersteller der Analyse zur Verfuegung';
+        // Klick hart unterbinden (falls action-disabled keine pointer-events:none setzt)
+        links[1].addEventListener('click', function (e) { e.preventDefault(); });
+      }
     }
 
     if (canDownload) {
@@ -751,7 +777,7 @@
     // Alte Rows entfernen
     container.querySelectorAll('.table-list').forEach(function (r) { r.remove(); });
 
-    // Neue Rows einfügen – FIX: explizites display/visibility/opacity für mobile Webflow-CSS
+    // Neue Rows einfuegen - FIX: explizites display/visibility/opacity fuer mobile Webflow-CSS
     var items = state.analysesData.slice((page - 1) * CONFIG.PAGE_SIZE, page * CONFIG.PAGE_SIZE);
     items.forEach(function (item) {
       var row = createAnalysisRow(item);
@@ -765,7 +791,7 @@
     updatePaginationInfo();
   }
 
-  // ── UI: Dots loader ───────────────────────────────────────────────────────────
+  // -- UI: Dots loader --------------------------------------------------------
 
   function showDotsLoader() {
     if (!state.container || document.getElementById('cvz-dots-loader')) return;
@@ -781,7 +807,7 @@
     }
   }
 
-  // ── Data load & render ────────────────────────────────────────────────────────
+  // -- Data load & render -----------------------------------------------------
 
   async function loadAndRenderAnalyses(keepPage) {
     if (!state.container || !state.memberstackId) { showEmptyState(); return; }
@@ -799,7 +825,7 @@
     renderAnalysesPage(state.container, state.currentPage);
   }
 
-  // ── PDF download ──────────────────────────────────────────────────────────────
+  // -- PDF download -----------------------------------------------------------
 
   async function triggerBlobDownload(url, fileName) {
     var blob   = await (await fetch(url)).blob();
@@ -864,14 +890,16 @@
       var downloadUrl = (await response.json()).downloadUrl;
       state.pdfUrlCache[analysisId] = downloadUrl;
 
-      // Async persistieren – kein await nötig
+      // Async persistieren - kein await noetig.
+      // WHY RPC statt direktem .from('analyses').update(): SECURITY DEFINER kapselt
+      // den Write, prueft Team-Zugehoerigkeit serverseitig, keine offene anon-UPDATE-Policy.
       window.supabase
-      .rpc('set_analysis_pdf_url', {
-      p_memberstack_id: state.memberstackId,
-      p_analysis_id:    analysisId,
-      p_pdf_url:        downloadUrl,
-      })
-      .then(function () {});
+        .rpc('set_analysis_pdf_url', {
+          p_memberstack_id: state.memberstackId,
+          p_analysis_id:    analysisId,
+          p_pdf_url:        downloadUrl,
+        })
+        .then(function () {});
 
       await triggerBlobDownload(downloadUrl, fileName);
       btn.classList.remove('loading');
@@ -886,7 +914,7 @@
     }
   }
 
-  // ── Realtime + Polling ────────────────────────────────────────────────────────
+  // -- Realtime + Polling -----------------------------------------------------
 
   // WHY Polling als Fallback: Supabase Realtime kann bei Verbindungsproblemen
   // ausfallen. Polling alle 10s stellt sicher dass Status-Updates ankommen.
@@ -977,7 +1005,7 @@
     }
   }
 
-  // ── Init ──────────────────────────────────────────────────────────────────────
+  // -- Init -------------------------------------------------------------------
 
   async function initDashboard() {
     try {
@@ -1021,7 +1049,7 @@
 
       document.documentElement.style.visibility = 'visible';
 
-      // ── Purchase Success Modal ─────────────────────────────────────────────
+      // -- Purchase Success Modal -------------------------------------------
       var isPurchaseSuccess = getParam('purchase') === 'success';
       if (isPurchaseSuccess) {
         window.history.replaceState({}, document.title, window.location.pathname);
@@ -1038,7 +1066,7 @@
       state.licenseType    = (currentUser._billingUser || currentUser).license_type || '';
       state.hasPdfAccess   = checkPdfAccess(currentUser);
 
-      // Modal nach fetchUser zeigen, damit Plan-Name verfügbar ist
+      // Modal nach fetchUser zeigen, damit Plan-Name verfuegbar ist
       if (isPurchaseSuccess) {
         showPurchaseSuccessModal(state.licenseType);
       }
