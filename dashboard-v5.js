@@ -288,7 +288,7 @@
 
     var bu           = user._billingUser || user;
     var isTeamMember = !!user.owner_user_id;
-    var reserved     = Math.round(Number(bu.reserved_credits || 0));
+    var reserved     = Math.max(0, Math.round(Number(bu.reserved_credits || 0)));
     var used         = Math.round(Number(bu.credits_used_current_period || 0));
     var limit        = Math.round(Number(bu.credits_limit || 0));
     var ppuCredits   = Math.round(Number(user.ppu_credits || 0));
