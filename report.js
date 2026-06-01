@@ -8,6 +8,13 @@
  *   - .section-roadmap nutzt buildRoadmap() statt direktem HTML
  *   - CSS für .cvz-roadmap / .cvz-rm-* ergänzt
  *
+ * ÄNDERUNGEN ggü. v3 (Team + Ersteller-Check):
+ *   - KI-Agent-Button nur fuer den Ersteller der Analyse sichtbar.
+ *     Team-Mitglieder sehen Report + PDF, aber NICHT den KI-Agent-Button
+ *     (Backend erzwingt dies ohnehin via verifyAnalysisOwnership -> 403).
+ *   - bootstrap() ermittelt die eigene user_id (users-Lookup) fuer den Vergleich.
+ *   - PDF-Download-Handler in attachPdfDownloadHandler() ausgelagert (kein Duplikat).
+ *
  * Embed in Webflow Before </body>:
  * <script src="https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js"></script>
  *
@@ -281,6 +288,10 @@
       .cvz-pdf-btn:hover{border-color:rgba(255,255,255,.35);color:#fff;transform:translateY(-2px);}
       .cvz-pdf-btn:disabled,.cvz-pdf-btn.loading{opacity:.5;cursor:not-allowed;transform:none;}
       .cvz-pdf-btn svg{flex-shrink:0;}
+      .cvz-agent-hint{
+        max-width:1200px;margin:0 auto;padding:0 24px 12px;text-align:center;
+        font-size:12px;color:#4a5568;line-height:1.6;font-family:'Geist','DM Sans',sans-serif;
+      }
       @media(max-width:480px){
         .cvz-ki-btn-wrap{flex-direction:column;}
         .cvz-ki-btn,.cvz-pdf-btn{width:100%;justify-content:center;}
@@ -565,6 +576,60 @@ function buildPrioCard(field) {
     catch(e) { return d; }
   }
 
+  // ── PDF-Download Handler (ausgelagert, damit er fuer Ersteller UND Team-Mitglied
+  //    genutzt werden kann; PDF-Download steht dem ganzen Team offen) ─────────────
+  const CVZ_PDF_ICON =
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function attachPdfDownloadHandler(pdfBtn, analysis, analysisId) {
+    if (!pdfBtn) return;
+    pdfBtn.addEventListener('click', async () => {
+      pdfBtn.disabled = true;
+      pdfBtn.classList.add('loading');
+      const origText = pdfBtn.innerHTML;
+      pdfBtn.innerHTML = CVZ_PDF_ICON + ' Wird generiert...';
+      try {
+        const memberstackId = (await window.$memberstackDom.getCurrentMember())?.data?.id;
+        if (!memberstackId) throw new Error('Nicht eingeloggt');
+        const resp = await fetch(
+          'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/generate-pdf-report',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-memberstack-id': memberstackId },
+            body: JSON.stringify({ analysisId: analysisId, userId: analysis.user_id, type: 'pdf' }),
+          }
+        );
+        if (!resp.ok) {
+          const e = await resp.json();
+          throw new Error(e.error || 'Generierung fehlgeschlagen');
+        }
+        const { downloadUrl } = await resp.json();
+        // Blob-Download
+        const blob    = await (await fetch(downloadUrl)).blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a       = document.createElement('a');
+        a.href        = blobUrl;
+        try {
+          const domain = new URL(analysis.landing_page_url).hostname.replace('www.','');
+          const date   = new Date(analysis.created_at).toISOString().slice(0,10);
+          a.download   = 'convertlyze-' + domain + '-' + date + '.pdf';
+        } catch(e) { a.download = 'convertlyze-report.pdf'; }
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+        pdfBtn.innerHTML = CVZ_PDF_ICON + ' PDF-Report';
+      } catch (err) {
+        console.error('[CVZ] PDF-Download:', err);
+        pdfBtn.innerHTML = '⚠ Fehler – erneut versuchen';
+        setTimeout(() => { pdfBtn.innerHTML = origText; }, 3000);
+      } finally {
+        pdfBtn.disabled = false;
+        pdfBtn.classList.remove('loading');
+      }
+    });
+  }
+
   // ── Render: Executive Summary ───────────────────────────────────────────────
   function renderExecSummary(analysis) {
     const container = document.querySelector('.section-executive-summary');
@@ -662,7 +727,8 @@ function buildPrioCard(field) {
   }
 
   // ── Render: Alle Sektionen ──────────────────────────────────────────────────
-  function renderAll(analysis, analysisId) {
+  // currentUserId: Supabase-user_id des eingeloggten Users (fuer Ersteller-Check)
+  function renderAll(analysis, analysisId, currentUserId) {
     // data-field Elemente (für Sektionen die Webflow nativ rendert)
     setText('[data-field="landing_page_url"]', analysis.landing_page_url);
     setText('[data-field="keyword"]', analysis.keyword);
@@ -885,72 +951,43 @@ function buildPrioCard(field) {
       if (el) el.innerHTML = builder();
     });
 
-    // KI-Agent Buttons
-    document.querySelectorAll('.section-ki-agent-btn').forEach(el => {
-      el.innerHTML = `
-        <div class="cvz-ki-btn-wrap">
-          <a href="https://www.convertlyze.com/analyse/optimization-agent?analysis_id=${analysisId}"
-             class="cvz-ki-btn"
-             aria-label="Mit KI-Agent optimieren">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="6" y="8" width="12" height="10" rx="2" fill="currentColor" opacity=".9"/><circle cx="9" cy="12" r="1.5" fill="#0d1117"/><circle cx="15" cy="12" r="1.5" fill="#0d1117"/><rect x="10" y="15" width="4" height="1.5" rx=".75" fill="#0d1117"/><rect x="11" y="4" width="2" height="4" rx="1" fill="currentColor" opacity=".9"/><circle cx="12" cy="5" r="2" fill="currentColor" opacity=".9"/></svg> Mit KI-Agent optimieren
-          </a>
-          <button class="cvz-pdf-btn"
-                  data-analysis-id="${analysisId}"
-                  aria-label="PDF-Report herunterladen"
-                  title="PDF-Report herunterladen">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> PDF-Report
-          </button>
-        </div>`;
+    // ── KI-Agent Buttons ──────────────────────────────────────────────────────
+    // GEAENDERT: KI-Agent-Button NUR fuer den Ersteller. Team-Mitglieder sehen
+    // nur den PDF-Button + einen Hinweis. Backend erzwingt dies ohnehin (403),
+    // hier nur UX. PDF-Download steht dem ganzen Team offen.
+    const isCreator = !!currentUserId && analysis.user_id === currentUserId;
 
-      // PDF-Button Click-Handler
-      const pdfBtn = el.querySelector('.cvz-pdf-btn');
-      if (pdfBtn) {
-        pdfBtn.addEventListener('click', async () => {
-          pdfBtn.disabled = true;
-          pdfBtn.classList.add('loading');
-          const origText = pdfBtn.innerHTML;
-          pdfBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Wird generiert...';
-          try {
-            const memberstackId = (await window.$memberstackDom.getCurrentMember())?.data?.id;
-            if (!memberstackId) throw new Error('Nicht eingeloggt');
-            const resp = await fetch(
-              'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/generate-pdf-report',
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-memberstack-id': memberstackId },
-                body: JSON.stringify({ analysisId: analysisId, userId: analysis.user_id, type: 'pdf' }),
-              }
-            );
-            if (!resp.ok) {
-              const e = await resp.json();
-              throw new Error(e.error || 'Generierung fehlgeschlagen');
-            }
-            const { downloadUrl } = await resp.json();
-            // Blob-Download
-            const blob    = await (await fetch(downloadUrl)).blob();
-            const blobUrl = URL.createObjectURL(blob);
-            const a       = document.createElement('a');
-            a.href        = blobUrl;
-            try {
-              const domain = new URL(analysis.landing_page_url).hostname.replace('www.','');
-              const date   = new Date(analysis.created_at).toISOString().slice(0,10);
-              a.download   = 'convertlyze-' + domain + '-' + date + '.pdf';
-            } catch(e) { a.download = 'convertlyze-report.pdf'; }
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
-            pdfBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> PDF-Report';
-          } catch (err) {
-            console.error('[CVZ] PDF-Download:', err);
-            pdfBtn.innerHTML = '⚠ Fehler – erneut versuchen';
-            setTimeout(() => { pdfBtn.innerHTML = origText; }, 3000);
-          } finally {
-            pdfBtn.disabled = false;
-            pdfBtn.classList.remove('loading');
-          }
-        });
+    document.querySelectorAll('.section-ki-agent-btn').forEach(el => {
+      if (isCreator) {
+        el.innerHTML = `
+          <div class="cvz-ki-btn-wrap">
+            <a href="https://www.convertlyze.com/analyse/optimization-agent?analysis_id=${analysisId}"
+               class="cvz-ki-btn"
+               aria-label="Mit KI-Agent optimieren">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="6" y="8" width="12" height="10" rx="2" fill="currentColor" opacity=".9"/><circle cx="9" cy="12" r="1.5" fill="#0d1117"/><circle cx="15" cy="12" r="1.5" fill="#0d1117"/><rect x="10" y="15" width="4" height="1.5" rx=".75" fill="#0d1117"/><rect x="11" y="4" width="2" height="4" rx="1" fill="currentColor" opacity=".9"/><circle cx="12" cy="5" r="2" fill="currentColor" opacity=".9"/></svg> Mit KI-Agent optimieren
+            </a>
+            <button class="cvz-pdf-btn"
+                    data-analysis-id="${analysisId}"
+                    aria-label="PDF-Report herunterladen"
+                    title="PDF-Report herunterladen">
+              ${CVZ_PDF_ICON} PDF-Report
+            </button>
+          </div>`;
+      } else {
+        el.innerHTML = `
+          <div class="cvz-ki-btn-wrap">
+            <button class="cvz-pdf-btn"
+                    data-analysis-id="${analysisId}"
+                    aria-label="PDF-Report herunterladen"
+                    title="PDF-Report herunterladen">
+              ${CVZ_PDF_ICON} PDF-Report
+            </button>
+          </div>
+          <p class="cvz-agent-hint">Der KI-Agent steht nur dem Ersteller dieser Analyse zur Verfügung.</p>`;
       }
+
+      // PDF-Handler in beiden Faellen anhaengen
+      attachPdfDownloadHandler(el.querySelector('.cvz-pdf-btn'), analysis, analysisId);
     });
 
     // Sektions-Überschriften – nach allen Renders einfügen
@@ -1008,7 +1045,7 @@ function buildPrioCard(field) {
     document.querySelectorAll('[data-action="share"],.share-button,#share-analysis').forEach(btn => {
       btn.addEventListener('click', async e => {
         e.preventDefault();
-        const shareData = { title:`Landing Page Analyse: ${analysis.keyword||''}`, text:`Score: ${analysis.overall_score||'-'}/10`, url:shareUrl };
+        const shareData = { title:`Landingpage Analyse: ${analysis.keyword||''}`, text:`Score: ${analysis.overall_score||'-'}/10`, url:shareUrl };
         if (navigator.share) { try { await navigator.share(shareData); feedback(btn,'Geteilt!'); return; } catch(e){} }
         if (navigator.clipboard) { try { await navigator.clipboard.writeText(shareUrl); feedback(btn,'Link kopiert!'); return; } catch(e){} }
         try {
@@ -1081,6 +1118,24 @@ function buildPrioCard(field) {
     return client;
   }
 
+  // ── Eigene Supabase-user_id holen (fuer Ersteller-Check) ────────────────────
+  async function fetchCurrentUserId(supabase) {
+    try {
+      const memberstackId = (await window.$memberstackDom.getCurrentMember())?.data?.id;
+      if (!memberstackId) return null;
+      const { data, error } = await supabase
+        .from('users')
+        .select('id')
+        .eq('memberstack_id', memberstackId)
+        .single();
+      if (error) { console.warn('[CVZ] fetchCurrentUserId:', error); return null; }
+      return data?.id || null;
+    } catch (e) {
+      console.warn('[CVZ] fetchCurrentUserId exception:', e);
+      return null;
+    }
+  }
+
   // ── Bootstrap ───────────────────────────────────────────────────────────────
   async function bootstrap() {
     injectStyles();
@@ -1103,8 +1158,11 @@ function buildPrioCard(field) {
     console.log('📊 Lade Analyse:', analysisId);
 
     try {
-      const { data: analysis, error } = await supabase
-        .from('analyses').select('*').eq('id', analysisId).single();
+      // Eigene user_id parallel zur Analyse holen (fuer Ersteller-Check)
+      const [{ data: analysis, error }, currentUserId] = await Promise.all([
+        supabase.from('analyses').select('*').eq('id', analysisId).single(),
+        fetchCurrentUserId(supabase),
+      ]);
 
       if (error) {
         if (error.code === 'PGRST116') alert('Analyse nicht gefunden. Bitte überprüfe den Link.');
@@ -1115,7 +1173,7 @@ function buildPrioCard(field) {
       if (!analysis) { alert('Analyse nicht gefunden'); return; }
 
       console.log('✅ Analyse geladen:', analysis);
-      renderAll(analysis, analysisId);
+      renderAll(analysis, analysisId, currentUserId);
 
     } catch(err) {
       console.error('❌ Unerwarteter Fehler:', err);
