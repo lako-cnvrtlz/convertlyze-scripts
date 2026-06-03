@@ -1,6 +1,16 @@
 /**
- * Convertlyze – Report Script v3
+ * Convertlyze – Report Script v4
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
+ *
+ * ÄNDERUNGEN ggü. v3 (Schwächen-Feld-Konsolidierung):
+ *   - Separate card('schwaechen', ...)-Karten für *_schwaechen_html ENTFERNT.
+ *     Schwächen werden jetzt ausschließlich über buildPrioCard() aus den
+ *     *_schwaechen_prioritized_html / *_opportunities_html /
+ *     *_optimierungspotenziale_html / search_intent_content_gaps gerendert.
+ *   - buildPrioCard() behält den HTML-Fallback für ALTE Analysen, deren
+ *     prioritized-Feld noch echtes HTML statt JSON enthält.
+ *   - card()/sanitize() bleiben unverändert (card gibt bei leerem Content ''
+ *     zurück, daher waren die entfernten Zeilen bei Neu-Analysen ohnehin leer).
  *
  * ÄNDERUNGEN ggü. v2:
  *   - toArray()-Helfer (robust gegen Objekt/Array/fehlend)
@@ -969,35 +979,33 @@ function buildPrioCard(field) {
     renderExecSummary(analysis);
 
     // Deep Dive Kategorien
+    // HINWEIS: Schwächen werden ausschließlich über buildPrioCard() gerendert.
+    // Die früheren card('schwaechen', ...)-Karten wurden entfernt (Feld-Konsolidierung).
     const sections = {
       '.section-deep-dive-hero': () => buildCatSection('Hero', analysis.hero_score,
         card('summary','Zusammenfassung', txt(analysis.hero_summary)) +
         card('staerken','Stärken', analysis.hero_staerken_html) +
-        card('schwaechen','Schwächen', analysis.hero_schwaechen_html) +
         buildPrioCard(analysis.hero_schwaechen_prioritized_html)),
 
       '.section-deep-dive-content': () => buildCatSection('Content', analysis.content_score,
         card('summary','Zusammenfassung', txt(analysis.content_summary)) +
         card('staerken','Stärken', analysis.content_staerken_html) +
-        card('schwaechen','Schwächen', analysis.content_schwaechen_html) +
-        buildPrioCard(analysis.content_schwaechen_prioritized_html)),
+        buildPrioCard(analysis.content_schwaechen_prioritized_html) +
+        buildPrioCard(analysis.content_gaps_html)),
 
       '.section-deep-dive-zielgruppe': () => buildCatSection('Zielgruppe', analysis.zielgruppe_score,
         card('summary','Zusammenfassung', txt(analysis.zielgruppe_summary)) +
         card('staerken','Stärken', analysis.zielgruppe_staerken_html) +
-        card('schwaechen','Schwächen', analysis.zielgruppe_schwaechen_html) +
         buildPrioCard(analysis.zielgruppe_schwaechen_prioritized_html)),
 
      '.section-deep-dive-conversion': () => buildCatSection('Conversion', analysis.conversion_score,
         card('summary','Zusammenfassung', txt(analysis.conversion_summary)) +
         card('staerken','Stärken', analysis.conversion_staerken_html) +
-        card('schwaechen','Schwächen', analysis.conversion_schwaechen_html) +
         buildPrioCard(analysis.conversion_schwaechen_prioritized_html)),
 
      '.section-deep-dive-struktur': () => buildCatSection('Struktur', analysis.struktur_score,
         card('summary','Zusammenfassung', txt(analysis.struktur_summary)) +
         card('staerken','Stärken', analysis.struktur_staerken_html) +
-        card('schwaechen','Schwächen', analysis.struktur_schwaechen_html) +
         buildPrioCard(analysis.struktur_schwaechen_prioritized_html)),
       
     '.section-deep-dive-searchintent': () => buildCatSection('Search Intent', analysis.search_intent_score,
@@ -1007,7 +1015,6 @@ function buildPrioCard(field) {
       '.section-deep-dive-differenzierung': () => buildCatSection('Differenzierung', analysis.wettbewerb_score,
         card('summary','Zusammenfassung', txt(analysis.wettbewerb_summary)) +
         card('staerken','Stärken', analysis.wettbewerb_staerken_html) +
-        card('schwaechen','Schwächen', analysis.wettbewerb_schwaechen_html) +
         buildPrioCard(analysis.wettbewerb_schwaechen_prioritized_html)),
 
       '.section-deep-dive-performance': () => buildCatSection('Performance', analysis.performance_score,
@@ -1019,7 +1026,6 @@ function buildPrioCard(field) {
       '.section-deep-dive-ai': () => buildCatSection('AI Sichtbarkeit', analysis.ai_readiness_score,
         card('summary','Zusammenfassung', txt(analysis.ai_readiness_bewertung)) +
         card('staerken','Stärken', analysis.ai_readiness_staerken_html) +
-        card('schwaechen','Schwächen', analysis.ai_readiness_schwaechen_html) +
         buildPrioCard(analysis.ai_readiness_optimierungspotenziale_html)),
       
       // === GEÄNDERT: nutzt buildRoadmap (JSON mit HTML-Fallback) ===
