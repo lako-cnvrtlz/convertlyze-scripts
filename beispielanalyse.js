@@ -801,7 +801,7 @@
     inject('.section-hero-info',
       '<div class="cvz-section cvz-fi cvz-fi-1">'+
       '<div style="background:rgba(79,209,197,.05);border:1px solid rgba(79,209,197,.15);border-radius:10px;padding:14px 18px;margin-bottom:12px;font-size:13px;color:#718096;line-height:1.65;">'+
-      '<p style="margin:0 0 8px;"><strong style="color:#c4cdd6;">Dies ist eine echte Convertlyze-Analyse</strong> – anonymisiert für diese Beispielseite. Alle Markennamen, Zitate und konkreten Kennzahlen wurden generalisiert, die Bewertungen und Empfehlungen stammen aus einem realen Analyselauf.</p>'+
+      '<p style="margin:0 0 8px;"><strong style="color:#c4cdd6;">Dies ist eine echte Convertlyze-Analyse</strong>. Anonymisiert für diese Beispielseite. Alle Markennamen, Zitate und konkreten Kennzahlen wurden generalisiert, die Bewertungen und Empfehlungen stammen aus einem realen Analyselauf.</p>'+
       '<p style="margin:0;">Convertlyze bewertet jede Seite im Kontext ihrer <strong style="color:#c4cdd6;">Branche und ihres Angebotstyps</strong>: Eine SaaS-Landingpage wird nach anderen Kriterien beurteilt als eine Consulting- oder E-Commerce-Seite – von der Erwartung an Proof Points über die CTA-Strategie bis zur Gewichtung einzelner Kategorien. Die folgende Analyse zeigt das vollständige Ausgabeformat am Beispiel eines DACH-SaaS-Anbieters im Buchhaltungs-Segment.</p>'+
       '</div>'+
       '<div class="cvz-card" style="padding:20px 24px;"><div class="cvz-info-grid">'+
