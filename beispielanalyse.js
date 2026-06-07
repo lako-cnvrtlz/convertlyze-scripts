@@ -1,6 +1,17 @@
 /**
- * Convertlyze – Statische Beispielanalyse (anonymisiert)
- * Fiktiver DACH-SaaS-Anbieter im Buchhaltungs-Segment
+ * Convertlyze – Statische Beispielanalyse (echte Analyse, anonymisiert) v2
+ * Realer Analyselauf, DACH-SaaS-Anbieter im Buchhaltungs-Segment (anonymisiert)
+ *
+ * ÄNDERUNGEN ggü. v1 (Angleichung an report.js v4):
+ *   - Separate _schwaechen (<ul>) + _empfehlungen (HTML mit Icons) Paare ENTFERNT.
+ *     Stattdessen pro Kategorie EIN *_prioritized-Array (JSON, FMT-PRIO-BADGES):
+ *     [{severity, problem, loesung, aufwand}]  ->  gerendert via buildPrioCard().
+ *   - severity aus altem Emoji abgeleitet: 🔴->critical, 🟡->high, 🟢->medium.
+ *   - Roadmap als priority_matrix-JSON (sofort_umsetzen/als_naechstes/quick_wins/
+ *     spaeter) -> gerendert via buildRoadmap() (identisch zu report.js v4).
+ *   - buildPrioCard() + buildRoadmap() + CVZ_SEV + cvzAufwand + toArray
+ *     1:1 aus report.js v4 übernommen, damit Demo == echter Report.
+ *   - CSS um .cvz-prio / .cvz-pr-* und .cvz-roadmap / .cvz-rm-* ergänzt.
  *
  * Einbindung: <script src="...beispielanalyse.js"></script>
  */
@@ -15,7 +26,7 @@
     conversion_goal: 'Kostenlose Testversion starten',
     industry:        'FinTech / Buchhaltungssoftware für KMU und Selbstständige',
     business_type:   'SaaS',
-    search_intent:   'Transactional',
+    search_intent:   'Commercial / Transactional',
     created_at:      '13.05.2026, 18:57',
 
     overall_score:       7.5,
@@ -26,6 +37,8 @@
     struktur_score:      7.0,
     search_intent_score: 7.3,
     wettbewerb_score:    6.8,
+    performance_score:   2.8,
+    ai_readiness_score:  5.8,
 
     industry_fit_summary: 'Die Landingpage erfüllt branchentypische Standards für Buchhaltungssoftware im DACH-Markt weitgehend: Steuerkonformität, Finanzamts-Schnittstelle und gesetzlich geforderte Rechnungsformate werden kommuniziert. Branchenübliche Sicherheitszertifikate und Datenschutznachweise fehlen jedoch im sichtbaren Seitenbereich – für ein Produkt, das sensible Finanzdaten verarbeitet, ein relevanter Vertrauensnachteil.',
 
@@ -44,6 +57,7 @@
       <li><strong>Hauptüberschrift kommuniziert keine messbaren Ergebnisse:</strong> Das Subheading listet Funktionen auf, ohne ein konkretes Outcome-Versprechen wie quantifizierte Zeitersparnis oder Kostenreduktion zu nennen.</li>
     </ul>`,
 
+    // ── HERO ──────────────────────────────────────────────────────────────────
     hero_summary: 'Der Hero adressiert die Zielgruppe klar und greift typische Probleme der Nutzergruppe mit treffenden Formulierungen auf. Der primäre CTA passt zum Conversion-Ziel. Ein Produktscreenshot macht die Lösung greifbar. Größter Hebel: Weder Hauptüberschrift noch Subheading kommunizieren ein messbares Ergebnis.',
 
     hero_staerken: `<ul>
@@ -53,18 +67,28 @@
       <li><strong>Bewertungsplattform-Signal direkt unterhalb des Heroes:</strong> Eine hohe Bewertung mit großer Rezensionsanzahl wird vor dem ersten Scroll sichtbar positioniert</li>
     </ul>`,
 
-    hero_schwaechen: `<ul>
-      <li><strong>Kein messbares Ergebnis im Hero kommuniziert:</strong> Das Subheading listet Funktionen auf, ohne quantifizierte Zeitersparnis oder Kostenvorteil zu nennen</li>
-      <li><strong>Sicherheitszertifikate fehlen oberhalb des CTA:</strong> Keine Datenschutz- oder Compliance-Badges vor der Kaufentscheidung sichtbar</li>
-      <li><strong>Fehlende Risikofreiheits-Signale am CTA selbst:</strong> Der Button-Text kommuniziert nicht explizit die Verbindlichkeitsfreiheit</li>
-    </ul>`,
+    hero_prioritized: [
+      {
+        severity: 'critical',
+        problem: 'Kein messbares Ergebnis im Hero kommuniziert: Das Subheading listet Funktionen auf, ohne quantifizierte Zeitersparnis oder Kostenvorteil zu nennen.',
+        loesung: 'Messbares Ergebnis in die Hauptüberschrift integrieren, z.B. Zeitersparnis pro Woche oder Vereinfachung des Steuerberater-Prozesses.',
+        aufwand: 'gering',
+      },
+      {
+        severity: 'high',
+        problem: 'Sicherheitszertifikate fehlen oberhalb des CTA: Keine Datenschutz- oder Compliance-Badges vor der Kaufentscheidung sichtbar.',
+        loesung: 'Gesetzeskonformitäts-Badge, Datenschutz-Nachweis und Sicherheitszertifikat als eigenständige Zeile direkt unter dem CTA platzieren.',
+        aufwand: 'gering',
+      },
+      {
+        severity: 'high',
+        problem: 'Fehlende Risikofreiheits-Signale am CTA selbst: Der Button-Text kommuniziert nicht explizit die Verbindlichkeitsfreiheit.',
+        loesung: 'Button-Text um kurzen Hinweis auf Verbindlichkeitsfreiheit ergänzen.',
+        aufwand: 'gering',
+      },
+    ],
 
-    hero_empfehlungen: `<ul>
-      <li>🔴 <strong>CRITICAL – Outcome in die Hauptüberschrift integrieren:</strong> Messbares Ergebnis ergänzen, z.B. Zeitersparnis pro Woche oder Vereinfachung des Steuerberater-Prozesses. Aufwand: Gering.</li>
-      <li>🟡 <strong>HIGH – Datenschutz- und Compliance-Badges unter dem Hero:</strong> Gesetzeskonformitäts-Badge, Datenschutz-Nachweis und Sicherheitszertifikat als eigenständige Zeile direkt unter dem CTA. Aufwand: Gering.</li>
-      <li>🟡 <strong>HIGH – Risikofreiheit am CTA verstärken:</strong> Button-Text um kurzen Hinweis auf Verbindlichkeitsfreiheit ergänzen. Aufwand: Gering.</li>
-    </ul>`,
-
+    // ── CONTENT ───────────────────────────────────────────────────────────────
     content_summary: 'Der Content kommuniziert funktionalen Nutzen klar und adressiert Compliance-Ängste überzeugend. Eine umfangreiche FAQ deckt kaufentscheidende Fragen ab. Kundenstimmen sind vorhanden, aber ohne messbare Ergebnisse. Größter Hebel: Den Business Case quantifizieren – konkrete Zeitersparnis-Zahlen oder ein Kostenvergleich würden die Überzeugungskraft deutlich steigern.',
 
     content_staerken: `<ul>
@@ -74,18 +98,31 @@
       <li><strong>Quantifizierter Social Proof:</strong> Eine konkrete Kundenzahl im sechsstelligen Bereich dient als klares Marktakzeptanz-Signal</li>
     </ul>`,
 
-    content_schwaechen: `<ul>
-      <li><strong>Business Case nicht quantifiziert:</strong> Keine konkreten Zeitersparnis-Angaben und kein Vergleich zu manueller Buchhaltung oder externen Kosten</li>
-      <li><strong>Kundenstimmen ohne messbare Ergebnisse:</strong> Testimonials beschreiben subjektive Zufriedenheit statt konkreter Verbesserungen</li>
-      <li><strong>Kein Transformationsversprechen:</strong> Der Content bleibt auf funktionaler Ebene – ein übergeordnetes Versprechen für das Geschäftsleben der Nutzer fehlt</li>
-    </ul>`,
+    content_prioritized: [
+      {
+        severity: 'high',
+        problem: 'Business Case nicht quantifiziert: Keine konkreten Zeitersparnis-Angaben und kein Vergleich zu manueller Buchhaltung oder externen Kosten.',
+        loesung: 'Durchschnittliche Zeitersparnis pro Monat oder typische Kosteneinsparung gegenüber externen Alternativen kommunizieren.',
+        aufwand: 'gering',
+      },
+      {
+        severity: 'high',
+        problem: 'Kundenstimmen ohne messbare Ergebnisse: Testimonials beschreiben subjektive Zufriedenheit statt konkreter Verbesserungen.',
+        loesung: 'Bestehende Kunden nach messbaren Ergebnissen befragen. Ein Testimonial mit spezifischer Stunden- oder Kostenersparnis steigert die Überzeugungskraft erheblich.',
+        aufwand: 'gering',
+      },
+      {
+        severity: 'medium',
+        problem: 'Kein Transformationsversprechen: Der Content bleibt auf funktionaler Ebene – ein übergeordnetes Versprechen für das Geschäftsleben der Nutzer fehlt.',
+        loesung: 'Übergeordnete Vision kommunizieren, die über die reine Softwarefunktion hinausgeht.',
+        aufwand: 'gering',
+      },
+    ],
 
-    content_empfehlungen: `<ul>
-      <li>🟡 <strong>HIGH – Business Case quantifizieren:</strong> Durchschnittliche Zeitersparnis pro Monat oder typische Kosteneinsparung gegenüber externen Alternativen kommunizieren. Aufwand: Gering.</li>
-      <li>🟡 <strong>HIGH – Testimonials mit konkreten Zahlen anreichern:</strong> Bestehende Kunden nach messbaren Ergebnissen befragen. Ein Testimonial mit spezifischer Stunden- oder Kostenersparnis steigert die Überzeugungskraft erheblich. Aufwand: Gering.</li>
-      <li>🟢 <strong>MEDIUM – Übergeordnetes Transformationsversprechen ergänzen:</strong> Vision kommunizieren, die über die Softwarefunktion hinausgeht. Aufwand: Gering.</li>
-    </ul>`,
+    // content_gaps: in der Demo nicht befüllt (keine Lazy-Loading-/nicht-bewertbar-Fälle)
+    content_gaps: [],
 
+    // ── ZIELGRUPPE ──────────────────────────────────────────────────────────────
     zielgruppe_summary: 'Die primäre Zielgruppe wird explizit in der Hauptüberschrift adressiert und durch zwei differenzierte Nutzer-Szenarien weiter geschärft. Alltagsnahe Problemformulierungen erzeugen hohe Wiedererkennbarkeit.',
 
     zielgruppe_staerken: `<ul>
@@ -94,16 +131,22 @@
       <li><strong>Alltagsnahe Problemformulierungen:</strong> Typische Buchhaltungs-Situationen werden treffend beschrieben und erzeugen sofortige Identifikation</li>
     </ul>`,
 
-    zielgruppe_schwaechen: `<ul>
-      <li><strong>Kleinunternehmen mit Teamstruktur nicht adressiert:</strong> Nutzer mit ersten Mitarbeitern oder komplexeren Strukturen finden keine spezifischen Inhalte</li>
-      <li><strong>Branchenspezifische Beispiele fehlen:</strong> Keine differenzierten Inhalte für verschiedene Selbstständigen-Typen wie Handwerk, Kreativberufe oder Dienstleistung</li>
-    </ul>`,
+    zielgruppe_prioritized: [
+      {
+        severity: 'high',
+        problem: 'Branchenspezifische Beispiele fehlen: Keine differenzierten Inhalte für verschiedene Selbstständigen-Typen wie Handwerk, Kreativberufe oder Dienstleistung. Auch Kleinunternehmen mit erster Teamstruktur finden keine spezifischen Inhalte.',
+        loesung: 'Drei bis vier Branchen-Szenarien mit je einem typischen Pain Point ergänzen.',
+        aufwand: 'mittel',
+      },
+      {
+        severity: 'medium',
+        problem: 'Persona-Pfade nicht klar getrennt: Neugründer und etablierte Selbstständige teilen sich denselben Conversion-Pfad.',
+        loesung: 'Separate CTAs für Neugründer und etablierte Selbstständige anbieten.',
+        aufwand: 'gering',
+      },
+    ],
 
-    zielgruppe_empfehlungen: `<ul>
-      <li>🟡 <strong>HIGH – Branchenspezifische Beispiele ergänzen:</strong> Drei bis vier Branchen-Szenarien mit je einem typischen Pain Point. Aufwand: Mittel.</li>
-      <li>🟢 <strong>MEDIUM – Persona-Pfade stärker differenzieren:</strong> Separate CTAs für Neugründer und etablierte Selbstständige. Aufwand: Gering.</li>
-    </ul>`,
-
+    // ── CONVERSION ──────────────────────────────────────────────────────────────
     conversion_summary: 'Der primäre CTA ist klar und prominent mit Risikoumkehr versehen. Ein dauerhaft kostenloser Einstieg senkt die Hemmschwelle erheblich. Größter Hebel: Preisangaben sind nicht im natürlichen Seitenfluss sichtbar.',
 
     conversion_staerken: `<ul>
@@ -112,16 +155,22 @@
       <li><strong>CTA-Wiederholung nach der Einwandbehandlung:</strong> Conversion-Element direkt nach der FAQ platziert – im richtigen Entscheidungsmoment</li>
     </ul>`,
 
-    conversion_schwaechen: `<ul>
-      <li><strong>Preisangaben nicht im natürlichen Seitenfluss:</strong> Kosteninformationen sind nur in der FAQ auffindbar – transaktionale Nutzer müssen aktiv danach suchen</li>
-      <li><strong>Kein persistenter CTA auf Mobile:</strong> Bei der Seitenlänge fehlt ein dauerhaft sichtbarer Conversion-Einstiegspunkt auf kleinen Bildschirmen</li>
-    </ul>`,
+    conversion_prioritized: [
+      {
+        severity: 'critical',
+        problem: 'Preisangaben nicht im natürlichen Seitenfluss: Kosteninformationen sind nur in der FAQ auffindbar – transaktionale Nutzer müssen aktiv danach suchen.',
+        loesung: 'Einstiegspreis als sichtbares Element unterhalb der Feature-Sektion in den Content-Flow integrieren.',
+        aufwand: 'gering',
+      },
+      {
+        severity: 'high',
+        problem: 'Kein persistenter CTA auf Mobile: Bei der Seitenlänge fehlt ein dauerhaft sichtbarer Conversion-Einstiegspunkt auf kleinen Bildschirmen.',
+        loesung: 'Floating-Button auf dem Mobile-Breakpoint ergänzen.',
+        aufwand: 'mittel',
+      },
+    ],
 
-    conversion_empfehlungen: `<ul>
-      <li>🔴 <strong>CRITICAL – Preisangaben in den Content-Flow integrieren:</strong> Einstiegspreis als sichtbares Element unterhalb der Feature-Sektion ergänzen. Aufwand: Gering.</li>
-      <li>🟡 <strong>HIGH – Persistenter CTA auf Mobile:</strong> Floating-Button auf dem Mobile-Breakpoint. Aufwand: Mittel.</li>
-    </ul>`,
-
+    // ── STRUKTUR ──────────────────────────────────────────────────────────────
     struktur_summary: 'Die Seitenstruktur folgt einem bewährten Aufmerksamkeits-Interesse-Wunsch-Handlungs-Muster. Die Navigation zwischen Sektionen ist logisch. Größter Hebel: Übermäßige Seitenlänge und redundante Inhalte reduzieren.',
 
     struktur_staerken: `<ul>
@@ -129,23 +178,40 @@
       <li><strong>Visueller Rhythmus durch abwechselnde Layouts:</strong> Karten, Listen und Kundenstimmen unterbrechen den Textfluss sinnvoll</li>
     </ul>`,
 
-    struktur_schwaechen: `<ul>
-      <li><strong>Übermäßige Seitenlänge:</strong> Redundante Feature-Wiederholungen und mehrfach platzierte CTAs erzeugen Entscheidungsmüdigkeit</li>
-      <li><strong>Trust-Sektion fehlt als eigenständiger Block:</strong> Sicherheits- und Datenschutzinformationen sind über die Seite verteilt statt gebündelt</li>
-    </ul>`,
+    struktur_prioritized: [
+      {
+        severity: 'high',
+        problem: 'Trust-Sektion fehlt als eigenständiger Block: Sicherheits- und Datenschutzinformationen sind über die Seite verteilt statt gebündelt.',
+        loesung: 'Eigenständige Badge-Zeile mit Compliance- und Datenschutznachweisen direkt unterhalb des Hero-Bereichs platzieren.',
+        aufwand: 'gering',
+      },
+      {
+        severity: 'medium',
+        problem: 'Übermäßige Seitenlänge: Redundante Feature-Wiederholungen und mehrfach platzierte CTAs erzeugen Entscheidungsmüdigkeit.',
+        loesung: 'Feature-Wiederholungen entfernen und Gesamtlänge reduzieren.',
+        aufwand: 'mittel',
+      },
+    ],
 
-    struktur_empfehlungen: `<ul>
-      <li>🟡 <strong>HIGH – Trust-Sektion direkt nach dem Hero:</strong> Eigenständige Badge-Zeile mit Compliance- und Datenschutznachweisen direkt unterhalb des Hero-Bereichs. Aufwand: Gering.</li>
-      <li>🟢 <strong>MEDIUM – Redundante Sektionen konsolidieren:</strong> Feature-Wiederholungen entfernen und Gesamtlänge reduzieren. Aufwand: Mittel.</li>
-    </ul>`,
-
+    // ── SEARCH INTENT ───────────────────────────────────────────────────────────
     search_intent_bewertung: 'Der Search Intent für das analysierte Keyword ist primär transaktional mit starkem kommerziellem Anteil. Die Landingpage adressiert diesen Intent gut durch direkten Trial-CTA und Preisinformationen in der FAQ. Schwäche: Der informationale Intent von Nutzern in frühen Recherchephasen wird nicht adressiert, was potenzielle Kunden in der Evaluierungsphase verliert.',
 
-    search_intent_empfehlungen: `<ul>
-      <li>🟡 <strong>HIGH – Informationalen Intent ergänzen:</strong> Kurze Einführung für Nutzer ohne Buchhaltungsvorkenntnisse. Aufwand: Mittel.</li>
-      <li>🟢 <strong>MEDIUM – Häufige Folge-Suchanfragen stärker adressieren:</strong> Eigene Sektion für typische Anschlussthemen wie vereinfachte Einnahmen-Überschuss-Rechnung. Aufwand: Gering.</li>
-    </ul>`,
+    search_intent_prioritized: [
+      {
+        severity: 'high',
+        problem: 'Informationaler Intent nicht adressiert: Nutzer in frühen Recherchephasen ohne Buchhaltungsvorkenntnisse finden keinen Einstieg.',
+        loesung: 'Kurze Einführung für Nutzer ohne Buchhaltungsvorkenntnisse ergänzen.',
+        aufwand: 'mittel',
+      },
+      {
+        severity: 'medium',
+        problem: 'Häufige Folge-Suchanfragen werden nicht aufgegriffen: Typische Anschlussthemen wie die vereinfachte Einnahmen-Überschuss-Rechnung fehlen.',
+        loesung: 'Eigene Sektion für typische Anschlussthemen ergänzen.',
+        aufwand: 'gering',
+      },
+    ],
 
+    // ── DIFFERENZIERUNG / WETTBEWERB ─────────────────────────────────────────────
     wettbewerb_summary: 'DACH-spezifische Positionierung als Differenzierungsmerkmal klar kommuniziert. Aktuelle Gesetzgebung als Alleinstellungsmerkmal stark genutzt. Schwäche: Ein direkter Vergleich mit Wettbewerbern fehlt – Nutzer, die mehrere Lösungen evaluieren, erhalten keine strukturierte Entscheidungshilfe.',
 
     wettbewerb_staerken: `<ul>
@@ -154,28 +220,48 @@
       <li><strong>Landesspezifische Integration als DACH-Vorteil:</strong> Direkte Anbindung an deutsche Steuerbehörden als echtes Differenzierungsmerkmal gegenüber internationalen Alternativen</li>
     </ul>`,
 
-    wettbewerb_schwaechen: `<ul>
-      <li><strong>Kein strukturierter Wettbewerbsvergleich:</strong> Nutzer, die mehrere Lösungen evaluieren, erhalten keine Entscheidungshilfe auf der Seite</li>
-      <li><strong>Differenzierung gegenüber internationalen Tools fehlt:</strong> Warum eine DACH-spezifische Lösung gegenüber internationalen Alternativen? – nicht adressiert</li>
-    </ul>`,
+    wettbewerb_prioritized: [
+      {
+        severity: 'high',
+        problem: 'Kein strukturierter Wettbewerbsvergleich: Nutzer, die mehrere Lösungen evaluieren, erhalten keine Entscheidungshilfe auf der Seite. Auch die Differenzierung gegenüber internationalen Tools fehlt.',
+        loesung: 'Vergleichstabelle mit den fünf wichtigsten Unterschieden zu etablierten Desktop-Lösungen und internationalen Alternativen ergänzen.',
+        aufwand: 'mittel',
+      },
+      {
+        severity: 'medium',
+        problem: 'Einstieg aus manuellen Prozessen nicht adressiert: Nutzer, die aktuell mit Tabellen oder Papier arbeiten, werden nicht direkt abgeholt.',
+        loesung: 'Kurze Sektion für Nutzer ergänzen, die aktuell noch manuell arbeiten.',
+        aufwand: 'gering',
+      },
+    ],
 
-    wettbewerb_empfehlungen: `<ul>
-      <li>🟡 <strong>HIGH – Vergleichssektion ergänzen:</strong> Tabelle mit den fünf wichtigsten Unterschieden zu etablierten Desktop-Lösungen und internationalen Alternativen. Aufwand: Mittel.</li>
-      <li>🟢 <strong>MEDIUM – Einstieg aus manuellen Prozessen direkt adressieren:</strong> Kurze Sektion für Nutzer, die aktuell noch mit Tabellen oder Papier arbeiten. Aufwand: Gering.</li>
-    </ul>`,
-
+    // ── PERFORMANCE ─────────────────────────────────────────────────────────────
     performance_summary: 'Performance auf Desktop sehr gut. Mobile Performance durch mehrere synchron ladende Drittanbieter-Skripte beeinträchtigt. Core Web Vitals Desktop im grünen Bereich, Mobile optimierungsbedürftig.',
-
     performance_desktop: 'Desktop-Performance nahezu perfekt. Largest Contentful Paint und First Contentful Paint laden sehr schnell. Layout-Stabilität minimal beeinträchtigt. Einziger Optimierungspunkt: Das LCP-Bild könnte mit einem Priorisierungs-Attribut schneller geladen werden.',
-
     performance_mobile: 'Mobile Performance kritisch beeinträchtigt durch synchron ladende Drittanbieter-Skripte. Consent-Management und Buchungstool blockieren den Rendering-Prozess. Lazy Loading für unterhalb des sichtbaren Bereichs liegende Bilder nicht konsequent aktiviert.',
 
-    performance_empfehlungen: `<ul>
-      <li>🔴 <strong>CRITICAL – Consent-Management asynchron laden:</strong> Das Consent-Tool auf asynchrones Laden umstellen – eliminiert Render-Blocking auf Mobile. Aufwand: Gering.</li>
-      <li>🟡 <strong>HIGH – Buchungstool verzögert initialisieren:</strong> Das eingebettete Buchungstool erst beim Scroll-Trigger laden statt beim Seitenload. Aufwand: Gering.</li>
-      <li>🟡 <strong>HIGH – LCP-Bild priorisieren:</strong> Hero-Bild mit Lade-Priorisierungs-Attribut versehen. Aufwand: Gering.</li>
-    </ul>`,
+    performance_opportunities: [
+      {
+        severity: 'critical',
+        problem: 'Consent-Management lädt synchron und blockiert das Rendering auf Mobile.',
+        loesung: 'Das Consent-Tool auf asynchrones Laden umstellen – eliminiert Render-Blocking auf Mobile.',
+        aufwand: 'gering',
+      },
+      {
+        severity: 'high',
+        problem: 'Eingebettetes Buchungstool wird beim Seitenload initialisiert und blockiert den Rendering-Prozess.',
+        loesung: 'Das Buchungstool erst beim Scroll-Trigger laden statt beim Seitenload.',
+        aufwand: 'gering',
+      },
+      {
+        severity: 'high',
+        problem: 'LCP-Bild wird nicht priorisiert geladen.',
+        loesung: 'Hero-Bild mit Lade-Priorisierungs-Attribut versehen.',
+        aufwand: 'gering',
+      },
+    ],
 
+    // ── AI READINESS ────────────────────────────────────────────────────────────
     ai_bewertung: 'AI Readiness moderat. Grundlegende strukturierte Daten sind vorhanden, aber unvollständig. Das Schema für häufig gestellte Fragen fehlt trotz umfangreicher FAQ-Sektion. Non-Commodity-Gehalt schwach – generische Aussagen dominieren statt einzigartiger, belegbarer Inhalte, die von KI-Systemen bevorzugt zitiert werden.',
 
     ai_staerken: `<ul>
@@ -183,28 +269,93 @@
       <li><strong>Klare Produktdefinition:</strong> Produktkategorie und Zielgruppe sind eindeutig kommuniziert – KI-Systeme können die Seite kontextuell einordnen</li>
     </ul>`,
 
-    ai_schwaechen: `<ul>
-      <li><strong>FAQ-Schema fehlt:</strong> Die umfangreiche FAQ-Sektion ist nicht mit dem entsprechenden strukturierten Datenformat ausgezeichnet – KI-Systeme können Antworten nicht direkt zitieren</li>
-      <li><strong>Non-Commodity-Gehalt schwach:</strong> Alle zentralen Aussagen sind generisch – keine eigenen Daten, keine messbaren Kundenergebnisse, die exklusiv auf diese Quelle zurückführen</li>
-      <li><strong>Videoinhalte nicht strukturiert ausgezeichnet:</strong> Vorhandene Videoinhalte fehlen als maschinenlesbare Videoobjekte</li>
-    </ul>`,
+    ai_optimierungspotenziale: [
+      {
+        severity: 'critical',
+        problem: 'FAQ-Schema fehlt: Die umfangreiche FAQ-Sektion ist nicht mit dem entsprechenden strukturierten Datenformat ausgezeichnet – KI-Systeme können Antworten nicht direkt zitieren.',
+        loesung: 'Alle FAQ-Einträge mit dem entsprechenden JSON-LD-Format auszeichnen. Ermöglicht direkte Zitation in KI-Antworten und AI Overviews.',
+        aufwand: 'gering',
+      },
+      {
+        severity: 'critical',
+        problem: 'Non-Commodity-Gehalt schwach: Alle zentralen Aussagen sind generisch – keine eigenen Daten, keine messbaren Kundenergebnisse, die exklusiv auf diese Quelle zurückführen.',
+        loesung: 'Zwei bis drei Kundenfälle mit messbaren Ergebnissen ergänzen. KI-Systeme bevorzugen Seiten mit einzigartigen, belegbaren Inhalten.',
+        aufwand: 'mittel',
+      },
+      {
+        severity: 'high',
+        problem: 'Videoinhalte nicht strukturiert ausgezeichnet: Vorhandene Videoinhalte fehlen als maschinenlesbare Videoobjekte.',
+        loesung: 'Produktdemo-Video mit dem entsprechenden JSON-LD-Format versehen.',
+        aufwand: 'gering',
+      },
+    ],
 
-    ai_empfehlungen: `<ul>
-      <li>🔴 <strong>CRITICAL – FAQ-Schema ergänzen:</strong> Alle FAQ-Einträge mit dem entsprechenden JSON-LD-Format auszeichnen. Ermöglicht direkte Zitation in KI-Antworten und AI Overviews. Aufwand: Gering.</li>
-      <li>🔴 <strong>CRITICAL – Non-Commodity-Gehalt erhöhen:</strong> Zwei bis drei Kundenfälle mit messbaren Ergebnissen ergänzen. KI-Systeme bevorzugen Seiten mit einzigartigen, belegbaren Inhalten. Aufwand: Mittel.</li>
-      <li>🟡 <strong>HIGH – Videoinhalte strukturiert auszeichnen:</strong> Produktdemo-Video mit dem entsprechenden JSON-LD-Format versehen. Aufwand: Gering.</li>
-    </ul>`,
-
-    roadmap: `<ul>
-      <li>🔴 <strong>SOFORT UMSETZEN (Sehr hoher Impact • Geringer Aufwand):</strong> Hauptüberschrift auf messbares Ergebnis umschreiben – konkretes Outcome-Versprechen statt Funktionsauflistung.<br><small>💡 Quantifizierte Zeitersparnis oder Vereinfachung eines typischen Prozesses als Kernaussage. Aufwand: Gering.</small></li>
-      <li>🔴 <strong>SOFORT UMSETZEN (Sehr hoher Impact • Geringer Aufwand):</strong> FAQ-Schema für alle Einträge ergänzen – ermöglicht direkte Zitation durch KI-Systeme und AI Overviews.<br><small>💡 JSON-LD im Head-Bereich, alle Fragen und Antworten strukturiert auszeichnen. Aufwand: Gering.</small></li>
-      <li>🔴 <strong>SOFORT UMSETZEN (Sehr hoher Impact • Geringer Aufwand):</strong> Consent-Management asynchron laden – eliminiert Render-Blocking auf Mobile und verbessert Mobile-Performance erheblich.<br><small>💡 Async-Attribut im entsprechenden Script-Tag setzen. Aufwand: Gering.</small></li>
-      <li>🟡 <strong>ALS NÄCHSTES (Hoher Impact • Geringer Aufwand):</strong> Trust-Badge-Sektion direkt nach dem Hero: Compliance-, Datenschutz- und Sicherheitsnachweise als visuelle Elemente.<br><small>💡 Drei Badges in einer Zeile, direkt unterhalb des Hero-CTAs. Aufwand: Gering.</small></li>
-      <li>🟡 <strong>ALS NÄCHSTES (Hoher Impact • Geringer Aufwand):</strong> Einstiegspreis in den Content-Flow integrieren – Kosteninformation als sichtbares Element im natürlichen Seitenfluss.<br><small>💡 Preisangabe unterhalb der Feature-Sektion ergänzen. Aufwand: Gering.</small></li>
-      <li>🟡 <strong>ALS NÄCHSTES (Hoher Impact • Mittlerer Aufwand):</strong> Kundenstimmen mit messbaren Ergebnissen anreichern – bestehende Kunden nach konkreten Verbesserungen befragen.<br><small>💡 Ziel: Zeitersparnis in Stunden pro Monat oder reduzierte externe Kosten. Aufwand: Mittel.</small></li>
-      <li>🟢 <strong>SPÄTER (Mittlerer Impact • Mittlerer Aufwand):</strong> Wettbewerbsvergleich als dedizierte Sektion ergänzen – strukturierte Entscheidungshilfe für evaluierende Nutzer.<br><small>💡 Tabelle mit fünf Differenzierungsmerkmalen gegenüber etablierten Alternativen. Aufwand: Mittel.</small></li>
-      <li>🟢 <strong>SPÄTER (Mittlerer Impact • Mittlerer Aufwand):</strong> Non-Commodity-Gehalt für AI-Sichtbarkeit erhöhen – einzigartige, belegbare Inhalte aus bestehenden Kundendaten destillieren.<br><small>💡 Konkrete Nutzerdaten aufbereiten und als exklusive Insights kommunizieren. Aufwand: Mittel.</small></li>
-    </ul>`,
+    // ── ROADMAP (priority_matrix-JSON, identisch zu report.js v4) ────────────────
+    priority_matrix: {
+      sofort_umsetzen: [
+        {
+          category: 'Hero',
+          issue: 'Hauptüberschrift auf messbares Ergebnis umschreiben – konkretes Outcome-Versprechen statt Funktionsauflistung.',
+          reasoning: 'Quantifizierte Zeitersparnis oder Vereinfachung eines typischen Prozesses als Kernaussage.',
+          impact: 'SEHR_HOCH',
+          effort: 'GERING',
+        },
+        {
+          category: 'AI Sichtbarkeit',
+          issue: 'FAQ-Schema für alle Einträge ergänzen – ermöglicht direkte Zitation durch KI-Systeme und AI Overviews.',
+          reasoning: 'JSON-LD im Head-Bereich, alle Fragen und Antworten strukturiert auszeichnen.',
+          impact: 'SEHR_HOCH',
+          effort: 'GERING',
+        },
+        {
+          category: 'Performance',
+          issue: 'Consent-Management asynchron laden – eliminiert Render-Blocking auf Mobile und verbessert Mobile-Performance erheblich.',
+          reasoning: 'Async-Attribut im entsprechenden Script-Tag setzen.',
+          impact: 'SEHR_HOCH',
+          effort: 'GERING',
+        },
+      ],
+      als_naechstes: [
+        {
+          category: 'Struktur',
+          issue: 'Trust-Badge-Sektion direkt nach dem Hero: Compliance-, Datenschutz- und Sicherheitsnachweise als visuelle Elemente.',
+          reasoning: 'Drei Badges in einer Zeile, direkt unterhalb des Hero-CTAs.',
+          impact: 'HOCH',
+          effort: 'GERING',
+        },
+        {
+          category: 'Conversion',
+          issue: 'Einstiegspreis in den Content-Flow integrieren – Kosteninformation als sichtbares Element im natürlichen Seitenfluss.',
+          reasoning: 'Preisangabe unterhalb der Feature-Sektion ergänzen.',
+          impact: 'HOCH',
+          effort: 'GERING',
+        },
+        {
+          category: 'Content',
+          issue: 'Kundenstimmen mit messbaren Ergebnissen anreichern – bestehende Kunden nach konkreten Verbesserungen befragen.',
+          reasoning: 'Ziel: Zeitersparnis in Stunden pro Monat oder reduzierte externe Kosten.',
+          impact: 'HOCH',
+          effort: 'MITTEL',
+        },
+      ],
+      quick_wins: [],
+      spaeter: [
+        {
+          category: 'Differenzierung',
+          issue: 'Wettbewerbsvergleich als dedizierte Sektion ergänzen – strukturierte Entscheidungshilfe für evaluierende Nutzer.',
+          reasoning: 'Tabelle mit fünf Differenzierungsmerkmalen gegenüber etablierten Alternativen.',
+          impact: 'MITTEL',
+          effort: 'MITTEL',
+        },
+        {
+          category: 'AI Sichtbarkeit',
+          issue: 'Non-Commodity-Gehalt für AI-Sichtbarkeit erhöhen – einzigartige, belegbare Inhalte aus bestehenden Kundendaten destillieren.',
+          reasoning: 'Konkrete Nutzerdaten aufbereiten und als exklusive Insights kommunizieren.',
+          impact: 'MITTEL',
+          effort: 'MITTEL',
+        },
+      ],
+    },
   };
 
   // ── CSS ─────────────────────────────────────────────────────────────────────
@@ -286,6 +437,50 @@
       .cvz-card-empfehlungen .cvz-card-label{color:#718096}.cvz-card-empfehlungen .cvz-card-label-dot{background:#718096}
       .cvz-card-empfehlungen .cvz-card-body,.cvz-card-empfehlungen .cvz-card-body *{color:#e8edf5!important;font-size:14px!important;}
       .cvz-card-empfehlungen .cvz-card-body strong{color:#fff!important;}
+
+      /* === Prio-Karten (severity-Badges, identisch zu report.js v4) === */
+      .cvz-prio{display:flex;flex-direction:column;gap:14px;}
+      .cvz-pr-item{padding-left:14px;border-left:3px solid #718096;}
+      .cvz-pr-crit{border-left-color:#ef4444;}
+      .cvz-pr-high{border-left-color:#f59e0b;}
+      .cvz-pr-med{border-left-color:#10b981;}
+      .cvz-pr-badge{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+      .cvz-pr-crit .cvz-pr-badge{color:#ef4444;}
+      .cvz-pr-high .cvz-pr-badge{color:#f59e0b;}
+      .cvz-pr-med .cvz-pr-badge{color:#10b981;}
+      .cvz-pr-problem{font-size:14px;font-weight:600;color:#e8edf5;line-height:1.5;}
+      .cvz-pr-loesung{font-size:13px;color:#c4cdd6;line-height:1.6;margin-top:6px;}
+      .cvz-pr-aufwand{color:#718096;font-weight:600;}
+
+      /* === Roadmap aus priority_matrix-JSON (identisch zu report.js v4) === */
+      .cvz-roadmap{display:flex;flex-direction:column;gap:16px;}
+      .cvz-rm-group{
+        background:rgba(255,255,255,.03);
+        border:1px solid rgba(255,255,255,.07);
+        border-radius:12px;overflow:hidden;
+      }
+      .cvz-rm-head{
+        padding:12px 18px;font-size:11px;font-weight:700;
+        letter-spacing:.08em;text-transform:uppercase;
+        border-bottom:1px solid rgba(255,255,255,.06);
+      }
+      .cvz-rm-sofort    .cvz-rm-head{color:#ef4444;background:rgba(239,68,68,.06);}
+      .cvz-rm-naechstes .cvz-rm-head{color:#f59e0b;background:rgba(245,158,11,.06);}
+      .cvz-rm-quickwins .cvz-rm-head{color:#10b981;background:rgba(16,185,129,.06);}
+      .cvz-rm-spaeter   .cvz-rm-head{color:#718096;background:rgba(113,128,150,.06);}
+      .cvz-rm-item{padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.05);}
+      .cvz-rm-item:last-child{border-bottom:none;}
+      .cvz-rm-item-cat{
+        font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+        color:#4a5568;margin-bottom:4px;
+      }
+      .cvz-rm-item-title{font-size:14px;font-weight:600;color:#e8edf5;line-height:1.5;}
+      .cvz-rm-rea{font-size:13px;color:#c4cdd6;line-height:1.6;margin-top:6px;}
+      .cvz-rm-meta{
+      font-size:11px;font-weight:600;color:#718096;
+      margin-top:4px;letter-spacing:.02em;
+      }
+
       .cvz-exec-panel{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:16px;padding:24px 28px;display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px;}
       .cvz-ring{flex-shrink:0;text-align:center;animation:cvzRing .75s cubic-bezier(.34,1.56,.64,1) .15s both;}
       .cvz-ring-c{width:96px;height:96px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;}
@@ -401,10 +596,111 @@
     return 'rgba(239,68,68,0.08)';
   }
 
+  // === robust gegen Objekt/Array/fehlend (identisch zu report.js v4) ===
+  function toArray(v) {
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === 'object') return [v];
+    return [];
+  }
+
   function card(type, label, content) {
     if (!content) return '';
     var cls = {summary:'cvz-card-summary',staerken:'cvz-card-staerken',schwaechen:'cvz-card-schwaechen',empfehlungen:'cvz-card-empfehlungen'}[type]||'';
     return '<div class="cvz-card '+cls+' cvz-fi cvz-fi-3"><div class="cvz-card-label"><div class="cvz-card-label-dot"></div>'+label.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div><div class="cvz-card-body">'+sanitize(content)+'</div></div>';
+  }
+
+  // === Prio-Karte (severity-Badges) – identisch zu report.js v4 ===
+  var CVZ_SEV = {
+    critical: { label: 'CRITICAL', cls: 'crit' },
+    high:     { label: 'HIGH',     cls: 'high' },
+    medium:   { label: 'MEDIUM',   cls: 'med'  },
+  };
+  function cvzAufwand(s) {
+    var m = { gering:'Gering', mittel:'Mittel', hoch:'Hoch' };
+    return m[String(s).toLowerCase()] || sanitize(String(s||''));
+  }
+
+  // Akzeptiert ein Array von {severity, problem, loesung, aufwand}.
+  // (In der Demo sind die Daten bereits Arrays – der String/JSON-Parse-Pfad aus
+  //  report.js wird hier nicht gebraucht, aber zur Sicherheit mit abgedeckt.)
+  function buildPrioCard(field) {
+    var data = field;
+    if (typeof field === 'string') {
+      var t = field.trim();
+      if (t.charAt(0) === '[' || t.charAt(0) === '{') {
+        try { data = JSON.parse(t); } catch (e) { data = null; }
+      } else {
+        return t ? card('empfehlungen', 'Priorisierte Handlungsempfehlungen', field) : '';
+      }
+    }
+    var items = toArray(data);
+    if (items.length === 0) return '';
+    var inner = '';
+    items.forEach(function(it) {
+      var sevKey = String(it.severity || '').toLowerCase();
+      var sev = CVZ_SEV[sevKey] || { label: String(it.severity||'').toUpperCase(), cls: 'med' };
+      var problem = sanitize(String(it.problem || it.issue || ''));
+      var loesung = sanitize(String(it.loesung || ''));
+      var aufwand = it.aufwand ? cvzAufwand(it.aufwand) : '';
+      inner += '<div class="cvz-pr-item cvz-pr-'+sev.cls+'">'
+        + '<div class="cvz-pr-badge">'+sev.label+'</div>'
+        + '<div class="cvz-pr-problem">'+problem+'</div>'
+        + (loesung
+            ? '<div class="cvz-pr-loesung">💡 '+loesung
+              + (aufwand ? ' <span class="cvz-pr-aufwand">Aufwand: '+aufwand+'</span>' : '')
+              + '</div>'
+            : '')
+        + '</div>';
+    });
+    return '<div class="cvz-card cvz-card-empfehlungen cvz-fi cvz-fi-3">'
+      + '<div class="cvz-card-label"><div class="cvz-card-label-dot"></div>Priorisierte Handlungsempfehlungen</div>'
+      + '<div class="cvz-card-body"><div class="cvz-prio">'+inner+'</div></div></div>';
+  }
+
+  // === Roadmap aus priority_matrix-JSON – identisch zu report.js v4 ===
+  function buildRoadmap(d) {
+    var pm = d.priority_matrix;
+    var hasData = pm && typeof pm === 'object' &&
+      (toArray(pm.sofort_umsetzen).length || toArray(pm.als_naechstes).length ||
+       toArray(pm.quick_wins).length      || toArray(pm.spaeter).length);
+    if (!hasData) {
+      return '<div class="cvz-section cvz-fi cvz-fi-2"><div class="cvz-cat-header"><div class="cvz-cat-name">Roadmap</div></div><div class="cvz-cards">'+
+        card('empfehlungen','Priorisierte Handlungsempfehlungen', d.priority_matrix_html || '')+
+        '</div></div>';
+    }
+    var gruppen = [
+      { key:'sofort_umsetzen', label:'Sofort umsetzen', cls:'sofort'    },
+      { key:'als_naechstes',   label:'Als Nächstes',    cls:'naechstes' },
+      { key:'quick_wins',      label:'Quick Wins',      cls:'quickwins' },
+      { key:'spaeter',         label:'Später',          cls:'spaeter'   },
+    ];
+    var pretty = function(s){ return s.replace(/_/g,' ').toLowerCase().replace(/^\w/, function(c){ return c.toUpperCase(); }); };
+    var gruppenHtml = '';
+    gruppen.forEach(function(g) {
+      var items = toArray(pm[g.key]);
+      if (items.length === 0) return;
+      var itemsHtml = '';
+      items.forEach(function(it) {
+        var cat    = sanitize(String(it.category || 'Optimierung'));
+        var iss    = sanitize(String(it.issue || ''));
+        var rea    = sanitize(String(it.reasoning || ''));
+        var impact = sanitize(String(it.impact || ''));
+        var effort = sanitize(String(it.effort || ''));
+        var meta = (impact || effort)
+          ? '<div class="cvz-rm-meta">'+(impact ? 'Impact: ' + pretty(impact) : '')+(impact && effort ? ' · ' : '')+(effort ? 'Aufwand: ' + pretty(effort) : '')+'</div>'
+          : '';
+        itemsHtml += '<div class="cvz-rm-item">'
+          + '<div class="cvz-rm-item-cat">'+cat+'</div>'
+          + '<div class="cvz-rm-item-title">'+iss+'</div>'
+          + meta
+          + (rea ? '<div class="cvz-rm-rea">'+rea+'</div>' : '')
+          + '</div>';
+      });
+      gruppenHtml += '<div class="cvz-rm-group cvz-rm-'+g.cls+'">'
+        + '<div class="cvz-rm-head">'+g.label+'</div>'
+        + '<div class="cvz-rm-items">'+itemsHtml+'</div></div>';
+    });
+    return '<div class="cvz-section cvz-fi cvz-fi-2"><div class="cvz-cat-header"><div class="cvz-cat-name">Roadmap</div></div><div class="cvz-roadmap">'+gruppenHtml+'</div></div>';
   }
 
   function buildCatSection(name, score, cards) {
@@ -504,8 +800,9 @@
     // Hero Info
     inject('.section-hero-info',
       '<div class="cvz-section cvz-fi cvz-fi-1">'+
-      '<div style="background:rgba(79,209,197,.05);border:1px solid rgba(79,209,197,.15);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:13px;color:#718096;line-height:1.6;">'+
-      'Die folgende Analyse zeigt das vollständige Convertlyze-Ausgabeformat anhand eines fiktiven, anonymisierten DACH-SaaS-Anbieters im Buchhaltungs-Segment. Alle Markennamen, Zitate und konkreten Kennzahlen wurden generalisiert.'+
+      '<div style="background:rgba(79,209,197,.05);border:1px solid rgba(79,209,197,.15);border-radius:10px;padding:14px 18px;margin-bottom:12px;font-size:13px;color:#718096;line-height:1.65;">'+
+      '<p style="margin:0 0 8px;"><strong style="color:#c4cdd6;">Dies ist eine echte Convertlyze-Analyse</strong> – anonymisiert für diese Beispielseite. Alle Markennamen, Zitate und konkreten Kennzahlen wurden generalisiert, die Bewertungen und Empfehlungen stammen aus einem realen Analyselauf.</p>'+
+      '<p style="margin:0;">Convertlyze bewertet jede Seite im Kontext ihrer <strong style="color:#c4cdd6;">Branche und ihres Angebotstyps</strong>: Eine SaaS-Landingpage wird nach anderen Kriterien beurteilt als eine Consulting- oder E-Commerce-Seite – von der Erwartung an Proof Points über die CTA-Strategie bis zur Gewichtung einzelner Kategorien. Die folgende Analyse zeigt das vollständige Ausgabeformat am Beispiel eines DACH-SaaS-Anbieters im Buchhaltungs-Segment.</p>'+
       '</div>'+
       '<div class="cvz-card" style="padding:20px 24px;"><div class="cvz-info-grid">'+
       '<div class="cvz-info-row"><div class="cvz-info-label">Keyword</div><div class="cvz-info-value">'+d.keyword+'</div></div>'+
@@ -551,63 +848,55 @@
       execSec('schwaechen', d.exec_schwaechen)+
       '</div>');
 
-    // Deep Dive
+    // Deep Dive – Schwächen jetzt ausschließlich über buildPrioCard()
     inject('.section-deep-dive-hero', buildCatSection('Hero', d.hero_score,
       card('summary','Zusammenfassung','<p>'+d.hero_summary+'</p>')+
       card('staerken','Stärken',d.hero_staerken)+
-      card('schwaechen','Schwächen',d.hero_schwaechen)+
-      card('empfehlungen','Priorisierte Handlungsempfehlungen',d.hero_empfehlungen)));
+      buildPrioCard(d.hero_prioritized)));
 
     inject('.section-deep-dive-content', buildCatSection('Content', d.content_score,
       card('summary','Zusammenfassung','<p>'+d.content_summary+'</p>')+
       card('staerken','Stärken',d.content_staerken)+
-      card('schwaechen','Schwächen',d.content_schwaechen)+
-      card('empfehlungen','Priorisierte Handlungsempfehlungen',d.content_empfehlungen)));
+      buildPrioCard(d.content_prioritized)+
+      buildPrioCard(d.content_gaps)));
 
     inject('.section-deep-dive-zielgruppe', buildCatSection('Zielgruppe', d.zielgruppe_score,
       card('summary','Zusammenfassung','<p>'+d.zielgruppe_summary+'</p>')+
       card('staerken','Stärken',d.zielgruppe_staerken)+
-      card('schwaechen','Schwächen',d.zielgruppe_schwaechen)+
-      card('empfehlungen','Priorisierte Handlungsempfehlungen',d.zielgruppe_empfehlungen)));
+      buildPrioCard(d.zielgruppe_prioritized)));
 
     inject('.section-deep-dive-conversion', buildCatSection('Conversion', d.conversion_score,
       card('summary','Zusammenfassung','<p>'+d.conversion_summary+'</p>')+
       card('staerken','Stärken',d.conversion_staerken)+
-      card('schwaechen','Schwächen',d.conversion_schwaechen)+
-      card('empfehlungen','Priorisierte Handlungsempfehlungen',d.conversion_empfehlungen)));
+      buildPrioCard(d.conversion_prioritized)));
 
     inject('.section-deep-dive-struktur', buildCatSection('Struktur', d.struktur_score,
       card('summary','Zusammenfassung','<p>'+d.struktur_summary+'</p>')+
       card('staerken','Stärken',d.struktur_staerken)+
-      card('schwaechen','Schwächen',d.struktur_schwaechen)+
-      card('empfehlungen','Priorisierte Handlungsempfehlungen',d.struktur_empfehlungen)));
+      buildPrioCard(d.struktur_prioritized)));
 
     inject('.section-deep-dive-searchintent', buildCatSection('Search Intent', d.search_intent_score,
       card('summary','Bewertung','<p>'+d.search_intent_bewertung+'</p>')+
-      card('empfehlungen','Priorisierte Handlungsempfehlungen',d.search_intent_empfehlungen)));
+      buildPrioCard(d.search_intent_prioritized)));
 
     inject('.section-deep-dive-differenzierung', buildCatSection('Differenzierung', d.wettbewerb_score,
       card('summary','Zusammenfassung','<p>'+d.wettbewerb_summary+'</p>')+
       card('staerken','Stärken',d.wettbewerb_staerken)+
-      card('schwaechen','Schwächen',d.wettbewerb_schwaechen)+
-      card('empfehlungen','Priorisierte Handlungsempfehlungen',d.wettbewerb_empfehlungen)));
+      buildPrioCard(d.wettbewerb_prioritized)));
 
-    inject('.section-deep-dive-performance', buildCatSection('Performance', 2.8,
+    inject('.section-deep-dive-performance', buildCatSection('Performance', d.performance_score,
       card('summary','Zusammenfassung','<p>'+d.performance_summary+'</p>')+
       card('summary','Desktop','<p>'+d.performance_desktop+'</p>')+
       card('summary','Mobil','<p>'+d.performance_mobile+'</p>')+
-      card('empfehlungen','Priorisierte Handlungsempfehlungen',d.performance_empfehlungen)));
+      buildPrioCard(d.performance_opportunities)));
 
-    inject('.section-deep-dive-ai', buildCatSection('AI Sichtbarkeit', 5.8,
+    inject('.section-deep-dive-ai', buildCatSection('AI Sichtbarkeit', d.ai_readiness_score,
       card('summary','Zusammenfassung','<p>'+d.ai_bewertung+'</p>')+
       card('staerken','Stärken',d.ai_staerken)+
-      card('schwaechen','Schwächen',d.ai_schwaechen)+
-      card('empfehlungen','Priorisierte Handlungsempfehlungen',d.ai_empfehlungen)));
+      buildPrioCard(d.ai_optimierungspotenziale)));
 
-    inject('.section-roadmap',
-      '<div class="cvz-section cvz-fi cvz-fi-2"><div class="cvz-cat-header"><div class="cvz-cat-name">Roadmap</div></div><div class="cvz-cards">'+
-      card('empfehlungen','Priorisierte Handlungsempfehlungen',d.roadmap)+
-      '</div></div>');
+    // Roadmap aus priority_matrix-JSON
+    inject('.section-roadmap', buildRoadmap(d));
 
     // ── Beispiel-PDF URL hier eintragen nach Upload ────────────────────────
     // Einfach die URL ersetzen, dann pushen + Cache leeren.
@@ -666,7 +955,7 @@
       kiBtn.parentNode.insertBefore(aiNotice, kiBtn.nextSibling);
     }
 
-    console.log('✅ Beispielanalyse gerendert');
+    console.log('✅ Beispielanalyse gerendert (v2 – Prio-Karten + Roadmap-JSON)');
   }
 
   if (document.readyState === 'loading') {
