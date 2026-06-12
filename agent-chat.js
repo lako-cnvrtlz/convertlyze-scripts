@@ -5,7 +5,7 @@
   }
   window.convertlyzeAgentInit = true;
 
-  console.log('Convertlyze Agent V2.32 - Badge oberhalb (-40)');
+  console.log('Convertlyze Agent V2.33 - Badge Position via CSS');
 
   // ==================== MARKED.JS KONFIGURATION ====================
 
@@ -164,11 +164,6 @@
         const container = messagesDiv.parentElement;
         if (!container) return;
 
-        // === BADGE-ABSTAND (hier justieren falls noetig) ===
-        // Negativ = Badge schwebt oberhalb des Chat-Kastens.
-        // -40 = 40px oberhalb der Oberkante. Mehr Abstand: -50, -60 ...
-        const BADGE_TOP_OFFSET = -40;
-
         // Sicherstellen, dass der Container positioniert ist
         const pos = getComputedStyle(container).position;
         if (pos === 'static') {
@@ -178,8 +173,12 @@
         if (el.parentElement !== container) {
           container.appendChild(el);
         }
+        // Nur Struktur + horizontale Zentrierung im JS.
+        // Der vertikale Abstand (top) kommt aus dem CSS per Media-Query,
+        // damit Desktop und Mobil getrennt justierbar sind. Wir markieren
+        // das Element mit einer Klasse, an die das CSS andockt.
+        el.classList.add('cvz-badge-anchored');
         el.style.position  = 'absolute';
-        el.style.top       = BADGE_TOP_OFFSET + 'px';
         el.style.left      = '50%';
         el.style.right     = 'auto';
         el.style.transform = 'translateX(-50%)';
