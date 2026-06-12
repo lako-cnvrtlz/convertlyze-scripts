@@ -5,7 +5,7 @@
   }
   window.convertlyzeAgentInit = true;
 
-  console.log('Convertlyze Agent V2.27 - Staged Counter + Umlaute');
+  console.log('Convertlyze Agent V2.28 - Severity Hebel-Karten');
 
   // ==================== MARKED.JS KONFIGURATION ====================
 
@@ -380,6 +380,42 @@
 
     // ==================== EXPORT: COLLECT MESSAGES ====================
 
+    // Wandelt die Hebel-Karten-HTML (cvz-hebel) in saubere Markdown-Zeilen um,
+    // damit der Export lesbaren Text statt rohem HTML enthaelt.
+    // Wird per DOMParser robust geparst (kein Regex-Gefrickel am HTML).
+    function cardsToMarkdown(rawText) {
+      if (!rawText || rawText.indexOf('cvz-hebel-wrap') === -1) return rawText;
+      try {
+        const doc = new DOMParser().parseFromString(rawText, 'text/html');
+        const wraps = doc.querySelectorAll('.cvz-hebel-wrap');
+        wraps.forEach(wrap => {
+          let md = '\n### Deine größten Conversion-Hebel\n';
+          wrap.querySelectorAll('.cvz-hebel').forEach((card, idx) => {
+            const cat  = (card.querySelector('.cvz-hebel-cat') || {}).textContent || '';
+            const prob = (card.querySelector('.cvz-hebel-prob') || {}).textContent || '';
+            // cat enthaelt "Hero · kritisch" -> wir trennen sauber
+            const catClean = cat.replace(/\s*·\s*(kritisch|wichtig)\s*$/i, '').trim();
+            const sevMatch = cat.match(/·\s*(kritisch|wichtig)/i);
+            const sev = sevMatch ? sevMatch[1].toLowerCase() : '';
+            md += (idx + 1) + '. **' + catClean + '**'
+               +  (sev ? ' (' + sev + ')' : '') + ': '
+               +  prob.trim() + '\n';
+          });
+          // Den HTML-Block im Text durch das Markdown ersetzen
+          const placeholder = doc.createTextNode(md);
+          wrap.parentNode.replaceChild(placeholder, wrap);
+        });
+        // Restlichen Text (Markdown ausserhalb der Karten) wiederherstellen.
+        // body.textContent wuerde Markdown-Sonderzeichen behalten, da der Rest
+        // ohnehin Plain-Markdown-Text ist.
+        return doc.body.textContent.replace(/\n{3,}/g, '\n\n').trim();
+      } catch (e) {
+        console.warn('cardsToMarkdown fallback:', e);
+        // Fallback: HTML-Tags grob strippen
+        return rawText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      }
+    }
+
     function getSelectedContent() {
       const includeUser = document.getElementById('export-include-user') ? document.getElementById('export-include-user').checked : true;
       const messages    = messagesDiv.querySelectorAll('.message');
@@ -390,7 +426,9 @@
         const isUser = msg.classList.contains('user');
         if (isUser && !includeUser) return;
 
-        const rawText = msg.dataset.rawText || msg.textContent.replace(/^[\s\n]+|[\s\n]+$/g, '');
+        let rawText = msg.dataset.rawText || msg.textContent.replace(/^[\s\n]+|[\s\n]+$/g, '');
+        // Hebel-Karten in lesbares Markdown wandeln (nur Assistant-Nachrichten betroffen)
+        rawText = cardsToMarkdown(rawText);
         collected.push({ index, role: isUser ? 'user' : 'assistant', text: rawText });
       });
       collected.sort((a, b) => a.index - b.index);
