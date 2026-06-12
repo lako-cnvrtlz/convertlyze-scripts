@@ -5,7 +5,7 @@
   }
   window.convertlyzeAgentInit = true;
 
-  console.log('Convertlyze Agent V2.28 - Severity Hebel-Karten');
+  console.log('Convertlyze Agent V2.29 - Badge + UI Polish');
 
   // ==================== MARKED.JS KONFIGURATION ====================
 
@@ -155,33 +155,49 @@
       function applyCounterState(el) {
         if (!el) return;
 
-        let text = '';
-        let color = '';
-        let visible = false;
+        let label = '';
+        let textColor = '';
+        let bgColor = '';
+        let borderColor = '';
 
         if (rounded <= 0) {
-          text = 'Keine Nachrichten mehr';
-          color = '#f0a0a0';
-          visible = true;
+          label = 'Keine Nachrichten übrig';
+          textColor = '#f0a0a0'; bgColor = 'rgba(226,75,74,0.12)'; borderColor = 'rgba(226,75,74,0.35)';
         } else if (rounded <= 3) {
-          text = 'Noch ' + rounded + (rounded === 1 ? ' Nachricht' : ' Nachrichten');
-          color = '#f0a0a0';
-          visible = true;
+          label = rounded + (rounded === 1 ? ' Nachricht übrig' : ' Nachrichten übrig');
+          textColor = '#f0a0a0'; bgColor = 'rgba(226,75,74,0.12)'; borderColor = 'rgba(226,75,74,0.35)';
         } else if (rounded <= 8) {
-          text = 'Noch ' + rounded + ' Nachrichten';
-          color = '#e8b87a';
-          visible = true;
+          label = rounded + ' Nachrichten übrig';
+          textColor = '#e8b87a'; bgColor = 'rgba(239,159,39,0.12)'; borderColor = 'rgba(239,159,39,0.35)';
         } else {
-          text = '';
-          visible = false;
+          // Viel uebrig: sichtbar, aber ruhig (teal, kein Stress)
+          label = rounded + ' Nachrichten übrig';
+          textColor = '#7ee0d4'; bgColor = 'rgba(79,209,197,0.10)'; borderColor = 'rgba(79,209,197,0.28)';
         }
 
-        el.textContent      = text;
-        el.style.color      = color;
-        el.style.fontWeight = '600';
-        el.style.fontSize   = '13px';
-        el.style.visibility = visible ? 'visible' : 'hidden';
-        el.style.opacity    = visible ? '1' : '0';
+        // Badge-Optik (kleines Pill mit Punkt)
+        el.innerHTML = '<span class="cvz-badge-dot"></span>' + label;
+        el.style.cssText = [
+          'display:inline-flex',
+          'align-items:center',
+          'gap:6px',
+          'font-size:12px',
+          'font-weight:600',
+          'padding:4px 10px',
+          'border-radius:20px',
+          'color:' + textColor,
+          'background:' + bgColor,
+          'border:1px solid ' + borderColor,
+          'visibility:visible',
+          'opacity:1',
+          'white-space:nowrap'
+        ].join(';');
+
+        // Den Punkt im Badge einfaerben
+        const dot = el.querySelector('.cvz-badge-dot');
+        if (dot) {
+          dot.style.cssText = 'width:6px;height:6px;border-radius:50%;background:' + textColor + ';display:inline-block;flex-shrink:0;';
+        }
       }
 
       if (creditsEl) {
@@ -192,7 +208,6 @@
         if (creditsBar) {
           const fallbackEl = document.createElement('div');
           fallbackEl.id    = 'credits-display';
-          fallbackEl.style.cssText = 'text-align:center; padding:8px;';
           creditsBar.parentElement.insertBefore(fallbackEl, creditsBar);
           applyCounterState(fallbackEl);
         }
