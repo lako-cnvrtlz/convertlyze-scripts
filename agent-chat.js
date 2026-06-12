@@ -5,7 +5,7 @@
   }
   window.convertlyzeAgentInit = true;
 
-  console.log('Convertlyze Agent V2.33 - Badge Position via CSS');
+  console.log('Convertlyze Agent V2.34 - Badge Position via ID');
 
   // ==================== MARKED.JS KONFIGURATION ====================
 
@@ -174,10 +174,8 @@
           container.appendChild(el);
         }
         // Nur Struktur + horizontale Zentrierung im JS.
-        // Der vertikale Abstand (top) kommt aus dem CSS per Media-Query,
-        // damit Desktop und Mobil getrennt justierbar sind. Wir markieren
-        // das Element mit einer Klasse, an die das CSS andockt.
-        el.classList.add('cvz-badge-anchored');
+        // Der vertikale Abstand (top) kommt aus dem CSS per Media-Query
+        // ueber die ID #credits-display, damit du ihn dort direkt steuern kannst.
         el.style.position  = 'absolute';
         el.style.left      = '50%';
         el.style.right     = 'auto';
