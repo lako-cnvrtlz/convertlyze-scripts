@@ -5,7 +5,7 @@
   }
   window.convertlyzeAgentInit = true;
 
-  console.log('Convertlyze Agent V2.30 - Badge Anchor Fix');
+  console.log('Convertlyze Agent V2.31 - Badge zentriert');
 
   // ==================== MARKED.JS KONFIGURATION ====================
 
@@ -168,14 +168,22 @@
         if (pos === 'static') {
           container.style.position = 'relative';
         }
+        // Platz oben schaffen, damit das Badge nicht den Titel ueberlappt.
+        // Nur setzen, wenn noch kein ausreichendes padding-top da ist.
+        const curPadTop = parseInt(getComputedStyle(container).paddingTop, 10) || 0;
+        if (curPadTop < 44) {
+          container.style.paddingTop = '44px';
+        }
         // Badge in diesen Container verschieben, falls noch nicht drin
         if (el.parentElement !== container) {
           container.appendChild(el);
         }
-        el.style.position = 'absolute';
-        el.style.top      = '14px';
-        el.style.right    = '16px';
-        el.style.zIndex   = '30';
+        el.style.position  = 'absolute';
+        el.style.top       = '12px';
+        el.style.left      = '50%';
+        el.style.right     = 'auto';
+        el.style.transform = 'translateX(-50%)';
+        el.style.zIndex    = '30';
       }
 
       function applyCounterState(el) {
