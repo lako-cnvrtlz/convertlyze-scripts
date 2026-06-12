@@ -5,7 +5,7 @@
   }
   window.convertlyzeAgentInit = true;
 
-  console.log('Convertlyze Agent V2.31 - Badge zentriert');
+  console.log('Convertlyze Agent V2.32 - Badge oberhalb (-40)');
 
   // ==================== MARKED.JS KONFIGURATION ====================
 
@@ -163,23 +163,23 @@
         // Eltern-Container von #messages (der sichtbare Chat-Kasten)
         const container = messagesDiv.parentElement;
         if (!container) return;
+
+        // === BADGE-ABSTAND (hier justieren falls noetig) ===
+        // Negativ = Badge schwebt oberhalb des Chat-Kastens.
+        // -40 = 40px oberhalb der Oberkante. Mehr Abstand: -50, -60 ...
+        const BADGE_TOP_OFFSET = -40;
+
         // Sicherstellen, dass der Container positioniert ist
         const pos = getComputedStyle(container).position;
         if (pos === 'static') {
           container.style.position = 'relative';
-        }
-        // Platz oben schaffen, damit das Badge nicht den Titel ueberlappt.
-        // Nur setzen, wenn noch kein ausreichendes padding-top da ist.
-        const curPadTop = parseInt(getComputedStyle(container).paddingTop, 10) || 0;
-        if (curPadTop < 44) {
-          container.style.paddingTop = '44px';
         }
         // Badge in diesen Container verschieben, falls noch nicht drin
         if (el.parentElement !== container) {
           container.appendChild(el);
         }
         el.style.position  = 'absolute';
-        el.style.top       = '12px';
+        el.style.top       = BADGE_TOP_OFFSET + 'px';
         el.style.left      = '50%';
         el.style.right     = 'auto';
         el.style.transform = 'translateX(-50%)';
