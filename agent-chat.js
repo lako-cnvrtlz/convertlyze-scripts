@@ -5,7 +5,7 @@
   }
   window.convertlyzeAgentInit = true;
 
-  console.log('Convertlyze Agent V2.29 - Badge + UI Polish');
+  console.log('Convertlyze Agent V2.30 - Badge Anchor Fix');
 
   // ==================== MARKED.JS KONFIGURATION ====================
 
@@ -152,6 +152,32 @@
         creditsEl = window.parent.document.getElementById('credits-display');
       }
 
+      // Badge zuverlaessig oben rechts im Chat-Bereich verankern.
+      // Unabhaengig vom Webflow-Container-Namen: wir nehmen den Eltern-Container
+      // von #messages und stellen sicher, dass er position:relative hat,
+      // dann haengen wir das Badge dort oben rechts ein.
+      function anchorBadge(el) {
+        if (!el) return;
+        const messagesDiv = document.getElementById('messages');
+        if (!messagesDiv) return;
+        // Eltern-Container von #messages (der sichtbare Chat-Kasten)
+        const container = messagesDiv.parentElement;
+        if (!container) return;
+        // Sicherstellen, dass der Container positioniert ist
+        const pos = getComputedStyle(container).position;
+        if (pos === 'static') {
+          container.style.position = 'relative';
+        }
+        // Badge in diesen Container verschieben, falls noch nicht drin
+        if (el.parentElement !== container) {
+          container.appendChild(el);
+        }
+        el.style.position = 'absolute';
+        el.style.top      = '14px';
+        el.style.right    = '16px';
+        el.style.zIndex   = '30';
+      }
+
       function applyCounterState(el) {
         if (!el) return;
 
@@ -202,6 +228,7 @@
 
       if (creditsEl) {
         applyCounterState(creditsEl);
+        anchorBadge(creditsEl);
       } else {
         console.warn('credits-display not found - creating fallback');
         const creditsBar = document.getElementById('credits-info-bar');
@@ -210,6 +237,7 @@
           fallbackEl.id    = 'credits-display';
           creditsBar.parentElement.insertBefore(fallbackEl, creditsBar);
           applyCounterState(fallbackEl);
+          anchorBadge(fallbackEl);
         }
       }
 
