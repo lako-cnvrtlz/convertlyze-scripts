@@ -122,6 +122,19 @@
       @keyframes cvzBar{from{width:0}to{width:var(--bw)}}
       @keyframes cvzRing{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:scale(1)}}
 
+      /* ── FIX: Sticky Anker-Nav ──
+         Webflow setzt auf body.body-home ein Overflow:Hidden (beide Achsen,
+         Webflow trennt X/Y nicht im Style-Panel). Das killt position:sticky
+         bei ALLEN Kind-Elementen der Seite, u.a. bei .cvz-anchor-nav weiter
+         unten. Wir geben hier gezielt nur overflow-y wieder frei.
+         overflow-x bleibt bewusst unangetastet (verhindert vermutlich
+         horizontales Scrollen, das soll erhalten bleiben).
+         Betrifft NUR diese Report-Seite, da report.js nur hier laeuft -
+         andere Seiten mit body-home-Klasse sind nicht betroffen. */
+      body.body-home{
+        overflow-y:visible!important;
+      }
+
       /* Anker-Navigation */
       .cvz-anchor-nav{
         background:#0d1117;
