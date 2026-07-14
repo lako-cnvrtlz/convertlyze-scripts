@@ -141,7 +141,6 @@
         '<option value="Newsletter-Anmeldung">Newsletter-Anmeldung</option>',
       '</optgroup>',
       '<optgroup label="KONTAKT &amp; INTERAKTION">',
-        '<option value="Beratungsanfrage">Beratungsanfrage</option>',
         '<option value="Beratungsanfrage (Pre Sales)">Beratungsanfrage (Pre Sales)</option>',
         '<option value="Live-Chat gestartet (Pre Sales)">Live-Chat gestartet (Pre Sales)</option>',
         '<option value="Support-Anfrage (Bestandskunden)">Support-Anfrage (Bestandskunden)</option>',
