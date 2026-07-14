@@ -122,7 +122,7 @@
         '<option value="Demo-Anfrage">Demo-Anfrage</option>',
         '<option value="Angebotsanfrage / Pricing Request">Angebotsanfrage / Pricing Request</option>',
         '<option value="Audit / Assessment buchen">Audit / Assessment buchen</option>',
-        '<option value="Kostenloses Audit buchen">Kostenloses Audit buchen</option>',
+        '<option value="Kostenloses Analyse / Ersteinschätzung beauftragen">Kostenloses Analyse / Ersteinschätzung beauftragen</option>',
         '<option value="Software-Lizenz / SaaS-Abo (Kauf)">Software-Lizenz / SaaS-Abo (Kauf)</option>',
         '<option value="Produktkauf (physisch oder digital)">Produktkauf (physisch oder digital)</option>',
         '<option value="Upgrade / Planwechsel">Upgrade / Planwechsel</option>',
