@@ -877,7 +877,7 @@ function buildPrioCard(field) {
     (function injectAnchorNav() {
       // Webflow-Nav-Höhe messen und als top setzen
       function setNavTop(anchorNav) {
-        const webflowNav = document.querySelector('.navbar-2-member');
+        const webflowNav = document.querySelector('.w-nav');
         if (webflowNav) {
           anchorNav.style.top = webflowNav.offsetHeight + 'px';
         } else {
@@ -927,7 +927,7 @@ function buildPrioCard(field) {
       window.addEventListener('resize', function() { setNavTop(nav); });
 
       // ResizeObserver auf Webflow-Nav für dynamische Änderungen (z.B. mobile Menu öffnet)
-      const webflowNav = document.querySelector('.navbar-2-member');
+      const webflowNav = document.querySelector('.w-nav');
       if (webflowNav && window.ResizeObserver) {
         new ResizeObserver(function() { setNavTop(nav); }).observe(webflowNav);
       }
