@@ -757,7 +757,7 @@
 
     (function() {
       function setNavTop(anchorNav) {
-        var webflowNav = document.querySelector('.navbar-2-member');
+        var webflowNav = document.querySelector('.w-nav');
         anchorNav.style.top = webflowNav ? webflowNav.offsetHeight + 'px' : '0px';
       }
 
@@ -796,7 +796,7 @@
 
       setNavTop(nav);
       window.addEventListener('resize', function() { setNavTop(nav); });
-      var wfNav = document.querySelector('.navbar-2-member');
+      var wfNav = document.querySelector('.w-nav');
       if (wfNav && window.ResizeObserver) {
         new ResizeObserver(function() { setNavTop(nav); }).observe(wfNav);
       }
