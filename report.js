@@ -122,26 +122,31 @@
       @keyframes cvzBar{from{width:0}to{width:var(--bw)}}
       @keyframes cvzRing{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:scale(1)}}
 
-      /* ── FIX: Sticky Anker-Nav ──
-         Webflow setzt auf body.body-home ein Overflow:Hidden (beide Achsen,
-         Webflow trennt X/Y nicht im Style-Panel). Das killt position:sticky
-         bei ALLEN Kind-Elementen der Seite, u.a. bei .cvz-anchor-nav weiter
-         unten. Wir geben hier gezielt nur overflow-y wieder frei.
-         overflow-x bleibt bewusst unangetastet (verhindert vermutlich
-         horizontales Scrollen, das soll erhalten bleiben).
-         Betrifft NUR diese Report-Seite, da report.js nur hier laeuft -
-         andere Seiten mit body-home-Klasse sind nicht betroffen. */
+      /* Anker-Navigation
+         Bewusst KEIN position:sticky mehr. Sticky bricht auf Mobile, sobald
+         GSAP ScrollTrigger.normalizeScroll() aktiv ist (transform-basiertes
+         Scrollen statt nativem Browser-Scroll) oder irgendein Vorfahre
+         overflow/transform gesetzt hat. Stattdessen: normaler Fluss per
+         Default, .cvz-anchor-nav--fixed wird per IntersectionObserver auf
+         einem Sentinel-Element getoggelt (siehe injectAnchorNav weiter unten).
+         Der body.body-home-Fix bleibt als zusätzliches Sicherheitsnetz stehen,
+         schadet nicht und hilft evtl. anderen Elementen auf der Seite. */
       body.body-home{
         overflow-y:visible!important;
       }
 
-      /* Anker-Navigation */
       .cvz-anchor-nav{
         background:#0d1117;
         border-top:1px solid rgba(255,255,255,.06);
         border-bottom:1px solid rgba(255,255,255,.06);
-        position:sticky;top:0;z-index:100;
+        position:relative;z-index:100;
         width:100%;overflow:hidden;
+      }
+      .cvz-anchor-nav.cvz-anchor-nav--fixed{
+        position:fixed;left:0;right:0;
+      }
+      .cvz-anchor-nav-sentinel{
+        width:100%;height:1px;pointer-events:none;visibility:hidden;
       }
       /* top wird per JS gesetzt sobald Nav-Höhe bekannt ist */
       .cvz-anchor-nav-inner{
@@ -875,14 +880,12 @@ function buildPrioCard(field) {
 
     // Anker-Navigation einfügen
     (function injectAnchorNav() {
-      // Webflow-Nav-Höhe messen und als top setzen
-      function setNavTop(anchorNav) {
+      // Webflow-Nav-Höhe messen (Selektor .w-nav statt .navbar-2-member:
+      // .w-nav ist Webflows eigene, immer vorhandene Wrapper-Klasse,
+      // unabhängig davon ob Gast- oder Member-Navbar aktiv ist)
+      function getNavHeight() {
         const webflowNav = document.querySelector('.w-nav');
-        if (webflowNav) {
-          anchorNav.style.top = webflowNav.offsetHeight + 'px';
-        } else {
-          anchorNav.style.top = '0px';
-        }
+        return webflowNav ? webflowNav.offsetHeight : 0;
       }
 
       const nav = document.createElement('nav');
@@ -910,26 +913,82 @@ function buildPrioCard(field) {
           const target = document.getElementById(id);
           if (!target) return;
           e.preventDefault();
-          const offset = nav.offsetHeight + 16;
+          const offset = nav.offsetHeight + getNavHeight() + 16;
           const top = target.getBoundingClientRect().top + window.scrollY - offset;
           window.scrollTo({top, behavior:'smooth'});
         });
       });
+
+      // Sentinel: 1px-Element direkt VOR der Nav. Sobald es aus dem Viewport
+      // (nach oben) verschwindet, hat die Nav ihre natürliche Position
+      // verlassen und wird auf "fixed" umgeschaltet.
+      const sentinel = document.createElement('div');
+      sentinel.className = 'cvz-anchor-nav-sentinel';
+
+      // Spacer: hält die Höhe der Nav im Layout frei, sobald sie auf
+      // "fixed" umschaltet (fixed nimmt das Element aus dem normalen Fluss).
+      const spacer = document.createElement('div');
+      spacer.style.display = 'none';
+
       // Vor dem ersten Section-Wrapper einfügen
       const firstSection = document.querySelector('.section-hero-info') ||
                            document.querySelector('.section-executive-summary');
-      if (firstSection) firstSection.parentNode.insertBefore(nav, firstSection);
+      if (firstSection) {
+        firstSection.parentNode.insertBefore(sentinel, firstSection);
+        firstSection.parentNode.insertBefore(nav, firstSection);
+        firstSection.parentNode.insertBefore(spacer, firstSection);
+      }
 
-      // Initiale Höhe setzen
-      setNavTop(nav);
+      function applyFixed(isFixed) {
+        const navH = getNavHeight();
+        if (isFixed) {
+          spacer.style.height = nav.offsetHeight + 'px';
+          spacer.style.display = 'block';
+          nav.style.top = navH + 'px';
+          nav.classList.add('cvz-anchor-nav--fixed');
+          // WICHTIG: Nav an body hängen, NICHT an ihrer ursprünglichen Stelle
+          // im DOM lassen. Falls irgendein Vorfahre (z.B. ein von GSAP
+          // erzeugter Scroll-Wrapper) einen transform gesetzt hat, würde
+          // position:fixed sich sonst relativ zu DIESEM Vorfahren verhalten
+          // statt relativ zum Viewport, transform erzeugt einen eigenen
+          // Containing Block, auch für fixed-Elemente, nicht nur für sticky.
+          if (nav.parentNode !== document.body) {
+            document.body.insertBefore(nav, document.body.firstChild);
+          }
+        } else {
+          nav.classList.remove('cvz-anchor-nav--fixed');
+          nav.style.top = '';
+          spacer.style.display = 'none';
+          // Zurück an die ursprüngliche Stelle im DOM (direkt vor dem Spacer).
+          if (nav.parentNode !== spacer.parentNode || nav.nextSibling !== spacer) {
+            spacer.parentNode.insertBefore(nav, spacer);
+          }
+        }
+      }
 
-      // Bei Resize neu messen
-      window.addEventListener('resize', function() { setNavTop(nav); });
+      // IntersectionObserver statt scroll-Listener: läuft unabhängig davon,
+      // ob GSAP/ScrollTrigger das native Scroll-Event überhaupt noch feuert.
+      const stickyObserver = new IntersectionObserver(
+        entries => { entries.forEach(entry => applyFixed(!entry.isIntersecting)); },
+        { rootMargin: `-${getNavHeight()}px 0px 0px 0px`, threshold: 0 }
+      );
+      stickyObserver.observe(sentinel);
 
-      // ResizeObserver auf Webflow-Nav für dynamische Änderungen (z.B. mobile Menu öffnet)
+      // Bei Resize (z.B. mobiles Menü öffnet/schließt, Rotation) den
+      // Observer mit aktualisiertem Offset neu aufsetzen und, falls die
+      // Nav gerade fixed ist, deren top-Wert nachziehen.
+      function refreshOnResize() {
+        if (nav.classList.contains('cvz-anchor-nav--fixed')) {
+          nav.style.top = getNavHeight() + 'px';
+        }
+        stickyObserver.disconnect();
+        stickyObserver.observe(sentinel);
+      }
+      window.addEventListener('resize', refreshOnResize);
+
       const webflowNav = document.querySelector('.w-nav');
       if (webflowNav && window.ResizeObserver) {
-        new ResizeObserver(function() { setNavTop(nav); }).observe(webflowNav);
+        new ResizeObserver(refreshOnResize).observe(webflowNav);
       }
 
       // Active-State beim Scrollen
