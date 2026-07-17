@@ -1,17 +1,18 @@
 /**
- * Convertlyze – Statische Beispielanalyse (echte Analyse, anonymisiert) v2
- * Realer Analyselauf, DACH-SaaS-Anbieter im Buchhaltungs-Segment (anonymisiert)
+ * Convertlyze – Statische Beispielanalyse (echte Analyse, anonymisiert) v3
+ * Realer Analyselauf, DACH-Enterprise-Anbieter im KI-Beratungs-Segment (anonymisiert)
  *
- * ÄNDERUNGEN ggü. v1 (Angleichung an report.js v4):
- *   - Separate _schwaechen (<ul>) + _empfehlungen (HTML mit Icons) Paare ENTFERNT.
- *     Stattdessen pro Kategorie EIN *_prioritized-Array (JSON, FMT-PRIO-BADGES):
- *     [{severity, problem, loesung, aufwand}]  ->  gerendert via buildPrioCard().
- *   - severity aus altem Emoji abgeleitet: 🔴->critical, 🟡->high, 🟢->medium.
- *   - Roadmap als priority_matrix-JSON (sofort_umsetzen/als_naechstes/quick_wins/
- *     spaeter) -> gerendert via buildRoadmap() (identisch zu report.js v4).
- *   - buildPrioCard() + buildRoadmap() + CVZ_SEV + cvzAufwand + toArray
- *     1:1 aus report.js v4 übernommen, damit Demo == echter Report.
- *   - CSS um .cvz-prio / .cvz-pr-* und .cvz-roadmap / .cvz-rm-* ergänzt.
+ * ÄNDERUNGEN ggü. v2:
+ *   - Neue Grundlage: reale Analyse eines KI-Beratungsangebots für den Mittelstand
+ *     (statt Buchhaltungssoftware). Struktur und Rendering-Code unverändert.
+ *   - Firmenname, Ansprechpartner, Cloud-Partner, Event-Namen und Use-Case-Produktnamen
+ *     entfernt bzw. generalisiert. Keine Domain- oder Markennennung mehr enthalten.
+ *   - Hero zeigt 3 statt 4 CTA-Kacheln (Event-Kachel entfällt), CTA-Labels umbenannt:
+ *     "KI-Potenzialanalyse anfragen" / "Unser Vorgehen" / "Anwendungsfälle entdecken".
+ *   - Alle Text-Bausteine (Stärken, Schwächen, Roadmap) an die 3-CTA-Variante angepasst,
+ *     d.h. "vier Kacheln" wurde durchgehend zu "drei Kacheln".
+ *   - Struktur der DATA-Objekte, Rendering-Funktionen (buildPrioCard, buildRoadmap,
+ *     Anker-Navigation, CSS) 1:1 aus v2 übernommen, damit Demo == echter Report.
  *
  * Einbindung: <script src="...beispielanalyse.js"></script>
  */
@@ -20,273 +21,291 @@
   'use strict';
 
   var DATA = {
-    keyword:         'Buchhaltungssoftware für Gründer',
-    url:             'demo-saas.example',
-    target_audience: 'Gründer und Selbstständige ohne Buchhaltungsvorkenntnisse',
-    conversion_goal: 'Kostenlose Testversion starten',
-    industry:        'FinTech / Buchhaltungssoftware für KMU und Selbstständige',
-    business_type:   'SaaS',
-    search_intent:   'Commercial / Transactional',
-    created_at:      '13.05.2026, 18:57',
+    keyword:         'AI as a Service',
+    url:             'demo-consulting.example/ki-as-a-service',
+    target_audience: 'CEOs im Mittelstand',
+    conversion_goal: 'Beratungsanfrage (Pre-Sales)',
+    industry:        'IT-Dienstleistung / KI-Beratung und Managed AI',
+    business_type:   'Enterprise / Consulting',
+    search_intent:   'Informational mit Commercial-Anteil',
+    created_at:      '05.07.2026, 09:14',
 
-    overall_score:       7.5,
-    hero_score:          7.8,
-    content_score:       7.2,
-    zielgruppe_score:    8.1,
-    conversion_score:    7.5,
-    struktur_score:      7.0,
-    search_intent_score: 7.3,
-    wettbewerb_score:    6.8,
-    performance_score:   2.8,
-    ai_readiness_score:  5.8,
+    overall_score:       5.1,
+    hero_score:          4.5,
+    content_score:       5.5,
+    zielgruppe_score:    5.0,
+    conversion_score:    4.0,
+    struktur_score:      5.5,
+    search_intent_score: 5.5,
+    wettbewerb_score:    5.5,
+    performance_score:   4.0,
+    ai_readiness_score:  5.6,
 
-    industry_fit_summary: 'Die Landingpage erfüllt branchentypische Standards für Buchhaltungssoftware im DACH-Markt weitgehend: Steuerkonformität, Finanzamts-Schnittstelle und gesetzlich geforderte Rechnungsformate werden kommuniziert. Branchenübliche Sicherheitszertifikate und Datenschutznachweise fehlen jedoch im sichtbaren Seitenbereich – für ein Produkt, das sensible Finanzdaten verarbeitet, ein relevanter Vertrauensnachteil.',
+    industry_fit_summary: 'Die Landingpage erfüllt typische Standards für KI-Beratungs- und Managed-AI-Angebote im Enterprise-Segment weitgehend: Ein strukturierter Beratungsprozess, konkrete Use Cases mit Branchenbezug und ein Change-Management-Ansatz entsprechen den Branchenkonventionen. Compliance-Signale wie AI-Act- und NIS2-Referenzen sind vorhanden, explizit ausgewiesene Zertifizierungen wie ISO 27001 oder BSI-Grundschutz fehlen jedoch, obwohl sie im IT-Services-Segment als Standard gelten. Die Partnerschaft mit einem europäischen Cloud-Anbieter ist ein relevantes Differenzierungsmerkmal, bleibt ohne Zertifizierungsnachweis aber unterhalb des Branchenstandards.',
 
-    dach_fit_summary: 'Die Zielgruppenansprache ist konsistent und für den DACH-Markt passend. Compliance-relevante Themen wie gesetzliche Buchführungspflichten und die aktuelle E-Rechnungspflicht werden prominent aufgegriffen. Schwäche: Datenschutz- und Sicherheitsnachweise sind nicht als eigenständige Trust-Sektion sichtbar – ein Standard, den DACH-Käufer bei Finanzsoftware erwarten.',
+    dach_fit_summary: 'Die Landingpage adressiert DACH-spezifische Kernanliegen gezielt: Datensouveränität durch eigene deutsche Rechenzentren, eine explizite Compliance-Verankerung (EU AI-Act, NIS2, DSGVO) und eine von Beginn an mitgedachte Compliance-Architektur sprechen die Risikosensibilität mittelständischer Entscheider direkt an. Die formelle Sie-Ansprache und ein namentlich genannter Ansprechpartner entsprechen den Erwartungen der Zielgruppe. Branchenspezifische Zertifizierungsnachweise fehlen jedoch als sichtbare Trust-Signale auf der Seite.',
 
     exec_staerken: `<ul>
-      <li><strong>Zielgruppe wird in der Hauptüberschrift direkt adressiert:</strong> Die H1 benennt die Kernzielgruppe explizit. Situationsspezifische Formulierungen erzeugen sofortige Wiedererkennbarkeit bei der angestrebten Nutzergruppe.</li>
-      <li><strong>Dreifache Risikoumkehr direkt unter dem primären CTA:</strong> Testlaufzeit, fehlende Zahlungspflicht und dauerhafter Gratis-Tarif werden in einem Satz am Entscheidungspunkt kommuniziert – alle zentralen Einwände sind adressiert.</li>
-      <li><strong>FAQ deckt kaufentscheidende Fragen vollständig ab:</strong> Preisstruktur, Gesetzeskonformität und Datenmigration werden beantwortet. Interessenten können die Kaufentscheidung treffen, ohne die Seite zu verlassen.</li>
-      <li><strong>Aktuelle Gesetzgebung als Positionierungssignal:</strong> Die laufende Pflicht zur elektronischen Rechnungsstellung wird prominent aufgegriffen und vermittelt regulatorische Kompetenz.</li>
+      <li><strong>Datensouveränität als echter Kauftreiber adressiert:</strong> Eigene zertifizierte Rechenzentren in Deutschland, volle Datenhoheit und die explizite Verankerung von EU AI-Act, NIS2 und DSGVO treffen den zentralen Entscheidungsnerv mittelständischer CEOs.</li>
+      <li><strong>Strukturierter Beratungsprozess macht den Leistungsumfang greifbar:</strong> Jeder Schritt schließt mit einem konkreten Ergebnis-Statement ab. Das schafft Klarheit darüber, was Kunden in welcher Phase erhalten.</li>
+      <li><strong>Sichtbarer Ansprechpartner senkt die Kontakthemmschwelle:</strong> Ein namentlich genannter Senior Account Manager mit Foto und Funktion macht die Anfrage persönlicher und weniger anonym.</li>
+      <li><strong>FAQ trifft die kaufentscheidenden Einwände direkt:</strong> Fragen zu Datenschutz, Kosten und regulatorischen Anforderungen werden an der richtigen Stelle der Seite beantwortet.</li>
     </ul>`,
 
     exec_schwaechen: `<ul>
-      <li><strong>Sicherheits- und Datenschutznachweise fehlen als visuelle Elemente:</strong> Gesetzeskonformität und Datensicherheit werden nur im Fließtext erwähnt, nicht als eigenständige Badge-Sektion. Für ein Produkt, das Finanzdaten verarbeitet, ist das ein erheblicher Vertrauensnachteil.</li>
-      <li><strong>Preisangaben nur in der FAQ auffindbar:</strong> Transaktionale Nutzer müssen aktiv nach den Kosten suchen, statt sie im natürlichen Seitenfluss zu finden.</li>
-      <li><strong>Hauptüberschrift kommuniziert keine messbaren Ergebnisse:</strong> Das Subheading listet Funktionen auf, ohne ein konkretes Outcome-Versprechen wie quantifizierte Zeitersparnis oder Kostenreduktion zu nennen.</li>
+      <li><strong>Kein klarer Handlungsaufruf im ersten sichtbaren Bereich:</strong> Drei gleichgroß gestaltete Kacheln ("KI-Potenzialanalyse anfragen", "Unser Vorgehen", "Anwendungsfälle entdecken") konkurrieren gleichrangig miteinander, ohne dass eine davon als offensichtlicher nächster Schritt hervorsticht. Gleichzeitig fehlen im sofort sichtbaren Bereich jegliche Vertrauenssignale.</li>
+      <li><strong>Kein wirtschaftliches Argument für die Investitionsentscheidung:</strong> Die Seite beschreibt überzeugend, wie vorgegangen wird, beantwortet aber nicht die entscheidende Frage eines CEOs: Was zahlt sich das am Ende aus? Ohne ein Beispiel für Einsparung, Amortisationszeit oder Größenordnung kann ein CEO das Vorhaben intern nicht vertreten.</li>
+      <li><strong>Kontaktformular zu aufwändig für einen ersten unverbindlichen Schritt:</strong> Das Formular verlangt neben Name, E-Mail und Unternehmen auch eine ausführliche Nachricht als Pflichtfeld. Der Hinweis, dass der Schritt unverbindlich und kostenlos ist, steht im Fließtext, aber nicht direkt neben dem Absende-Button.</li>
     </ul>`,
 
     // ── HERO ──────────────────────────────────────────────────────────────────
-    hero_summary: 'Der Hero adressiert die Zielgruppe klar und greift typische Probleme der Nutzergruppe mit treffenden Formulierungen auf. Der primäre CTA passt zum Conversion-Ziel. Ein Produktscreenshot macht die Lösung greifbar. Größter Hebel: Weder Hauptüberschrift noch Subheading kommunizieren ein messbares Ergebnis.',
+    hero_summary: 'Der Hero adressiert die Zielgruppe Mittelstand explizit und schafft damit grundsätzliche Relevanz. Das technologische Visual passt zum Thema. Jedoch bleibt die primäre Headline auf einer Richtungsangabe ohne konkretes, messbares Ergebnis. Drei gleichrangig gestaltete CTA-Kacheln ohne erkennbare Hierarchie verhindern eine klare Führung zur Conversion. Vertrauenssignale fehlen im sofort sichtbaren Bereich vollständig.',
 
     hero_staerken: `<ul>
-      <li><strong>Hauptüberschrift adressiert Kernzielgruppe direkt:</strong> Nutzer verstehen sofort, für wen das Produkt gedacht ist – keine Interpretationsarbeit nötig</li>
-      <li><strong>CTA passt zum Conversion-Ziel:</strong> Kostenloser Einstieg mit klarer Risikoumkehr – hohe Entscheidungsbereitschaft durch Signal der Verbindlichkeitsfreiheit</li>
-      <li><strong>Produktvisualisierung im Hero:</strong> Ein Dashboard-Screenshot macht die Lösung greifbar statt eines generischen Stock-Fotos</li>
-      <li><strong>Bewertungsplattform-Signal direkt unterhalb des Heroes:</strong> Eine hohe Bewertung mit großer Rezensionsanzahl wird vor dem ersten Scroll sichtbar positioniert</li>
+      <li><strong>Zielgruppe Mittelstand explizit im Hero genannt:</strong> Die primäre Headline adressiert die Zielgruppe direkt, CEOs mittelständischer Unternehmen erkennen sofortige Relevanz.</li>
+      <li><strong>Technologisch hochwertiges Hero-Visual:</strong> Ein dunkler Gradient mit digitalem Netzwerk-Muster erzeugt eine professionelle, technologische Atmosphäre, die zum Thema passt.</li>
+      <li><strong>Hero-Text kommuniziert ein Differenzierungsmerkmal:</strong> Die Positionierung gegen reine Beratungsrhetorik spricht ergebnisorientierte Entscheider an.</li>
     </ul>`,
 
     hero_prioritized: [
       {
         severity: 'critical',
-        problem: 'Kein messbares Ergebnis im Hero kommuniziert: Das Subheading listet Funktionen auf, ohne quantifizierte Zeitersparnis oder Kostenvorteil zu nennen.',
-        loesung: 'Messbares Ergebnis in die Hauptüberschrift integrieren, z.B. Zeitersparnis pro Woche oder Vereinfachung des Steuerberater-Prozesses.',
+        problem: 'Primäre Headline bleibt auf einer Richtungsangabe ohne quantifiziertes Ergebnis. Ein CEO im Mittelstand kann nicht einschätzen, welche Kosteneinsparung oder welcher Wettbewerbsvorteil in welchem Zeitrahmen entsteht.',
+        loesung: 'Headline oder Hero-Text um ein konkretes Ergebnis ergänzen, zum Beispiel die typische Zeit bis zum ersten produktiven Ergebnis.',
+        aufwand: 'gering',
+      },
+      {
+        severity: 'critical',
+        problem: 'Drei CTA-Kacheln im Hero ("KI-Potenzialanalyse anfragen", "Unser Vorgehen", "Anwendungsfälle entdecken") ohne erkennbare visuelle Hierarchie. Besucher müssen selbst entscheiden, welche Option relevant ist, das senkt die Wahrscheinlichkeit einer Conversion erheblich.',
+        loesung: 'Den primären CTA "KI-Potenzialanalyse anfragen" als farbigen Solid-Button hervorheben, deutlich größer als die übrigen. Die restlichen Kacheln als kleinere Navigationslinks darstellen.',
         aufwand: 'gering',
       },
       {
         severity: 'high',
-        problem: 'Sicherheitszertifikate fehlen oberhalb des CTA: Keine Datenschutz- oder Compliance-Badges vor der Kaufentscheidung sichtbar.',
-        loesung: 'Gesetzeskonformitäts-Badge, Datenschutz-Nachweis und Sicherheitszertifikat als eigenständige Zeile direkt unter dem CTA platzieren.',
-        aufwand: 'gering',
-      },
-      {
-        severity: 'high',
-        problem: 'Fehlende Risikofreiheits-Signale am CTA selbst: Der Button-Text kommuniziert nicht explizit die Verbindlichkeitsfreiheit.',
-        loesung: 'Button-Text um kurzen Hinweis auf Verbindlichkeitsfreiheit ergänzen.',
+        problem: 'Keine Vertrauenssignale im sofort sichtbaren Bereich. Weder Kundenlogos noch Zertifikate noch Kennzahlen sind ohne Scrollen sichtbar.',
+        loesung: 'Eine kompakte Trust-Leiste direkt unter den CTA-Kacheln ergänzen, etwa Kundenlogos oder eine kurze Kennzahl zur Projekterfahrung.',
         aufwand: 'gering',
       },
     ],
 
     // ── CONTENT ───────────────────────────────────────────────────────────────
-    content_summary: 'Der Content kommuniziert funktionalen Nutzen klar und adressiert Compliance-Ängste überzeugend. Eine umfangreiche FAQ deckt kaufentscheidende Fragen ab. Kundenstimmen sind vorhanden, aber ohne messbare Ergebnisse. Größter Hebel: Den Business Case quantifizieren – konkrete Zeitersparnis-Zahlen oder ein Kostenvergleich würden die Überzeugungskraft deutlich steigern.',
+    content_summary: 'Die Seite kommuniziert emotionale Sicherheit (Datenschutz, Compliance, deutsche Infrastruktur) und funktionale Klarheit (strukturierter Beratungsprozess, konkrete Use Cases) überzeugend. Die FAQ-Sektion trifft kaufentscheidende Einwände direkt. Schwerwiegend fehlt jedoch der quantifizierte Business Case: kein Return on Investment, keine Amortisationszeit, keine Kostenorientierung. Für einen CEO, der eine strategische Investition intern rechtfertigen muss, ist das ein fundamentaler Blocker.',
 
     content_staerken: `<ul>
-      <li><strong>Nutzenversprechen auf funktionaler und emotionaler Ebene:</strong> Konkrete Prozessbeschreibungen und alltagsnahe Formulierungen adressieren typische Ängste von Gründern ohne Buchhaltungskenntnisse</li>
-      <li><strong>Kundenstimmen mit vollständiger Attribution:</strong> Testimonials mit Namens- und Unternehmensangabe wirken authentischer als anonyme Zitate</li>
-      <li><strong>FAQ deckt kaufentscheidende Fragen vollständig ab:</strong> Preismodell, Gesetzeskonformität und Datenmigration werden adressiert</li>
-      <li><strong>Quantifizierter Social Proof:</strong> Eine konkrete Kundenzahl im sechsstelligen Bereich dient als klares Marktakzeptanz-Signal</li>
+      <li><strong>Emotionale Ebene durch Datenschutz und Souveränität stark adressiert:</strong> Eigene zertifizierte Rechenzentren in Deutschland und die explizite Verankerung von AI-Act, NIS2 und DSGVO treffen den zentralen Kauftreiber mittelständischer CEOs.</li>
+      <li><strong>Strukturierter Beratungsprozess mit Ergebnis-Kommunikation pro Schritt:</strong> Jeder Schritt schließt mit einem konkreten Ergebnis-Statement, das den Prozess greifbar macht.</li>
+      <li><strong>Konkrete Use Cases mit Branchen-Bezug:</strong> Reale Anwendungsszenarien statt eines abstrakten KI-Versprechens.</li>
+      <li><strong>Change Management als eigenständige Leistungskomponente:</strong> Der Hinweis, dass KI-Projekte selten an der Technologie, sondern an der Umsetzung in der Organisation scheitern, adressiert einen realen CEO-Schmerzpunkt.</li>
     </ul>`,
 
     content_prioritized: [
       {
-        severity: 'high',
-        problem: 'Business Case nicht quantifiziert: Keine konkreten Zeitersparnis-Angaben und kein Vergleich zu manueller Buchhaltung oder externen Kosten.',
-        loesung: 'Durchschnittliche Zeitersparnis pro Monat oder typische Kosteneinsparung gegenüber externen Alternativen kommunizieren.',
-        aufwand: 'gering',
+        severity: 'critical',
+        problem: 'Kein Return on Investment kommuniziert. Kein einziges konkretes Beispiel zeigt, was eine Investition in einem vergleichbaren Unternehmen an Einsparung oder Nutzen gebracht hat.',
+        loesung: 'Mindestens ein Wirtschaftlichkeitsbeispiel ergänzen: Einsparung, Amortisationszeit oder Größenordnung aus einem realen Projekt.',
+        aufwand: 'mittel',
       },
       {
         severity: 'high',
-        problem: 'Kundenstimmen ohne messbare Ergebnisse: Testimonials beschreiben subjektive Zufriedenheit statt konkreter Verbesserungen.',
-        loesung: 'Bestehende Kunden nach messbaren Ergebnissen befragen. Ein Testimonial mit spezifischer Stunden- oder Kostenersparnis steigert die Überzeugungskraft erheblich.',
+        problem: 'Testimonials ohne verifizierbare Attribution und ohne konkretes Ergebnis. Für eine Enterprise-Beratung sind Kundenstimmen mit messbaren Projektergebnissen kaufentscheidend.',
+        loesung: 'Mindestens ein bis zwei Testimonials auf Referenz-Niveau heben: Name, Firma, messbares Ergebnis.',
         aufwand: 'gering',
       },
       {
         severity: 'medium',
-        problem: 'Kein Transformationsversprechen: Der Content bleibt auf funktionaler Ebene – ein übergeordnetes Versprechen für das Geschäftsleben der Nutzer fehlt.',
-        loesung: 'Übergeordnete Vision kommunizieren, die über die reine Softwarefunktion hinausgeht.',
-        aufwand: 'gering',
+        problem: 'Kein vollständig ausgearbeiteter Referenzfall vorhanden. Die Use Cases werden als eigene Produkte präsentiert, aber ohne Kundenname, Zeitrahmen oder verifizierbare Erfolgsmetriken.',
+        loesung: 'Einen Use Case zur vollständigen Case Study ausbauen: Ausgangssituation, Lösung, messbares Ergebnis mit Zeitrahmen.',
+        aufwand: 'hoch',
       },
     ],
 
-    // content_gaps: in der Demo nicht befüllt (keine Lazy-Loading-/nicht-bewertbar-Fälle)
     content_gaps: [],
 
     // ── ZIELGRUPPE ──────────────────────────────────────────────────────────────
-    zielgruppe_summary: 'Die primäre Zielgruppe wird explizit in der Hauptüberschrift adressiert und durch zwei differenzierte Nutzer-Szenarien weiter geschärft. Alltagsnahe Problemformulierungen erzeugen hohe Wiedererkennbarkeit.',
+    zielgruppe_summary: 'Die Zielgruppe Mittelstand wird im Hero explizit genannt und die Tonalität passt zur Entscheider-Ebene. Jedoch fehlt die wirtschaftliche Argumentation für die Decider-Ebene vollständig, ein CEO kann eine strategische Investition intern nicht vertreten, wenn er nur Prozessbeschreibungen findet. Kernprobleme bleiben zu abstrakt, es fehlen konkrete Situationen, in denen sich Mittelständler wiedererkennen.',
 
     zielgruppe_staerken: `<ul>
-      <li><strong>Explizite Zielgruppenansprache in der Hauptüberschrift:</strong> Keine Interpretationsarbeit nötig – die Zielgruppe erkennt sich sofort</li>
-      <li><strong>Zwei differenzierte Nutzer-Szenarien:</strong> Neugründer und etablierte Selbstständige werden mit separaten Inhalten angesprochen</li>
-      <li><strong>Alltagsnahe Problemformulierungen:</strong> Typische Buchhaltungs-Situationen werden treffend beschrieben und erzeugen sofortige Identifikation</li>
+      <li><strong>Zielgruppe Mittelstand explizit im Hero adressiert:</strong> Keine Interpretationsarbeit nötig, CEOs mittelständischer Unternehmen erkennen sofortige Relevanz.</li>
+      <li><strong>CEO-spezifischer Pain Point adressiert:</strong> Der Handlungsdruck, den CEOs im Wettbewerbsumfeld spüren, wird konkret angesprochen.</li>
+      <li><strong>Tonalität angemessen für Entscheider-Ebene:</strong> Durchgehende Sie-Ansprache und sachliche Sprache passen zur Erwartungshaltung mittelständischer Geschäftsführer.</li>
     </ul>`,
 
     zielgruppe_prioritized: [
       {
         severity: 'high',
-        problem: 'Branchenspezifische Beispiele fehlen: Keine differenzierten Inhalte für verschiedene Selbstständigen-Typen wie Handwerk, Kreativberufe oder Dienstleistung. Auch Kleinunternehmen mit erster Teamstruktur finden keine spezifischen Inhalte.',
-        loesung: 'Drei bis vier Branchen-Szenarien mit je einem typischen Pain Point ergänzen.',
+        problem: 'Kernprobleme zu abstrakt für CEO-Ebene formuliert. Eine allgemeine Marktlage-Beschreibung erzeugt keine Wiedererkennung, welche konkrete Herausforderung treibt den CEO tatsächlich an?',
+        loesung: 'Zwei bis drei konkrete CEO-Situationen benennen, zum Beispiel Wettbewerber, die bereits Prozesse automatisieren, die im eigenen Haus noch manuell laufen.',
+        aufwand: 'gering',
+      },
+      {
+        severity: 'high',
+        problem: 'Buying-Center-Ebene der Fachverantwortlichen nur oberflächlich adressiert. IT- und Compliance-Verantwortliche finden keine Architektur-Details oder konkreten Sicherheitszertifikate.',
+        loesung: 'Eine kurze technische Sektion oder ein verlinktes Datenblatt für IT-Verantwortliche ergänzen.',
         aufwand: 'mittel',
       },
       {
         severity: 'medium',
-        problem: 'Persona-Pfade nicht klar getrennt: Neugründer und etablierte Selbstständige teilen sich denselben Conversion-Pfad.',
-        loesung: 'Separate CTAs für Neugründer und etablierte Selbstständige anbieten.',
+        problem: 'Mittelstands-Spezifik fehlt jenseits der Headline. Welche Branchen und Unternehmensgrößen konkret gemeint sind, bleibt unklar.',
+        loesung: 'Einen kurzen Orientierungsabschnitt ergänzen, für welche Unternehmen das Angebot besonders relevant ist.',
         aufwand: 'gering',
       },
     ],
 
     // ── CONVERSION ──────────────────────────────────────────────────────────────
-    conversion_summary: 'Der primäre CTA ist klar und prominent mit Risikoumkehr versehen. Ein dauerhaft kostenloser Einstieg senkt die Hemmschwelle erheblich. Größter Hebel: Preisangaben sind nicht im natürlichen Seitenfluss sichtbar.',
+    conversion_summary: 'Die Potenzialanalyse ist als niedrigschwelliger Einstieg gut positioniert, ein sichtbarer Ansprechpartner mit Foto senkt die Kontakthemmschwelle. Jedoch blockieren mehrere Faktoren die Conversion: Drei gleichrangige CTA-Kacheln ohne erkennbaren Primary CTA erzeugen Entscheidungsunsicherheit. Das Kontaktformular ist für eine erste Anfrage zu aufwändig, Risk-Reversal-Signale fehlen direkt am Formular.',
 
     conversion_staerken: `<ul>
-      <li><strong>Dreifache Risikoumkehr direkt unter dem CTA:</strong> Testlaufzeit, fehlende Zahlungspflicht und dauerhafter Gratis-Tarif in einem Satz – alle zentralen Einwände adressiert</li>
-      <li><strong>Dauerhaft kostenloser Einstieg als Fallback:</strong> Reduziert die Hemmschwelle für preissensible Nutzer erheblich</li>
-      <li><strong>CTA-Wiederholung nach der Einwandbehandlung:</strong> Conversion-Element direkt nach der FAQ platziert – im richtigen Entscheidungsmoment</li>
+      <li><strong>Ansprechpartner mit Foto und Funktion im Kontaktbereich:</strong> Senkt die Hemmschwelle für den ersten Kontakt und macht die Anfrage persönlicher.</li>
+      <li><strong>Niedrigschwelliger Einstieg positioniert:</strong> Die Formulierung als unverbindliches Erstgespräch signalisiert geringe Verbindlichkeit für Besucher in der Evaluierungsphase.</li>
+      <li><strong>Mehrere Einstiegspunkte zur Conversion vorhanden:</strong> Der primäre CTA erscheint sowohl im Hero als auch nach den Use Cases.</li>
     </ul>`,
 
     conversion_prioritized: [
       {
         severity: 'critical',
-        problem: 'Preisangaben nicht im natürlichen Seitenfluss: Kosteninformationen sind nur in der FAQ auffindbar – transaktionale Nutzer müssen aktiv danach suchen.',
-        loesung: 'Einstiegspreis als sichtbares Element unterhalb der Feature-Sektion in den Content-Flow integrieren.',
+        problem: 'Drei CTA-Kacheln im Hero optisch gleichrangig ohne erkennbaren Primary CTA. Besucher müssen zwischen gleichwertig wirkenden Optionen wählen, die Entscheidungszeit steigt und die Conversion-Wahrscheinlichkeit sinkt.',
+        loesung: 'Den primären CTA "KI-Potenzialanalyse anfragen" als einzigen farbigen Solid-Button hervorheben, die übrigen Kacheln als kleinere Navigationslinks darstellen.',
         aufwand: 'gering',
       },
       {
-        severity: 'high',
-        problem: 'Kein persistenter CTA auf Mobile: Bei der Seitenlänge fehlt ein dauerhaft sichtbarer Conversion-Einstiegspunkt auf kleinen Bildschirmen.',
-        loesung: 'Floating-Button auf dem Mobile-Breakpoint ergänzen.',
+        severity: 'critical',
+        problem: 'Formular wirkt für eine Pre-Sales-Anfrage überladen. Das Pflicht-Nachrichtenfeld erzeugt Abbrüche, weil Besucher in der Evaluierungsphase oft noch nicht wissen, was sie konkret schreiben sollen.',
+        loesung: 'Formular auf Name, E-Mail und Unternehmen reduzieren. Alternativ eine Kalender-Integration einbinden, die direkt einen Termin buchbar macht.',
         aufwand: 'mittel',
+      },
+      {
+        severity: 'high',
+        problem: 'Kein Risk-Reversal-Signal nahe dem Formular. Weder unverbindlich noch kostenlos erscheint direkt am Absende-Button.',
+        loesung: 'Direkt unter dem Submit-Button ein kurzes Signal platzieren, zum Beispiel: Unverbindlich und kostenlos, Rückmeldung innerhalb von 24 Stunden.',
+        aufwand: 'gering',
       },
     ],
 
     // ── STRUKTUR ──────────────────────────────────────────────────────────────
-    struktur_summary: 'Die Seitenstruktur folgt einem bewährten Aufmerksamkeits-Interesse-Wunsch-Handlungs-Muster. Die Navigation zwischen Sektionen ist logisch. Größter Hebel: Übermäßige Seitenlänge und redundante Inhalte reduzieren.',
+    struktur_summary: 'Der grundlegende Seitenaufbau ist nachvollziehbar und der Beratungsprozess ist klar strukturiert. Die FAQ-Sektion ist sinnvoll nahe dem Kontaktbereich platziert. Kritisch fehlen jedoch Trust-Elemente im sofort sichtbaren Bereich, und die Amplify-Ebene, also die Konsequenzen des Nicht-Handelns, fehlt vollständig.',
 
     struktur_staerken: `<ul>
-      <li><strong>Klare Seitenstruktur nach bewährtem Muster:</strong> Hero → Problem → Lösung → Social Proof → FAQ → CTA – logisch und konversionserprobt</li>
-      <li><strong>Visueller Rhythmus durch abwechselnde Layouts:</strong> Karten, Listen und Kundenstimmen unterbrechen den Textfluss sinnvoll</li>
+      <li><strong>Logischer Grundaufbau erkennbar:</strong> Hero, Einleitung, Vorteile, Beratungsprozess, Use Cases, Kontaktformular und FAQ folgen einer nachvollziehbaren Reihenfolge.</li>
+      <li><strong>Beratungsprozess klar strukturiert:</strong> Eigene Überschrift, kurze Beschreibung und Ergebnis-Statement pro Schritt schaffen Scanbarkeit.</li>
+      <li><strong>FAQ direkt vor dem finalen CTA platziert:</strong> Letzte Einwände werden am Entscheidungspunkt adressiert.</li>
     </ul>`,
 
     struktur_prioritized: [
       {
+        severity: 'critical',
+        problem: 'Trust-Elemente fehlen im sofort sichtbaren Bereich vollständig. Weder Social Proof noch Kundenlogos noch Kennzahlen sind ohne Scrollen sichtbar.',
+        loesung: 'Eine kompakte Trust-Leiste direkt unter den CTA-Kacheln ergänzen.',
+        aufwand: 'gering',
+      },
+      {
         severity: 'high',
-        problem: 'Trust-Sektion fehlt als eigenständiger Block: Sicherheits- und Datenschutzinformationen sind über die Seite verteilt statt gebündelt.',
-        loesung: 'Eigenständige Badge-Zeile mit Compliance- und Datenschutznachweisen direkt unterhalb des Hero-Bereichs platzieren.',
+        problem: 'Amplify-Schritt fehlt: Das Problem wird benannt, die Konsequenzen des Nicht-Handelns werden aber nicht verstärkt. Ohne diesen Schritt fehlt der Handlungsdruck.',
+        loesung: 'Eine kurze Passage ergänzen, was Unternehmen verlieren, die jetzt nicht handeln, ohne Panikmache.',
         aufwand: 'gering',
       },
       {
         severity: 'medium',
-        problem: 'Übermäßige Seitenlänge: Redundante Feature-Wiederholungen und mehrfach platzierte CTAs erzeugen Entscheidungsmüdigkeit.',
-        loesung: 'Feature-Wiederholungen entfernen und Gesamtlänge reduzieren.',
+        problem: 'Anchor-Navigation fehlt trotz langer Seite mit mehreren Hauptsektionen.',
+        loesung: 'Eine Sticky-Sub-Navigation oder Anchor-Links zu den wichtigsten Sektionen ergänzen.',
         aufwand: 'mittel',
       },
     ],
 
     // ── SEARCH INTENT ───────────────────────────────────────────────────────────
-    search_intent_bewertung: 'Der Search Intent für das analysierte Keyword ist primär transaktional mit starkem kommerziellem Anteil. Die Landingpage adressiert diesen Intent gut durch direkten Trial-CTA und Preisinformationen in der FAQ. Schwäche: Der informationale Intent von Nutzern in frühen Recherchephasen wird nicht adressiert, was potenzielle Kunden in der Evaluierungsphase verliert.',
+    search_intent_bewertung: 'Das Keyword trägt primär Informationsabsicht. Suchende wollen verstehen, was das Angebot bedeutet, wie es funktioniert und welche Anbieter es gibt. Die Seite bedient diesen Informationsbedarf teilweise durch den Beratungsprozess und die FAQ, jedoch fehlt eine klassische Einstiegs-Erklärung: Was ist das eigentlich? Der sekundäre Commercial Intent wird durch die Potenzialanalyse adressiert, allerdings ohne die für die Evaluierungsphase typischen Differenzierungsargumente gegenüber Alternativen.',
 
     search_intent_prioritized: [
       {
         severity: 'high',
-        problem: 'Informationaler Intent nicht adressiert: Nutzer in frühen Recherchephasen ohne Buchhaltungsvorkenntnisse finden keinen Einstieg.',
-        loesung: 'Kurze Einführung für Nutzer ohne Buchhaltungsvorkenntnisse ergänzen.',
-        aufwand: 'mittel',
+        problem: 'Fehlende Erklärungsebene für das Konzept selbst. Die Seite setzt voraus, dass Besucher bereits wissen, worum es geht und warum sie es brauchen.',
+        loesung: 'Eine einleitende Sektion ergänzen, die das Konzept in drei bis vier Sätzen erklärt und den Unterschied zu Alternativen benennt.',
+        aufwand: 'gering',
       },
       {
-        severity: 'medium',
-        problem: 'Häufige Folge-Suchanfragen werden nicht aufgegriffen: Typische Anschlussthemen wie die vereinfachte Einnahmen-Überschuss-Rechnung fehlen.',
-        loesung: 'Eigene Sektion für typische Anschlussthemen ergänzen.',
+        severity: 'high',
+        problem: 'Fehlende Differenzierungsargumente für die Evaluierungsphase. Besucher, die mehrere Anbieter vergleichen, erhalten keine strukturierte Entscheidungshilfe.',
+        loesung: 'Eine "Warum wir"-Sektion ergänzen, die die wichtigsten Differenzierungsmerkmale klar benennt.',
         aufwand: 'gering',
       },
     ],
 
     // ── DIFFERENZIERUNG / WETTBEWERB ─────────────────────────────────────────────
-    wettbewerb_summary: 'DACH-spezifische Positionierung als Differenzierungsmerkmal klar kommuniziert. Aktuelle Gesetzgebung als Alleinstellungsmerkmal stark genutzt. Schwäche: Ein direkter Vergleich mit Wettbewerbern fehlt – Nutzer, die mehrere Lösungen evaluieren, erhalten keine strukturierte Entscheidungshilfe.',
+    wettbewerb_summary: 'Differenzierung ist teilweise kommuniziert, aber nicht konsequent im Hero verankert. Stärken liegen in der souveränen deutschen Infrastruktur und konkreten Use Cases mit messbaren Outcomes, das sind echte Differenzierungsmerkmale gegenüber reinen Beratungsanbietern. Ein Wettbewerber am Markt punktet mit einem klareren Conversion-Pfad und explizitem Risikoabbau.',
 
     wettbewerb_staerken: `<ul>
-      <li><strong>Aktuelle Gesetzgebung als Alleinstellungsmerkmal:</strong> Technische Details zur elektronischen Rechnungspflicht demonstrieren regulatorische Kompetenz</li>
-      <li><strong>Quantifizierter Social Proof:</strong> Kundenzahl im sechsstelligen Bereich als klares Marktakzeptanz-Signal</li>
-      <li><strong>Landesspezifische Integration als DACH-Vorteil:</strong> Direkte Anbindung an deutsche Steuerbehörden als echtes Differenzierungsmerkmal gegenüber internationalen Alternativen</li>
+      <li><strong>Souveräne Infrastruktur als Differenzierungsmerkmal:</strong> Betrieb in eigenen zertifizierten deutschen Rechenzentren ist ein konkreter, belegbarer Vorteil, besonders relevant für datensensible Mittelstandsunternehmen.</li>
+      <li><strong>Eigene KI-Reise als Glaubwürdigkeitsbeweis:</strong> Ein eigenes Kompetenzzentrum positioniert den Anbieter als Practitioner statt als reinen Berater.</li>
+      <li><strong>Strukturierter Beratungsprozess:</strong> Gibt Interessenten in der Consideration-Phase Orientierung, ein Wettbewerber bietet keinen vergleichbar strukturierten Prozessrahmen.</li>
     </ul>`,
 
     wettbewerb_prioritized: [
       {
         severity: 'high',
-        problem: 'Kein strukturierter Wettbewerbsvergleich: Nutzer, die mehrere Lösungen evaluieren, erhalten keine Entscheidungshilfe auf der Seite. Auch die Differenzierung gegenüber internationalen Tools fehlt.',
-        loesung: 'Vergleichstabelle mit den fünf wichtigsten Unterschieden zu etablierten Desktop-Lösungen und internationalen Alternativen ergänzen.',
+        problem: 'Kein strukturierter Wettbewerbsvergleich vorhanden. Besucher, die mehrere Lösungen evaluieren, erhalten keine Entscheidungshilfe auf der Seite.',
+        loesung: 'Eine Vergleichstabelle mit den wichtigsten Differenzierungsmerkmalen zu etablierten Alternativen ergänzen.',
         aufwand: 'mittel',
       },
       {
         severity: 'medium',
-        problem: 'Einstieg aus manuellen Prozessen nicht adressiert: Nutzer, die aktuell mit Tabellen oder Papier arbeiten, werden nicht direkt abgeholt.',
-        loesung: 'Kurze Sektion für Nutzer ergänzen, die aktuell noch manuell arbeiten.',
+        problem: 'Preistransparenz fehlt vollständig, ein Wettbewerber gibt zumindest im FAQ Orientierung zur Kostenstruktur.',
+        loesung: 'Zumindest eine Preisorientierung im FAQ ergänzen, etwa eine typische Größenordnung für Pilotprojekte.',
         aufwand: 'gering',
       },
     ],
 
     // ── PERFORMANCE ─────────────────────────────────────────────────────────────
-    performance_summary: 'Performance auf Desktop sehr gut. Mobile Performance durch mehrere synchron ladende Drittanbieter-Skripte beeinträchtigt. Core Web Vitals Desktop im grünen Bereich, Mobile optimierungsbedürftig.',
-    performance_desktop: 'Desktop-Performance nahezu perfekt. Largest Contentful Paint und First Contentful Paint laden sehr schnell. Layout-Stabilität minimal beeinträchtigt. Einziger Optimierungspunkt: Das LCP-Bild könnte mit einem Priorisierungs-Attribut schneller geladen werden.',
-    performance_mobile: 'Mobile Performance kritisch beeinträchtigt durch synchron ladende Drittanbieter-Skripte. Consent-Management und Buchungstool blockieren den Rendering-Prozess. Lazy Loading für unterhalb des sichtbaren Bereichs liegende Bilder nicht konsequent aktiviert.',
+    performance_summary: 'Performance auf Mobile ist kritisch, auf Desktop durchschnittlich. Hauptursache: Ein Consent-Management-Tool und mehrere Tracking-Skripte blockieren den Hauptthread erheblich, zusätzlich wird das Hero-Bild trotz LCP-Relevanz mit Lazy Loading geladen.',
+    performance_desktop: 'Desktop-Performance ist durchschnittlich. Ladezeit-Werte liegen im mittleren Bereich, die Interaktivität ist jedoch durch einen blockierten Hauptthread verzögert. Die Serverantwortzeit ist sehr schnell, das LCP-Bild wird jedoch ohne Priorisierung ausgeliefert.',
+    performance_mobile: 'Mobile Performance ist kritisch. Die Ladezeit bis zum ersten sichtbaren Inhalt ist deutlich zu hoch, die Interaktivität ist massiv verzögert. Hauptursachen sind ein Consent-Management-Tool und mehrere Marketing-Tracking-Skripte, die das Rendering blockieren, sowie ein Hero-Bild mit Lazy Loading trotz LCP-Relevanz.',
 
     performance_opportunities: [
       {
         severity: 'critical',
-        problem: 'Consent-Management lädt synchron und blockiert das Rendering auf Mobile.',
-        loesung: 'Das Consent-Tool auf asynchrones Laden umstellen – eliminiert Render-Blocking auf Mobile.',
+        problem: 'Hero-Bild mit Lazy Loading geladen, obwohl es das LCP-Element ist. Verschlechtert die Ladezeit auf beiden Geräten erheblich.',
+        loesung: 'Lazy Loading am Hero-Bild entfernen und eine hohe Ladepriorität setzen.',
         aufwand: 'gering',
       },
       {
-        severity: 'high',
-        problem: 'Eingebettetes Buchungstool wird beim Seitenload initialisiert und blockiert den Rendering-Prozess.',
-        loesung: 'Das Buchungstool erst beim Scroll-Trigger laden statt beim Seitenload.',
-        aufwand: 'gering',
+        severity: 'critical',
+        problem: 'Consent-Management-Tool blockiert den Hauptthread massiv, größter einzelner Performance-Faktor auf Mobile und Desktop.',
+        loesung: 'Consent-Skripte asynchron laden, alternativ ein leichtgewichtigeres Tool evaluieren.',
+        aufwand: 'hoch',
       },
       {
         severity: 'high',
-        problem: 'LCP-Bild wird nicht priorisiert geladen.',
-        loesung: 'Hero-Bild mit Lade-Priorisierungs-Attribut versehen.',
-        aufwand: 'gering',
+        problem: 'Mehrere Marketing-Tracking-Skripte blockieren zusätzlich den Hauptthread und verzögern die Interaktivität.',
+        loesung: 'Tracking-Skripte mit defer oder async laden, alternativ über einen Tag-Manager verzögert feuern.',
+        aufwand: 'mittel',
       },
     ],
 
     // ── AI READINESS ────────────────────────────────────────────────────────────
-    ai_bewertung: 'AI Readiness moderat. Grundlegende strukturierte Daten sind vorhanden, aber unvollständig. Das Schema für häufig gestellte Fragen fehlt trotz umfangreicher FAQ-Sektion. Non-Commodity-Gehalt schwach – generische Aussagen dominieren statt einzigartiger, belegbarer Inhalte, die von KI-Systemen bevorzugt zitiert werden.',
+    ai_bewertung: 'AI-Sichtbarkeit ist mittelmäßig. Non-Commodity-Gehalt ist partiell vorhanden, einzelne Use Cases mit messbaren Outcomes sind echte, nicht generische Inhalte. Viele zentrale Aussagen bleiben jedoch generisch und könnten von jeder vergleichbaren Seite stammen. Schema-Auszeichnung ist auf Basis-Typen beschränkt, ein FAQ-Schema fehlt trotz vorhandener FAQ-Sektion.',
 
     ai_staerken: `<ul>
-      <li><strong>Grundlegende strukturierte Daten vorhanden:</strong> Basisauszeichnung für Organisation und Softwareprodukt ermöglicht maschinenlesbare Einordnung durch KI-Crawler</li>
-      <li><strong>Klare Produktdefinition:</strong> Produktkategorie und Zielgruppe sind eindeutig kommuniziert – KI-Systeme können die Seite kontextuell einordnen</li>
+      <li><strong>KI-Crawler-Sichtbarkeit nahezu vollständig:</strong> Der Inhalt steht server-seitig bereit und ist für nicht-rendernde KI-Crawler direkt erfassbar.</li>
+      <li><strong>Konkrete Use Cases mit messbaren Outcomes:</strong> Ein Use Case mit belegter Bearbeitungszeitreduktion ist ein echter Non-Commodity-Inhalt, den KI-Systeme bevorzugt zitieren.</li>
+      <li><strong>FAQ-Section mit relevanten Nutzerfragen:</strong> Deckt typische Consideration- und Decision-Stage-Fragen ab, eine gute Grundlage für ein FAQ-Schema.</li>
     </ul>`,
 
     ai_optimierungspotenziale: [
       {
         severity: 'critical',
-        problem: 'FAQ-Schema fehlt: Die umfangreiche FAQ-Sektion ist nicht mit dem entsprechenden strukturierten Datenformat ausgezeichnet – KI-Systeme können Antworten nicht direkt zitieren.',
-        loesung: 'Alle FAQ-Einträge mit dem entsprechenden JSON-LD-Format auszeichnen. Ermöglicht direkte Zitation in KI-Antworten und AI Overviews.',
+        problem: 'FAQ-Schema fehlt, obwohl die FAQ-Sektion relevante Fragen abdeckt. KI-Systeme können die Antworten dadurch nicht direkt zitieren.',
+        loesung: 'FAQ-Schema via JSON-LD für alle Fragen und Antworten ergänzen.',
         aufwand: 'gering',
       },
       {
-        severity: 'critical',
-        problem: 'Non-Commodity-Gehalt schwach: Alle zentralen Aussagen sind generisch – keine eigenen Daten, keine messbaren Kundenergebnisse, die exklusiv auf diese Quelle zurückführen.',
-        loesung: 'Zwei bis drei Kundenfälle mit messbaren Ergebnissen ergänzen. KI-Systeme bevorzugen Seiten mit einzigartigen, belegbaren Inhalten.',
+        severity: 'high',
+        problem: 'Non-Commodity-Gehalt unvollständig: Nur ein Teil der Use Cases enthält spezifische, belegte Ergebnisse.',
+        loesung: 'Alle Use Cases mit messbaren Ergebnissen anreichern, generische Formulierungen durch eigene Daten ersetzen.',
         aufwand: 'mittel',
       },
       {
         severity: 'high',
-        problem: 'Videoinhalte nicht strukturiert ausgezeichnet: Vorhandene Videoinhalte fehlen als maschinenlesbare Videoobjekte.',
-        loesung: 'Produktdemo-Video mit dem entsprechenden JSON-LD-Format versehen.',
-        aufwand: 'gering',
+        problem: 'Video-Content fehlt vollständig, obwohl KI-Systeme Videos aktiv als Informationsquelle nutzen.',
+        loesung: 'Mindestens ein Video einbetten, etwa eine kurze Produktdemo oder ein Erklärvideo zum Vorgehen.',
+        aufwand: 'mittel',
       },
     ],
 
@@ -295,64 +314,79 @@
       sofort_umsetzen: [
         {
           category: 'Hero',
-          issue: 'Hauptüberschrift auf messbares Ergebnis umschreiben – konkretes Outcome-Versprechen statt Funktionsauflistung.',
-          reasoning: 'Quantifizierte Zeitersparnis oder Vereinfachung eines typischen Prozesses als Kernaussage.',
+          issue: 'Primäre Headline um ein konkretes, messbares Ergebnis ergänzen statt einer reinen Richtungsangabe.',
+          reasoning: 'Ein greifbares Ergebnis muss für einen CEO im Mittelstand intern rechtfertigbar sein.',
           impact: 'SEHR_HOCH',
           effort: 'GERING',
         },
         {
-          category: 'AI Sichtbarkeit',
-          issue: 'FAQ-Schema für alle Einträge ergänzen – ermöglicht direkte Zitation durch KI-Systeme und AI Overviews.',
-          reasoning: 'JSON-LD im Head-Bereich, alle Fragen und Antworten strukturiert auszeichnen.',
+          category: 'Hero',
+          issue: 'Einen einzigen visuell dominanten Primary CTA im Hero etablieren, die übrigen zwei Kacheln als kleinere Navigationslinks darstellen.',
+          reasoning: 'Drei gleichrangige Kacheln erzeugen Entscheidungsunsicherheit und senken die Conversion-Wahrscheinlichkeit.',
           impact: 'SEHR_HOCH',
           effort: 'GERING',
         },
         {
-          category: 'Performance',
-          issue: 'Consent-Management asynchron laden – eliminiert Render-Blocking auf Mobile und verbessert Mobile-Performance erheblich.',
-          reasoning: 'Async-Attribut im entsprechenden Script-Tag setzen.',
-          impact: 'SEHR_HOCH',
+          category: 'Content',
+          issue: 'Testimonials mit vollständiger Attribution und konkretem Ergebnis versehen.',
+          reasoning: 'Für eine Enterprise-Beratung sind Kundenstimmen mit messbarem Outcome kaufentscheidend.',
+          impact: 'HOCH',
           effort: 'GERING',
         },
       ],
       als_naechstes: [
         {
           category: 'Struktur',
-          issue: 'Trust-Badge-Sektion direkt nach dem Hero: Compliance-, Datenschutz- und Sicherheitsnachweise als visuelle Elemente.',
-          reasoning: 'Drei Badges in einer Zeile, direkt unterhalb des Hero-CTAs.',
+          issue: 'Trust-Leiste direkt unter den CTA-Kacheln ergänzen.',
+          reasoning: 'Kundenlogos, Zertifikate oder eine kurze Kennzahl schaffen Glaubwürdigkeit im ersten Moment.',
           impact: 'HOCH',
           effort: 'GERING',
         },
         {
           category: 'Conversion',
-          issue: 'Einstiegspreis in den Content-Flow integrieren – Kosteninformation als sichtbares Element im natürlichen Seitenfluss.',
-          reasoning: 'Preisangabe unterhalb der Feature-Sektion ergänzen.',
+          issue: 'Formular vereinfachen und Pflicht-Nachrichtenfeld optional machen oder durch Kalender-Integration ersetzen.',
+          reasoning: 'Reduziert Abbrüche bei Besuchern, die noch nicht wissen, was sie konkret schreiben sollen.',
           impact: 'HOCH',
-          effort: 'GERING',
+          effort: 'MITTEL',
         },
         {
           category: 'Content',
-          issue: 'Kundenstimmen mit messbaren Ergebnissen anreichern – bestehende Kunden nach konkreten Verbesserungen befragen.',
-          reasoning: 'Ziel: Zeitersparnis in Stunden pro Monat oder reduzierte externe Kosten.',
+          issue: 'Mindestens ein Wirtschaftlichkeitsbeispiel mit Einsparung oder Amortisationszeit ergänzen.',
+          reasoning: 'Ohne quantifizierten Business Case kann ein CEO die Investition intern nicht vertreten.',
           impact: 'HOCH',
           effort: 'MITTEL',
         },
       ],
-      quick_wins: [],
+      quick_wins: [
+        {
+          category: 'Performance',
+          issue: 'Lazy Loading am Hero-Bild entfernen und eine hohe Ladepriorität setzen.',
+          reasoning: 'Das LCP-Element wird aktuell unnötig verzögert geladen.',
+          impact: 'HOCH',
+          effort: 'GERING',
+        },
+        {
+          category: 'AI Sichtbarkeit',
+          issue: 'FAQ-Schema für alle Fragen und Antworten ergänzen.',
+          reasoning: 'Ermöglicht direkte Zitation durch KI-Systeme und AI Overviews.',
+          impact: 'MITTEL',
+          effort: 'GERING',
+        },
+      ],
       spaeter: [
         {
           category: 'Differenzierung',
-          issue: 'Wettbewerbsvergleich als dedizierte Sektion ergänzen – strukturierte Entscheidungshilfe für evaluierende Nutzer.',
-          reasoning: 'Tabelle mit fünf Differenzierungsmerkmalen gegenüber etablierten Alternativen.',
+          issue: 'Vergleichstabelle mit den wichtigsten Unterschieden zu etablierten Alternativen ergänzen.',
+          reasoning: 'Strukturierte Entscheidungshilfe für Besucher, die mehrere Anbieter evaluieren.',
           impact: 'MITTEL',
           effort: 'MITTEL',
         },
         {
-          category: 'AI Sichtbarkeit',
-          issue: 'Non-Commodity-Gehalt für AI-Sichtbarkeit erhöhen – einzigartige, belegbare Inhalte aus bestehenden Kundendaten destillieren.',
-          reasoning: 'Konkrete Nutzerdaten aufbereiten und als exklusive Insights kommunizieren.',
-          impact: 'MITTEL',
-          effort: 'MITTEL',
+          category: 'Content',
+          issue: 'Einen Use Case zur vollständigen Case Study mit Kundenname oder Branche ausbauen.',
+          reasoning: 'Der stärkste Proof Point für CEOs in der Entscheidungsphase, schließt die aktuell größte inhaltliche Lücke.',
+          impact: 'HOCH',
+          effort: 'HOCH',
         },
       ],
     },
@@ -364,7 +398,7 @@
     var s = document.createElement('style');
     s.id = 'cvz-bsp-styles';
     s.textContent = `
-      .cvz-section{max-width:1200px;margin:0 auto;padding:0 24px 32px;font-family:'Geist','DM Sans','Segoe UI',sans-serif;color:#e2e8f0;}
+      .cvz-section{max-width:1200px;margin:0 auto;padding:28px 24px 32px;font-family:'Geist','DM Sans','Segoe UI',sans-serif;color:#e2e8f0;}
       .cvz-section *{box-sizing:border-box;}
       @media(prefers-reduced-motion:reduce){
         .cvz-fi{animation:none!important;opacity:1!important;transform:none!important;}
@@ -390,7 +424,6 @@
         position:sticky;top:0;z-index:100;
         width:100%;overflow:hidden;
       }
-      /* top wird per JS gesetzt sobald Nav-Höhe bekannt ist */
       .cvz-anchor-nav-inner{
         display:flex;align-items:center;justify-content:center;
         gap:0;width:100%;padding:0 24px;
@@ -547,7 +580,7 @@
         justify-content:unset!important;gap:unset!important;
       }
       @media(max-width:768px){
-        .cvz-section{padding:0 16px 24px;}
+        .cvz-section{padding:24px 16px 24px;}
         .cvz-exec-panel{flex-direction:column;align-items:center;padding:20px 16px;gap:20px;}
         .cvz-ring{width:100%;display:flex;flex-direction:column;align-items:center;}
         .cvz-bars{width:100%;}
@@ -596,7 +629,6 @@
     return 'rgba(239,68,68,0.08)';
   }
 
-  // === robust gegen Objekt/Array/fehlend (identisch zu report.js v4) ===
   function toArray(v) {
     if (Array.isArray(v)) return v;
     if (v && typeof v === 'object') return [v];
@@ -609,7 +641,6 @@
     return '<div class="cvz-card '+cls+' cvz-fi cvz-fi-3"><div class="cvz-card-label"><div class="cvz-card-label-dot"></div>'+label.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div><div class="cvz-card-body">'+sanitize(content)+'</div></div>';
   }
 
-  // === Prio-Karte (severity-Badges) – identisch zu report.js v4 ===
   var CVZ_SEV = {
     critical: { label: 'CRITICAL', cls: 'crit' },
     high:     { label: 'HIGH',     cls: 'high' },
@@ -620,9 +651,6 @@
     return m[String(s).toLowerCase()] || sanitize(String(s||''));
   }
 
-  // Akzeptiert ein Array von {severity, problem, loesung, aufwand}.
-  // (In der Demo sind die Daten bereits Arrays – der String/JSON-Parse-Pfad aus
-  //  report.js wird hier nicht gebraucht, aber zur Sicherheit mit abgedeckt.)
   function buildPrioCard(field) {
     var data = field;
     if (typeof field === 'string') {
@@ -657,7 +685,6 @@
       + '<div class="cvz-card-body"><div class="cvz-prio">'+inner+'</div></div></div>';
   }
 
-  // === Roadmap aus priority_matrix-JSON – identisch zu report.js v4 ===
   function buildRoadmap(d) {
     var pm = d.priority_matrix;
     var hasData = pm && typeof pm === 'object' &&
@@ -728,9 +755,7 @@
     injectStyles();
     var d = DATA;
 
-    // Anker-Navigation
     (function() {
-      // Webflow-Nav-Höhe messen und als top setzen
       function setNavTop(anchorNav) {
         var webflowNav = document.querySelector('.navbar-2-member');
         anchorNav.style.top = webflowNav ? webflowNav.offsetHeight + 'px' : '0px';
@@ -754,7 +779,6 @@
       nav.innerHTML = '<div class="cvz-anchor-nav-inner">'+
         links.map(function(l){ return '<a href="'+l.href+'">'+l.label+'</a>'; }).join('')+
         '</div>';
-      // Smooth scroll mit Nav-Offset
       nav.querySelectorAll('a').forEach(function(a) {
         a.addEventListener('click', function(e) {
           var id = a.getAttribute('href').replace('#','');
@@ -797,12 +821,11 @@
       });
     })();
 
-    // Hero Info
     inject('.section-hero-info',
       '<div class="cvz-section cvz-fi cvz-fi-1">'+
       '<div style="background:rgba(79,209,197,.05);border:1px solid rgba(79,209,197,.15);border-radius:10px;padding:14px 18px;margin-bottom:12px;font-size:13px;color:#718096;line-height:1.65;">'+
       '<p style="margin:0 0 8px;"><strong style="color:#c4cdd6;">Dies ist eine echte Convertlyze-Analyse</strong>. Anonymisiert für diese Beispielseite. Alle Markennamen, Zitate und konkreten Kennzahlen wurden generalisiert, die Bewertungen und Empfehlungen stammen aus einem realen Analyselauf.</p>'+
-      '<p style="margin:0;">Convertlyze bewertet jede Seite im Kontext ihrer <strong style="color:#c4cdd6;">Branche und ihres Angebotstyps</strong>: Eine SaaS-Landingpage wird nach anderen Kriterien beurteilt als eine Consulting- oder E-Commerce-Seite – von der Erwartung an Proof Points über die CTA-Strategie bis zur Gewichtung einzelner Kategorien. Die folgende Analyse zeigt das vollständige Ausgabeformat am Beispiel eines DACH-SaaS-Anbieters im Buchhaltungs-Segment.</p>'+
+      '<p style="margin:0;">Convertlyze bewertet jede Seite im Kontext ihrer <strong style="color:#c4cdd6;">Branche und ihres Angebotstyps</strong>: Eine Enterprise-Beratungsseite wird nach anderen Kriterien beurteilt als eine SaaS- oder E-Commerce-Seite, von der Erwartung an Proof Points über die CTA-Strategie bis zur Gewichtung einzelner Kategorien. Die folgende Analyse zeigt das vollständige Ausgabeformat am Beispiel eines DACH-Anbieters im KI-Beratungssegment.</p>'+
       '</div>'+
       '<div class="cvz-card" style="padding:20px 24px;"><div class="cvz-info-grid">'+
       '<div class="cvz-info-row"><div class="cvz-info-label">Keyword</div><div class="cvz-info-value">'+d.keyword+'</div></div>'+
@@ -815,7 +838,6 @@
       '<div class="cvz-info-row"><div class="cvz-info-label">Analyse vom</div><div class="cvz-info-value">'+d.created_at+'</div></div>'+
       '</div></div></div>');
 
-    // Executive Summary
     var rColor = getRingColor(d.overall_score);
     var rBg    = getRingBg(d.overall_score);
     var cats = [
@@ -848,7 +870,6 @@
       execSec('schwaechen', d.exec_schwaechen)+
       '</div>');
 
-    // Deep Dive – Schwächen jetzt ausschließlich über buildPrioCard()
     inject('.section-deep-dive-hero', buildCatSection('Hero', d.hero_score,
       card('summary','Zusammenfassung','<p>'+d.hero_summary+'</p>')+
       card('staerken','Stärken',d.hero_staerken)+
@@ -895,11 +916,8 @@
       card('staerken','Stärken',d.ai_staerken)+
       buildPrioCard(d.ai_optimierungspotenziale)));
 
-    // Roadmap aus priority_matrix-JSON
     inject('.section-roadmap', buildRoadmap(d));
 
-    // ── Beispiel-PDF URL hier eintragen nach Upload ────────────────────────
-    // Einfach die URL ersetzen, dann pushen + Cache leeren.
     var BEISPIEL_PDF_URL = 'https://cdn.prod.website-files.com/68aa0ecac3a6a586fee94df1/6a1741fa7607ff99c484a389_Convertlyze%20%E2%80%93%20Beispielanalyse.pdf';
 
     var pdfBtnHtml = BEISPIEL_PDF_URL !== 'PLACEHOLDER'
@@ -916,14 +934,12 @@
       pdfBtnHtml+
       '</div>');
 
-    // Überschriften nach allen Renders
     heading('.section-hero-info',            'Beispielanalyse', '');
     heading('.section-executive-summary',    'Executive Summary', 'Die wichtigsten Erkenntnisse auf einen Blick');
     heading('.section-deep-dive-hero',       'Deep Dive', 'Detaillierte Analyse jeder Kategorie');
-    heading('.section-deep-dive-performance','Performance &amp; AI Sichtbarkeit', 'Performance und AI Readiness fließen nicht in den Gesamt-Score ein. Performance-Optimierungen erfordern meist hauptsächlich technische Umsetzung. Bei AI Readiness ist es gemischt – strukturierte Daten brauchen Entwicklungs-Support, Inhaltsstruktur und Semantik kannst du direkt selbst angehen.');
+    heading('.section-deep-dive-performance','Performance &amp; AI Sichtbarkeit', 'Performance und AI Readiness fließen nicht in den Gesamt-Score ein. Performance-Optimierungen erfordern meist hauptsächlich technische Umsetzung. Bei AI Readiness ist es gemischt, strukturierte Daten brauchen Entwicklungs-Support, Inhaltsstruktur und Semantik kannst du direkt selbst angehen.');
     heading('.section-roadmap',              'Roadmap', 'Die wichtigsten Maßnahmen, sortiert nach Impact und Aufwand.');
 
-    // Anker-IDs setzen
     var anchorMap = {
       '.section-executive-summary':     'cvz-exec',
       '.section-deep-dive-hero':        'cvz-hero',
@@ -941,7 +957,6 @@
       if (el) el.id = anchorMap[sel];
     });
 
-    // EU AI Act Hinweis
     var kiBtn = document.querySelector('.section-ki-agent-btn');
     if (kiBtn) {
       var aiNotice = document.createElement('div');
@@ -955,7 +970,7 @@
       kiBtn.parentNode.insertBefore(aiNotice, kiBtn.nextSibling);
     }
 
-    console.log('✅ Beispielanalyse gerendert (v2 – Prio-Karten + Roadmap-JSON)');
+    console.log('✅ Beispielanalyse gerendert (v3 – anonymisiert, 3 CTAs)');
   }
 
   if (document.readyState === 'loading') {
