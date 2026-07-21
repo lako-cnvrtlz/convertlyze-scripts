@@ -291,7 +291,7 @@
     ai_optimierungspotenziale: [
       {
         severity: 'critical',
-        problem: 'FAQ-Schema fehlt, obwohl die FAQ-Sektion relevante Fragen abdeckt. KI-Systeme können die Antworten dadurch nicht direkt zitieren.',
+        problem: 'FAQ-Schema fehlt, obwohl die FAQ-Sektion relevante Fragen abdeckt. KI-Systeme können die Antworten lesen.Ohne strukturierte Auszeichnung sinkt jedoch die Wahrscheinlichkeit, als direkte Antwort zitiert zu werden.',
         loesung: 'FAQ-Schema via JSON-LD für alle Fragen und Antworten ergänzen.',
         aufwand: 'gering',
       },
@@ -368,7 +368,7 @@
         {
           category: 'AI Sichtbarkeit',
           issue: 'FAQ-Schema für alle Fragen und Antworten ergänzen.',
-          reasoning: 'Ermöglicht direkte Zitation durch KI-Systeme und AI Overviews.',
+          reasoning: 'Erhöht die Chance auf direkte Zitation durch KI-Systeme und AI Overviews.',
           impact: 'MITTEL',
           effort: 'GERING',
         },
