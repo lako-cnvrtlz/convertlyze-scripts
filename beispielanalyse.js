@@ -918,7 +918,7 @@
 
     inject('.section-roadmap', buildRoadmap(d));
 
-    var BEISPIEL_PDF_URL = 'https://cdn.prod.website-files.com/68aa0ecac3a6a586fee94df1/6a1741fa7607ff99c484a389_Convertlyze%20%E2%80%93%20Beispielanalyse.pdf';
+    var BEISPIEL_PDF_URL = 'https://cdn.prod.website-files.com/68aa0ecac3a6a586fee94df1/6a5fde6afc2a9ae8e9d334a6_Convertlyze%20-%20Beispielanalyse%20-%20PDF%20Report.pdf';
 
     var pdfBtnHtml = BEISPIEL_PDF_URL !== 'PLACEHOLDER'
       ? '<a href="' + BEISPIEL_PDF_URL + '" class="cvz-pdf-btn" target="_blank" rel="noopener" aria-label="Beispiel-PDF herunterladen">'+
