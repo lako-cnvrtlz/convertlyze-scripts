@@ -291,7 +291,7 @@
     ai_optimierungspotenziale: [
       {
         severity: 'critical',
-        problem: 'FAQ-Schema fehlt, obwohl die FAQ-Sektion relevante Fragen abdeckt. KI-Systeme können die Antworten lesen.Ohne strukturierte Auszeichnung sinkt jedoch die Wahrscheinlichkeit, als direkte Antwort zitiert zu werden.',
+        problem: 'FAQ-Schema fehlt, obwohl die FAQ-Sektion relevante Fragen abdeckt. Ohne strukturierte Auszeichnung sinkt jedoch die Wahrscheinlichkeit, als direkte Antwort zitiert zu werden.',
         loesung: 'FAQ-Schema via JSON-LD für alle Fragen und Antworten ergänzen.',
         aufwand: 'gering',
       },
