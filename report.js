@@ -1,4 +1,4 @@
-/** 
+/**
  * Convertlyze – Report Script v5
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
  *
@@ -616,24 +616,38 @@
     const cf = dd.category_findings || dd;
     if (!cf || typeof cf !== 'object') return null;
     const arr = cf[label];
-    return Array.isArray(arr) && arr.length > 0 ? arr : null;
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    // Erkennung ALTER, fehlerhafter Daten: das alte Modul D (vor v1.3) hat bei
+    // nicht-primären Cluster-Mitgliedern problem/loesung durch einen Platzhalter
+    // ("Verwandtes Thema bereits unter X beschrieben") ersetzt und dabei ein
+    // cross_reference-Feld gesetzt, das die neue Modul-D-Version nicht mehr
+    // kennt. Finden wir dieses Feld, stammt der Datensatz noch aus der alten
+    // Logik - dann lieber auf die rohen, unbearbeiteten Kategorie-Felder
+    // zurückfallen (vollständige Information) statt die kaputten
+    // Platzhalter-Texte anzuzeigen.
+    const hasOldFormatArtifact = arr.some(it => it && it.cross_reference === true);
+    if (hasOldFormatArtifact) return null;
+    return arr;
+  }
+
+  // === Anzeigenamen für Kategorien, die intern anders heißen als im UI ===
+  // Wettbewerb ist der interne Pipeline-Name (Make.com/SP2/SP3-Feld), im
+  // Frontend soll dem Nutzer aber immer "Differenzierung" angezeigt werden.
+  const CVZ_CATEGORY_DISPLAY_NAMES = {
+    'Wettbewerb': 'Differenzierung',
+  };
+  function displayCategoryName(cat) {
+    return CVZ_CATEGORY_DISPLAY_NAMES[cat] || cat;
   }
 
   // === NEU: Rendert eine Kategorie-Karte aus deduplizierten Findings ===
   // Verhält sich analog zu buildPrioCard(), rendert aber zusätzlich:
   //   - cross_reference: true  -> kompakte Verweis-Zeile statt voller Karte
   //   - cross_category (Array) -> Badge "Betrifft auch: ..." an der Karte
-  function buildPrioCardFromDedup(items) {
+  function buildPrioCardFromDedup(items, currentCategory) {
     if (!items || items.length === 0) return '';
     let inner = '';
     for (const it of items) {
-      if (it.cross_reference) {
-        const primaryCat = sanitize(String(it.primary_category || ''));
-        inner += `<div class="cvz-pr-crossref">`
-          + `<span class="cvz-pr-crossref-icon">↳</span> Verwandtes Thema bereits unter „${primaryCat}“ beschrieben.`
-          + `</div>`;
-        continue;
-      }
       const sevKey = String(it.severity || '').toLowerCase();
       const sev = CVZ_SEV[sevKey] || { label: String(it.severity||'').toUpperCase(), cls: 'med' };
       const problem = sanitize(String(it.problem || ''));
@@ -641,7 +655,12 @@
       const aufwand = it.aufwand ? cvzAufwand(it.aufwand) : '';
       let crossBadge = '';
       if (it.cross_category && Array.isArray(it.cross_category) && it.cross_category.length > 1) {
-        crossBadge = `<span class="cvz-pr-crossbadge">Betrifft auch: ${sanitize(it.cross_category.join(', '))}</span>`;
+        const others = it.cross_category
+          .filter(c => c !== currentCategory)
+          .map(displayCategoryName);
+        if (others.length > 0) {
+          crossBadge = `<span class="cvz-pr-crossbadge">Siehe auch: ${sanitize(others.join(', '))}</span>`;
+        }
       }
       inner += `<div class="cvz-pr-item cvz-pr-${sev.cls}">`
         + `<div class="cvz-pr-badge">${sev.label}${crossBadge}</div>`
@@ -1145,7 +1164,7 @@
     const sections = {
       '.section-deep-dive-hero': () => {
         const dedupItems = getDedupCategory(analysis, 'Hero');
-        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.hero_schwaechen_prioritized_html);
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems, 'Hero') : buildPrioCard(analysis.hero_schwaechen_prioritized_html);
         return buildCatSection('Hero', analysis.hero_score,
           card('summary','Zusammenfassung', txt(analysis.hero_summary)) +
           card('staerken','Stärken', analysis.hero_staerken_html) +
@@ -1154,7 +1173,7 @@
 
       '.section-deep-dive-content': () => {
         const dedupItems = getDedupCategory(analysis, 'Content');
-        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.content_schwaechen_prioritized_html);
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems, 'Content') : buildPrioCard(analysis.content_schwaechen_prioritized_html);
         return buildCatSection('Content', analysis.content_score,
           card('summary','Zusammenfassung', txt(analysis.content_summary)) +
           card('staerken','Stärken', analysis.content_staerken_html) +
@@ -1164,7 +1183,7 @@
 
       '.section-deep-dive-zielgruppe': () => {
         const dedupItems = getDedupCategory(analysis, 'Zielgruppe');
-        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.zielgruppe_schwaechen_prioritized_html);
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems, 'Zielgruppe') : buildPrioCard(analysis.zielgruppe_schwaechen_prioritized_html);
         return buildCatSection('Zielgruppe', analysis.zielgruppe_score,
           card('summary','Zusammenfassung', txt(analysis.zielgruppe_summary)) +
           card('staerken','Stärken', analysis.zielgruppe_staerken_html) +
@@ -1173,7 +1192,7 @@
 
       '.section-deep-dive-conversion': () => {
         const dedupItems = getDedupCategory(analysis, 'Conversion');
-        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.conversion_schwaechen_prioritized_html);
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems, 'Conversion') : buildPrioCard(analysis.conversion_schwaechen_prioritized_html);
         return buildCatSection('Conversion', analysis.conversion_score,
           card('summary','Zusammenfassung', txt(analysis.conversion_summary)) +
           card('staerken','Stärken', analysis.conversion_staerken_html) +
@@ -1182,7 +1201,7 @@
 
       '.section-deep-dive-struktur': () => {
         const dedupItems = getDedupCategory(analysis, 'Struktur');
-        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.struktur_schwaechen_prioritized_html);
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems, 'Struktur') : buildPrioCard(analysis.struktur_schwaechen_prioritized_html);
         return buildCatSection('Struktur', analysis.struktur_score,
           card('summary','Zusammenfassung', txt(analysis.struktur_summary)) +
           card('staerken','Stärken', analysis.struktur_staerken_html) +
@@ -1191,7 +1210,7 @@
 
       '.section-deep-dive-searchintent': () => {
         const dedupItems = getDedupCategory(analysis, 'Search Intent');
-        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.search_intent_content_gaps);
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems, 'Search Intent') : buildPrioCard(analysis.search_intent_content_gaps);
         return buildCatSection('Search Intent', analysis.search_intent_score,
           card('summary','Bewertung', txt(analysis.search_intent_bewertung)) +
           prio);
@@ -1199,7 +1218,7 @@
 
       '.section-deep-dive-differenzierung': () => {
         const dedupItems = getDedupCategory(analysis, 'Wettbewerb');
-        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.wettbewerb_schwaechen_prioritized_html);
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems, 'Wettbewerb') : buildPrioCard(analysis.wettbewerb_schwaechen_prioritized_html);
         return buildCatSection('Differenzierung', analysis.wettbewerb_score,
           card('summary','Zusammenfassung', txt(analysis.wettbewerb_summary)) +
           card('staerken','Stärken', analysis.wettbewerb_staerken_html) +
@@ -1208,7 +1227,7 @@
 
       '.section-deep-dive-performance': () => {
         const dedupItems = getDedupCategory(analysis, 'Performance');
-        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.performance_opportunities_html);
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems, 'Performance') : buildPrioCard(analysis.performance_opportunities_html);
         return buildCatSection('Performance', analysis.performance_score,
           card('summary','Zusammenfassung', txt(analysis.performance_summary)) +
           card('summary','Desktop', txt(analysis.performance_desktop_zusammenfassung)) +
@@ -1218,7 +1237,7 @@
 
       '.section-deep-dive-ai': () => {
         const dedupItems = getDedupCategory(analysis, 'AI Readiness');
-        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.ai_readiness_optimierungspotenziale_html);
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems, 'AI Readiness') : buildPrioCard(analysis.ai_readiness_optimierungspotenziale_html);
         return buildCatSection('AI Sichtbarkeit', analysis.ai_readiness_score,
           card('summary','Zusammenfassung', txt(analysis.ai_readiness_bewertung)) +
           card('staerken','Stärken', analysis.ai_readiness_staerken_html) +
