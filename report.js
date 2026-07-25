@@ -659,7 +659,7 @@
           .filter(c => c !== currentCategory)
           .map(displayCategoryName);
         if (others.length > 0) {
-          crossBadge = `<span class="cvz-pr-crossbadge">Siehe auch: ${sanitize(others.join(', '))}</span>`;
+          crossBadge = `<span class="cvz-pr-crossbadge">Betrifft auch: ${sanitize(others.join(', '))}</span>`;
         }
       }
       inner += `<div class="cvz-pr-item cvz-pr-${sev.cls}">`
