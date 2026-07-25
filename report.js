@@ -1,12 +1,26 @@
 /**
- * Convertlyze – Report Script v4
+ * Convertlyze – Report Script v5
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
+ *
+ * ÄNDERUNGEN ggü. v4 (Dedup-Findings-Integration):
+ *   - NEU: getDedupCategory() liest deduplizierte Findings aus
+ *     analysis.dedup_findings (jsonb-Spalte, befüllt durch die neue
+ *     Make.com-Cluster-Pipeline: Findings Collector -> Claude-Clustering ->
+ *     Cluster Extractor -> Category/Roadmap Builder).
+ *   - NEU: buildPrioCardFromDedup() rendert die deduplizierten Findings:
+ *       - cross_reference: true  -> kompakte Verweis-Zeile ("Verwandtes
+ *         Thema bereits unter X beschrieben") statt voller Karte
+ *       - cross_category (Array) -> Badge "Betrifft auch: ..." an der Karte
+ *   - Alle 9 Kategorie-Sektionen nutzen jetzt zuerst dedup_findings, falls
+ *     vorhanden, und fallen sonst auf die alte buildPrioCard()-Logik mit
+ *     den rohen *_schwaechen_prioritized_html-Feldern zurück (Kompatibilität
+ *     mit alten Analysen, die noch kein dedup_findings haben).
+ *   - content_gaps_html bleibt unverändert über buildPrioCard() gerendert,
+ *     da dieses Feld nicht Teil der Dedup-Pipeline ist.
  *
  * ÄNDERUNGEN ggü. v3 (Schwächen-Feld-Konsolidierung):
  *   - Separate card('schwaechen', ...)-Karten für *_schwaechen_html ENTFERNT.
- *     Schwächen werden jetzt ausschließlich über buildPrioCard() aus den
- *     *_schwaechen_prioritized_html / *_opportunities_html /
- *     *_optimierungspotenziale_html / search_intent_content_gaps gerendert.
+ *     Schwächen werden jetzt ausschließlich über buildPrioCard() gerendert.
  *   - buildPrioCard() behält den HTML-Fallback für ALTE Analysen, deren
  *     prioritized-Feld noch echtes HTML statt JSON enthält.
  *   - card()/sanitize() bleiben unverändert (card gibt bei leerem Content ''
@@ -79,7 +93,7 @@
       .w-dropdown-list [data-analysis]{
         white-space:normal!important;overflow:visible!important;display:block!important;
       }
-      
+
       /* Share feedback */
       .share-success{animation:cvzShare .3s ease}
       @keyframes cvzShare{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
@@ -346,7 +360,7 @@
         .cvz-ki-btn,.cvz-pdf-btn{width:100%;justify-content:center;}
       }
 
-      /* === NEU: Roadmap aus priority_matrix-JSON === */
+      /* === Roadmap aus priority_matrix-JSON === */
       .cvz-roadmap{display:flex;flex-direction:column;gap:16px;}
       .cvz-rm-group{
         background:rgba(255,255,255,.03);
@@ -372,7 +386,7 @@
       .cvz-rm-rea{font-size:13px;color:#c4cdd6;line-height:1.6;margin-top:6px;}
       .cvz-rm-meta{
       font-size:11px;font-weight:600;color:#718096;
-      margin-top:4px;letter-spacing:.02em;  
+      margin-top:4px;letter-spacing:.02em;
       }
       .cvz-prio{display:flex;flex-direction:column;gap:14px;}
       .cvz-pr-item{padding-left:14px;border-left:3px solid #718096;}
@@ -386,6 +400,20 @@
       .cvz-pr-problem{font-size:14px;font-weight:600;color:#e8edf5;line-height:1.5;}
       .cvz-pr-loesung{font-size:13px;color:#c4cdd6;line-height:1.6;margin-top:6px;}
       .cvz-pr-aufwand{color:#718096;font-weight:600;}
+
+      /* === NEU: Cross-Reference-Verweis und Cross-Category-Badge === */
+      .cvz-pr-crossref{
+        display:flex;align-items:center;gap:8px;
+        padding:10px 14px;font-size:13px;color:#718096;
+        background:rgba(255,255,255,.02);border-radius:8px;
+      }
+      .cvz-pr-crossref-icon{color:#4a5568;flex-shrink:0;}
+      .cvz-pr-crossbadge{
+        display:inline-block;margin-left:8px;
+        font-size:10px;font-weight:600;letter-spacing:.02em;text-transform:none;
+        color:#a78bfa;background:rgba(167,139,250,.1);
+        padding:2px 8px;border-radius:6px;vertical-align:middle;
+      }
 
       /* Responsive */
       @media(max-width:768px){
@@ -421,7 +449,7 @@
   }
   function sc(v) { const n = parseFloat(v); return isNaN(n) ? null : n; }
 
-  // === NEU: robust gegen Objekt/Array/fehlend (gleiche Logik wie Agent-Fix) ===
+  // === robust gegen Objekt/Array/fehlend (gleiche Logik wie Agent-Fix) ===
   function toArray(v) {
     if (Array.isArray(v)) return v;
     if (v && typeof v === 'object') return [v];
@@ -460,8 +488,8 @@
         <div class="cvz-cards">${cards}</div>
       </div>`;
   }
-  
-// === NEU: Defensiver Roadmap-Renderer ===
+
+  // === Defensiver Roadmap-Renderer ===
   // Nutzt priority_matrix (JSON) wenn befüllt, sonst Fallback auf priority_matrix_html.
   // Dadurch funktioniert der Report mit ALTEN (HTML) und NEUEN (JSON) Analysen.
   function buildRoadmap(analysis) {
@@ -524,54 +552,113 @@
   }
 
   const CVZ_SEV = {
-  critical: { label: 'CRITICAL', cls: 'crit' },
-  high:     { label: 'HIGH',     cls: 'high' },
-  medium:   { label: 'MEDIUM',   cls: 'med'  },
-};
-function cvzAufwand(s) {
-  const m = { gering:'Gering', mittel:'Mittel', hoch:'Hoch' };
-  return m[String(s).toLowerCase()] || sanitize(String(s||''));
-}
+    critical: { label: 'CRITICAL', cls: 'crit' },
+    high:     { label: 'HIGH',     cls: 'high' },
+    medium:   { label: 'MEDIUM',   cls: 'med'  },
+  };
+  function cvzAufwand(s) {
+    const m = { gering:'Gering', mittel:'Mittel', hoch:'Hoch' };
+    return m[String(s).toLowerCase()] || sanitize(String(s||''));
+  }
 
-// ⚠️ Felder *_schwaechen_prioritized_html enthalten trotz "_html"-Suffix
-// JSON-DATEN (Array), KEIN HTML. Niemals direkt via innerHTML rendern —
-// immer über buildPrioCard().
-function buildPrioCard(field) {
-  let data = field;
-  if (typeof field === 'string') {
-    const t = field.trim();
-    if (t.startsWith('[') || t.startsWith('{')) {
-      try { data = JSON.parse(t); } catch (e) { data = null; }
-    } else {
-      // Alte Analyse: echtes HTML -> Fallback
-      return t ? card('empfehlungen', 'Priorisierte Handlungsempfehlungen', field) : '';
+  // ⚠️ Felder *_schwaechen_prioritized_html enthalten trotz "_html"-Suffix
+  // JSON-DATEN (Array), KEIN HTML. Niemals direkt via innerHTML rendern —
+  // immer über buildPrioCard() (Fallback für alte Analysen ohne dedup_findings)
+  // oder buildPrioCardFromDedup() (neue Analysen mit deduplizierten Findings).
+  function buildPrioCard(field) {
+    let data = field;
+    if (typeof field === 'string') {
+      const t = field.trim();
+      if (t.startsWith('[') || t.startsWith('{')) {
+        try { data = JSON.parse(t); } catch (e) { data = null; }
+      } else {
+        // Alte Analyse: echtes HTML -> Fallback
+        return t ? card('empfehlungen', 'Priorisierte Handlungsempfehlungen', field) : '';
+      }
     }
+    const items = toArray(data);
+    if (items.length === 0) return '';
+    let inner = '';
+    for (const it of items) {
+      const sevKey = String(it.severity || '').toLowerCase();
+      const sev = CVZ_SEV[sevKey] || { label: String(it.severity||'').toUpperCase(), cls: 'med' };
+      const problem = sanitize(String(it.problem || it.issue || ''));
+      const loesung = sanitize(String(it.loesung || ''));
+      const aufwand = it.aufwand ? cvzAufwand(it.aufwand) : '';
+      inner += `<div class="cvz-pr-item cvz-pr-${sev.cls}">`
+        + `<div class="cvz-pr-badge">${sev.label}</div>`
+        + `<div class="cvz-pr-problem">${problem}</div>`
+        + (loesung
+            ? `<div class="cvz-pr-loesung">💡 ${loesung}`
+              + (aufwand ? ` <span class="cvz-pr-aufwand">Aufwand: ${aufwand}</span>` : '')
+              + `</div>`
+            : '')
+        + `</div>`;
+    }
+    return `
+      <div class="cvz-card cvz-card-empfehlungen cvz-fi cvz-fi-3">
+        <div class="cvz-card-label"><div class="cvz-card-label-dot"></div>Priorisierte Handlungsempfehlungen</div>
+        <div class="cvz-card-body"><div class="cvz-prio">${inner}</div></div>
+      </div>`;
   }
-  const items = toArray(data);
-  if (items.length === 0) return '';
-  let inner = '';
-  for (const it of items) {
-    const sevKey = String(it.severity || '').toLowerCase();
-    const sev = CVZ_SEV[sevKey] || { label: String(it.severity||'').toUpperCase(), cls: 'med' };
-    const problem = sanitize(String(it.problem || it.issue || ''));
-    const loesung = sanitize(String(it.loesung || ''));
-    const aufwand = it.aufwand ? cvzAufwand(it.aufwand) : '';
-    inner += `<div class="cvz-pr-item cvz-pr-${sev.cls}">`
-      + `<div class="cvz-pr-badge">${sev.label}</div>`
-      + `<div class="cvz-pr-problem">${problem}</div>`
-      + (loesung
-          ? `<div class="cvz-pr-loesung">💡 ${loesung}`
-            + (aufwand ? ` <span class="cvz-pr-aufwand">Aufwand: ${aufwand}</span>` : '')
-            + `</div>`
-          : '')
-      + `</div>`;
+
+  // === NEU: Liest deduplizierte Findings aus dedup_findings (Supabase jsonb) ===
+  // dedup_findings enthält {category_findings: {...}, roadmap_matrix: {...}}.
+  // Gibt null zurück, wenn die Analyse noch keine dedup_findings hat (alte
+  // Analysen) - dann greift in den Sektions-Buildern der Fallback auf
+  // buildPrioCard() mit dem alten *_schwaechen_prioritized_html-Feld.
+  function getDedupCategory(analysis, label) {
+    let dd = analysis.dedup_findings;
+    if (!dd) return null;
+    if (typeof dd === 'string') {
+      try { dd = JSON.parse(dd); } catch (e) { return null; }
+    }
+    const cf = dd.category_findings || dd;
+    if (!cf || typeof cf !== 'object') return null;
+    const arr = cf[label];
+    return Array.isArray(arr) && arr.length > 0 ? arr : null;
   }
-  return `
-    <div class="cvz-card cvz-card-empfehlungen cvz-fi cvz-fi-3">
-      <div class="cvz-card-label"><div class="cvz-card-label-dot"></div>Priorisierte Handlungsempfehlungen</div>
-      <div class="cvz-card-body"><div class="cvz-prio">${inner}</div></div>
-    </div>`;
-}
+
+  // === NEU: Rendert eine Kategorie-Karte aus deduplizierten Findings ===
+  // Verhält sich analog zu buildPrioCard(), rendert aber zusätzlich:
+  //   - cross_reference: true  -> kompakte Verweis-Zeile statt voller Karte
+  //   - cross_category (Array) -> Badge "Betrifft auch: ..." an der Karte
+  function buildPrioCardFromDedup(items) {
+    if (!items || items.length === 0) return '';
+    let inner = '';
+    for (const it of items) {
+      if (it.cross_reference) {
+        const primaryCat = sanitize(String(it.primary_category || ''));
+        inner += `<div class="cvz-pr-crossref">`
+          + `<span class="cvz-pr-crossref-icon">↳</span> Verwandtes Thema bereits unter „${primaryCat}“ beschrieben.`
+          + `</div>`;
+        continue;
+      }
+      const sevKey = String(it.severity || '').toLowerCase();
+      const sev = CVZ_SEV[sevKey] || { label: String(it.severity||'').toUpperCase(), cls: 'med' };
+      const problem = sanitize(String(it.problem || ''));
+      const loesung = sanitize(String(it.loesung || ''));
+      const aufwand = it.aufwand ? cvzAufwand(it.aufwand) : '';
+      let crossBadge = '';
+      if (it.cross_category && Array.isArray(it.cross_category) && it.cross_category.length > 1) {
+        crossBadge = `<span class="cvz-pr-crossbadge">Betrifft auch: ${sanitize(it.cross_category.join(', '))}</span>`;
+      }
+      inner += `<div class="cvz-pr-item cvz-pr-${sev.cls}">`
+        + `<div class="cvz-pr-badge">${sev.label}${crossBadge}</div>`
+        + `<div class="cvz-pr-problem">${problem}</div>`
+        + (loesung
+            ? `<div class="cvz-pr-loesung">💡 ${loesung}`
+              + (aufwand ? ` <span class="cvz-pr-aufwand">Aufwand: ${aufwand}</span>` : '')
+              + `</div>`
+            : '')
+        + `</div>`;
+    }
+    return `
+      <div class="cvz-card cvz-card-empfehlungen cvz-fi cvz-fi-3">
+        <div class="cvz-card-label"><div class="cvz-card-label-dot"></div>Priorisierte Handlungsempfehlungen</div>
+        <div class="cvz-card-body"><div class="cvz-prio">${inner}</div></div>
+      </div>`;
+  }
 
   // ── XSS-Sanitization ──────────────────────────────────────────────────────
   // Erlaubt nur sichere HTML-Tags aus Claude-Output (Listen, Bold, Paragraphen)
@@ -1051,56 +1138,94 @@ function buildPrioCard(field) {
     renderExecSummary(analysis);
 
     // Deep Dive Kategorien
-    // HINWEIS: Schwächen werden ausschließlich über buildPrioCard() gerendert.
-    // Die früheren card('schwaechen', ...)-Karten wurden entfernt (Feld-Konsolidierung).
+    // HINWEIS: Schwächen werden zuerst über dedup_findings (deduplizierte
+    // Findings inkl. Cross-Reference/Cross-Category) gerendert, falls
+    // vorhanden. Fallback: buildPrioCard() mit den rohen
+    // *_schwaechen_prioritized_html-Feldern (alte Analysen ohne dedup_findings).
     const sections = {
-      '.section-deep-dive-hero': () => buildCatSection('Hero', analysis.hero_score,
-        card('summary','Zusammenfassung', txt(analysis.hero_summary)) +
-        card('staerken','Stärken', analysis.hero_staerken_html) +
-        buildPrioCard(analysis.hero_schwaechen_prioritized_html)),
+      '.section-deep-dive-hero': () => {
+        const dedupItems = getDedupCategory(analysis, 'Hero');
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.hero_schwaechen_prioritized_html);
+        return buildCatSection('Hero', analysis.hero_score,
+          card('summary','Zusammenfassung', txt(analysis.hero_summary)) +
+          card('staerken','Stärken', analysis.hero_staerken_html) +
+          prio);
+      },
 
-      '.section-deep-dive-content': () => buildCatSection('Content', analysis.content_score,
-        card('summary','Zusammenfassung', txt(analysis.content_summary)) +
-        card('staerken','Stärken', analysis.content_staerken_html) +
-        buildPrioCard(analysis.content_schwaechen_prioritized_html) +
-        buildPrioCard(analysis.content_gaps_html)),
+      '.section-deep-dive-content': () => {
+        const dedupItems = getDedupCategory(analysis, 'Content');
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.content_schwaechen_prioritized_html);
+        return buildCatSection('Content', analysis.content_score,
+          card('summary','Zusammenfassung', txt(analysis.content_summary)) +
+          card('staerken','Stärken', analysis.content_staerken_html) +
+          prio +
+          buildPrioCard(analysis.content_gaps_html));
+      },
 
-      '.section-deep-dive-zielgruppe': () => buildCatSection('Zielgruppe', analysis.zielgruppe_score,
-        card('summary','Zusammenfassung', txt(analysis.zielgruppe_summary)) +
-        card('staerken','Stärken', analysis.zielgruppe_staerken_html) +
-        buildPrioCard(analysis.zielgruppe_schwaechen_prioritized_html)),
+      '.section-deep-dive-zielgruppe': () => {
+        const dedupItems = getDedupCategory(analysis, 'Zielgruppe');
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.zielgruppe_schwaechen_prioritized_html);
+        return buildCatSection('Zielgruppe', analysis.zielgruppe_score,
+          card('summary','Zusammenfassung', txt(analysis.zielgruppe_summary)) +
+          card('staerken','Stärken', analysis.zielgruppe_staerken_html) +
+          prio);
+      },
 
-     '.section-deep-dive-conversion': () => buildCatSection('Conversion', analysis.conversion_score,
-        card('summary','Zusammenfassung', txt(analysis.conversion_summary)) +
-        card('staerken','Stärken', analysis.conversion_staerken_html) +
-        buildPrioCard(analysis.conversion_schwaechen_prioritized_html)),
+      '.section-deep-dive-conversion': () => {
+        const dedupItems = getDedupCategory(analysis, 'Conversion');
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.conversion_schwaechen_prioritized_html);
+        return buildCatSection('Conversion', analysis.conversion_score,
+          card('summary','Zusammenfassung', txt(analysis.conversion_summary)) +
+          card('staerken','Stärken', analysis.conversion_staerken_html) +
+          prio);
+      },
 
-     '.section-deep-dive-struktur': () => buildCatSection('Struktur', analysis.struktur_score,
-        card('summary','Zusammenfassung', txt(analysis.struktur_summary)) +
-        card('staerken','Stärken', analysis.struktur_staerken_html) +
-        buildPrioCard(analysis.struktur_schwaechen_prioritized_html)),
-      
-    '.section-deep-dive-searchintent': () => buildCatSection('Search Intent', analysis.search_intent_score,
-      card('summary','Bewertung', txt(analysis.search_intent_bewertung)) +
-      buildPrioCard(analysis.search_intent_content_gaps)),
+      '.section-deep-dive-struktur': () => {
+        const dedupItems = getDedupCategory(analysis, 'Struktur');
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.struktur_schwaechen_prioritized_html);
+        return buildCatSection('Struktur', analysis.struktur_score,
+          card('summary','Zusammenfassung', txt(analysis.struktur_summary)) +
+          card('staerken','Stärken', analysis.struktur_staerken_html) +
+          prio);
+      },
 
-      '.section-deep-dive-differenzierung': () => buildCatSection('Differenzierung', analysis.wettbewerb_score,
-        card('summary','Zusammenfassung', txt(analysis.wettbewerb_summary)) +
-        card('staerken','Stärken', analysis.wettbewerb_staerken_html) +
-        buildPrioCard(analysis.wettbewerb_schwaechen_prioritized_html)),
+      '.section-deep-dive-searchintent': () => {
+        const dedupItems = getDedupCategory(analysis, 'Search Intent');
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.search_intent_content_gaps);
+        return buildCatSection('Search Intent', analysis.search_intent_score,
+          card('summary','Bewertung', txt(analysis.search_intent_bewertung)) +
+          prio);
+      },
 
-      '.section-deep-dive-performance': () => buildCatSection('Performance', analysis.performance_score,
-        card('summary','Zusammenfassung', txt(analysis.performance_summary)) +
-        card('summary','Desktop', txt(analysis.performance_desktop_zusammenfassung)) +
-        card('summary','Mobil', txt(analysis.performance_mobile_zusammenfassung)) +
-        buildPrioCard(analysis.performance_opportunities_html)),
+      '.section-deep-dive-differenzierung': () => {
+        const dedupItems = getDedupCategory(analysis, 'Wettbewerb');
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.wettbewerb_schwaechen_prioritized_html);
+        return buildCatSection('Differenzierung', analysis.wettbewerb_score,
+          card('summary','Zusammenfassung', txt(analysis.wettbewerb_summary)) +
+          card('staerken','Stärken', analysis.wettbewerb_staerken_html) +
+          prio);
+      },
 
-      '.section-deep-dive-ai': () => buildCatSection('AI Sichtbarkeit', analysis.ai_readiness_score,
-        card('summary','Zusammenfassung', txt(analysis.ai_readiness_bewertung)) +
-        card('staerken','Stärken', analysis.ai_readiness_staerken_html) +
-        buildPrioCard(analysis.ai_readiness_optimierungspotenziale_html)),
-      
-      // === GEÄNDERT: nutzt buildRoadmap (JSON mit HTML-Fallback) ===
+      '.section-deep-dive-performance': () => {
+        const dedupItems = getDedupCategory(analysis, 'Performance');
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.performance_opportunities_html);
+        return buildCatSection('Performance', analysis.performance_score,
+          card('summary','Zusammenfassung', txt(analysis.performance_summary)) +
+          card('summary','Desktop', txt(analysis.performance_desktop_zusammenfassung)) +
+          card('summary','Mobil', txt(analysis.performance_mobile_zusammenfassung)) +
+          prio);
+      },
+
+      '.section-deep-dive-ai': () => {
+        const dedupItems = getDedupCategory(analysis, 'AI Readiness');
+        const prio = dedupItems ? buildPrioCardFromDedup(dedupItems) : buildPrioCard(analysis.ai_readiness_optimierungspotenziale_html);
+        return buildCatSection('AI Sichtbarkeit', analysis.ai_readiness_score,
+          card('summary','Zusammenfassung', txt(analysis.ai_readiness_bewertung)) +
+          card('staerken','Stärken', analysis.ai_readiness_staerken_html) +
+          prio);
+      },
+
+      // === nutzt buildRoadmap (JSON mit HTML-Fallback) ===
       '.section-roadmap': () => buildRoadmap(analysis),
     };
 
@@ -1110,7 +1235,7 @@ function buildPrioCard(field) {
     });
 
     // ── KI-Agent Buttons ──────────────────────────────────────────────────────
-    // GEAENDERT: KI-Agent-Button NUR fuer den Ersteller. Team-Mitglieder sehen
+    // KI-Agent-Button NUR fuer den Ersteller. Team-Mitglieder sehen
     // nur den PDF-Button + einen Hinweis. Backend erzwingt dies ohnehin (403),
     // hier nur UX. PDF-Download steht dem ganzen Team offen.
     const isCreator = !!currentUserId && analysis.user_id === currentUserId;
