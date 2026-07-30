@@ -665,10 +665,10 @@
   };
 
   // NEU: Score-Farblogik fuer overall_score_weighted
-  // 8-10 = tuerkis, 6-7.9 = blau, 4-5.9 = orange, 0-3.9 = rot
+  // 8-10 = gruen, 6-7.9 = tuerkis, 4-5.9 = orange, 0-3.9 = rot
   function getScoreColor(score) {
-    if (score >= 8)  return '#4fd1c5';
-    if (score >= 6)  return '#3b82f6';
+    if (score >= 8)  return '#059669';
+    if (score >= 6)  return '#4fd1c5';
     if (score >= 4)  return '#f59e0b';
     return '#ef4444';
   }
