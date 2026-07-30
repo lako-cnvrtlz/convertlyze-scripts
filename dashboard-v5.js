@@ -644,7 +644,8 @@
         '<div class="header-cell">DATUM</div>' +
         '<div class="header-cell">ANSICHT</div>' +
         '<div class="header-cell">KI-AGENT</div>' +
-        '<div class="header-cell">REPORT</div>';
+        '<div class="header-cell">REPORT</div>' +
+        '<div class="header-cell">SCORE</div>';
       container.insertBefore(header, container.firstChild);
     }
     return header;
@@ -662,6 +663,38 @@
     error:      { text: 'Fehler',         cls: 'status-error' },
     failed:     { text: 'Fehler',         cls: 'status-error' },
   };
+
+  // NEU: Score-Farblogik fuer overall_score_weighted
+  // 8-10 = tuerkis, 6-7.9 = blau, 4-5.9 = orange, 0-3.9 = rot
+  function getScoreColor(score) {
+    if (score >= 8)  return '#4fd1c5';
+    if (score >= 6)  return '#3b82f6';
+    if (score >= 4)  return '#f59e0b';
+    return '#ef4444';
+  }
+
+  function createScoreBadge(score) {
+    var hasScore = typeof score === 'number' && !isNaN(score);
+    var badge = document.createElement('div');
+    badge.className = 'score-badge';
+    if (hasScore) {
+      var color = getScoreColor(score);
+      badge.textContent = score.toFixed(1);
+      badge.style.cssText =
+        'display:inline-flex;align-items:center;justify-content:center;' +
+        'min-width:40px;padding:4px 10px;border-radius:6px;' +
+        'font-weight:700;font-size:13px;line-height:1;' +
+        'background:' + color + ';color:#0d1117;';
+    } else {
+      badge.textContent = '-';
+      badge.style.cssText =
+        'display:inline-flex;align-items:center;justify-content:center;' +
+        'min-width:40px;padding:4px 10px;border-radius:6px;' +
+        'font-weight:700;font-size:13px;line-height:1;' +
+        'background:#252d3d;color:#7a8ba8;';
+    }
+    return badge;
+  }
 
   function createAnalysisRow(analysis) {
     var isMobile    = window.innerWidth <= 768;
@@ -707,6 +740,7 @@
         '<div class="analysis-keyword"><div class="text-block-keyword"></div></div>' +
         '<div class="analysis-status"><div class="status-badge ' + statusInfo.cls + '"></div></div>' +
         '<div class="analysis-date"><div class="text-block-date"></div></div>' +
+        '<div class="analysis-score" style="display:flex;justify-content:center;margin-top:8px;"></div>' +
         '<div class="action-cell" style="display:flex;justify-content:center;gap:16px;width:100%;margin-top:8px;">' +
           '<a href="#" class="aktion-link w-inline-block ' + actionClass + '" target="_blank">' + ICONS.eye + '</a>' +
           '<a href="#" class="aktion-link w-inline-block ' + agentClass + '" target="_blank">' + ICONS.agent + '</a>' +
@@ -720,7 +754,8 @@
         '<div class="analysis-date"><div class="text-block-date"></div></div>' +
         '<div class="action-cell"><a href="#" class="aktion-link w-inline-block ' + actionClass + '" target="_blank">' + ICONS.eye + '</a></div>' +
         '<div class="action-cell"><a href="#" class="aktion-link w-inline-block ' + agentClass + '" target="_blank">' + ICONS.agent + '</a></div>' +
-        '<div class="action-cell">' + dlBtnHtml + '</div>';
+        '<div class="action-cell">' + dlBtnHtml + '</div>' +
+        '<div class="analysis-score" style="display:flex;align-items:center;justify-content:center;"></div>';
     }
 
     // XSS-safe: User-Daten per textContent
@@ -730,6 +765,10 @@
     row.querySelector('.text-block-keyword').textContent = truncate(analysis.keyword, maxKeyword);
     row.querySelector('.status-badge').textContent       = statusInfo.text;
     row.querySelector('.text-block-date').textContent    = formattedDate;
+
+    // NEU: Score-Badge einfuegen (overall_score_weighted)
+    var scoreVal = parseFloat(analysis.overall_score_weighted);
+    row.querySelector('.analysis-score').appendChild(createScoreBadge(scoreVal));
 
     // Links per href (kein innerHTML)
     var links = row.querySelectorAll('a.aktion-link');
