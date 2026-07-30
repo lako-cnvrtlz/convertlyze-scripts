@@ -682,14 +682,14 @@
       badge.textContent = score.toFixed(1);
       badge.style.cssText =
         'display:inline-flex;align-items:center;justify-content:center;' +
-        'min-width:40px;padding:4px 10px;border-radius:6px;' +
+        'min-width:44px;padding:8px 14px;border-radius:9999px;' +
         'font-weight:700;font-size:13px;line-height:1;' +
         'background:' + color + ';color:#0d1117;';
     } else {
       badge.textContent = '-';
       badge.style.cssText =
         'display:inline-flex;align-items:center;justify-content:center;' +
-        'min-width:40px;padding:4px 10px;border-radius:6px;' +
+        'min-width:44px;padding:8px 14px;border-radius:9999px;' +
         'font-weight:700;font-size:13px;line-height:1;' +
         'background:#252d3d;color:#7a8ba8;';
     }
