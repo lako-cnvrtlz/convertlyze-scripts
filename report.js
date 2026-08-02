@@ -284,7 +284,7 @@
       .cvz-heading-wrap,.cvz-heading-wrap *{line-height:1.2!important;}
 
       /* Webflow Section-Wrapper resetten */
-      .section-hero-info,
+      .section-hero-analyse,
       .section-executive-summary,
       .section-deep-dive-hero,
       .section-deep-dive-content,
@@ -310,8 +310,8 @@
 
       /* Info Grid (Hero Block) */
       .cvz-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;}
-      .section-hero-info .cvz-card{border-bottom:none!important;}
-      .section-hero-info .cvz-card{
+      .section-hero-analyse .cvz-card{border-bottom:none!important;}
+      .section-hero-analyse .cvz-card{
         background:#0d1117!important;
         border:1px solid rgba(255,255,255,.07)!important;
         color:#e2e8f0!important;
@@ -1037,7 +1037,7 @@
       spacer.style.display = 'none';
 
       // Vor dem ersten Section-Wrapper einfügen
-      const firstSection = document.querySelector('.section-hero-info') ||
+      const firstSection = document.querySelector('.section-hero-analyse') ||
                            document.querySelector('.section-executive-summary');
       if (firstSection) {
         firstSection.parentNode.insertBefore(sentinel, firstSection);
@@ -1122,7 +1122,7 @@
 
     // Hero Info Block
     (function renderHeroInfo() {
-      const c = document.querySelector('.section-hero-info');
+      const c = document.querySelector('.section-hero-analyse');
       if (!c) return;
 
       function infoRow(label, value) {
@@ -1303,7 +1303,7 @@
           (sub ? '<div class="cvz-heading-sub">' + sub + '</div>' : '');
         el.insertBefore(wrap, el.firstChild);
       }
-      heading('.section-hero-info',            'Deine Analyse', '');
+      heading('.section-hero-analyse',            'Deine Analyse', '');
       heading('.section-executive-summary',    'Executive Summary', 'Die wichtigsten Erkenntnisse auf einen Blick');
       heading('.section-deep-dive-hero',       'Deep Dive', 'Detaillierte Analyse jeder Kategorie');
       heading('.section-deep-dive-performance','Performance &amp; AI Sichtbarkeit', 'Performance und AI Readiness fließen nicht in den Gesamt-Score ein. Performance-Optimierungen erfordern meist hauptsächlich technische Umsetzung. Bei AI Readiness ist es gemischt – strukturierte Daten brauchen Entwicklungs-Support, Inhaltsstruktur und Semantik kannst du direkt selbst angehen.');
