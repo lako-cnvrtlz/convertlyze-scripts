@@ -1,6 +1,19 @@
 /**
- * Convertlyze – Report Script v5
+ * Convertlyze – Report Script v6
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
+ *
+ * ÄNDERUNGEN ggü. v5 (Performance & AI Sichtbarkeit in Executive Summary):
+ *   - renderExecSummary() rendert jetzt zusätzlich zwei Balken für
+ *     Performance und AI Sichtbarkeit, getrennt durch eine Linie mit dem
+ *     Label "Nicht im Gesamt-Score". Die Balken sind visuell zurückgenommen
+ *     (grau statt Teal), damit klar bleibt, dass sie den Ring-Wert oben
+ *     nicht beeinflussen.
+ *   - Fehlender Score (PageSpeed-Timeout, alte Analyse ohne
+ *     ai_readiness_score) -> Zeile wird ausgelassen. Fehlen beide, entfällt
+ *     auch die Trennlinie.
+ *   - NEU im CSS: .cvz-bars-divider, .cvz-bars-divider-t, .cvz-br-extra
+ *   - Der PDF-Report (Playwright-Template) ist NICHT angepasst und zeigt
+ *     die beiden Werte weiterhin nur im Deep Dive.
  *
  * ÄNDERUNGEN ggü. v4 (Dedup-Findings-Integration):
  *   - NEU: getDedupCategory() liest deduplizierte Findings aus
@@ -259,6 +272,27 @@
               animation:cvzBar 1s cubic-bezier(.4,0,.2,1) .65s forwards;transition:opacity .15s,filter .15s;}
       .cvz-br:hover .cvz-bf{opacity:1;filter:brightness(1.15)}
       .cvz-bv{font-size:14px;font-family:'DM Mono',monospace;width:32px;text-align:right;flex-shrink:0;color:#4fd1c5;}
+
+      /* Kategorien außerhalb des Gesamt-Scores (Performance, AI Sichtbarkeit) */
+      .cvz-bars-divider{
+        display:flex;align-items:center;gap:10px;margin:14px 0 10px;
+      }
+      .cvz-bars-divider::before,
+      .cvz-bars-divider::after{
+        content:'';flex:1;height:1px;background:rgba(255,255,255,.08);
+      }
+      .cvz-bars-divider-t{
+        font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+        color:#4a5568;white-space:nowrap;
+      }
+      .cvz-br-extra .cvz-bl{color:#5a6675;}
+      .cvz-br-extra:hover .cvz-bl{color:#c4cdd6;}
+      .cvz-br-extra .cvz-bf{background:#718096;opacity:.55;}
+      .cvz-br-extra:hover .cvz-bf{opacity:.8;}
+      .cvz-br-extra .cvz-bv{color:#8b98a8;}
+      @media(max-width:768px){
+        .cvz-bars-divider-t{font-size:8px;letter-spacing:.06em;}
+      }
 
       /* Executive Summary: Badges */
       .cvz-badges{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;}
@@ -866,6 +900,8 @@
     }
 
     const overall = sc(analysis.overall_score_weighted);
+
+    // Kategorien, die in den gewichteten Gesamt-Score einfließen
     const categories = [
       { label: 'Hero',            score: sc(analysis.hero_score) },
       { label: 'Content',         score: sc(analysis.content_score) },
@@ -876,15 +912,35 @@
       { label: 'Differenzierung', score: sc(analysis.wettbewerb_score) },
     ];
 
-    const bars = categories.map(({ label, score }) => {
+    // Kategorien AUSSERHALB des Gesamt-Scores. Werden unterhalb einer
+    // Trennlinie und visuell zurückgenommen (grau) gerendert, damit klar ist,
+    // dass sie den Ring-Wert oben nicht beeinflussen.
+    // Fehlender Score (z.B. PageSpeed-Timeout oder alte Analyse ohne
+    // ai_readiness_score) -> Zeile wird komplett weggelassen.
+    const extraCategories = [
+      { label: 'Performance',     score: sc(analysis.performance_score) },
+      { label: 'AI Sichtbarkeit', score: sc(analysis.ai_readiness_score) },
+    ].filter(c => c.score !== null);
+
+    function bar({ label, score }, extraCls) {
       const pct = score !== null ? ((score / 10) * 100).toFixed(1) : '0';
       const val = score !== null ? score.toFixed(1) : '–';
-      return `<div class="cvz-br">
-        <div class="cvz-bl">${label}</div>
+      return `<div class="cvz-br ${extraCls || ''}">
+        <div class="cvz-bl" title="${label}">${label}</div>
         <div class="cvz-bt"><div class="cvz-bf" style="--bw:${pct}%;"></div></div>
         <div class="cvz-bv">${val}</div>
       </div>`;
-    }).join('');
+    }
+
+    const bars = categories.map(c => bar(c)).join('');
+
+    // Trennlinie nur rendern, wenn darunter auch wirklich etwas steht
+    const extraBars = extraCategories.length > 0
+      ? `<div class="cvz-bars-divider">
+           <span class="cvz-bars-divider-t">Nicht im Gesamt-Score</span>
+         </div>` +
+        extraCategories.map(c => bar(c, 'cvz-br-extra')).join('')
+      : '';
 
     const rColor = getRingColor(overall);
     const rBg    = getRingBg(overall);
@@ -927,7 +983,7 @@
             </div>
             <div class="cvz-ring-l">Gesamt</div>
           </div>
-          <div class="cvz-bars">${bars}</div>
+          <div class="cvz-bars">${bars}${extraBars}</div>
         </div>
         <div class="cvz-badges cvz-fi cvz-fi-3">
           ${badge('Industry Fit', analysis.industry_fit_summary)}
