@@ -79,6 +79,15 @@
   // ODER hier den vorhandenen Selektor eintragen (z.B. '#mein-cta' / '.meine-klasse').
   const CTA_SELECTOR = '.footer-cta-hell';
 
+  // ── AI-Hinweis-Selektor ─────────────────────────────────────────────────────
+  // Statisches Webflow-Element mit dem KI-Hinweistext (z.B. EU-AI-Act-Kennzeichnung).
+  // Bewusst KEIN vom Script erzeugter Text mehr (siehe CHANGELOG) - lebt komplett
+  // in Webflow, damit er auch bei JS-Fehlern/CDN-Ausfall sichtbar bleibt.
+  // Wird trotzdem erst zusammen mit dem CTA sichtbar gemacht (per .analysis-loaded),
+  // damit er nicht schon vor den echten Analyse-Daten aufblitzt.
+  // In Webflow dem Element die Klasse "section-ai-notice" geben.
+  const AI_NOTICE_SELECTOR = '.section-ai-notice';
+
   // ── Supabase Config ─────────────────────────────────────────────────────────
   const SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
@@ -114,6 +123,11 @@
       /* CTA erst nach vollstaendigem Laden sichtbar (Webflow-Element) */
       ${CTA_SELECTOR}{visibility:hidden!important;opacity:0!important;}
       .analysis-loaded ${CTA_SELECTOR}{
+        visibility:visible!important;opacity:1!important;transition:opacity .3s ease;
+      }
+      /* KI-Hinweis (statisches Webflow-Element) - analog zum CTA erst nach Laden sichtbar */
+      ${AI_NOTICE_SELECTOR}{visibility:hidden!important;opacity:0!important;}
+      .analysis-loaded ${AI_NOTICE_SELECTOR}{
         visibility:visible!important;opacity:1!important;transition:opacity .3s ease;
       }
       /* Report-Loader (Spinner) - sichtbar bis .analysis-loaded gesetzt ist */
@@ -1391,7 +1405,6 @@
         const el = document.querySelector(sel);
         if (el) el.id = id;
       });
-
     })();
 
     // Share Button
