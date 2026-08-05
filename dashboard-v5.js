@@ -71,7 +71,6 @@
     hasPdfAccess:    false,
     container:       null,
     realtimeChannel: null,
-    pdfUrlCache:     {},
     pollingTimer:    null,
   };
 
@@ -209,9 +208,7 @@
       console.error('[CVZ] Analysen laden fehlgeschlagen:', result.error);
       return [];
     }
-    var data = result.data || [];
-    data.forEach(function (a) { if (a.pdf_url) state.pdfUrlCache[a.id] = a.pdf_url; });
-    return data;
+    return result.data || [];
   }
 
   async function triggerCreditResetIfPaid(user) {
@@ -720,7 +717,7 @@
       ? 'Analyse muss abgeschlossen sein'
       : !canAccessPdf(analysis)
         ? 'PDF-Report nur fuer kostenpflichtige Plaene oder Pay-per-Use verfuegbar'
-        : (state.pdfUrlCache[analysis.id] ? 'Report oeffnen' : 'Report generieren & herunterladen');
+        : 'Report herunterladen';
 
     var dlBtnHtml =
       '<button class="aktion-link download-link ' + (canDownload ? '' : 'action-disabled') + '"' +
@@ -867,7 +864,21 @@
   // -- PDF download -----------------------------------------------------------
 
   async function triggerBlobDownload(url, fileName) {
-    var blob   = await (await fetch(url)).blob();
+    var res = await fetch(url);
+
+    if (!res.ok) {
+      var errText = await res.text();
+      throw new Error('Download fehlgeschlagen (' + res.status + '): ' + errText.slice(0, 200));
+    }
+
+    // Storage liefert bei Fehlern JSON statt PDF - abfangen bevor es als .pdf landet
+    var contentType = res.headers.get('content-type') || '';
+    if (contentType.indexOf('application/json') !== -1) {
+      var body = await res.text();
+      throw new Error('Unerwartete Antwort: ' + body.slice(0, 200));
+    }
+
+    var blob    = await res.blob();
     var blobUrl = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href     = blobUrl;
@@ -897,14 +908,6 @@
 
       var ext      = isAgency ? 'docx' : 'pdf';
       var fileName = 'convertlyze-' + domain + datetime + '.' + ext;
-      var cached   = state.pdfUrlCache[analysisId];
-
-      if (cached) {
-        await triggerBlobDownload(cached, fileName);
-        btn.classList.remove('loading');
-        btn.title = 'Report herunterladen';
-        return;
-      }
 
       var response = await fetch(
         CONFIG.generateReportUrl,
@@ -927,18 +930,6 @@
       }
 
       var downloadUrl = (await response.json()).downloadUrl;
-      state.pdfUrlCache[analysisId] = downloadUrl;
-
-      // Async persistieren - kein await noetig.
-      // WHY RPC statt direktem .from('analyses').update(): SECURITY DEFINER kapselt
-      // den Write, prueft Team-Zugehoerigkeit serverseitig, keine offene anon-UPDATE-Policy.
-      window.supabase
-        .rpc('set_analysis_pdf_url', {
-          p_memberstack_id: state.memberstackId,
-          p_analysis_id:    analysisId,
-          p_pdf_url:        downloadUrl,
-        })
-        .then(function () {});
 
       await triggerBlobDownload(downloadUrl, fileName);
       btn.classList.remove('loading');
