@@ -793,8 +793,18 @@
           throw new Error(e.error || 'Generierung fehlgeschlagen');
         }
         const { downloadUrl } = await resp.json();
-        // Blob-Download
-        const blob    = await (await fetch(downloadUrl)).blob();
+
+        const fileRes = await fetch(downloadUrl);
+        if (!fileRes.ok) {
+          const t = await fileRes.text();
+          throw new Error('Download fehlgeschlagen (' + fileRes.status + '): ' + t.slice(0, 200));
+        }
+        if ((fileRes.headers.get('content-type') || '').indexOf('application/json') !== -1) {
+          const t = await fileRes.text();
+          throw new Error('Unerwartete Antwort: ' + t.slice(0, 200));
+        }
+
+        const blob    = await fileRes.blob();
         const blobUrl = URL.createObjectURL(blob);
         const a       = document.createElement('a');
         a.href        = blobUrl;
@@ -952,7 +962,6 @@
         <div class="cvz-badge-tx">${text || 'Keine Daten verfügbar.'}</div>
       </div>`;
     }
-
     function execSection(type, items) {
       const isS     = type === 'staerken';
       const color   = isS ? '#4fd1c5' : '#ef4444';
@@ -1383,19 +1392,6 @@
         if (el) el.id = id;
       });
 
-    // EU AI Act Hinweis
-    var kiBtn = document.querySelector('.section-ki-agent-btn');
-    if (kiBtn) {
-      var aiNotice = document.createElement('div');
-      aiNotice.style.cssText = 'max-width:1200px;margin:0 auto;padding:16px 24px 32px;text-align:center;font-family:Geist,DM Sans,sans-serif;';
-      aiNotice.innerHTML = '<p style="font-size:12px;color:#4a5568;line-height:1.6;margin:0;">'+
-        'KI-generierter Bericht · Erstellt mit Claude (Anthropic) · '+
-        'Diese Analyse wurde vollständig durch ein KI-System erstellt. '+
-        'Alle Empfehlungen sollten durch eine qualifizierte Fachperson geprüft werden. '+
-        'Alle Angaben ohne Gewähr.'+
-        '</p>';
-      kiBtn.parentNode.insertBefore(aiNotice, kiBtn.nextSibling);
-    }
     })();
 
     // Share Button
