@@ -114,6 +114,7 @@
     margin-bottom: 10px; cursor: pointer;
   }
   .cvz-competitor-item.selected { border-color: var(--cvz-teal); background: var(--cvz-teal-dim); }
+  .cvz-competitor-item.locked { opacity: 0.45; cursor: not-allowed; }
   .cvz-competitor-item input[type="checkbox"] { margin-top: 3px; accent-color: var(--cvz-teal); }
   .cvz-competitor-item .title { font-weight: 600; font-size: 0.92rem; }
   .cvz-competitor-item .url { font-size: 0.78rem; color: var(--cvz-text-muted); word-break: break-all; }
@@ -183,7 +184,7 @@
   .cvz-msg.assistant p { margin: 0 0 10px; color: var(--cvz-text); }
   .cvz-msg.assistant p:last-child { margin-bottom: 0; }
   .cvz-msg.assistant h1, .cvz-msg.assistant h2, .cvz-msg.assistant h3 {
-    color: var(--cvz-teal); margin: 16px 0 8px; font-size: 1.05rem;
+    color: var(--cvz-teal); margin: 10px 0 4px; font-size: 1.05rem; text-align: left; line-height: 1.25;
   }
   .cvz-msg.assistant h1:first-child, .cvz-msg.assistant h2:first-child, .cvz-msg.assistant h3:first-child { margin-top: 0; }
   .cvz-msg.assistant strong { color: var(--cvz-text); font-weight: 700; }
