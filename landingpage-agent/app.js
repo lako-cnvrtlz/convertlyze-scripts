@@ -54,11 +54,9 @@ async function cvzResolveIdentity() {
 const cvzState = {
   step: 0,
   keyword: '',
-  // Enum-Slug fuer DB und Backend-Whitelist (z.B. 'saas').
+  // Entweder ein fester Slug (z.B. 'saas') oder der Freitext aus
+  // "Eigene Eingabe" - beides landet in derselben DB-Spalte.
   business_type: '',
-  // Freitext bei Auswahl "Eigene Eingabe". Geht NICHT in business_type,
-  // sondern in existing_content - business_type bleibt ein Enum.
-  business_type_custom: '',
   target_audience: '',
   conversion_goal: '',
   funnel_stage: '',
@@ -97,22 +95,22 @@ function cvzShowError(msg) {
 // ==================== SCHRITT 0: THEMA ====================
 
 // ACHTUNG - DIE VERBINDLICHE LISTE LIEGT IM BACKEND.
-// value = Enum-Slug, der an /api/page-agent/brief geschickt und in
-//         Supabase (Spalte business_type) gespeichert wird.
+// value = Wert, der an /api/page-agent/brief geschickt und in Supabase
+//         (Spalte business_type, text null - kein Constraint) gespeichert wird.
 // label = reiner Anzeigetext im Formular.
 //
-// Die value-Strings MUESSEN exakt der Whitelist in der Flask-Validierung
+// Die fuenf festen Slugs muessen der Whitelist in der Flask-Validierung
 // entsprechen - dort, wo "Ungueltiger Business-Typ" geworfen wird.
-// Nur 'sonstiges' ist aus der DB bestaetigt, die uebrigen Slugs sind
-// daraus abgeleitet und damit GERATEN. Vor dem Deploy gegen den
-// Backend-Code abgleichen, sonst kippt der Launch mit derselben Meldung.
+// Sie sind GERATEN und vor dem Deploy gegen den Backend-Code abzugleichen.
 //
-// Eigene Kategorien sind erlaubt, aber NICHT in dieser Spalte: sie landen
-// als Freitext in business_type_custom, waehrend business_type auf
-// 'sonstiges' steht. Grund: sobald beliebige Strings in business_type
-// stehen duerfen, sammeln sich dort Varianten wie "SaaS", "saas" und
-// "Software as a Service" - dann laesst sich nicht mehr auswerten,
-// welche Kategorie welche Scores erzielt.
+// Bei "Eigene Eingabe" wird der Freitext DIREKT als business_type
+// gespeichert. Voraussetzung: die Flask-Whitelist laesst freie Werte zu
+// (siehe Chat) - sonst kippt der Launch mit "Ungueltiger Business-Typ".
+//
+// Preis dieser Entscheidung: in der Spalte stehen ab jetzt Slugs UND
+// Freitext gemischt. Auswertungen nach Kategorie funktionieren nur noch
+// fuer die fuenf festen Werte, alles andere ist ein Sammelbecken mit
+// Varianten wie "Ausbildungsanbieter" und "Ausbildungs-Anbieter".
 const CVZ_BUSINESS_TYPES = [
   { value: 'saas',               label: 'SaaS / Software' },
   { value: 'beratung',           label: 'Beratung / Agentur' },
@@ -121,13 +119,18 @@ const CVZ_BUSINESS_TYPES = [
   { value: 'marktplatz',         label: 'Marktplatz / Plattform' }
 ];
 
-// Auswahl "Eigene Eingabe" wird als dieser Enum-Wert gespeichert.
-// Aus dem Supabase-Screenshot bestaetigt.
-const CVZ_BUSINESS_TYPE_OTHER = 'sonstiges';
+// Nur ein Marker fuer die Dropdown-Option - wird NIE gespeichert oder
+// verschickt. Der doppelte Unterstrich macht eine Kollision mit einer
+// echten Nutzereingabe praktisch unmoeglich.
+const CVZ_BUSINESS_TYPE_CUSTOM = '__custom__';
 const CVZ_BUSINESS_TYPE_MAXLEN = 60;
 
+// Freitext liegt vor, wenn ein Wert gesetzt ist, der nicht zu den festen
+// Slugs gehoert. So ueberlebt die Auswahl auch das Zurueckspringen von
+// Schritt 2 auf Schritt 1, bei dem das Formular neu gerendert wird.
 function cvzBusinessTypeIsCustom() {
-  return cvzState.business_type === CVZ_BUSINESS_TYPE_OTHER;
+  return !!cvzState.business_type &&
+    !CVZ_BUSINESS_TYPES.some(t => t.value === cvzState.business_type);
 }
 
 function cvzRenderBusinessTypeField() {
@@ -143,13 +146,13 @@ function cvzRenderBusinessTypeField() {
       <select class="cvz-input" id="cvz-in-business-type" onchange="cvzToggleBusinessTypeCustom(this.value)">
         <option value="" ${!cvzState.business_type ? 'selected' : ''}>Bitte wählen …</option>
         ${options}
-        <option value="${CVZ_BUSINESS_TYPE_OTHER}" ${isCustom ? 'selected' : ''}>→ Eigene Eingabe …</option>
+        <option value="${CVZ_BUSINESS_TYPE_CUSTOM}" ${isCustom ? 'selected' : ''}>→ Eigene Eingabe …</option>
       </select>
     </div>
     <input class="cvz-input ${isCustom ? '' : 'cvz-hidden'}" id="cvz-in-business-type-custom"
       type="text" maxlength="${CVZ_BUSINESS_TYPE_MAXLEN}"
       placeholder="z.B. Ausbildungsanbieter" aria-label="Eigene Produktkategorie"
-      value="${cvzEsc(cvzState.business_type_custom)}">
+      value="${isCustom ? cvzEsc(cvzState.business_type) : ''}">
     <p class="cvz-hint">Bestimmt, welche Vergleichsmaßstäbe für Hero, Conversion und Differenzierung angelegt werden.</p>
   `;
 }
@@ -157,38 +160,37 @@ function cvzRenderBusinessTypeField() {
 function cvzToggleBusinessTypeCustom(value) {
   const custom = document.getElementById('cvz-in-business-type-custom');
   if (!custom) return;
-  const isCustom = value === CVZ_BUSINESS_TYPE_OTHER;
+  const isCustom = value === CVZ_BUSINESS_TYPE_CUSTOM;
   custom.classList.toggle('cvz-hidden', !isCustom);
   if (isCustom) {
     custom.focus();
   } else {
     custom.value = '';
-    cvzState.business_type_custom = '';
   }
 }
 
-// Schreibt beide Werte in den State: den Enum-Slug fuer die DB und den
-// Freitext separat, damit er beim Zurueckspringen erhalten bleibt.
+// Schreibt den finalen Wert in den State: entweder einen festen Slug oder
+// den bereinigten Freitext.
 //
-// Der slice() hier ist Komfort, kein Schutz - maxlength und diese Zeile
-// sind clientseitig und trivial umgehbar. Der Freitext landet spaeter im
-// LLM-Prompt, die verbindliche Laengenpruefung gehoert in die Flask-Schicht.
+// Die Bereinigung hier ist Komfort, kein Schutz - maxlength und dieser
+// slice sind clientseitig und trivial umgehbar. Der Wert landet spaeter
+// im SP1-Prompt und ist das einzige voellig freie Feld im Briefing, die
+// verbindliche Pruefung gehoert deshalb in die Flask-Schicht.
 function cvzReadBusinessType() {
   const select = document.getElementById('cvz-in-business-type');
   const custom = document.getElementById('cvz-in-business-type-custom');
   if (!select) return;
 
-  cvzState.business_type = select.value;
-
-  if (select.value === CVZ_BUSINESS_TYPE_OTHER && custom) {
-    cvzState.business_type_custom = String(custom.value)
-      .replace(/[\r\n\t]+/g, ' ')
-      .replace(/\s{2,}/g, ' ')
-      .trim()
-      .slice(0, CVZ_BUSINESS_TYPE_MAXLEN);
-  } else {
-    cvzState.business_type_custom = '';
+  if (select.value !== CVZ_BUSINESS_TYPE_CUSTOM) {
+    cvzState.business_type = select.value;
+    return;
   }
+
+  cvzState.business_type = String(custom ? custom.value : '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, CVZ_BUSINESS_TYPE_MAXLEN);
 }
 
 function cvzRenderStep0() {
@@ -822,9 +824,6 @@ function cvzToggleNoCustomerReasons(checked) {
   }
 }
 
-// Der Freitext aus "Eigene Eingabe" steckt NICHT mehr hier drin - er geht
-// als eigenes Feld business_type_custom an /brief. Doppelt uebergeben
-// waere er sonst zweimal im Prompt.
 function cvzBuildExistingContent() {
   const parts = [];
   if (cvzState.existing_content) parts.push(cvzState.existing_content);
@@ -837,10 +836,14 @@ function cvzValidateStep() {
   if (cvzState.step === 0) {
     cvzSyncStep0Fields();
     if (!cvzState.keyword) return 'Bitte ein Thema/Keyword eingeben.';
-    if (!cvzState.business_type) return 'Bitte eine Produktkategorie auswaehlen.';
-    if (cvzState.business_type === CVZ_BUSINESS_TYPE_OTHER && !cvzState.business_type_custom) {
+    // Bei "Eigene Eingabe" mit leerem Textfeld bleibt business_type leer,
+    // die erste Pruefung greift also fuer beide Faelle. Die zweite gibt
+    // nur die passendere Meldung aus.
+    const btSelect = document.getElementById('cvz-in-business-type');
+    if (btSelect && btSelect.value === CVZ_BUSINESS_TYPE_CUSTOM && !cvzState.business_type) {
       return 'Bitte deine Produktkategorie eingeben.';
     }
+    if (!cvzState.business_type) return 'Bitte eine Produktkategorie auswaehlen.';
     if (!cvzState.target_audience) return 'Bitte eine Zielgruppe angeben.';
   }
   if (cvzState.step === 1) {
@@ -964,14 +967,9 @@ async function cvzLaunch() {
         funnel_stage: cvzState.funnel_stage,
         conversion_goal: cvzState.conversion_goal,
         target_audience: cvzState.target_audience,
-        // Enum-Slug, NICHT der Anzeigetext - siehe Kommentar bei
-        // CVZ_BUSINESS_TYPES.
+        // Fester Slug ODER Freitext - siehe Kommentar bei
+        // CVZ_BUSINESS_TYPES. Nie der Anzeigetext der festen Optionen.
         business_type: cvzState.business_type || null,
-        // Freitext bei "Eigene Eingabe", sonst null. Setzt voraus, dass
-        // die Spalte business_type_custom in Supabase existiert und das
-        // Flask-Endpoint das Feld annimmt - sonst geht die eingetippte
-        // Kategorie still verloren (kein Fehler, nur ein leeres Feld).
-        business_type_custom: cvzState.business_type_custom || null,
         usps: cvzState.usps,
         features: cvzState.features,
         keyword: cvzState.keyword,
