@@ -274,3 +274,13 @@
     .cvz-chat-wrap { flex: none; width: 100%; height: 55vh; max-height: none; }
     .cvz-preview-panel { flex: none; width: 100%; height: 55vh; max-height: none; }
   }
+
+  /* Auf echten Mobil-Viewports macht eine auf ~350px herunterskalierte
+     1440px-Desktop-Ansicht den Text unlesbar klein (siehe Chat-Begruendung) -
+     der Desktop-Button wird hier komplett entfernt, nicht nur deaktiviert.
+     767px = derselbe Schwellwert wie die window.innerWidth-Standardauswahl
+     in app.js (cvzPreviewDevice), damit Default-Verhalten und sichtbare
+     Optionen konsistent sind. */
+  @media (max-width: 767px) {
+    #cvz-device-desktop { display: none; }
+  }
