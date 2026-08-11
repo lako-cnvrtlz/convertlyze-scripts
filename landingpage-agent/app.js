@@ -76,6 +76,7 @@ const cvzState = {
   features: [],
   existing_content: '',
   reference_urls: [],
+  brand_reference_url: '',
   pdfExtracts: [], // [{filename, text}]
   competitorSuggestions: [], // [{title, domain, url, selected}]
   manualCompetitors: []
@@ -193,6 +194,10 @@ function cvzRenderStep2() {
     <input type="file" accept="application/pdf" id="cvz-in-pdf" onchange="cvzUploadPdf(event)">
     <div id="cvz-pdf-status" style="margin-top:8px;"></div>
     <div class="cvz-chip-row" id="cvz-pdf-chips">${cvzRenderPdfChips()}</div>
+
+    <label class="cvz-label">Eure Website fuer den Marken-Look (optional)</label>
+    <input class="cvz-input" id="cvz-in-brand-url" placeholder="https://eure-website.de" value="${cvzEsc(cvzState.brand_reference_url)}">
+    <p class="cvz-hint">Falls angegeben, versucht der Assistent, eure Markenfarbe automatisch zu erkennen und schlaegt sie dir zur Bestaetigung vor - er uebernimmt sie nie ungefragt.</p>
 
     <label class="cvz-label">Sonstiger Kontext (optional)</label>
     <textarea class="cvz-input" id="cvz-in-existing" placeholder="Weitere Hinweise fuer den Assistenten, die nicht in ein Feld oben passen">${cvzEsc(cvzState.existing_content)}</textarea>
@@ -360,6 +365,7 @@ function cvzSyncStep1Fields() {
 }
 function cvzSyncStep2Fields() {
   cvzState.existing_content = document.getElementById('cvz-in-existing').value.trim();
+  cvzState.brand_reference_url = document.getElementById('cvz-in-brand-url').value.trim();
 }
 
 // Fuegt Freitext, Referenz-Links und bereits extrahierten PDF-Text zu EINEM
@@ -390,6 +396,13 @@ function cvzValidateStep() {
     cvzSyncStep2Fields();
     if (cvzState.usps.length === 0) return 'Bitte mindestens eine USP eintragen.';
     if (cvzState.features.length === 0) return 'Bitte mindestens ein Feature eintragen.';
+    if (cvzState.brand_reference_url) {
+      try {
+        new URL(cvzState.brand_reference_url);
+      } catch {
+        return `"${cvzState.brand_reference_url}" ist keine gueltige URL (mit https:// beginnen) - oder das Feld leer lassen.`;
+      }
+    }
   }
   if (cvzState.step === 3) {
     const total = cvzState.competitorSuggestions.filter(s => s.selected).length + cvzState.manualCompetitors.length;
@@ -489,7 +502,8 @@ async function cvzLaunch() {
         features: cvzState.features,
         keyword: cvzState.keyword,
         competitor_urls: competitorUrls,
-        existing_content: cvzBuildExistingContent() || null
+        existing_content: cvzBuildExistingContent() || null,
+        brand_reference_url: cvzState.brand_reference_url || null
       })
     });
     if (!briefRes.ok) {
@@ -651,11 +665,22 @@ function cvzApplyPreviewScale() {
 }
 
 // Debounced, damit ein Resize-Event-Sturm (z.B. beim Ziehen des Browser-
-// fensters) nicht bei jedem einzelnen Pixel neu rechnet.
+// fensters) nicht bei jedem einzelnen Pixel neu rechnet. Erzwingt zusaetzlich
+// einen Wechsel auf Mobile, falls der Viewport unter die Mobil-Schwelle
+// faellt WAEHREND Desktop aktiv ist (siehe CSS: der Desktop-Button wird dort
+// versteckt, der State darf dann nicht auf 'desktop' haengen bleiben - sonst
+// bleibt die auf ~350px herunterskalierte 1440px-Ansicht unlesbar aktiv,
+// nur ohne sichtbaren Weg zurueck zu Mobile ausser ueber den Mobile-Button).
 let cvzResizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(cvzResizeTimer);
-  cvzResizeTimer = setTimeout(cvzApplyPreviewScale, 150);
+  cvzResizeTimer = setTimeout(() => {
+    if (window.innerWidth < 768 && cvzPreviewDevice === 'desktop') {
+      cvzSetPreviewDevice('mobile');
+    } else {
+      cvzApplyPreviewScale();
+    }
+  }, 150);
 });
 
 function cvzSetPreviewDevice(device) {
