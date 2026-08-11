@@ -1,15 +1,68 @@
 // ==================== KONFIGURATION ====================
 const API_BASE = 'https://convertlyze-agent-api-production.up.railway.app';
 
+// ==================== IDENTITAET (echter Memberstack-Login) ====================
+// Ersetzt den bisherigen Dev-Modus (Eingabefelder fuer Test-IDs). Die
+// memberstack_id kommt direkt aus der aktiven Memberstack-Session
+// (window.$memberstackDom - von Memberstacks eigenem, site-weit auf
+// convertlyze.com laufendem Skript global bereitgestellt). Die Supabase
+// user_id kennt das Frontend nicht direkt - die wird ueber den /me-Endpoint
+// aufgeloest, der serverseitig dieselbe Zuordnung nutzt wie authenticateUser
+// fuer alle anderen Endpoints (siehe Backend: router.get('/me', ...)).
+let cvzMemberstackId = null;
+let cvzResolvedUserId = null;
+
 function cvzAuthHeaders() {
-  const memberstackId = document.getElementById('cvz-dev-memberstack').value.trim();
   return {
-    'Authorization': `Bearer ${memberstackId}`,
+    'Authorization': `Bearer ${cvzMemberstackId}`,
     'Content-Type': 'application/json'
   };
 }
 function cvzUserId() {
-  return document.getElementById('cvz-dev-userid').value.trim();
+  return cvzResolvedUserId;
+}
+
+// Wartet kurz auf window.$memberstackDom, falls Memberstacks eigenes Skript
+// auf der Host-Seite noch laedt (Ladereihenfolge nicht garantiert). Bricht
+// nach 5s ab statt endlos zu warten.
+function cvzWaitForMemberstack(timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const check = () => {
+      if (window.$memberstackDom) return resolve(window.$memberstackDom);
+      if (Date.now() - start > timeoutMs) return reject(new Error('Memberstack wurde nicht geladen.'));
+      setTimeout(check, 100);
+    };
+    check();
+  });
+}
+
+// Liefert true, wenn ein eingeloggter User gefunden UND die user_id
+// erfolgreich aufgeloest wurde - false in jedem anderen Fall (nicht
+// eingeloggt, Memberstack nicht geladen, /me fehlgeschlagen). Der Aufrufer
+// zeigt bei false das Auth-Gate statt des Formulars, damit kein API-Aufruf
+// mit leerer/ungueltiger user_id versucht wird.
+async function cvzResolveIdentity() {
+  try {
+    const memberstackDom = await cvzWaitForMemberstack();
+    const { data: member } = await memberstackDom.getCurrentMember();
+    if (!member) return false;
+
+    cvzMemberstackId = member.id;
+
+    const res = await fetch(`${API_BASE}/api/page-agent/me`, {
+      headers: { 'Authorization': `Bearer ${cvzMemberstackId}` }
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (!data.user_id) return false;
+
+    cvzResolvedUserId = data.user_id;
+    return true;
+  } catch (e) {
+    console.error('Identitaets-Aufloesung fehlgeschlagen:', e.message);
+    return false;
+  }
 }
 
 // ==================== FORMULAR-STATE ====================
@@ -187,10 +240,9 @@ async function cvzUploadPdf(event) {
   formData.append('file', file);
 
   try {
-    const memberstackId = document.getElementById('cvz-dev-memberstack').value.trim();
     const res = await fetch(`${API_BASE}/api/page-agent/upload-pdf`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${memberstackId}` }, // KEIN Content-Type - fetch setzt den multipart-Boundary selbst
+      headers: { 'Authorization': `Bearer ${cvzMemberstackId}` }, // KEIN Content-Type - fetch setzt den multipart-Boundary selbst
       body: formData
     });
     const data = await res.json();
@@ -757,7 +809,18 @@ function cvzStartNewProject() {
 }
 
 // ==================== INIT ====================
-// Erst Wiederaufnahme versuchen, sonst normales Formular zeigen.
-cvzTryResume().then(resumed => {
-  if (!resumed) cvzRenderStep();
+// Erst Identitaet aufloesen (echter Memberstack-Login + /me-Aufloesung),
+// dann Wiederaufnahme versuchen, sonst normales Formular zeigen. Ohne
+// gueltige Identitaet (nicht eingeloggt, Memberstack nicht verfuegbar):
+// Auth-Gate statt Formular, damit kein API-Aufruf mit leerer user_id
+// versucht wird.
+cvzResolveIdentity().then(identityOk => {
+  if (!identityOk) {
+    document.getElementById('cvz-auth-gate').style.display = 'block';
+    document.getElementById('cvz-form-card').style.display = 'none';
+    return;
+  }
+  cvzTryResume().then(resumed => {
+    if (!resumed) cvzRenderStep();
+  });
 });
