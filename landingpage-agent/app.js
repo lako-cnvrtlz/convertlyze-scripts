@@ -290,6 +290,12 @@ function cvzEsc(s) {
 }
 
 // ---- Step 3: Wettbewerber ----
+const CVZ_MAX_COMPETITORS = 5; // konsistent mit MAX_COMPETITORS im Backend
+
+function cvzTotalCompetitorCount() {
+  return cvzState.competitorSuggestions.filter(s => s.selected).length + cvzState.manualCompetitors.length;
+}
+
 async function cvzRenderStep3() {
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Wettbewerber bestätigen</h1>
@@ -297,7 +303,7 @@ async function cvzRenderStep3() {
     <div id="cvz-competitor-list"><p class="cvz-hint">Lade Vorschläge …</p></div>
     <label class="cvz-label">Weiteren Wettbewerber manuell hinzufügen</label>
     <input class="cvz-input" id="cvz-in-manual-competitor" placeholder="URL eines Wettbewerbers, z.B. https://wettbewerber.de" onkeydown="cvzAddManualCompetitorOnEnter(event)">
-    <p class="cvz-hint">Nicht eure eigene Seite — eine Seite, mit der ihr um dieselben Kunden konkurriert. Bis zu 5 Wettbewerber werden geprüft.</p>
+    <p class="cvz-hint">Nicht eure eigene Seite — eine Seite, mit der ihr um dieselben Kunden konkurriert. Maximal ${CVZ_MAX_COMPETITORS} Wettbewerber insgesamt, eigene Eintraege haben Vorrang vor Vorschlaegen.</p>
   `;
 
   if (cvzState.competitorSuggestions.length === 0) {
@@ -307,7 +313,10 @@ async function cvzRenderStep3() {
         body: JSON.stringify({ keyword: cvzState.keyword })
       });
       const data = await res.json();
-      cvzState.competitorSuggestions = (data.suggestions || []).map(s => ({ ...s, selected: true }));
+      // Backend liefert bereits maximal CVZ_MAX_COMPETITORS Vorschlaege (ohne
+      // Wikipedia) - slice hier zusaetzlich als Absicherung, falls sich das
+      // Backend-Limit mal aendert, ohne dass diese Konstante mitgezogen wird.
+      cvzState.competitorSuggestions = (data.suggestions || []).slice(0, CVZ_MAX_COMPETITORS).map(s => ({ ...s, selected: true }));
     } catch (e) {
       console.error('suggest-competitors failed', e);
       document.getElementById('cvz-competitor-list').innerHTML =
@@ -319,15 +328,23 @@ async function cvzRenderStep3() {
 }
 function cvzRenderCompetitorList() {
   const container = document.getElementById('cvz-competitor-list');
-  const suggested = cvzState.competitorSuggestions.map((s, i) => `
-    <div class="cvz-competitor-item ${s.selected ? 'selected' : ''}" onclick="cvzToggleCompetitor(${i})">
-      <input type="checkbox" ${s.selected ? 'checked' : ''} onclick="event.stopPropagation(); cvzToggleCompetitor(${i})">
+  const total = cvzTotalCompetitorCount();
+  const atCap = total >= CVZ_MAX_COMPETITORS;
+
+  const suggested = cvzState.competitorSuggestions.map((s, i) => {
+    // Nicht ausgewaehlte Vorschlaege werden gesperrt, sobald das Limit
+    // erreicht ist - bereits ausgewaehlte bleiben abwaehlbar.
+    const locked = atCap && !s.selected;
+    return `
+    <div class="cvz-competitor-item ${s.selected ? 'selected' : ''} ${locked ? 'locked' : ''}" onclick="${locked ? '' : `cvzToggleCompetitor(${i})`}">
+      <input type="checkbox" ${s.selected ? 'checked' : ''} ${locked ? 'disabled' : ''} onclick="event.stopPropagation(); cvzToggleCompetitor(${i})">
       <div>
         <div class="title">${cvzEsc(s.title)}</div>
         <div class="url">${cvzEsc(s.url)}</div>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
   const manual = cvzState.manualCompetitors.map((url, i) => `
     <div class="cvz-competitor-item selected">
       <input type="checkbox" checked disabled>
@@ -335,10 +352,18 @@ function cvzRenderCompetitorList() {
       <button onclick="cvzRemoveManualCompetitor(${i})" style="background:none;border:none;color:var(--cvz-text-muted);cursor:pointer;">×</button>
     </div>
   `).join('');
-  container.innerHTML = (suggested + manual) || '<p class="cvz-hint">Keine Vorschläge gefunden — bitte manuell ergänzen.</p>';
+
+  const counter = `<p class="cvz-hint" style="margin-bottom:10px;">${total}/${CVZ_MAX_COMPETITORS} Wettbewerber ausgewählt${atCap ? ' – Limit erreicht' : ''}</p>`;
+  container.innerHTML = counter + ((suggested + manual) || '<p class="cvz-hint">Keine Vorschläge gefunden — bitte manuell ergänzen.</p>');
 }
 function cvzToggleCompetitor(i) {
-  cvzState.competitorSuggestions[i].selected = !cvzState.competitorSuggestions[i].selected;
+  const s = cvzState.competitorSuggestions[i];
+  if (!s.selected && cvzTotalCompetitorCount() >= CVZ_MAX_COMPETITORS) {
+    cvzShowError(`Maximal ${CVZ_MAX_COMPETITORS} Wettbewerber möglich - wähle zuerst einen anderen ab.`);
+    return;
+  }
+  cvzShowError(null);
+  s.selected = !s.selected;
   cvzRenderCompetitorList();
 }
 function cvzAddManualCompetitorOnEnter(event) {
@@ -346,8 +371,24 @@ function cvzAddManualCompetitorOnEnter(event) {
   event.preventDefault();
   const val = event.target.value.trim();
   if (!val) return;
+
+  if (cvzState.manualCompetitors.length >= CVZ_MAX_COMPETITORS) {
+    cvzShowError(`Maximal ${CVZ_MAX_COMPETITORS} eigene Wettbewerber möglich - entferne zuerst einen.`);
+    return;
+  }
+  cvzShowError(null);
+
   cvzState.manualCompetitors.push(val);
   event.target.value = '';
+
+  // Eigene Eingaben haben Vorrang vor Vorschlaegen (siehe Chat-Anforderung):
+  // wenn das Hinzufuegen das Gesamtlimit ueberschreitet, werden automatisch
+  // vorgeschlagene Wettbewerber abgewaehlt (von hinten beginnend), bis das
+  // Limit wieder eingehalten wird - kein Blockieren der eigenen Eingabe.
+  for (let i = cvzState.competitorSuggestions.length - 1; i >= 0 && cvzTotalCompetitorCount() > CVZ_MAX_COMPETITORS; i--) {
+    if (cvzState.competitorSuggestions[i].selected) cvzState.competitorSuggestions[i].selected = false;
+  }
+
   cvzRenderCompetitorList();
 }
 function cvzRemoveManualCompetitor(i) {
@@ -405,8 +446,9 @@ function cvzValidateStep() {
     }
   }
   if (cvzState.step === 3) {
-    const total = cvzState.competitorSuggestions.filter(s => s.selected).length + cvzState.manualCompetitors.length;
+    const total = cvzTotalCompetitorCount();
     if (total === 0) return 'Bitte mindestens einen Wettbewerber auswaehlen oder ergaenzen.';
+    if (total > CVZ_MAX_COMPETITORS) return `Maximal ${CVZ_MAX_COMPETITORS} Wettbewerber moeglich - bitte welche abwaehlen.`;
   }
   return null;
 }
@@ -440,25 +482,38 @@ function cvzRenderStep() {
 }
 
 // ==================== LAUNCH (Formular abschliessen) ====================
-// Generischer Fortschritts-Ticker fuer lange Anfragen. Struktur-Turns koennen
-// durch mehrere Anthropic-Runden 30-90+ Sekunden dauern - ohne Anzeige wirkt
-// die Oberflaeche in dieser Zeit wie eingefroren (siehe Chat-Begruendung).
-// WICHTIG: Das ist KEIN echter Fortschritt vom Backend - das waere Streaming
-// und eine groessere Aenderung (siehe Chat). Rein clientseitige Anzeige, dass
-// die Anfrage noch laeuft, mit verstrichener Zeit plus rotierenden
-// Status-Phrasen fuer den gefuehlten Fortschritt.
-const CVZ_PROGRESS_MESSAGES = ['Analysiert Anforderungen', 'Prüft Best-Practice-Regeln', 'Baut Inhalte auf', 'Fast fertig'];
-function cvzStartProgressTicker(baseText, onUpdate) {
+// Generischer Fortschritts-Ticker fuer lange Anfragen. Kickoff-Analyse und
+// Struktur-Turns dauern real 2-3 Minuten (mehrere Anthropic-Runden + Tool-
+// Aufrufe) - ohne Anzeige wirkt die Oberflaeche in dieser Zeit wie
+// eingefroren (siehe Chat-Begruendung). WICHTIG: Das ist KEIN echter
+// Fortschritt vom Backend (das waere Streaming, siehe Chat) - rein
+// clientseitige Anzeige mit verstrichener Zeit plus rotierenden, bewusst
+// launigen Status-Phrasen, passend zur tatsaechlichen Wartezeit.
+const CVZ_KICKOFF_MESSAGES = [
+  'Hier wird die nächsten 2-3 Minuten malocht. Hol dir in der Zeit gerne einen Kaffee',
+  'Kaffee schon geholt? Wir wühlen noch in Keywords und Wettbewerbern',
+  'Buying-Center-Rollen werden einsortiert',
+  'Fast durch, letzte Erkenntnisse werden zusammengetragen'
+];
+const CVZ_STRUCTURE_MESSAGES = [
+  'Denkt nach',
+  'Baut Sektion für Sektion auf',
+  'Bei einer kompletten Seite dauert das schon mal 2-3 Minuten',
+  'Feilt an Überschriften und Trust-Signalen',
+  'Fast fertig, letzte Handgriffe'
+];
+
+function cvzStartProgressTicker(baseText, messages, onUpdate) {
   const startTime = Date.now();
   let msgIndex = 0;
   const tick = () => {
     const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
-    let text = elapsedSec >= 8 ? `${CVZ_PROGRESS_MESSAGES[Math.min(msgIndex, CVZ_PROGRESS_MESSAGES.length - 1)]} …` : baseText;
-    if (elapsedSec >= 20) text += ` (${elapsedSec}s – bei einer vollständigen Struktur kann das bis zu einer Minute dauern)`;
+    let text = elapsedSec >= 8 ? `${messages[Math.min(msgIndex, messages.length - 1)]} …` : baseText;
+    if (elapsedSec >= 30) text += ` (${elapsedSec}s)`;
     onUpdate(text);
   };
   tick();
-  const messageTimer = setInterval(() => { msgIndex++; }, 7000);
+  const messageTimer = setInterval(() => { msgIndex++; }, 20000);
   const tickTimer = setInterval(tick, 1000);
   return () => { clearInterval(messageTimer); clearInterval(tickTimer); };
 }
@@ -468,7 +523,7 @@ function cvzShowLoading(text) {
   document.getElementById('cvz-form-card').style.display = 'none';
   document.getElementById('cvz-loading').style.display = 'block';
   if (cvzLoadingStopTicker) cvzLoadingStopTicker();
-  cvzLoadingStopTicker = cvzStartProgressTicker(text, t => {
+  cvzLoadingStopTicker = cvzStartProgressTicker(text, CVZ_KICKOFF_MESSAGES, t => {
     document.getElementById('cvz-loading-text').textContent = t;
   });
 }
@@ -479,7 +534,7 @@ async function cvzLaunch() {
   const competitorUrls = [
     ...cvzState.competitorSuggestions.filter(s => s.selected).map(s => s.url),
     ...cvzState.manualCompetitors
-  ].slice(0, 5);
+  ].slice(0, CVZ_MAX_COMPETITORS);
 
   try {
     cvzShowLoading('Projekt wird angelegt …');
@@ -511,8 +566,8 @@ async function cvzLaunch() {
       throw new Error(err.error + (err.missing_fields ? ` (${err.missing_fields.join(', ')})` : ''));
     }
 
-    // Laengster Schritt: Keyword-, SERP- und Wettbewerber-Analyse laufen hier.
-    cvzShowLoading('Analysiere Keyword, Suchergebnisse und Wettbewerber … das kann 20-30 Sekunden dauern.');
+    // Laengster Schritt: Keyword-, SERP- und Wettbewerber-Analyse laufen hier - real 2-3 Minuten.
+    cvzShowLoading('Hier wird die nächsten 2-3 Minuten malocht. Hol dir in der Zeit gerne einen Kaffee …');
     const sessionRes = await fetch(`${API_BASE}/api/page-agent/start-session`, {
       method: 'POST', headers,
       body: JSON.stringify({ user_id: userId, page_project_id })
@@ -659,6 +714,17 @@ function cvzApplyPreviewScale() {
   const availableWidth = body.clientWidth - 32; // 16px Innenabstand auf beiden Seiten, siehe .cvz-preview-body padding
   const scale = Math.min(1, Math.max(availableWidth, 100) / deviceWidth);
 
+  // WICHTIG: .cvz-preview-frame-inner ist ein normaler Block-div OHNE eigene
+  // Breite/Hoehe - der uebernaehme sonst per CSS-Boxmodell automatisch die
+  // Breite von .cvz-preview-frame-outer (seinem Elternelement), NICHT die
+  // seines Iframe-Inhalts. Dadurch bezog sich jede Neuberechnung auf die
+  // Breite der VORHERIGEN Skalierung statt auf die tatsaechliche
+  // Geraetebreite - das war der Grund, warum ein Wechsel zurueck zu Desktop
+  // nach Mobile nicht korrekt neu skalierte. Inner bekommt deshalb IMMER
+  // explizit die natuerliche (unskalierte) Groesse gesetzt, bevor der
+  // transform greift.
+  inner.style.width = deviceWidth + 'px';
+  inner.style.height = cvzPreviewContentHeight + 'px';
   inner.style.transform = `scale(${scale})`;
   outer.style.width = Math.round(deviceWidth * scale) + 'px';
   outer.style.height = Math.round(cvzPreviewContentHeight * scale) + 'px';
@@ -798,7 +864,7 @@ async function cvzSendMessage() {
   // marked.parse() die ganze Blase (inkl. Spinner) neu aufzubauen.
   loadingBubble.innerHTML = '<span class="cvz-spinner-inline"></span><span class="cvz-loading-label">Denkt nach …</span>';
   const loadingLabel = loadingBubble.querySelector('.cvz-loading-label');
-  const stopTicker = cvzStartProgressTicker('Denkt nach …', t => { loadingLabel.textContent = t; });
+  const stopTicker = cvzStartProgressTicker('Denkt nach …', CVZ_STRUCTURE_MESSAGES, t => { loadingLabel.textContent = t; });
 
   try {
     const res = await fetch(`${API_BASE}/api/page-agent/chat`, {
