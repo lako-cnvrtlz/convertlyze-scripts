@@ -77,6 +77,8 @@ const cvzState = {
   existing_content: '',
   reference_urls: [],
   brand_reference_url: '',
+  customer_reasons: '',
+  no_customer_reasons: false,
   pdfExtracts: [], // [{filename, text}]
   competitorSuggestions: [], // [{title, domain, url, selected}]
   manualCompetitors: []
@@ -184,6 +186,14 @@ function cvzRenderStep2() {
     <label class="cvz-label">Features</label>
     <input class="cvz-input" id="cvz-in-feature" placeholder="Feature eingeben, Enter druecken" onkeydown="cvzAddChipOnEnter(event,'features','cvz-feature-chips')">
     <div class="cvz-chip-row" id="cvz-feature-chips">${cvzRenderChips(cvzState.features, 'features')}</div>
+
+    <label class="cvz-label">Häufigste Kauf-/Wechselgründe von Kunden (optional)</label>
+    <textarea class="cvz-input" id="cvz-in-customer-reasons" placeholder="Was hast du von Kunden im Verkaufsgespräch oder Support am häufigsten als Grund gehört?" ${cvzState.no_customer_reasons ? 'disabled' : ''}>${cvzEsc(cvzState.customer_reasons)}</textarea>
+    <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:0.85rem; color:var(--cvz-text-muted); cursor:pointer; font-weight:400;">
+      <input type="checkbox" id="cvz-in-no-customer-reasons" ${cvzState.no_customer_reasons ? 'checked' : ''} onchange="cvzToggleNoCustomerReasons(this.checked)">
+      Keine Informationen vorhanden
+    </label>
+    <p class="cvz-hint">Das ist die Kundenperspektive, nicht eure eigene - oft aussagekräftiger als USPs/Features fürs Storytelling.</p>
 
     <label class="cvz-label">Referenz-Links (optional)</label>
     <input class="cvz-input" id="cvz-in-refurl" placeholder="URL eingeben, Enter druecken (Seite oder YouTube-Video)" onkeydown="cvzAddRefUrlOnEnter(event)">
@@ -407,6 +417,25 @@ function cvzSyncStep1Fields() {
 function cvzSyncStep2Fields() {
   cvzState.existing_content = document.getElementById('cvz-in-existing').value.trim();
   cvzState.brand_reference_url = document.getElementById('cvz-in-brand-url').value.trim();
+  if (!cvzState.no_customer_reasons) {
+    cvzState.customer_reasons = document.getElementById('cvz-in-customer-reasons').value.trim();
+  }
+}
+
+// Deaktiviert/leert das Textfeld statt komplett neu zu rendern (haelt Fokus
+// stabil, siehe andere Toggle-Handler in diesem File). "Keine Informationen
+// vorhanden" ist ein EXPLIZITES Signal (siehe Backend-Kommentar) - beim
+// Aktivieren wird ein eventuell eingetippter Text bewusst verworfen, nicht
+// nur versteckt, damit kein Widerspruch zwischen Checkbox und Textfeld
+// entstehen kann.
+function cvzToggleNoCustomerReasons(checked) {
+  cvzState.no_customer_reasons = checked;
+  const textarea = document.getElementById('cvz-in-customer-reasons');
+  textarea.disabled = checked;
+  if (checked) {
+    textarea.value = '';
+    cvzState.customer_reasons = '';
+  }
 }
 
 // Fuegt Freitext, Referenz-Links und bereits extrahierten PDF-Text zu EINEM
@@ -558,7 +587,8 @@ async function cvzLaunch() {
         keyword: cvzState.keyword,
         competitor_urls: competitorUrls,
         existing_content: cvzBuildExistingContent() || null,
-        brand_reference_url: cvzState.brand_reference_url || null
+        brand_reference_url: cvzState.brand_reference_url || null,
+        customer_reasons: cvzState.no_customer_reasons ? 'Keine Informationen vorhanden' : (cvzState.customer_reasons || null)
       })
     });
     if (!briefRes.ok) {
