@@ -2,13 +2,6 @@
 const API_BASE = 'https://convertlyze-agent-api-production.up.railway.app';
 
 // ==================== IDENTITAET (echter Memberstack-Login) ====================
-// Ersetzt den bisherigen Dev-Modus (Eingabefelder fuer Test-IDs). Die
-// memberstack_id kommt direkt aus der aktiven Memberstack-Session
-// (window.$memberstackDom - von Memberstacks eigenem, site-weit auf
-// convertlyze.com laufendem Skript global bereitgestellt). Die Supabase
-// user_id kennt das Frontend nicht direkt - die wird ueber den /me-Endpoint
-// aufgeloest, der serverseitig dieselbe Zuordnung nutzt wie authenticateUser
-// fuer alle anderen Endpoints (siehe Backend: router.get('/me', ...)).
 let cvzMemberstackId = null;
 let cvzResolvedUserId = null;
 
@@ -22,9 +15,6 @@ function cvzUserId() {
   return cvzResolvedUserId;
 }
 
-// Wartet kurz auf window.$memberstackDom, falls Memberstacks eigenes Skript
-// auf der Host-Seite noch laedt (Ladereihenfolge nicht garantiert). Bricht
-// nach 5s ab statt endlos zu warten.
 function cvzWaitForMemberstack(timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
@@ -37,11 +27,6 @@ function cvzWaitForMemberstack(timeoutMs = 5000) {
   });
 }
 
-// Liefert true, wenn ein eingeloggter User gefunden UND die user_id
-// erfolgreich aufgeloest wurde - false in jedem anderen Fall (nicht
-// eingeloggt, Memberstack nicht geladen, /me fehlgeschlagen). Der Aufrufer
-// zeigt bei false das Auth-Gate statt des Formulars, damit kein API-Aufruf
-// mit leerer/ungueltiger user_id versucht wird.
 async function cvzResolveIdentity() {
   try {
     const memberstackDom = await cvzWaitForMemberstack();
@@ -80,8 +65,8 @@ const cvzState = {
   brand_color: '',
   customer_reasons: '',
   no_customer_reasons: false,
-  pdfExtracts: [], // [{filename, text}]
-  competitorSuggestions: [], // [{title, domain, url, selected}]
+  pdfExtracts: [],
+  competitorSuggestions: [],
   manualCompetitors: []
 };
 
@@ -101,7 +86,6 @@ function cvzShowError(msg) {
   el.style.display = msg ? 'block' : 'none';
 }
 
-// ---- Step 0: Thema ----
 function cvzRenderStep0() {
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Worum geht es?</h1>
@@ -115,7 +99,6 @@ function cvzRenderStep0() {
   document.getElementById('cvz-btn-back').style.visibility = 'hidden';
 }
 
-// ---- Step 1: Ziel ----
 const CONVERSION_GOAL_GROUPS = {
   'Primary Conversions (Sales & Umsatz)': [
     'Demo-Anfrage', 'Angebotsanfrage / Pricing Request', 'Audit / Assessment buchen',
@@ -176,7 +159,6 @@ function cvzSelectFunnel(value) {
   });
 }
 
-// ---- Step 2: Angebot (USPs/Features als Chips) ----
 function cvzRenderStep2() {
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Was macht euch aus?</h1>
@@ -233,7 +215,7 @@ function cvzAddRefUrlOnEnter(event) {
   const val = event.target.value.trim();
   if (!val) return;
   try {
-    new URL(val); // wirft bei ungueltiger URL
+    new URL(val);
   } catch {
     cvzShowError(`"${val}" ist keine gueltige URL (mit https:// beginnen).`);
     return;
@@ -265,7 +247,7 @@ async function cvzUploadPdf(event) {
   try {
     const res = await fetch(`${API_BASE}/api/page-agent/upload-pdf`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${cvzMemberstackId}` }, // KEIN Content-Type - fetch setzt den multipart-Boundary selbst
+      headers: { 'Authorization': `Bearer ${cvzMemberstackId}` },
       body: formData
     });
     const data = await res.json();
@@ -277,7 +259,7 @@ async function cvzUploadPdf(event) {
   } catch (err) {
     statusEl.innerHTML = `<p class="cvz-hint" style="color:var(--cvz-danger);">${cvzEsc(err.message)}</p>`;
   } finally {
-    event.target.value = ''; // erlaubt erneuten Upload derselben Datei
+    event.target.value = '';
   }
 }
 function cvzRemovePdf(i) {
@@ -307,8 +289,7 @@ function cvzEsc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// ---- Step 3: Wettbewerber ----
-const CVZ_MAX_COMPETITORS = 5; // konsistent mit MAX_COMPETITORS im Backend
+const CVZ_MAX_COMPETITORS = 5;
 
 function cvzTotalCompetitorCount() {
   return cvzState.competitorSuggestions.filter(s => s.selected).length + cvzState.manualCompetitors.length;
@@ -331,9 +312,6 @@ async function cvzRenderStep3() {
         body: JSON.stringify({ keyword: cvzState.keyword })
       });
       const data = await res.json();
-      // Backend liefert bereits maximal CVZ_MAX_COMPETITORS Vorschlaege (ohne
-      // Wikipedia) - slice hier zusaetzlich als Absicherung, falls sich das
-      // Backend-Limit mal aendert, ohne dass diese Konstante mitgezogen wird.
       cvzState.competitorSuggestions = (data.suggestions || []).slice(0, CVZ_MAX_COMPETITORS).map(s => ({ ...s, selected: true }));
     } catch (e) {
       console.error('suggest-competitors failed', e);
@@ -350,8 +328,6 @@ function cvzRenderCompetitorList() {
   const atCap = total >= CVZ_MAX_COMPETITORS;
 
   const suggested = cvzState.competitorSuggestions.map((s, i) => {
-    // Nicht ausgewaehlte Vorschlaege werden gesperrt, sobald das Limit
-    // erreicht ist - bereits ausgewaehlte bleiben abwaehlbar.
     const locked = atCap && !s.selected;
     return `
     <div class="cvz-competitor-item ${s.selected ? 'selected' : ''} ${locked ? 'locked' : ''}" onclick="${locked ? '' : `cvzToggleCompetitor(${i})`}">
@@ -399,10 +375,6 @@ function cvzAddManualCompetitorOnEnter(event) {
   cvzState.manualCompetitors.push(val);
   event.target.value = '';
 
-  // Eigene Eingaben haben Vorrang vor Vorschlaegen (siehe Chat-Anforderung):
-  // wenn das Hinzufuegen das Gesamtlimit ueberschreitet, werden automatisch
-  // vorgeschlagene Wettbewerber abgewaehlt (von hinten beginnend), bis das
-  // Limit wieder eingehalten wird - kein Blockieren der eigenen Eingabe.
   for (let i = cvzState.competitorSuggestions.length - 1; i >= 0 && cvzTotalCompetitorCount() > CVZ_MAX_COMPETITORS; i--) {
     if (cvzState.competitorSuggestions[i].selected) cvzState.competitorSuggestions[i].selected = false;
   }
@@ -431,11 +403,6 @@ function cvzSyncStep2Fields() {
   }
 }
 
-// Farbpicker und Textfeld halten sich gegenseitig synchron. Der native
-// <input type="color"> akzeptiert NUR vollstaendige 6-stellige Hex-Werte -
-// beim Tippen im Textfeld wird der Picker deshalb nur aktualisiert, wenn der
-// bisher eingegebene Wert bereits ein gueltiger voller Hex-Code ist, sonst
-// bleibt er unveraendert (kein Fehler, einfach kein Sync in diesem Moment).
 function cvzSyncBrandColorFromPicker(hex) {
   cvzState.brand_color = hex;
   document.getElementById('cvz-in-brand-color').value = hex;
@@ -447,12 +414,6 @@ function cvzSyncBrandColorFromText(value) {
   }
 }
 
-// Deaktiviert/leert das Textfeld statt komplett neu zu rendern (haelt Fokus
-// stabil, siehe andere Toggle-Handler in diesem File). "Keine Informationen
-// vorhanden" ist ein EXPLIZITES Signal (siehe Backend-Kommentar) - beim
-// Aktivieren wird ein eventuell eingetippter Text bewusst verworfen, nicht
-// nur versteckt, damit kein Widerspruch zwischen Checkbox und Textfeld
-// entstehen kann.
 function cvzToggleNoCustomerReasons(checked) {
   cvzState.no_customer_reasons = checked;
   const textarea = document.getElementById('cvz-in-customer-reasons');
@@ -463,11 +424,6 @@ function cvzToggleNoCustomerReasons(checked) {
   }
 }
 
-// Fuegt Freitext, Referenz-Links und bereits extrahierten PDF-Text zu EINEM
-// String zusammen, den das Backend im existing_content-Feld erwartet.
-// PDF-Text ist bereits ausgelesen -> direkt inline, keine erneute Extraktion
-// noetig. Referenz-Links bleiben als URLs stehen, die ruft der Agent selbst
-// per fetch_reference_content ab (siehe Backend, max. 3).
 function cvzBuildExistingContent() {
   const parts = [];
   if (cvzState.existing_content) parts.push(cvzState.existing_content);
@@ -538,14 +494,7 @@ function cvzRenderStep() {
   if (cvzState.step === 3) cvzRenderStep3();
 }
 
-// ==================== LAUNCH (Formular abschliessen) ====================
-// Generischer Fortschritts-Ticker fuer lange Anfragen. Kickoff-Analyse und
-// Struktur-Turns dauern real 2-3 Minuten (mehrere Anthropic-Runden + Tool-
-// Aufrufe) - ohne Anzeige wirkt die Oberflaeche in dieser Zeit wie
-// eingefroren (siehe Chat-Begruendung). WICHTIG: Das ist KEIN echter
-// Fortschritt vom Backend (das waere Streaming, siehe Chat) - rein
-// clientseitige Anzeige mit verstrichener Zeit plus rotierenden, bewusst
-// launigen Status-Phrasen, passend zur tatsaechlichen Wartezeit.
+// ==================== LAUNCH ====================
 const CVZ_KICKOFF_MESSAGES = [
   'Hier wird die nächsten 2-3 Minuten malocht. Hol dir in der Zeit gerne einen Kaffee',
   'Kaffee schon geholt? Wir wühlen noch in Keywords und Wettbewerbern',
@@ -625,7 +574,6 @@ async function cvzLaunch() {
       throw new Error(err.error + (err.missing_fields ? ` (${err.missing_fields.join(', ')})` : ''));
     }
 
-    // Laengster Schritt: Keyword-, SERP- und Wettbewerber-Analyse laufen hier - real 2-3 Minuten.
     cvzShowLoading('Hier wird die nächsten 2-3 Minuten malocht. Hol dir in der Zeit gerne einen Kaffee …');
     const sessionRes = await fetch(`${API_BASE}/api/page-agent/start-session`, {
       method: 'POST', headers,
@@ -645,18 +593,10 @@ async function cvzLaunch() {
   }
 }
 
-// ==================== SESSION-WIEDERAUFNAHME (kontobasiert, kein localStorage) ====================
-// Aufruf-Varianten:
-// 1. index.html?project=<page_project_id> - explizit von der Projekt-Liste
-//    aus geoeffnet (siehe projects.html)
-// 2. index.html ohne Parameter - Backend loest ueber last_active_page_project_id
-//    des Accounts auf (siehe /resume ohne page_project_id im Backend)
+// ==================== SESSION-WIEDERAUFNAHME ====================
 async function cvzTryResume() {
   const urlParams = new URLSearchParams(window.location.search);
 
-  // Explizites "neues Projekt starten" - Resume komplett ueberspringen.
-  // Flag wird sofort aus der URL entfernt, damit ein spaeterer Reload
-  // wieder normal resumen kann, statt dauerhaft im Formular haengen zu bleiben.
   if (urlParams.get('new')) {
     window.history.replaceState({}, '', window.location.pathname);
     return false;
@@ -671,7 +611,7 @@ async function cvzTryResume() {
 
   try {
     const res = await fetch(url, { method: 'GET', headers });
-    if (!res.ok) return false; // z.B. 404 = noch nie ein Projekt angelegt, ganz normal beim allerersten Besuch
+    if (!res.ok) return false;
 
     const data = await res.json();
     cvzState.session_id = data.session_id;
@@ -702,24 +642,9 @@ function cvzOpenChat(sessionData) {
   cvzAppendMessage('assistant', sessionData.message);
 }
 function cvzUpdateQuota(remaining, limit) {
-  // Kontingent ist seit der Umstellung SESSION-basiert (nicht mehr
-  // Nachrichten-basiert) - Chatten innerhalb einer Session ist unlimitiert,
-  // nur eine NEUE Session zieht vom Kontingent ab. Label entsprechend
-  // angepasst, sonst suggeriert "Nachrichten übrig" faelschlich ein
-  // Pro-Nachricht-Limit innerhalb dieses Chats.
   document.getElementById('cvz-quota').textContent = `${remaining}/${limit} Sessions übrig`;
 }
 
-// Rendert ein vollstaendiges HTML-Dokument (siehe services/templates.js,
-// renderDocument()) sicher isoliert per <iframe srcdoc="...">. sandbox=
-// "allow-same-origin" OHNE "allow-scripts": das generierte Dokument enthaelt
-// kein JS und soll auch keins ausfuehren duerfen, aber diese Seite braucht
-// Lesezugriff auf contentDocument, um die Iframe-Hoehe an den Inhalt
-// anzupassen (Iframes sizen sich nicht von selbst auf ihren Inhalt).
-// onLoaded(measuredHeight) gibt die ermittelte Hoehe an den Aufrufer weiter
-// (measuredHeight ist null, falls die Messung fehlschlug), damit der
-// Aufrufer sie z.B. fuer die Skalierungsberechnung weiterverwenden kann,
-// ohne contentDocument ein zweites Mal abzufragen.
 function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
   const iframe = document.createElement('iframe');
   iframe.setAttribute('sandbox', 'allow-same-origin');
@@ -740,29 +665,10 @@ function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
   return iframe;
 }
 
-// Geraete-Breiten fuer die Vorschau. "Desktop" ist eine echte Desktop-
-// Viewport-Breite (das Iframe rendert IMMER intern bei dieser Breite,
-// unabhaengig von der sichtbaren Groesse) - siehe cvzApplyPreviewScale fuer
-// die Skalierung, die das Panel ohne horizontales Scrollen darstellbar macht.
 const CVZ_DEVICE_WIDTHS = { desktop: 1440, mobile: 390 };
-// Default: Ist DIESE Seite (der Chat/die Vorschau selbst) schon auf einem
-// schmalen Viewport geoeffnet, ist ein Desktop-Preview selten sinnvoll -
-// dort startet Mobile. Auf einem breiten Desktop-Viewport ist Desktop Standard.
 let cvzPreviewDevice = window.innerWidth < 768 ? 'mobile' : 'desktop';
-// Natuerliche (unskalierte) Hoehe der aktuell angezeigten Struktur bei der
-// aktuellen Geraetebreite - noetig, um bei jeder Neuberechnung (Panel-
-// Groessenaenderung, Geraete-Wechsel) die Skalierung neu bestimmen zu
-// koennen, ohne jedes Mal erneut ins Iframe hineinzumessen.
 let cvzPreviewContentHeight = 0;
 
-// Skaliert .cvz-preview-frame-inner (und damit das Iframe) so herunter, dass
-// die volle Geraetebreite IMMER in den verfuegbaren Platz passt - kein
-// horizontales Scrollen noetig (siehe Chat-Begruendung). .cvz-preview-frame-
-// outer bekommt die tatsaechliche (skalierte) Groesse, damit die Scrollbox
-// exakt zum sichtbaren Inhalt passt statt Leerraum in der urspruenglichen
-// Groesse freizuhalten. Bei "Mobile" ergibt sich durch min(1, ...) meist
-// scale=1 (kein Verkleinern noetig), das Panel zeigt dann einen natuerlich
-// grossen Handy-Rahmen statt eines gestreckten breiten Fensters.
 function cvzApplyPreviewScale() {
   const outer = document.getElementById('cvz-preview-frame-outer');
   const inner = document.getElementById('cvz-preview-frame-inner');
@@ -770,18 +676,9 @@ function cvzApplyPreviewScale() {
 
   const deviceWidth = CVZ_DEVICE_WIDTHS[cvzPreviewDevice];
   const body = document.getElementById('cvz-preview-body');
-  const availableWidth = body.clientWidth - 32; // 16px Innenabstand auf beiden Seiten, siehe .cvz-preview-body padding
+  const availableWidth = body.clientWidth - 32;
   const scale = Math.min(1, Math.max(availableWidth, 100) / deviceWidth);
 
-  // WICHTIG: .cvz-preview-frame-inner ist ein normaler Block-div OHNE eigene
-  // Breite/Hoehe - der uebernaehme sonst per CSS-Boxmodell automatisch die
-  // Breite von .cvz-preview-frame-outer (seinem Elternelement), NICHT die
-  // seines Iframe-Inhalts. Dadurch bezog sich jede Neuberechnung auf die
-  // Breite der VORHERIGEN Skalierung statt auf die tatsaechliche
-  // Geraetebreite - das war der Grund, warum ein Wechsel zurueck zu Desktop
-  // nach Mobile nicht korrekt neu skalierte. Inner bekommt deshalb IMMER
-  // explizit die natuerliche (unskalierte) Groesse gesetzt, bevor der
-  // transform greift.
   inner.style.width = deviceWidth + 'px';
   inner.style.height = cvzPreviewContentHeight + 'px';
   inner.style.transform = `scale(${scale})`;
@@ -789,13 +686,6 @@ function cvzApplyPreviewScale() {
   outer.style.height = Math.round(cvzPreviewContentHeight * scale) + 'px';
 }
 
-// Debounced, damit ein Resize-Event-Sturm (z.B. beim Ziehen des Browser-
-// fensters) nicht bei jedem einzelnen Pixel neu rechnet. Erzwingt zusaetzlich
-// einen Wechsel auf Mobile, falls der Viewport unter die Mobil-Schwelle
-// faellt WAEHREND Desktop aktiv ist (siehe CSS: der Desktop-Button wird dort
-// versteckt, der State darf dann nicht auf 'desktop' haengen bleiben - sonst
-// bleibt die auf ~350px herunterskalierte 1440px-Ansicht unlesbar aktiv,
-// nur ohne sichtbaren Weg zurueck zu Mobile ausser ueber den Mobile-Button).
 let cvzResizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(cvzResizeTimer);
@@ -814,12 +704,8 @@ function cvzSetPreviewDevice(device) {
   document.getElementById('cvz-device-mobile').classList.toggle('active', device === 'mobile');
 
   const iframe = document.querySelector('#cvz-preview-frame-inner iframe');
-  if (!iframe) return; // noch keine Struktur vorhanden - nur der Button-Zustand aendert sich
+  if (!iframe) return;
   iframe.style.width = CVZ_DEVICE_WIDTHS[device] + 'px';
-  // Nach dem Breitenwechsel reflowt der Seiteninhalt im iframe (responsive
-  // CSS, siehe renderDocument) - die Hoehe war fuer die VORHERIGE Breite
-  // berechnet und muss neu ermittelt werden, sonst stimmt die Skalierung
-  // nicht mehr mit dem tatsaechlichen Inhalt ueberein.
   try {
     const doc = iframe.contentDocument || iframe.contentWindow.document;
     cvzPreviewContentHeight = doc.documentElement.scrollHeight;
@@ -829,22 +715,14 @@ function cvzSetPreviewDevice(device) {
   }
   cvzApplyPreviewScale();
 }
-cvzSetPreviewDevice(cvzPreviewDevice); // Button-Zustand direkt beim Laden synchronisieren
+cvzSetPreviewDevice(cvzPreviewDevice);
 
-// Persistentes Vorschau-Panel: zeigt IMMER nur die AKTUELLSTE Struktur-
-// Version, kein Verlauf (siehe CSS-Kommentar bei .cvz-preview-panel). Merkt
-// sich das aktuelle Dokument in cvzLatestStructureHtml fuer den Download-
-// Button, der unabhaengig von einer bestimmten Chat-Nachricht funktionieren
-// muss.
 let cvzLatestStructureHtml = null;
 function cvzUpdatePreviewPanel(htmlDocument, version) {
   if (!htmlDocument) return;
   cvzLatestStructureHtml = htmlDocument;
 
   const body = document.getElementById('cvz-preview-body');
-  // Skalierungs-Rahmen (outer = sichtbare Groesse, inner = natuerliche
-  // Groesse + transform:scale, siehe cvzApplyPreviewScale) statt direkt ins
-  // Panel zu rendern - ersetzt gleichzeitig den Empty-State.
   body.innerHTML = '<div class="cvz-preview-frame-outer" id="cvz-preview-frame-outer"><div class="cvz-preview-frame-inner" id="cvz-preview-frame-inner"></div></div>';
   const inner = document.getElementById('cvz-preview-frame-inner');
 
@@ -858,6 +736,9 @@ function cvzUpdatePreviewPanel(htmlDocument, version) {
 
   document.getElementById('cvz-preview-version').textContent = version ? `Version ${version}` : '';
   document.getElementById('cvz-preview-download').disabled = false;
+  // PDF-Export: Landingpage-Button erst klickbar, sobald eine Struktur
+  // existiert - genau wie der HTML-Download-Button direkt darüber.
+  document.getElementById('cvz-export-landingpage-pdf').disabled = false;
 }
 
 function cvzDownloadCurrentStructure() {
@@ -870,20 +751,15 @@ function cvzDownloadCurrentStructure() {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url); // sonst haelt der Browser den Blob unnoetig im Speicher
+  URL.revokeObjectURL(url);
 }
 
-// structureVersion ist optional (z.B. beim Kickoff-Reply ohne Struktur nicht
-// vorhanden). Bei vorhandenem structureHtmlDocument wird NICHT mehr inline
-// im Chat eingebettet (siehe cvzUpdatePreviewPanel) - stattdessen aktualisiert
-// sich das Vorschau-Panel, und der Chat bekommt nur einen kurzen Hinweis,
-// damit dieselbe Struktur nicht doppelt zu sehen ist.
 function cvzAppendMessage(role, text, structureHtmlDocument, structureVersion) {
   const wrap = document.getElementById('cvz-chat-messages');
   const bubble = document.createElement('div');
   bubble.className = `cvz-msg ${role}`;
   if (role === 'assistant' && typeof marked !== 'undefined') {
-    bubble.innerHTML = marked.parse(text); // Agent-Text, kein User-Input - unproblematisch als HTML einzufuegen
+    bubble.innerHTML = marked.parse(text);
   } else {
     bubble.textContent = text;
   }
@@ -901,9 +777,7 @@ function cvzAppendMessage(role, text, structureHtmlDocument, structureVersion) {
   return bubble;
 }
 
-let cvzIsSending = false; // Re-Entrancy-Schutz: verhindert Doppel-Submit (z.B. Enter + Klick fast gleichzeitig,
-                           // oder ein ungeduldiger zweiter Versuch waehrend ein Struktur-Turn mit vielen
-                           // Tool-Aufrufen noch laeuft und "Denkt nach..." laenger stehen bleibt als erwartet).
+let cvzIsSending = false;
 
 async function cvzSendMessage() {
   if (cvzIsSending) return;
@@ -918,9 +792,6 @@ async function cvzSendMessage() {
   cvzAppendMessage('user', message);
   const loadingBubble = cvzAppendMessage('assistant', 'Denkt nach …');
   loadingBubble.classList.add('loading');
-  // Spinner-Icon + Text-Label als getrennte Elemente, damit der Ticker unten
-  // nur das Label aktualisiert (textContent) statt bei jedem Update per
-  // marked.parse() die ganze Blase (inkl. Spinner) neu aufzubauen.
   loadingBubble.innerHTML = '<span class="cvz-spinner-inline"></span><span class="cvz-loading-label">Denkt nach …</span>';
   const loadingLabel = loadingBubble.querySelector('.cvz-loading-label');
   const stopTicker = cvzStartProgressTicker('Denkt nach …', CVZ_STRUCTURE_MESSAGES, t => { loadingLabel.textContent = t; });
@@ -958,40 +829,16 @@ function cvzStartNewProject() {
   window.location.href = window.location.pathname + '?new=1';
 }
 
-// ==================== INIT ====================
-// Erst Identitaet aufloesen (echter Memberstack-Login + /me-Aufloesung),
-// dann Wiederaufnahme versuchen, sonst normales Formular zeigen. Ohne
-// gueltige Identitaet (nicht eingeloggt, Memberstack nicht verfuegbar):
-// Auth-Gate statt Formular, damit kein API-Aufruf mit leerer user_id
-// versucht wird.
-cvzResolveIdentity().then(identityOk => {
-  if (!identityOk) {
-    document.getElementById('cvz-auth-gate').style.display = 'block';
-    document.getElementById('cvz-form-card').style.display = 'none';
-    return;
-  }
-  cvzTryResume().then(resumed => {
-    if (!resumed) cvzRenderStep();
-  });
-});
-// ==================== ERGÄNZUNG in cvzUpdatePreviewPanel() (bestehende Funktion) ====================
-// In der bereits vorhandenen Funktion cvzUpdatePreviewPanel(), direkt neben
-// der Zeile "document.getElementById('cvz-preview-download').disabled = false;",
-// folgende Zeile ergänzen - der Landingpage-PDF-Button soll erst klickbar
-// sein, sobald eine Struktur existiert, genau wie der HTML-Download-Button:
-//
-//   document.getElementById('cvz-export-landingpage-pdf')?.removeAttribute('disabled');
-//
-// Passend dazu im Webflow-Markup: der Button startet mit dem Attribut
-// disabled, genau wie vermutlich schon bei #cvz-preview-download der Fall.
-
-// ==================== PDF-EXPORT (Ergänzung zu app.js) ====================
-// Direkt an das Ende von app.js anhängen. Braucht nur cvzAuthHeaders() und
-// cvzState.page_project_id, die bereits weiter oben in app.js definiert
-// sind - KEINE weiteren State-Ergänzungen nötig. Der Server lädt Briefing-
-// Text und Struktur-HTML selbst aus Supabase (page_agent_messages bzw.
-// page_structures), siehe Chat-Begründung.
-
+// ==================== PDF-EXPORT ====================
+// Buttons werden per onclick direkt im HTML-Embed verdrahtet (siehe
+// frontend/embed.html: id="cvz-export-briefing-pdf" bzw.
+// id="cvz-export-landingpage-pdf", jeweils mit onclick="cvzExportPdf({...})") -
+// passend zum bestehenden Stil dieser Datei (onclick="cvzGoBack()" usw.).
+// KEIN zusaetzliches addEventListener fuer dieselben IDs - das wuerde zu
+// doppelter Ausfuehrung pro Klick fuehren. Der Server laedt Briefing-Text
+// und Struktur-HTML selbst aus Supabase (page_agent_messages bzw.
+// page_structures) - hier wird nur cvzState.page_project_id und
+// cvzAuthHeaders() gebraucht, beide bereits weiter oben definiert.
 async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
   const label = buttonEl.querySelector('.btn-label') || buttonEl;
   const originalText = label.textContent;
@@ -1045,23 +892,14 @@ async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
   }
 }
 
-// Button-Bindings - IDs müssen im Webflow-Markup rund um
-// #cvz-preview-download ergänzt werden (dort liegt bereits der
-// "Struktur als HTML"-Button).
-document.getElementById('cvz-export-briefing-pdf')?.addEventListener('click', (e) => {
-  cvzExportPdf({
-    buttonEl: e.currentTarget,
-    errorEl: document.getElementById('cvz-export-briefing-error'),
-    type: 'briefing',
-    downloadName: `convertlyze-briefing-${Date.now()}.pdf`,
-  });
-});
-
-document.getElementById('cvz-export-landingpage-pdf')?.addEventListener('click', (e) => {
-  cvzExportPdf({
-    buttonEl: e.currentTarget,
-    errorEl: document.getElementById('cvz-export-landingpage-error'),
-    type: 'landingpage',
-    downloadName: `convertlyze-landingpage-${Date.now()}.pdf`,
+// ==================== INIT ====================
+cvzResolveIdentity().then(identityOk => {
+  if (!identityOk) {
+    document.getElementById('cvz-auth-gate').style.display = 'block';
+    document.getElementById('cvz-form-card').style.display = 'none';
+    return;
+  }
+  cvzTryResume().then(resumed => {
+    if (!resumed) cvzRenderStep();
   });
 });
