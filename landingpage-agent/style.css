@@ -62,7 +62,7 @@
   .cvz-steps .step.done { color: var(--cvz-text); border-bottom-color: var(--cvz-text); }
 
   h1.cvz-title { font-size: 1.6rem; font-weight: 700; margin: 0 0 8px; line-height: 1.25; }
-  p.cvz-subtitle { color: var(--cvz-text); margin: 0 0 28px; font-size: 0.95rem; }
+  p.cvz-subtitle { color: var(--cvz-teal); margin: 0 0 28px; font-size: 0.95rem; }
 
   label.cvz-label {
     display: block; font-size: 0.82rem; font-weight: 600;
