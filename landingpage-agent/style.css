@@ -160,7 +160,7 @@
   .cvz-chat-header .title { font-weight: 700; }
   .cvz-chat-header .quota { font-size: 0.78rem; color: var(--cvz-text-muted); }
   .cvz-chat-messages {
-    flex: 1; overflow-y: auto; padding: 20px;
+    flex: 1; min-height: 0; overflow-y: auto; padding: 20px;
     display: flex; flex-direction: column; gap: 16px;
     background: var(--cvz-bg-elevated); border-left: 1px solid var(--cvz-border); border-right: 1px solid var(--cvz-border);
   }
@@ -259,7 +259,7 @@
      das ergibt die gewuenschte "Handy-Rahmen"-Optik statt eines gestreckten
      breiten Panels.
   */
-  .cvz-preview-body { flex: 1; overflow: auto; background: var(--cvz-bg); position: relative; padding: 16px; }
+  .cvz-preview-body { flex: 1; min-height: 0; overflow: auto; background: var(--cvz-bg); position: relative; padding: 16px; }
   .cvz-preview-empty {
     height: 100%; display: flex; align-items: center; justify-content: center;
     text-align: center; padding: 40px; color: var(--cvz-text-muted); font-size: 0.9rem;
@@ -272,8 +272,8 @@
 
   @media (max-width: 1080px) {
     .cvz-workspace { flex-direction: column; }
-    .cvz-chat-wrap { flex: none; width: 100%; height: 55vh; max-height: none; }
-    .cvz-preview-panel { flex: none; width: 100%; height: 55vh; max-height: none; }
+    .cvz-chat-wrap { flex: none; width: 100%; height: 42vh; max-height: none; }
+    .cvz-preview-panel { flex: none; width: 100%; height: 68vh; max-height: none; }
   }
 
   /* Auf echten Mobil-Viewports macht eine auf ~350px herunterskalierte
@@ -281,7 +281,15 @@
      der Desktop-Button wird hier komplett entfernt, nicht nur deaktiviert.
      767px = derselbe Schwellwert wie die window.innerWidth-Standardauswahl
      in app.js (cvzPreviewDevice), damit Default-Verhalten und sichtbare
-     Optionen konsistent sind. */
+     Optionen konsistent sind. Chat-Bubbles bekommen hier zusaetzlich mehr
+     Breite - 85% wirkt auf schmalen Handy-Bildschirmen unnoetig schmal mit
+     viel Leerraum an der Seite. */
   @media (max-width: 767px) {
     #cvz-device-desktop { display: none; }
+    .cvz-msg { max-width: 94%; }
+    /* Titel/Kontingent/Button brechen in einer Zeile haesslich mitten im
+       Text um (siehe Chat-Screenshot) - auf schmalen Screens stattdessen
+       sauber untereinander, jedes Element auf eigener Zeile. */
+    .cvz-chat-header { flex-direction: column; align-items: flex-start; gap: 6px; }
+    .cvz-chat-header button { align-self: flex-start; }
   }
