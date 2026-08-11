@@ -118,21 +118,6 @@ const CVZ_BUSINESS_TYPES = [
   { value: 'physisches_produkt', label: 'Physisches Produkt' },
   { value: 'marktplatz',         label: 'Marktplatz / Plattform' }
 ];
-
-const businessType = input.business_type;
-
-if (!businessType || typeof businessType !== 'string' || !businessType.trim()) {
-  throw new Error('Business Type muss angegeben werden');
-}
-
-const predefinedType = CVZ_BUSINESS_TYPES.find(
-  type => type.value === businessType
-);
-
-const businessTypeCategory = predefinedType
-  ? predefinedType.value
-  : 'other';
-
 // Nur ein Marker fuer die Dropdown-Option - wird NIE gespeichert oder
 // verschickt. Der doppelte Unterstrich macht eine Kollision mit einer
 // echten Nutzereingabe praktisch unmoeglich.
