@@ -77,6 +77,7 @@ const cvzState = {
   existing_content: '',
   reference_urls: [],
   brand_reference_url: '',
+  brand_color: '',
   customer_reasons: '',
   no_customer_reasons: false,
   pdfExtracts: [], // [{filename, text}]
@@ -205,9 +206,16 @@ function cvzRenderStep2() {
     <div id="cvz-pdf-status" style="margin-top:8px;"></div>
     <div class="cvz-chip-row" id="cvz-pdf-chips">${cvzRenderPdfChips()}</div>
 
+    <label class="cvz-label">Eure Markenfarbe (optional)</label>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <input type="color" id="cvz-in-brand-color-picker" value="${/^#([0-9a-fA-F]{6})$/.test(cvzState.brand_color) ? cvzState.brand_color : '#4f46e5'}" style="width:44px; height:40px; padding:2px; border-radius:8px; border:1px solid var(--cvz-border); background:var(--cvz-bg); cursor:pointer;" oninput="cvzSyncBrandColorFromPicker(this.value)">
+      <input class="cvz-input" id="cvz-in-brand-color" placeholder="#4f46e5" value="${cvzEsc(cvzState.brand_color)}" style="flex:1;" oninput="cvzSyncBrandColorFromText(this.value)">
+    </div>
+    <p class="cvz-hint">Direkte Eingabe hat Vorrang vor der automatischen Erkennung aus der Website unten - keine Bestaetigung im Chat noetig, da hier eindeutig.</p>
+
     <label class="cvz-label">Eure Website fuer den Marken-Look (optional)</label>
     <input class="cvz-input" id="cvz-in-brand-url" placeholder="https://eure-website.de" value="${cvzEsc(cvzState.brand_reference_url)}">
-    <p class="cvz-hint">Falls angegeben, versucht der Assistent, eure Markenfarbe automatisch zu erkennen und schlaegt sie dir zur Bestaetigung vor - er uebernimmt sie nie ungefragt.</p>
+    <p class="cvz-hint">Nur relevant, wenn oben keine Farbe eingetragen ist - dann versucht der Assistent, sie automatisch zu erkennen und schlaegt sie dir zur Bestaetigung vor.</p>
 
     <label class="cvz-label">Sonstiger Kontext (optional)</label>
     <textarea class="cvz-input" id="cvz-in-existing" placeholder="Weitere Hinweise fuer den Assistenten, die nicht in ein Feld oben passen">${cvzEsc(cvzState.existing_content)}</textarea>
@@ -417,8 +425,25 @@ function cvzSyncStep1Fields() {
 function cvzSyncStep2Fields() {
   cvzState.existing_content = document.getElementById('cvz-in-existing').value.trim();
   cvzState.brand_reference_url = document.getElementById('cvz-in-brand-url').value.trim();
+  cvzState.brand_color = document.getElementById('cvz-in-brand-color').value.trim();
   if (!cvzState.no_customer_reasons) {
     cvzState.customer_reasons = document.getElementById('cvz-in-customer-reasons').value.trim();
+  }
+}
+
+// Farbpicker und Textfeld halten sich gegenseitig synchron. Der native
+// <input type="color"> akzeptiert NUR vollstaendige 6-stellige Hex-Werte -
+// beim Tippen im Textfeld wird der Picker deshalb nur aktualisiert, wenn der
+// bisher eingegebene Wert bereits ein gueltiger voller Hex-Code ist, sonst
+// bleibt er unveraendert (kein Fehler, einfach kein Sync in diesem Moment).
+function cvzSyncBrandColorFromPicker(hex) {
+  cvzState.brand_color = hex;
+  document.getElementById('cvz-in-brand-color').value = hex;
+}
+function cvzSyncBrandColorFromText(value) {
+  cvzState.brand_color = value.trim();
+  if (/^#([0-9a-fA-F]{6})$/.test(cvzState.brand_color)) {
+    document.getElementById('cvz-in-brand-color-picker').value = cvzState.brand_color;
   }
 }
 
@@ -466,6 +491,9 @@ function cvzValidateStep() {
     cvzSyncStep2Fields();
     if (cvzState.usps.length === 0) return 'Bitte mindestens eine USP eintragen.';
     if (cvzState.features.length === 0) return 'Bitte mindestens ein Feature eintragen.';
+    if (cvzState.brand_color && !/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(cvzState.brand_color)) {
+      return `"${cvzState.brand_color}" ist kein gueltiger Hex-Farbcode (z.B. #4f46e5) - oder das Feld leer lassen.`;
+    }
     if (cvzState.brand_reference_url) {
       try {
         new URL(cvzState.brand_reference_url);
@@ -588,6 +616,7 @@ async function cvzLaunch() {
         competitor_urls: competitorUrls,
         existing_content: cvzBuildExistingContent() || null,
         brand_reference_url: cvzState.brand_reference_url || null,
+        brand_color: cvzState.brand_color || null,
         customer_reasons: cvzState.no_customer_reasons ? 'Keine Informationen vorhanden' : (cvzState.customer_reasons || null)
       })
     });
