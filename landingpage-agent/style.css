@@ -36,7 +36,7 @@
     padding: 12px 16px;
     margin-bottom: 20px;
     font-size: 0.8rem;
-    color: var(--cvz-text-muted);
+    color: var(--cvz-text);
   }
   .cvz-dev-bar summary { cursor: pointer; color: var(--cvz-teal); font-weight: 600; }
   .cvz-dev-bar input {
@@ -55,18 +55,18 @@
 
   .cvz-steps {
     display: flex; gap: 6px; margin-bottom: 28px; font-size: 0.72rem;
-    letter-spacing: 0.06em; text-transform: uppercase; color: var(--cvz-text-muted);
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--cvz-text);
   }
   .cvz-steps .step { flex: 1; padding-bottom: 8px; border-bottom: 2px solid var(--cvz-border); }
   .cvz-steps .step.active { color: var(--cvz-teal); border-bottom-color: var(--cvz-teal); font-weight: 600; }
-  .cvz-steps .step.done { color: var(--cvz-text); border-bottom-color: var(--cvz-text-muted); }
+  .cvz-steps .step.done { color: var(--cvz-text); border-bottom-color: var(--cvz-text); }
 
   h1.cvz-title { font-size: 1.6rem; font-weight: 700; margin: 0 0 8px; line-height: 1.25; }
   p.cvz-subtitle { color: var(--cvz-text); margin: 0 0 28px; font-size: 0.95rem; }
 
   label.cvz-label {
     display: block; font-size: 0.82rem; font-weight: 600;
-    color: var(--cvz-text-muted); margin: 18px 0 6px;
+    color: var(--cvz-text); margin: 18px 0 6px;
   }
   label.cvz-label:first-of-type { margin-top: 0; }
 
@@ -82,7 +82,7 @@
   }
   textarea.cvz-input { resize: vertical; min-height: 70px; }
 
-  input[type="file"] { color: var(--cvz-text-muted); font-size: 0.85rem; }
+  input[type="file"] { color: var(--cvz-text); font-size: 0.85rem; }
   input[type="file"]::file-selector-button {
     background: var(--cvz-teal); color: var(--cvz-bg); border: none;
     border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer;
@@ -104,7 +104,7 @@
   .cvz-choice {
     flex: 1; padding: 14px 10px; text-align: center; border-radius: 10px;
     border: 1px solid var(--cvz-border); background: var(--cvz-bg);
-    color: var(--cvz-text-muted); cursor: pointer; font-size: 0.88rem; font-weight: 600;
+    color: var(--cvz-text); cursor: pointer; font-size: 0.88rem; font-weight: 600;
   }
   .cvz-choice.selected { border-color: var(--cvz-teal); color: var(--cvz-teal); background: var(--cvz-teal-dim); }
 
@@ -117,7 +117,7 @@
   .cvz-competitor-item.locked { opacity: 0.45; cursor: not-allowed; }
   .cvz-competitor-item input[type="checkbox"] { margin-top: 3px; accent-color: var(--cvz-teal); }
   .cvz-competitor-item .title { font-weight: 600; font-size: 0.92rem; }
-  .cvz-competitor-item .url { font-size: 0.78rem; color: var(--cvz-text-muted); word-break: break-all; }
+  .cvz-competitor-item .url { font-size: 0.78rem; color: var(--cvz-text); word-break: break-all; }
 
   .cvz-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 32px; }
 
@@ -127,10 +127,10 @@
   }
   button.cvz-btn-primary { background: var(--cvz-teal); color: var(--cvz-bg); }
   button.cvz-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-  button.cvz-btn-secondary { background: transparent; color: var(--cvz-text-muted); }
+  button.cvz-btn-secondary { background: transparent; color: var(--cvz-text); }
   button.cvz-btn-secondary:hover { color: var(--cvz-text); }
 
-  .cvz-hint { font-size: 0.78rem; color: var(--cvz-text-muted); margin-top: 6px; }
+  .cvz-hint { font-size: 0.78rem; color: var(--cvz-text); margin-top: 6px; }
   .cvz-error {
     background: rgba(248, 113, 113, 0.1); border: 1px solid var(--cvz-danger);
     color: var(--cvz-danger); border-radius: 10px; padding: 12px 14px;
@@ -177,7 +177,7 @@
   .cvz-msg { max-width: 85%; padding: 12px 16px; border-radius: 14px; font-size: 0.92rem; line-height: 1.5; }
   .cvz-msg.user { align-self: flex-end; background: var(--cvz-teal); color: var(--cvz-bg); border-bottom-right-radius: 4px; white-space: pre-wrap; }
   .cvz-msg.assistant { align-self: flex-start; background: var(--cvz-bg); border: 1px solid var(--cvz-border); border-bottom-left-radius: 4px; }
-  .cvz-msg.assistant.loading { color: var(--cvz-text-muted); font-style: italic; display: flex; align-items: center; gap: 10px; }
+  .cvz-msg.assistant.loading { color: var(--cvz-text); font-style: italic; display: flex; align-items: center; gap: 10px; }
   /* Kleiner Inline-Spinner fuer die Chat-Ladeblase - nutzt dieselbe
      cvz-spin-Animation wie der grosse Kickoff-Spinner oben, nur kompakter,
      damit bei langen Struktur-Turns (mehrere get_methodology-Runden, siehe
@@ -248,10 +248,10 @@
     display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; row-gap: 8px;
   }
   .cvz-preview-header .title { font-weight: 700; }
-  .cvz-preview-header .version { font-size: 0.78rem; color: var(--cvz-text-muted); flex: 1; }
+  .cvz-preview-header .version { font-size: 0.78rem; color: var(--cvz-text); flex: 1; }
   .cvz-device-toggle { display: flex; gap: 4px; background: var(--cvz-bg); border: 1px solid var(--cvz-border); border-radius: 8px; padding: 3px; }
   .cvz-device-btn {
-    border: none; background: transparent; color: var(--cvz-text-muted);
+    border: none; background: transparent; color: var(--cvz-text);
     font-size: 0.78rem; font-weight: 600; padding: 5px 12px; border-radius: 6px;
     cursor: pointer; font-family: inherit;
   }
@@ -272,7 +272,7 @@
   .cvz-preview-body { flex: 1; min-height: 0; overflow: auto; background: var(--cvz-bg); position: relative; padding: 16px; }
   .cvz-preview-empty {
     height: 100%; display: flex; align-items: center; justify-content: center;
-    text-align: center; padding: 40px; color: var(--cvz-text-muted); font-size: 0.9rem;
+    text-align: center; padding: 40px; color: var(--cvz-text); font-size: 0.9rem;
   }
   .cvz-preview-frame-outer {
     margin: 0 auto; overflow: hidden; border: 1px solid var(--cvz-border); border-radius: 8px; background: #fff;
