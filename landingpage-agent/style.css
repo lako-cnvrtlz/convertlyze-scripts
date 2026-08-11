@@ -155,10 +155,20 @@
   .cvz-chat-wrap { display: flex; flex-direction: column; height: 80vh; max-height: 760px; flex: 0 0 440px; min-width: 0; }
   .cvz-chat-header {
     padding: 16px 20px; border-bottom: 1px solid var(--cvz-border);
-    display: flex; justify-content: space-between; align-items: center;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
   }
   .cvz-chat-header .title { font-weight: 700; }
   .cvz-chat-header .quota { font-size: 0.78rem; color: var(--cvz-text-muted); }
+  /* .cvz-btn-secondary ist bewusst transparent/text-artig (siehe Definition
+     weiter oben) - im Chat-Header braucht der Button aber eine sichtbare
+     Umrandung, sonst wirkt er wie normaler Text statt wie ein klickbares
+     Element (siehe Chat-Screenshot). Chat-Header-spezifischer Zusatz statt
+     die globale .cvz-btn-secondary-Definition zu aendern, die an anderer
+     Stelle bewusst dezent bleiben soll. */
+  .cvz-chat-header button.cvz-btn-secondary {
+    border: 1px solid var(--cvz-border); border-radius: 8px;
+  }
+  .cvz-chat-header button.cvz-btn-secondary:hover { border-color: var(--cvz-teal); }
   .cvz-chat-messages {
     flex: 1; min-height: 0; overflow-y: auto; padding: 20px;
     display: flex; flex-direction: column; gap: 16px;
@@ -287,9 +297,4 @@
   @media (max-width: 767px) {
     #cvz-device-desktop { display: none; }
     .cvz-msg { max-width: 94%; }
-    /* Titel/Kontingent/Button brechen in einer Zeile haesslich mitten im
-       Text um (siehe Chat-Screenshot) - auf schmalen Screens stattdessen
-       sauber untereinander, jedes Element auf eigener Zeile. */
-    .cvz-chat-header { flex-direction: column; align-items: flex-start; gap: 6px; }
-    .cvz-chat-header button { align-self: flex-start; }
   }
