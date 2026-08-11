@@ -54,6 +54,7 @@ async function cvzResolveIdentity() {
 const cvzState = {
   step: 0,
   keyword: '',
+  business_type: '',
   target_audience: '',
   conversion_goal: '',
   funnel_stage: '',
@@ -67,6 +68,9 @@ const cvzState = {
   no_customer_reasons: false,
   pdfExtracts: [],
   competitorSuggestions: [],
+  // Vom URL-Filter aussortierte Vorschlaege - bleiben einklappbar sichtbar,
+  // damit ein faelschlich gefilterter Treffer nicht verloren geht.
+  filteredOutCompetitors: [],
   manualCompetitors: []
 };
 
@@ -86,18 +90,92 @@ function cvzShowError(msg) {
   el.style.display = msg ? 'block' : 'none';
 }
 
+// ==================== SCHRITT 0: THEMA ====================
+
+const CVZ_BUSINESS_TYPES = [
+  'SaaS / Software',
+  'Beratung / Agentur',
+  'Dienstleistung',
+  'Physisches Produkt',
+  'Marktplatz / Plattform'
+];
+const CVZ_BUSINESS_TYPE_CUSTOM = '__custom__';
+const CVZ_BUSINESS_TYPE_MAXLEN = 60;
+
+// true, wenn der gespeicherte Wert ein Freitext ist (nicht aus der Liste).
+function cvzBusinessTypeIsCustom() {
+  return !!cvzState.business_type && CVZ_BUSINESS_TYPES.indexOf(cvzState.business_type) === -1;
+}
+
+function cvzRenderBusinessTypeField() {
+  const isCustom = cvzBusinessTypeIsCustom();
+
+  const options = CVZ_BUSINESS_TYPES.map(v => `
+    <option value="${cvzEsc(v)}" ${cvzState.business_type === v ? 'selected' : ''}>${cvzEsc(v)}</option>
+  `).join('');
+
+  return `
+    <label class="cvz-label">Produktkategorie</label>
+    <div class="cvz-select-wrap">
+      <select class="cvz-input" id="cvz-in-business-type" onchange="cvzToggleBusinessTypeCustom(this.value)">
+        <option value="" ${!cvzState.business_type ? 'selected' : ''}>Bitte wählen …</option>
+        ${options}
+        <option value="${CVZ_BUSINESS_TYPE_CUSTOM}" ${isCustom ? 'selected' : ''}>→ Eigene Eingabe …</option>
+      </select>
+    </div>
+    <input class="cvz-input ${isCustom ? '' : 'cvz-hidden'}" id="cvz-in-business-type-custom"
+      type="text" maxlength="${CVZ_BUSINESS_TYPE_MAXLEN}"
+      placeholder="z.B. Ausbildungsanbieter" aria-label="Eigene Produktkategorie"
+      value="${isCustom ? cvzEsc(cvzState.business_type) : ''}">
+    <p class="cvz-hint">Bestimmt, welche Vergleichsmaßstäbe für Hero, Conversion und Differenzierung angelegt werden.</p>
+  `;
+}
+
+function cvzToggleBusinessTypeCustom(value) {
+  const custom = document.getElementById('cvz-in-business-type-custom');
+  if (!custom) return;
+  const isCustom = value === CVZ_BUSINESS_TYPE_CUSTOM;
+  custom.classList.toggle('cvz-hidden', !isCustom);
+  if (isCustom) {
+    custom.focus();
+  } else {
+    custom.value = '';
+  }
+}
+
+// Liefert den finalen Wert fuer State und Payload.
+// ACHTUNG: maxlength und dieser slice sind clientseitig und trivial
+// umgehbar - der Wert landet spaeter im LLM-Prompt. Die verbindliche
+// Laengen- und Zeichenpruefung gehoert in die Flask-Schicht vor SP1.
+function cvzReadBusinessType() {
+  const select = document.getElementById('cvz-in-business-type');
+  const custom = document.getElementById('cvz-in-business-type-custom');
+  if (!select) return cvzState.business_type;
+
+  if (select.value !== CVZ_BUSINESS_TYPE_CUSTOM) return select.value;
+
+  return String(custom ? custom.value : '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, CVZ_BUSINESS_TYPE_MAXLEN);
+}
+
 function cvzRenderStep0() {
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Worum geht es?</h1>
     <p class="cvz-subtitle">Da eure Landingpage noch nicht existiert: Gib das Thema/Ziel-Keyword ein, nicht eine URL.</p>
     <label class="cvz-label">Thema / Ziel-Keyword</label>
-    <input class="cvz-input" id="cvz-in-keyword" placeholder="z.B. landingpage analyse" value="${cvzState.keyword}">
+    <input class="cvz-input" id="cvz-in-keyword" placeholder="z.B. landingpage analyse" value="${cvzEsc(cvzState.keyword)}">
+    ${cvzRenderBusinessTypeField()}
     <label class="cvz-label">Hauptzielgruppe (Persona)</label>
-    <input class="cvz-input" id="cvz-in-audience" placeholder="z.B. Marketing-Leiter in KMUs" value="${cvzState.target_audience}">
+    <input class="cvz-input" id="cvz-in-audience" placeholder="z.B. Marketing-Leiter in KMUs" value="${cvzEsc(cvzState.target_audience)}">
     <p class="cvz-hint"><a href="https://www.convertlyze.com/content-hub/icp-generator" target="_blank" rel="noopener" style="color:var(--cvz-teal);">Unsicher bei deiner Zielgruppe? → Kostenloser ICP- & Persona-Assistent</a></p>
   `;
   document.getElementById('cvz-btn-back').style.visibility = 'hidden';
 }
+
+// ==================== SCHRITT 1: ZIEL ====================
 
 const CONVERSION_GOAL_GROUPS = {
   'Primary Conversions (Sales & Umsatz)': [
@@ -133,10 +211,12 @@ function cvzRenderStep1() {
     <h1 class="cvz-title">Was soll auf der Seite passieren?</h1>
     <p class="cvz-subtitle">Conversion-Ziel und Phase der Kaufentscheidung.</p>
     <label class="cvz-label">Conversion-Ziel</label>
-    <select class="cvz-input" id="cvz-in-goal">
-      <option value="" disabled ${!cvzState.conversion_goal ? 'selected' : ''}>Conversion-Ziel auswählen …</option>
-      ${optgroups}
-    </select>
+    <div class="cvz-select-wrap">
+      <select class="cvz-input" id="cvz-in-goal">
+        <option value="" disabled ${!cvzState.conversion_goal ? 'selected' : ''}>Conversion-Ziel auswählen …</option>
+        ${optgroups}
+      </select>
+    </div>
     <label class="cvz-label">Funnel-Stage</label>
     <div class="cvz-choice-row" id="cvz-funnel-choices">
       ${[
@@ -158,6 +238,8 @@ function cvzSelectFunnel(value) {
     el.classList.toggle('selected', el.dataset.value === value);
   });
 }
+
+// ==================== SCHRITT 2: ANGEBOT ====================
 
 function cvzRenderStep2() {
   document.getElementById('cvz-step-content').innerHTML = `
@@ -285,11 +367,202 @@ function cvzRemoveChip(field, index) {
   const containerId = field === 'usps' ? 'cvz-usp-chips' : 'cvz-feature-chips';
   document.getElementById(containerId).innerHTML = cvzRenderChips(cvzState[field], field);
 }
+
+// Escaped jetzt auch Anfuehrungszeichen. Vorher brach ein " im Wert
+// (z.B. in einer USP oder einem Keyword) aus value="..." aus und
+// zerlegte das Markup - der Fehler war still, das Feld blieb nur leer.
 function cvzEsc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-const CVZ_MAX_COMPETITORS = 5;
+// ==================== SCHRITT 3: WETTBEWERBER ====================
+//
+// Die Vorschlaege aus suggest-competitors enthalten regelmaessig
+// YouTube-Videos, Blogartikel und Glossarseiten - URLs, die zum Keyword
+// ranken, aber keine Landingpages sind. Werden sie mitanalysiert, kosten
+// sie Credits und produzieren einen Vergleich ohne Aussagekraft.
+//
+// Filter in drei Stufen:
+//   1. Host-Blocklist    - Plattformen, die nie Wettbewerber-LP sein koennen
+//   2. Pfad-Blocklist    - Content- und Rechtsseiten derselben Domain
+//   3. Scoring + Dedupe  - eine URL pro Domain, beste zuerst
+
+const CVZ_MAX_COMPETITORS = 5;      // Hartes Limit fuer die Analyse
+const CVZ_PRESELECT_COUNT = 3;      // Vorausgewaehlt beim ersten Rendern
+const CVZ_MAX_SUGGESTIONS_SHOWN = 8; // Wie viele Vorschlaege ueberhaupt angezeigt werden
+
+// Suffix-Match: "youtube.com" trifft auch "www." und "m.youtube.com".
+const CVZ_BLOCKED_HOSTS = [
+  'youtube.com', 'youtu.be', 'vimeo.com', 'dailymotion.com', 'twitch.tv',
+  'wikipedia.org', 'wikimedia.org', 'wiktionary.org',
+  'reddit.com', 'quora.com', 'gutefrage.net', 'stackexchange.com', 'stackoverflow.com',
+  'linkedin.com', 'xing.com', 'facebook.com', 'instagram.com', 'threads.net',
+  'twitter.com', 'x.com', 'tiktok.com', 'pinterest.com', 'pinterest.de',
+  'medium.com', 'substack.com', 'blogspot.com', 'wordpress.com', 'tumblr.com',
+  'github.com', 'gitlab.com', 'slideshare.net', 'scribd.com', 'issuu.com',
+  'amazon.de', 'amazon.com', 'ebay.de', 'etsy.com', 'otto.de',
+  'google.com', 'google.de', 'bing.com',
+  'capterra.com', 'capterra.com.de', 'g2.com', 'omr.com', 'trustpilot.com',
+  'chip.de', 'computerbild.de', 'heise.de', 'golem.de', 't3n.de',
+  'handelsblatt.com', 'wiwo.de', 'spiegel.de', 'zeit.de', 'faz.net',
+  'apple.com', 'play.google.com', 'apps.apple.com',
+  'eventbrite.de', 'meetup.com', 'spotify.com'
+];
+
+// Segmentweiser Vergleich, KEIN includes() - sonst wuerde "news"
+// in "/newsletter-software/" treffen und eine gueltige Seite wegwerfen.
+const CVZ_BLOCKED_PATH_SEGMENTS = [
+  'blog', 'blogs', 'news', 'newsroom', 'presse', 'press', 'pressemitteilung',
+  'magazin', 'magazine', 'journal', 'insights', 'stories',
+  'glossar', 'glossary', 'lexikon', 'wiki', 'wissen', 'wissensdatenbank',
+  'ratgeber', 'guide', 'guides', 'tipps', 'tutorial', 'tutorials',
+  'artikel', 'article', 'articles', 'beitrag', 'post', 'posts',
+  'academy', 'akademie', 'kurs', 'kurse', 'webinar', 'webinare',
+  'podcast', 'podcasts', 'video', 'videos', 'mediathek',
+  'event', 'events', 'veranstaltung', 'veranstaltungen', 'messe',
+  'karriere', 'career', 'careers', 'jobs', 'stellenangebote',
+  'impressum', 'datenschutz', 'datenschutzerklaerung', 'privacy',
+  'agb', 'terms', 'legal', 'cookie', 'cookies', 'nutzungsbedingungen',
+  'kontakt', 'contact', 'ueber-uns', 'about', 'about-us', 'team',
+  'faq', 'hilfe', 'help', 'support', 'docs', 'doku', 'dokumentation',
+  'changelog', 'release-notes', 'status',
+  'category', 'kategorie', 'tag', 'tags', 'author', 'autor',
+  'suche', 'search', 'sitemap',
+  'login', 'signin', 'anmelden', 'register', 'registrieren', 'account',
+  'download', 'downloads', 'whitepaper', 'ebook', 'checkliste', 'vorlage', 'vorlagen'
+];
+
+// Sprechen fuer eine echte Angebotsseite - positiv im Scoring, keine Pflicht.
+const CVZ_BONUS_PATH_SEGMENTS = [
+  'produkt', 'produkte', 'product', 'products',
+  'software', 'tool', 'tools', 'plattform', 'platform',
+  'loesung', 'loesungen', 'solution', 'solutions',
+  'leistungen', 'services', 'service',
+  'features', 'funktionen', 'funktionsumfang',
+  'preise', 'pricing', 'preis', 'tarife', 'kosten',
+  'demo', 'testen', 'trial'
+];
+
+const CVZ_BLOCKED_EXTENSIONS = [
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+  '.zip', '.rar', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp',
+  '.mp4', '.mp3', '.xml', '.json', '.csv'
+];
+
+// Prueft eine einzelne URL.
+// -> { ok, reason, host, path, url }
+function cvzInspectUrl(rawUrl) {
+  const result = { ok: false, reason: '', host: '', path: '', url: '' };
+  let input = String(rawUrl || '').trim();
+  if (!input) {
+    result.reason = 'leer';
+    return result;
+  }
+
+  // Ohne Protokoll parst der URL-Konstruktor nicht.
+  if (!/^https?:\/\//i.test(input)) input = 'https://' + input;
+
+  let parsed;
+  try {
+    parsed = new URL(input);
+  } catch {
+    result.reason = 'ungültige URL';
+    return result;
+  }
+
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+  const path = parsed.pathname.toLowerCase();
+
+  result.host = host;
+  result.path = path;
+  result.url = parsed.origin + parsed.pathname + parsed.search;
+
+  if (CVZ_BLOCKED_HOSTS.some(b => host === b || host.endsWith('.' + b))) {
+    result.reason = 'keine Wettbewerber-Seite';
+    return result;
+  }
+
+  if (CVZ_BLOCKED_EXTENSIONS.some(ext => path.endsWith(ext))) {
+    result.reason = 'kein HTML';
+    return result;
+  }
+
+  const segments = path.split('/').filter(Boolean);
+  let hit = null;
+  for (const seg of segments) {
+    if (CVZ_BLOCKED_PATH_SEGMENTS.includes(seg)) { hit = seg; break; }
+    // Datumspfade wie /2024/03/ sind praktisch immer Blog-Archive.
+    if (/^(19|20)\d{2}$/.test(seg)) { hit = seg; break; }
+  }
+  if (hit) {
+    result.reason = `Content-Seite (/${hit}/)`;
+    return result;
+  }
+
+  result.ok = true;
+  return result;
+}
+
+// Hoeher = eher eine echte Landingpage.
+function cvzScoreUrl(info) {
+  let score = 100;
+  const segments = info.path.split('/').filter(Boolean);
+
+  score -= segments.length * 12;                       // Tiefe im Baum
+  if (segments.length === 0) score += 25;              // Startseite
+  if (segments.some(s => CVZ_BONUS_PATH_SEGMENTS.includes(s))) score += 20;
+
+  const last = segments[segments.length - 1] || '';
+  if (last.length > 40) score -= 15;                   // Artikel-Slug
+  if ((last.match(/-/g) || []).length >= 5) score -= 12;
+  if ((info.host.match(/\./g) || []).length > 1) score -= 10; // Subdomain
+
+  return score;
+}
+
+// Filtert, dedupliziert und sortiert die Rohvorschlaege.
+// -> { items: [...], removed: [{url, reason}] }
+function cvzFilterCompetitorSuggestions(rawList) {
+  const items = [];
+  const removed = [];
+  const seenHosts = new Set();
+
+  (rawList || []).forEach(entry => {
+    const rawUrl = typeof entry === 'string' ? entry : (entry && entry.url) || '';
+    const title = (entry && entry.title) || '';
+
+    const info = cvzInspectUrl(rawUrl);
+    if (!info.ok) {
+      removed.push({ url: rawUrl, reason: info.reason });
+      return;
+    }
+
+    // Eine URL pro Domain: drei Unterseiten desselben Anbieters
+    // verbrauchen drei Slots fuer eine einzige Erkenntnis.
+    if (seenHosts.has(info.host)) {
+      removed.push({ url: rawUrl, reason: 'Domain bereits enthalten' });
+      return;
+    }
+    seenHosts.add(info.host);
+
+    items.push({
+      url: info.url,
+      host: info.host,
+      title: title || info.host,
+      score: cvzScoreUrl(info),
+      selected: false,
+      recommended: false
+    });
+  });
+
+  items.sort((a, b) => b.score - a.score);
+  return { items, removed };
+}
 
 function cvzTotalCompetitorCount() {
   return cvzState.competitorSuggestions.filter(s => s.selected).length + cvzState.manualCompetitors.length;
@@ -300,19 +573,40 @@ async function cvzRenderStep3() {
     <h1 class="cvz-title">Wettbewerber bestätigen</h1>
     <p class="cvz-subtitle">Basierend auf eurem Thema — Vorschläge abwählen oder eigene ergänzen.</p>
     <div id="cvz-competitor-list"><p class="cvz-hint">Lade Vorschläge …</p></div>
+    <div id="cvz-filtered-box"></div>
     <label class="cvz-label">Weiteren Wettbewerber manuell hinzufügen</label>
     <input class="cvz-input" id="cvz-in-manual-competitor" placeholder="URL eines Wettbewerbers, z.B. https://wettbewerber.de" onkeydown="cvzAddManualCompetitorOnEnter(event)">
     <p class="cvz-hint">Nicht eure eigene Seite — eine Seite, mit der ihr um dieselben Kunden konkurriert. Maximal ${CVZ_MAX_COMPETITORS} Wettbewerber insgesamt, eigene Eintraege haben Vorrang vor Vorschlaegen.</p>
   `;
 
-  if (cvzState.competitorSuggestions.length === 0) {
+  const nothingLoadedYet =
+    cvzState.competitorSuggestions.length === 0 &&
+    cvzState.filteredOutCompetitors.length === 0;
+
+  if (nothingLoadedYet) {
     try {
       const res = await fetch(`${API_BASE}/api/page-agent/suggest-competitors`, {
         method: 'POST', headers: cvzAuthHeaders(),
-        body: JSON.stringify({ keyword: cvzState.keyword })
+        body: JSON.stringify({
+          keyword: cvzState.keyword,
+          business_type: cvzState.business_type || null
+        })
       });
       const data = await res.json();
-      cvzState.competitorSuggestions = (data.suggestions || []).slice(0, CVZ_MAX_COMPETITORS).map(s => ({ ...s, selected: true }));
+
+      // WICHTIG: erst filtern, dann kuerzen. Vorher wurde auf 5 gekuerzt
+      // und danach gefiltert - dabei gingen gute Kandidaten auf Position
+      // 6+ verloren, sobald oben Blog- oder Video-Treffer standen.
+      const filtered = cvzFilterCompetitorSuggestions(data.suggestions || []);
+
+      cvzState.competitorSuggestions = filtered.items
+        .slice(0, CVZ_MAX_SUGGESTIONS_SHOWN)
+        .map((s, i) => ({
+          ...s,
+          selected: i < CVZ_PRESELECT_COUNT,
+          recommended: i < CVZ_PRESELECT_COUNT
+        }));
+      cvzState.filteredOutCompetitors = filtered.removed;
     } catch (e) {
       console.error('suggest-competitors failed', e);
       document.getElementById('cvz-competitor-list').innerHTML =
@@ -322,34 +616,89 @@ async function cvzRenderStep3() {
   }
   cvzRenderCompetitorList();
 }
+
 function cvzRenderCompetitorList() {
   const container = document.getElementById('cvz-competitor-list');
   const total = cvzTotalCompetitorCount();
   const atCap = total >= CVZ_MAX_COMPETITORS;
 
+  const counter = `
+    <p class="cvz-selection-count ${atCap ? 'limit' : ''}">
+      ${total} von ${CVZ_MAX_COMPETITORS} ausgewählt${atCap ? ' – mehr geht nicht' : ' – du kannst weitere ergänzen oder abwählen'}
+    </p>`;
+
   const suggested = cvzState.competitorSuggestions.map((s, i) => {
     const locked = atCap && !s.selected;
+    const badge = s.recommended ? '<span class="cvz-badge">Empfohlen</span>' : '';
     return `
     <div class="cvz-competitor-item ${s.selected ? 'selected' : ''} ${locked ? 'locked' : ''}" onclick="${locked ? '' : `cvzToggleCompetitor(${i})`}">
       <input type="checkbox" ${s.selected ? 'checked' : ''} ${locked ? 'disabled' : ''} onclick="event.stopPropagation(); cvzToggleCompetitor(${i})">
-      <div>
-        <div class="title">${cvzEsc(s.title)}</div>
+      <div class="cvz-competitor-body">
+        <div class="title">${cvzEsc(s.title)}${badge}</div>
         <div class="url">${cvzEsc(s.url)}</div>
       </div>
     </div>
   `;
   }).join('');
+
   const manual = cvzState.manualCompetitors.map((url, i) => `
     <div class="cvz-competitor-item selected">
       <input type="checkbox" checked disabled>
-      <div style="flex:1"><div class="url">${cvzEsc(url)}</div></div>
+      <div class="cvz-competitor-body"><div class="url">${cvzEsc(url)}</div></div>
       <button onclick="cvzRemoveManualCompetitor(${i})" style="background:none;border:none;color:var(--cvz-text-muted);cursor:pointer;">×</button>
     </div>
   `).join('');
 
-  const counter = `<p class="cvz-hint" style="margin-bottom:10px;">${total}/${CVZ_MAX_COMPETITORS} Wettbewerber ausgewählt${atCap ? ' – Limit erreicht' : ''}</p>`;
-  container.innerHTML = counter + ((suggested + manual) || '<p class="cvz-hint">Keine Vorschläge gefunden — bitte manuell ergänzen.</p>');
+  const list = (suggested + manual) || '<p class="cvz-hint">Keine Vorschläge übrig — bitte manuell ergänzen.</p>';
+  container.innerHTML = counter + list;
+
+  cvzRenderFilteredBox();
 }
+
+// Aussortierte Vorschlaege bleiben nachvollziehbar und rueckholbar.
+// Ohne das waere ein Fehlgriff des Filters fuer den Nutzer unsichtbar.
+function cvzRenderFilteredBox() {
+  const box = document.getElementById('cvz-filtered-box');
+  if (!box) return;
+
+  if (cvzState.filteredOutCompetitors.length === 0) {
+    box.innerHTML = '';
+    return;
+  }
+
+  const rows = cvzState.filteredOutCompetitors.map((entry, i) => `
+    <li>
+      <span>${cvzEsc(entry.url)}</span>
+      <span class="reason">${cvzEsc(entry.reason)}</span>
+      <button onclick="cvzRestoreFilteredCompetitor(${i})">Trotzdem prüfen</button>
+    </li>
+  `).join('');
+
+  box.innerHTML = `
+    <details class="cvz-filtered-box">
+      <summary>${cvzState.filteredOutCompetitors.length} Vorschläge ausgeblendet (Videos, Blog- und Glossarseiten)</summary>
+      <ul class="cvz-filtered-list">${rows}</ul>
+    </details>
+  `;
+}
+
+function cvzRestoreFilteredCompetitor(i) {
+  const entry = cvzState.filteredOutCompetitors[i];
+  if (!entry) return;
+
+  const info = cvzInspectUrl(entry.url);
+  cvzState.filteredOutCompetitors.splice(i, 1);
+  cvzState.competitorSuggestions.push({
+    url: info.url || entry.url,
+    host: info.host,
+    title: info.host || entry.url,
+    score: 0,
+    selected: false,
+    recommended: false
+  });
+  cvzRenderCompetitorList();
+}
+
 function cvzToggleCompetitor(i) {
   const s = cvzState.competitorSuggestions[i];
   if (!s.selected && cvzTotalCompetitorCount() >= CVZ_MAX_COMPETITORS) {
@@ -360,11 +709,26 @@ function cvzToggleCompetitor(i) {
   s.selected = !s.selected;
   cvzRenderCompetitorList();
 }
+
 function cvzAddManualCompetitorOnEnter(event) {
   if (event.key !== 'Enter') return;
   event.preventDefault();
   const val = event.target.value.trim();
   if (!val) return;
+
+  const info = cvzInspectUrl(val);
+  if (!info.host) {
+    cvzShowError(`"${val}" ist keine gueltige URL.`);
+    return;
+  }
+
+  // Doppelte Domains verbrauchen zwei Slots fuer eine Erkenntnis.
+  const dupSuggestion = cvzState.competitorSuggestions.some(s => s.selected && s.host === info.host);
+  const dupManual = cvzState.manualCompetitors.some(u => cvzInspectUrl(u).host === info.host);
+  if (dupSuggestion || dupManual) {
+    cvzShowError('Diese Domain ist schon in der Auswahl.');
+    return;
+  }
 
   if (cvzState.manualCompetitors.length >= CVZ_MAX_COMPETITORS) {
     cvzShowError(`Maximal ${CVZ_MAX_COMPETITORS} eigene Wettbewerber möglich - entferne zuerst einen.`);
@@ -372,15 +736,18 @@ function cvzAddManualCompetitorOnEnter(event) {
   }
   cvzShowError(null);
 
-  cvzState.manualCompetitors.push(val);
+  cvzState.manualCompetitors.push(info.url);
   event.target.value = '';
 
+  // Eigene Eintraege haben Vorrang: bei Ueberlauf werden Vorschlaege
+  // von hinten abgewaehlt.
   for (let i = cvzState.competitorSuggestions.length - 1; i >= 0 && cvzTotalCompetitorCount() > CVZ_MAX_COMPETITORS; i--) {
     if (cvzState.competitorSuggestions[i].selected) cvzState.competitorSuggestions[i].selected = false;
   }
 
   cvzRenderCompetitorList();
 }
+
 function cvzRemoveManualCompetitor(i) {
   cvzState.manualCompetitors.splice(i, 1);
   cvzRenderCompetitorList();
@@ -390,6 +757,7 @@ function cvzRemoveManualCompetitor(i) {
 function cvzSyncStep0Fields() {
   cvzState.keyword = document.getElementById('cvz-in-keyword').value.trim();
   cvzState.target_audience = document.getElementById('cvz-in-audience').value.trim();
+  cvzState.business_type = cvzReadBusinessType();
 }
 function cvzSyncStep1Fields() {
   cvzState.conversion_goal = document.getElementById('cvz-in-goal').value.trim();
@@ -436,6 +804,11 @@ function cvzValidateStep() {
   if (cvzState.step === 0) {
     cvzSyncStep0Fields();
     if (!cvzState.keyword) return 'Bitte ein Thema/Keyword eingeben.';
+    const btSelect = document.getElementById('cvz-in-business-type');
+    if (btSelect && !btSelect.value) return 'Bitte eine Produktkategorie auswaehlen.';
+    if (btSelect && btSelect.value === CVZ_BUSINESS_TYPE_CUSTOM && !cvzState.business_type) {
+      return 'Bitte deine Produktkategorie eingeben.';
+    }
     if (!cvzState.target_audience) return 'Bitte eine Zielgruppe angeben.';
   }
   if (cvzState.step === 1) {
@@ -559,6 +932,7 @@ async function cvzLaunch() {
         funnel_stage: cvzState.funnel_stage,
         conversion_goal: cvzState.conversion_goal,
         target_audience: cvzState.target_audience,
+        business_type: cvzState.business_type || null,
         usps: cvzState.usps,
         features: cvzState.features,
         keyword: cvzState.keyword,
