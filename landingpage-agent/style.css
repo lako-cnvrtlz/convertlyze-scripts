@@ -1,300 +1,410 @@
 :root {
-    --cvz-bg: #0d1117;
-    --cvz-bg-elevated: #161b22;
-    --cvz-border: #30363d;
-    --cvz-teal: #4fd1c5;
-    --cvz-teal-dim: rgba(79, 209, 197, 0.12);
-    --cvz-text: #e6edf3;
-    --cvz-text-muted: #8b949e;
-    --cvz-danger: #f87171;
-    --cvz-radius: 12px;
-  }
+  --cvz-bg: #0d1117;
+  --cvz-bg-elevated: #161b22;
+  --cvz-border: #30363d;
+  --cvz-teal: #4fd1c5;
+  --cvz-teal-dim: rgba(79, 209, 197, 0.12);
+  --cvz-text: #e6edf3;
+  --cvz-text-muted: #8b949e;
+  --cvz-danger: #f87171;
+  --cvz-radius: 12px;
+}
 
-  * { box-sizing: border-box; }
+* { box-sizing: border-box; }
 
-  body {
-    margin: 0;
-    background: var(--cvz-bg);
-    color: var(--cvz-text);
-    /* Geist wird von der Host-Seite (convertlyze.com) global geladen -
-       hier nur referenziert, nicht per @font-face nachgeladen. */
-    font-family: 'Geist', ui-sans-serif, -apple-system, BlinkMacSystemFont, sans-serif;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-  }
+body {
+  margin: 0;
+  background: var(--cvz-bg);
+  color: var(--cvz-text);
+  /* Geist wird von der Host-Seite (convertlyze.com) global geladen -
+     hier nur referenziert, nicht per @font-face nachgeladen. */
+  font-family: 'Geist', ui-sans-serif, -apple-system, BlinkMacSystemFont, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
 
-  .cvz-app { width: 100%; max-width: 640px; }
+.cvz-app { width: 100%; max-width: 640px; }
 
-  /* ---------- Dev-Leiste: nur zum Testen, vor echtem Memberstack-Login entfernen ---------- */
-  .cvz-dev-bar {
-    background: var(--cvz-bg-elevated);
-    border: 1px dashed var(--cvz-border);
-    border-radius: var(--cvz-radius);
-    padding: 12px 16px;
-    margin-bottom: 20px;
-    font-size: 0.8rem;
-    color: var(--cvz-text);
-  }
-  .cvz-dev-bar summary { cursor: pointer; color: var(--cvz-teal); font-weight: 600; }
-  .cvz-dev-bar input {
-    width: 100%; margin-top: 8px; padding: 8px 10px;
-    background: var(--cvz-bg); border: 1px solid var(--cvz-border);
-    border-radius: 8px; color: var(--cvz-text); font-size: 0.8rem;
-  }
+/* Utility: wird von app.js zum Ein-/Ausblenden des Freitextfeldes
+   (business_type) und der Liste gefilterter Vorschlaege genutzt. */
+.cvz-hidden { display: none !important; }
 
-  /* ---------- Formular-Karte ---------- */
-  .cvz-card {
-    background: var(--cvz-bg-elevated);
-    border: 1px solid var(--cvz-border);
-    border-radius: 20px;
-    padding: 40px;
-  }
+/* ---------- Dev-Leiste: nur zum Testen, vor echtem Memberstack-Login entfernen ---------- */
+.cvz-dev-bar {
+  background: var(--cvz-bg-elevated);
+  border: 1px dashed var(--cvz-border);
+  border-radius: var(--cvz-radius);
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  font-size: 0.8rem;
+  color: var(--cvz-text);
+}
+.cvz-dev-bar summary { cursor: pointer; color: var(--cvz-teal); font-weight: 600; }
+.cvz-dev-bar input {
+  width: 100%; margin-top: 8px; padding: 8px 10px;
+  background: var(--cvz-bg); border: 1px solid var(--cvz-border);
+  border-radius: 8px; color: var(--cvz-text); font-size: 0.8rem;
+}
 
-  .cvz-steps {
-    display: flex; gap: 6px; margin-bottom: 28px; font-size: 0.72rem;
-    letter-spacing: 0.06em; text-transform: uppercase; color: var(--cvz-text);
-  }
-  .cvz-steps .step { flex: 1; padding-bottom: 8px; border-bottom: 2px solid var(--cvz-border); }
-  .cvz-steps .step.active { color: var(--cvz-teal); border-bottom-color: var(--cvz-teal); font-weight: 600; }
-  .cvz-steps .step.done { color: var(--cvz-text); border-bottom-color: var(--cvz-text); }
+/* ---------- Formular-Karte ---------- */
+/* color explizit: die Karte liegt in einem Webflow-Dokument, dessen
+   body/Wrapper-Regeln sonst dunkle Standardfarben vererben koennen. */
+.cvz-card {
+  background: var(--cvz-bg-elevated);
+  border: 1px solid var(--cvz-border);
+  border-radius: 20px;
+  padding: 40px;
+  color: var(--cvz-text);
+}
 
-  h1.cvz-title { font-size: 1.6rem; font-weight: 700; margin: 0 0 8px; line-height: 1.25; }
-  p.cvz-subtitle { color: var(--cvz-teal); margin: 0 0 28px; font-size: 0.95rem; }
+.cvz-steps {
+  display: flex; gap: 6px; margin-bottom: 28px; font-size: 0.72rem;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--cvz-text-muted);
+}
+.cvz-steps .step { flex: 1; padding-bottom: 8px; border-bottom: 2px solid var(--cvz-border); }
+.cvz-steps .step.active { color: var(--cvz-teal); border-bottom-color: var(--cvz-teal); font-weight: 600; }
+.cvz-steps .step.done { color: var(--cvz-text); border-bottom-color: var(--cvz-text); }
 
-  label.cvz-label {
-    display: block; font-size: 0.82rem; font-weight: 600;
-    color: var(--cvz-text); margin: 18px 0 6px;
-  }
-  label.cvz-label:first-of-type { margin-top: 0; }
+/* h1 wird von Webflow global eingefaerbt - ohne explizites color gewinnt
+   die Host-Regel gegen die Vererbung von .cvz-card. */
+h1.cvz-title {
+  font-size: 1.6rem; font-weight: 700; margin: 0 0 8px; line-height: 1.25;
+  color: var(--cvz-text);
+}
+p.cvz-subtitle { color: var(--cvz-teal); margin: 0 0 28px; font-size: 0.95rem; }
 
-  input.cvz-input, textarea.cvz-input, select.cvz-input {
-    width: 100%; padding: 12px 14px; background: var(--cvz-bg);
-    border: 1px solid var(--cvz-border); border-radius: 10px;
-    color: var(--cvz-text); font-size: 0.95rem; font-family: inherit;
-  }
-  select.cvz-input { appearance: none; cursor: pointer; }
-  input.cvz-input:focus, textarea.cvz-input:focus, select.cvz-input:focus {
-    outline: none; border-color: var(--cvz-teal);
-    box-shadow: 0 0 0 3px var(--cvz-teal-dim);
-  }
-  textarea.cvz-input { resize: vertical; min-height: 70px; }
+label.cvz-label {
+  display: block; font-size: 0.82rem; font-weight: 600;
+  color: var(--cvz-text); margin: 18px 0 6px;
+}
+label.cvz-label:first-of-type { margin-top: 0; }
 
-  input[type="file"] { color: var(--cvz-text); font-size: 0.85rem; }
-  input[type="file"]::file-selector-button {
-    background: var(--cvz-teal); color: var(--cvz-bg); border: none;
-    border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer;
-    font-family: inherit; margin-right: 10px;
-  }
+input.cvz-input, textarea.cvz-input, select.cvz-input {
+  width: 100%; padding: 12px 14px; background: var(--cvz-bg);
+  border: 1px solid var(--cvz-border); border-radius: 10px;
+  color: var(--cvz-text); font-size: 0.95rem; font-family: inherit;
+}
+/* appearance:none entfernt auch den nativen Dropdown-Pfeil - der wird
+   unten als CSS-Chevron ueber .cvz-select-wrap wieder ergaenzt. */
+select.cvz-input { appearance: none; cursor: pointer; padding-right: 40px; }
+/* Optionsliste rendert das Betriebssystem, nicht die Seite. Firefox und
+   Windows-Chrome uebernehmen aber background/color, wenn man sie setzt -
+   sonst schwarze Schrift auf hellem Systemgrau (siehe Screenshot). */
+select.cvz-input option {
+  background: var(--cvz-bg-elevated);
+  color: var(--cvz-text);
+}
+input.cvz-input:focus, textarea.cvz-input:focus, select.cvz-input:focus {
+  outline: none; border-color: var(--cvz-teal);
+  box-shadow: 0 0 0 3px var(--cvz-teal-dim);
+}
+textarea.cvz-input { resize: vertical; min-height: 70px; }
 
-  .cvz-chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-  .cvz-chip {
-    display: flex; align-items: center; gap: 6px;
-    background: var(--cvz-teal-dim); border: 1px solid var(--cvz-teal);
-    color: var(--cvz-teal); border-radius: 999px; padding: 6px 12px; font-size: 0.85rem;
-  }
-  .cvz-chip button {
-    background: none; border: none; color: var(--cvz-teal); cursor: pointer;
-    font-size: 0.9rem; line-height: 1; padding: 0;
-  }
+.cvz-select-wrap { position: relative; }
+.cvz-select-wrap::after {
+  content: ''; position: absolute; right: 16px; top: 50%;
+  width: 8px; height: 8px; margin-top: -6px;
+  border-right: 2px solid var(--cvz-text-muted);
+  border-bottom: 2px solid var(--cvz-text-muted);
+  transform: rotate(45deg); pointer-events: none;
+}
 
-  .cvz-choice-row { display: flex; gap: 10px; margin-top: 8px; }
-  .cvz-choice {
-    flex: 1; padding: 14px 10px; text-align: center; border-radius: 10px;
-    border: 1px solid var(--cvz-border); background: var(--cvz-bg);
-    color: var(--cvz-text); cursor: pointer; font-size: 0.88rem; font-weight: 600;
-  }
-  .cvz-choice.selected { border-color: var(--cvz-teal); color: var(--cvz-teal); background: var(--cvz-teal-dim); }
+input[type="file"] { color: var(--cvz-text); font-size: 0.85rem; }
+input[type="file"]::file-selector-button {
+  background: var(--cvz-teal); color: var(--cvz-bg); border: none;
+  border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer;
+  font-family: inherit; margin-right: 10px;
+}
 
-  .cvz-competitor-item {
-    display: flex; align-items: flex-start; gap: 12px;
-    padding: 14px 16px; border: 1px solid var(--cvz-border); border-radius: 10px;
-    margin-bottom: 10px; cursor: pointer;
-  }
-  .cvz-competitor-item.selected { border-color: var(--cvz-teal); background: var(--cvz-teal-dim); }
-  .cvz-competitor-item.locked { opacity: 0.45; cursor: not-allowed; }
-  .cvz-competitor-item input[type="checkbox"] { margin-top: 3px; accent-color: var(--cvz-teal); }
-  .cvz-competitor-item .title { font-weight: 600; font-size: 0.92rem; }
-  .cvz-competitor-item .url { font-size: 0.78rem; color: var(--cvz-text); word-break: break-all; }
+.cvz-chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.cvz-chip {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--cvz-teal-dim); border: 1px solid var(--cvz-teal);
+  color: var(--cvz-teal); border-radius: 999px; padding: 6px 12px; font-size: 0.85rem;
+}
+.cvz-chip button {
+  background: none; border: none; color: var(--cvz-teal); cursor: pointer;
+  font-size: 0.9rem; line-height: 1; padding: 0;
+}
 
-  .cvz-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 32px; }
+.cvz-choice-row { display: flex; gap: 10px; margin-top: 8px; }
+.cvz-choice {
+  flex: 1; padding: 14px 10px; text-align: center; border-radius: 10px;
+  border: 1px solid var(--cvz-border); background: var(--cvz-bg);
+  color: var(--cvz-text); cursor: pointer; font-size: 0.88rem; font-weight: 600;
+}
+.cvz-choice.selected { border-color: var(--cvz-teal); color: var(--cvz-teal); background: var(--cvz-teal-dim); }
 
-  button.cvz-btn-primary, button.cvz-btn-secondary {
-    font-family: inherit; font-size: 0.95rem; font-weight: 600;
-    padding: 13px 26px; border-radius: 10px; cursor: pointer; border: none;
-  }
-  button.cvz-btn-primary { background: var(--cvz-teal); color: var(--cvz-bg); }
-  button.cvz-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-  button.cvz-btn-secondary { background: transparent; color: var(--cvz-text); }
-  button.cvz-btn-secondary:hover { color: var(--cvz-text); }
+/* ---------- Wettbewerber-Auswahl ---------- */
+.cvz-competitor-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px; border: 1px solid var(--cvz-border); border-radius: 10px;
+  margin-bottom: 10px; cursor: pointer;
+}
+.cvz-competitor-item.selected { border-color: var(--cvz-teal); background: var(--cvz-teal-dim); }
+.cvz-competitor-item.locked { opacity: 0.45; cursor: not-allowed; }
+.cvz-competitor-item input[type="checkbox"] { margin-top: 3px; accent-color: var(--cvz-teal); }
+.cvz-competitor-item .cvz-competitor-body { min-width: 0; flex: 1; }
+/* .title / .url sind generische Klassennamen, die Webflow-Projekte haeufig
+   selbst belegen. Ohne explizites color gewinnt die Host-Regel, weil
+   Vererbung gegen jede direkt matchende Regel verliert - genau das war der
+   unlesbare dunkle Text im Screenshot. */
+.cvz-competitor-item .title {
+  font-weight: 600; font-size: 0.92rem; color: var(--cvz-text);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.cvz-competitor-item .url { font-size: 0.78rem; color: var(--cvz-text-muted); word-break: break-all; }
 
-  .cvz-hint { font-size: 0.78rem; color: var(--cvz-text); margin-top: 6px; }
-  .cvz-error {
-    background: rgba(248, 113, 113, 0.1); border: 1px solid var(--cvz-danger);
-    color: var(--cvz-danger); border-radius: 10px; padding: 12px 14px;
-    font-size: 0.85rem; margin-top: 16px;
-  }
+.cvz-badge {
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  border-radius: 999px; padding: 3px 8px; white-space: nowrap;
+  background: var(--cvz-teal-dim); color: var(--cvz-teal); border: 1px solid var(--cvz-teal);
+}
 
-  /* ---------- Ladezustand ---------- */
-  .cvz-loading { text-align: center; padding: 60px 20px; }
-  .cvz-spinner {
-    width: 32px; height: 32px; border: 3px solid var(--cvz-border);
-    border-top-color: var(--cvz-teal); border-radius: 50%;
-    margin: 0 auto 20px; animation: cvz-spin 0.8s linear infinite;
-  }
-  @keyframes cvz-spin { to { transform: rotate(360deg); } }
-  .cvz-loading p { color: var(--cvz-text); font-size: 0.9rem; }
+.cvz-selection-count {
+  font-size: 0.82rem; color: var(--cvz-text-muted); margin: 0 0 14px;
+}
+.cvz-selection-count.limit { color: var(--cvz-teal); font-weight: 600; }
 
-  /* ---------- Chat + Vorschau-Panel (Split-View) ---------- */
-  .cvz-workspace {
-    display: none; gap: 20px; width: 100%; max-width: 1400px;
-    align-items: flex-start;
-  }
-  .cvz-chat-wrap { display: flex; flex-direction: column; height: 80vh; max-height: 760px; flex: 0 0 440px; min-width: 0; }
-  .cvz-chat-header {
-    padding: 16px 20px; border-bottom: 1px solid var(--cvz-border);
-    display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
-  }
-  .cvz-chat-header .title { font-weight: 700; }
-  .cvz-chat-header .quota { font-size: 0.78rem; color: var(--cvz-text); }
-  /* .cvz-btn-secondary ist bewusst transparent/text-artig (siehe Definition
-     weiter oben) - im Chat-Header braucht der Button aber eine sichtbare
-     Umrandung, sonst wirkt er wie normaler Text statt wie ein klickbares
-     Element (siehe Chat-Screenshot). Chat-Header-spezifischer Zusatz statt
-     die globale .cvz-btn-secondary-Definition zu aendern, die an anderer
-     Stelle bewusst dezent bleiben soll. */
-  .cvz-chat-header button.cvz-btn-secondary {
-    border: 1px solid var(--cvz-border); border-radius: 8px;
-  }
-  .cvz-chat-header button.cvz-btn-secondary:hover { border-color: var(--cvz-teal); }
-  .cvz-chat-messages {
-    flex: 1; min-height: 0; overflow-y: auto; padding: 20px;
-    display: flex; flex-direction: column; gap: 16px;
-    background: var(--cvz-bg-elevated); border-left: 1px solid var(--cvz-border); border-right: 1px solid var(--cvz-border);
-  }
-  .cvz-msg { max-width: 85%; padding: 12px 16px; border-radius: 14px; font-size: 0.92rem; line-height: 1.5; }
-  .cvz-msg.user { align-self: flex-end; background: var(--cvz-teal); color: var(--cvz-bg); border-bottom-right-radius: 4px; white-space: pre-wrap; }
-  .cvz-msg.assistant { align-self: flex-start; background: var(--cvz-bg); border: 1px solid var(--cvz-border); border-bottom-left-radius: 4px; }
-  .cvz-msg.assistant.loading { color: var(--cvz-text); font-style: italic; display: flex; align-items: center; gap: 10px; }
-  /* Kleiner Inline-Spinner fuer die Chat-Ladeblase - nutzt dieselbe
-     cvz-spin-Animation wie der grosse Kickoff-Spinner oben, nur kompakter,
-     damit bei langen Struktur-Turns (mehrere get_methodology-Runden, siehe
-     Chat-Begruendung) sichtbar bleibt, dass noch gearbeitet wird und nicht
-     nur ein statischer Text steht. */
-  .cvz-spinner-inline {
-    flex-shrink: 0; width: 14px; height: 14px; border: 2px solid var(--cvz-border);
-    border-top-color: var(--cvz-teal); border-radius: 50%; animation: cvz-spin 0.8s linear infinite;
-  }
-  .cvz-loading-label { flex: 1; }
+/* Ausgefilterte Vorschlaege bleiben einklappbar sichtbar, damit der Filter
+   nachvollziehbar ist und ein bewusst gewuenschter Treffer nicht verloren geht. */
+.cvz-filtered-box {
+  margin-top: 16px; border: 1px solid var(--cvz-border); border-radius: 10px;
+  padding: 12px 16px; background: var(--cvz-bg);
+}
+.cvz-filtered-box summary {
+  cursor: pointer; font-size: 0.82rem; font-weight: 600; color: var(--cvz-text-muted);
+}
+.cvz-filtered-box summary:hover { color: var(--cvz-teal); }
+.cvz-filtered-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.cvz-filtered-list li {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  padding: 8px 0; border-top: 1px solid var(--cvz-border);
+  font-size: 0.78rem; color: var(--cvz-text-muted); word-break: break-all;
+}
+.cvz-filtered-list .reason { color: var(--cvz-text-muted); white-space: nowrap; flex-shrink: 0; }
+.cvz-filtered-list button {
+  background: none; border: 1px solid var(--cvz-border); border-radius: 6px;
+  color: var(--cvz-text); font-family: inherit; font-size: 0.72rem;
+  padding: 4px 10px; cursor: pointer; flex-shrink: 0;
+}
+.cvz-filtered-list button:hover { border-color: var(--cvz-teal); color: var(--cvz-teal); }
 
-  /* Markdown-Inhalte in Assistant-Bubbles: alle Farben EXPLIZIT setzen, damit
-     kein Browser-Standardblau auf dunklem Hintergrund unlesbar wird. */
-  .cvz-msg.assistant p { margin: 0 0 10px; color: var(--cvz-text); }
-  .cvz-msg.assistant p:last-child { margin-bottom: 0; }
-  .cvz-msg.assistant h1, .cvz-msg.assistant h2, .cvz-msg.assistant h3 {
-    color: var(--cvz-teal); margin: 10px 0 4px; font-size: 1.05rem; text-align: left; line-height: 1.25;
-  }
-  .cvz-msg.assistant h1:first-child, .cvz-msg.assistant h2:first-child, .cvz-msg.assistant h3:first-child { margin-top: 0; }
-  .cvz-msg.assistant strong { color: var(--cvz-text); font-weight: 700; }
-  .cvz-msg.assistant a { color: var(--cvz-teal); text-decoration: underline; }
-  .cvz-msg.assistant ul, .cvz-msg.assistant ol { margin: 0 0 10px; padding-left: 20px; color: var(--cvz-text); }
-  .cvz-msg.assistant li { margin-bottom: 4px; }
-  .cvz-msg.assistant table {
-    width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.85rem;
-  }
-  .cvz-msg.assistant th, .cvz-msg.assistant td {
-    border: 1px solid var(--cvz-border); padding: 8px 10px; text-align: left; color: var(--cvz-text);
-  }
-  .cvz-msg.assistant th { background: var(--cvz-bg-elevated); color: var(--cvz-teal); }
-  .cvz-msg.assistant code {
-    background: var(--cvz-bg-elevated); border: 1px solid var(--cvz-border);
-    border-radius: 4px; padding: 1px 5px; font-size: 0.85em; color: var(--cvz-teal);
-  }
-  .cvz-chat-input-row {
-    display: flex; gap: 10px; padding: 16px 20px;
-    border: 1px solid var(--cvz-border); border-top: none;
-    border-radius: 0 0 20px 20px; background: var(--cvz-bg-elevated);
-  }
-  .cvz-chat-input-row textarea {
-    flex: 1; resize: none; padding: 12px 14px; border-radius: 10px;
-    background: var(--cvz-bg); border: 1px solid var(--cvz-border);
-    color: var(--cvz-text); font-family: inherit; font-size: 0.92rem; max-height: 120px;
-  }
-  .cvz-chat-input-row textarea:focus { outline: none; border-color: var(--cvz-teal); }
-  .cvz-chat-input-row button {
-    background: var(--cvz-teal); color: var(--cvz-bg); border: none;
-    border-radius: 10px; padding: 0 22px; font-weight: 600; cursor: pointer; font-family: inherit;
-  }
-  .cvz-chat-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+.cvz-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 32px; }
 
-  /* Persistentes Vorschau-Panel: zeigt IMMER nur die AKTUELLSTE Struktur-
-     Version (nicht jede Zwischenversion aus dem Chat-Verlauf) - Ziel ist eine
-     grosse, gut sichtbare Live-Ansicht als Arbeitsgrundlage fuer Optimierung,
-     kein Verlauf. Der Chat selbst bekommt bei einer neuen Version nur einen
-     kurzen Hinweis-Text statt eines eigenen eingebetteten Mockups (siehe
-     cvzAppendMessage/cvzUpdatePreviewPanel) - sonst waeren dieselben Inhalte
-     doppelt zu sehen.
-  */
-  .cvz-preview-panel {
-    flex: 1; min-width: 0; height: 80vh; max-height: 760px;
-    display: flex; flex-direction: column;
-    background: var(--cvz-bg-elevated); border: 1px solid var(--cvz-border); border-radius: 20px;
-    overflow: hidden;
-  }
-  .cvz-preview-header {
-    padding: 16px 20px; border-bottom: 1px solid var(--cvz-border);
-    display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; row-gap: 8px;
-  }
-  .cvz-preview-header .title { font-weight: 700; }
-  .cvz-preview-header .version { font-size: 0.78rem; color: var(--cvz-text); flex: 1; }
-  .cvz-device-toggle { display: flex; gap: 4px; background: var(--cvz-bg); border: 1px solid var(--cvz-border); border-radius: 8px; padding: 3px; }
-  .cvz-device-btn {
-    border: none; background: transparent; color: var(--cvz-text);
-    font-size: 0.78rem; font-weight: 600; padding: 5px 12px; border-radius: 6px;
-    cursor: pointer; font-family: inherit;
-  }
-  .cvz-device-btn.active { background: var(--cvz-teal-dim); color: var(--cvz-teal); }
-  /* Skalierter Rahmen statt horizontalem Scrollen (siehe Chat-Begruendung):
-     .cvz-preview-frame-outer bekommt die tatsaechliche SICHTBARE (skalierte)
-     Groesse und zentriert sich per margin:auto im Panel. .cvz-preview-frame-
-     inner enthaelt das Iframe in NATUERLICHER Groesse (Geraetebreite x
-     Content-Hoehe) und wird per CSS transform:scale() verkleinert - das
-     Iframe selbst rendert intern immer bei der vollen Geraetebreite (ein
-     transform aendert nur die Darstellung, nicht den internen Viewport),
-     "Desktop" zeigt also wirklich das Desktop-Layout, nur verkleinert statt
-     abgeschnitten. Bei "Mobile" faellt die Skalierung meist auf 1 (kein
-     Verkleinern), da 390px selten breiter ist als der verfuegbare Platz -
-     das ergibt die gewuenschte "Handy-Rahmen"-Optik statt eines gestreckten
-     breiten Panels.
-  */
-  .cvz-preview-body { flex: 1; min-height: 0; overflow: auto; background: var(--cvz-bg); position: relative; padding: 16px; }
-  .cvz-preview-empty {
-    height: 100%; display: flex; align-items: center; justify-content: center;
-    text-align: center; padding: 40px; color: var(--cvz-text); font-size: 0.9rem;
-  }
-  .cvz-preview-frame-outer {
-    margin: 0 auto; overflow: hidden; border: 1px solid var(--cvz-border); border-radius: 8px; background: #fff;
-  }
-  .cvz-preview-frame-inner { transform-origin: top left; }
-  .cvz-preview-frame-inner iframe { display: block; border: none; }
+button.cvz-btn-primary, button.cvz-btn-secondary {
+  font-family: inherit; font-size: 0.95rem; font-weight: 600;
+  padding: 13px 26px; border-radius: 10px; cursor: pointer; border: none;
+}
+button.cvz-btn-primary { background: var(--cvz-teal); color: var(--cvz-bg); }
+button.cvz-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+button.cvz-btn-secondary { background: transparent; color: var(--cvz-text); }
+button.cvz-btn-secondary:hover { color: var(--cvz-teal); }
 
-  @media (max-width: 1080px) {
-    .cvz-workspace { flex-direction: column; }
-    .cvz-chat-wrap { flex: none; width: 100%; height: 42vh; max-height: none; }
-    .cvz-preview-panel { flex: none; width: 100%; height: 68vh; max-height: none; }
-  }
+.cvz-hint { font-size: 0.78rem; color: var(--cvz-text-muted); margin-top: 6px; }
+.cvz-error {
+  background: rgba(248, 113, 113, 0.1); border: 1px solid var(--cvz-danger);
+  color: var(--cvz-danger); border-radius: 10px; padding: 12px 14px;
+  font-size: 0.85rem; margin-top: 16px;
+}
 
-  /* Auf echten Mobil-Viewports macht eine auf ~350px herunterskalierte
-     1440px-Desktop-Ansicht den Text unlesbar klein (siehe Chat-Begruendung) -
-     der Desktop-Button wird hier komplett entfernt, nicht nur deaktiviert.
-     767px = derselbe Schwellwert wie die window.innerWidth-Standardauswahl
-     in app.js (cvzPreviewDevice), damit Default-Verhalten und sichtbare
-     Optionen konsistent sind. Chat-Bubbles bekommen hier zusaetzlich mehr
-     Breite - 85% wirkt auf schmalen Handy-Bildschirmen unnoetig schmal mit
-     viel Leerraum an der Seite. */
-  @media (max-width: 767px) {
-    #cvz-device-desktop { display: none; }
-    .cvz-msg { max-width: 94%; }
-  }
+/* ---------- Ladezustand ---------- */
+.cvz-loading { text-align: center; padding: 60px 20px; }
+.cvz-spinner {
+  width: 32px; height: 32px; border: 3px solid var(--cvz-border);
+  border-top-color: var(--cvz-teal); border-radius: 50%;
+  margin: 0 auto 20px; animation: cvz-spin 0.8s linear infinite;
+}
+@keyframes cvz-spin { to { transform: rotate(360deg); } }
+.cvz-loading p { color: var(--cvz-text-muted); font-size: 0.9rem; }
+
+/* ---------- Chat + Vorschau-Panel (Split-View) ---------- */
+.cvz-workspace {
+  display: none; gap: 20px; width: 100%; max-width: 1400px;
+  align-items: flex-start;
+}
+.cvz-chat-wrap { display: flex; flex-direction: column; height: 80vh; max-height: 760px; flex: 0 0 440px; min-width: 0; }
+.cvz-chat-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--cvz-border);
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+}
+.cvz-chat-header .title { font-weight: 700; color: var(--cvz-text); }
+.cvz-chat-header .quota { font-size: 0.78rem; color: var(--cvz-text-muted); }
+/* .cvz-btn-secondary ist bewusst transparent/text-artig (siehe Definition
+   weiter oben) - im Chat-Header braucht der Button aber eine sichtbare
+   Umrandung, sonst wirkt er wie normaler Text statt wie ein klickbares
+   Element (siehe Chat-Screenshot). Chat-Header-spezifischer Zusatz statt
+   die globale .cvz-btn-secondary-Definition zu aendern, die an anderer
+   Stelle bewusst dezent bleiben soll. */
+.cvz-chat-header button.cvz-btn-secondary {
+  border: 1px solid var(--cvz-border); border-radius: 8px;
+}
+.cvz-chat-header button.cvz-btn-secondary:hover { border-color: var(--cvz-teal); }
+.cvz-chat-messages {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 20px;
+  display: flex; flex-direction: column; gap: 16px;
+  background: var(--cvz-bg-elevated); border-left: 1px solid var(--cvz-border); border-right: 1px solid var(--cvz-border);
+}
+.cvz-msg { max-width: 85%; padding: 12px 16px; border-radius: 14px; font-size: 0.92rem; line-height: 1.5; }
+.cvz-msg.user { align-self: flex-end; background: var(--cvz-teal); color: var(--cvz-bg); border-bottom-right-radius: 4px; white-space: pre-wrap; }
+.cvz-msg.assistant {
+  align-self: flex-start; background: var(--cvz-bg); border: 1px solid var(--cvz-border);
+  border-bottom-left-radius: 4px; color: var(--cvz-text);
+}
+.cvz-msg.assistant.loading { color: var(--cvz-text-muted); font-style: italic; display: flex; align-items: center; gap: 10px; }
+/* Kleiner Inline-Spinner fuer die Chat-Ladeblase - nutzt dieselbe
+   cvz-spin-Animation wie der grosse Kickoff-Spinner oben, nur kompakter,
+   damit bei langen Struktur-Turns (mehrere get_methodology-Runden, siehe
+   Chat-Begruendung) sichtbar bleibt, dass noch gearbeitet wird und nicht
+   nur ein statischer Text steht. */
+.cvz-spinner-inline {
+  flex-shrink: 0; width: 14px; height: 14px; border: 2px solid var(--cvz-border);
+  border-top-color: var(--cvz-teal); border-radius: 50%; animation: cvz-spin 0.8s linear infinite;
+}
+.cvz-loading-label { flex: 1; }
+
+/* Markdown-Inhalte in Assistant-Bubbles: alle Farben EXPLIZIT setzen, damit
+   kein Browser-Standardblau auf dunklem Hintergrund unlesbar wird. */
+.cvz-msg.assistant p { margin: 0 0 10px; color: var(--cvz-text); }
+.cvz-msg.assistant p:last-child { margin-bottom: 0; }
+.cvz-msg.assistant h1, .cvz-msg.assistant h2, .cvz-msg.assistant h3 {
+  color: var(--cvz-teal); margin: 10px 0 4px; font-size: 1.05rem; text-align: left; line-height: 1.25;
+}
+.cvz-msg.assistant h1:first-child, .cvz-msg.assistant h2:first-child, .cvz-msg.assistant h3:first-child { margin-top: 0; }
+.cvz-msg.assistant strong { color: var(--cvz-text); font-weight: 700; }
+.cvz-msg.assistant a { color: var(--cvz-teal); text-decoration: underline; }
+.cvz-msg.assistant ul, .cvz-msg.assistant ol { margin: 0 0 10px; padding-left: 20px; color: var(--cvz-text); }
+.cvz-msg.assistant li { margin-bottom: 4px; }
+.cvz-msg.assistant table {
+  width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.85rem;
+}
+.cvz-msg.assistant th, .cvz-msg.assistant td {
+  border: 1px solid var(--cvz-border); padding: 8px 10px; text-align: left; color: var(--cvz-text);
+}
+.cvz-msg.assistant th { background: var(--cvz-bg-elevated); color: var(--cvz-teal); }
+.cvz-msg.assistant code {
+  background: var(--cvz-bg-elevated); border: 1px solid var(--cvz-border);
+  border-radius: 4px; padding: 1px 5px; font-size: 0.85em; color: var(--cvz-teal);
+}
+.cvz-chat-input-row {
+  display: flex; gap: 10px; padding: 16px 20px;
+  border: 1px solid var(--cvz-border); border-top: none;
+  border-radius: 0 0 20px 20px; background: var(--cvz-bg-elevated);
+}
+.cvz-chat-input-row textarea {
+  flex: 1; resize: none; padding: 12px 14px; border-radius: 10px;
+  background: var(--cvz-bg); border: 1px solid var(--cvz-border);
+  color: var(--cvz-text); font-family: inherit; font-size: 0.92rem; max-height: 120px;
+}
+.cvz-chat-input-row textarea:focus { outline: none; border-color: var(--cvz-teal); }
+.cvz-chat-input-row button {
+  background: var(--cvz-teal); color: var(--cvz-bg); border: none;
+  border-radius: 10px; padding: 0 22px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+.cvz-chat-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Persistentes Vorschau-Panel: zeigt IMMER nur die AKTUELLSTE Struktur-
+   Version (nicht jede Zwischenversion aus dem Chat-Verlauf) - Ziel ist eine
+   grosse, gut sichtbare Live-Ansicht als Arbeitsgrundlage fuer Optimierung,
+   kein Verlauf. Der Chat selbst bekommt bei einer neuen Version nur einen
+   kurzen Hinweis-Text statt eines eigenen eingebetteten Mockups (siehe
+   cvzAppendMessage/cvzUpdatePreviewPanel) - sonst waeren dieselben Inhalte
+   doppelt zu sehen.
+*/
+.cvz-preview-panel {
+  flex: 1; min-width: 0; height: 80vh; max-height: 760px;
+  display: flex; flex-direction: column;
+  background: var(--cvz-bg-elevated); border: 1px solid var(--cvz-border); border-radius: 20px;
+  overflow: hidden;
+}
+.cvz-preview-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--cvz-border);
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; row-gap: 8px;
+}
+.cvz-preview-header .title { font-weight: 700; color: var(--cvz-text); }
+.cvz-preview-header .version { font-size: 0.78rem; color: var(--cvz-text-muted); flex: 1; }
+.cvz-device-toggle { display: flex; gap: 4px; background: var(--cvz-bg); border: 1px solid var(--cvz-border); border-radius: 8px; padding: 3px; }
+.cvz-device-btn {
+  border: none; background: transparent; color: var(--cvz-text-muted);
+  font-size: 0.78rem; font-weight: 600; padding: 5px 12px; border-radius: 6px;
+  cursor: pointer; font-family: inherit;
+}
+.cvz-device-btn.active { background: var(--cvz-teal-dim); color: var(--cvz-teal); }
+/* Skalierter Rahmen statt horizontalem Scrollen (siehe Chat-Begruendung):
+   .cvz-preview-frame-outer bekommt die tatsaechliche SICHTBARE (skalierte)
+   Groesse und zentriert sich per margin:auto im Panel. .cvz-preview-frame-
+   inner enthaelt das Iframe in NATUERLICHER Groesse (Geraetebreite x
+   Content-Hoehe) und wird per CSS transform:scale() verkleinert - das
+   Iframe selbst rendert intern immer bei der vollen Geraetebreite (ein
+   transform aendert nur die Darstellung, nicht den internen Viewport),
+   "Desktop" zeigt also wirklich das Desktop-Layout, nur verkleinert statt
+   abgeschnitten. Bei "Mobile" faellt die Skalierung meist auf 1 (kein
+   Verkleinern), da 390px selten breiter ist als der verfuegbare Platz -
+   das ergibt die gewuenschte "Handy-Rahmen"-Optik statt eines gestreckten
+   breiten Panels.
+*/
+.cvz-preview-body { flex: 1; min-height: 0; overflow: auto; background: var(--cvz-bg); position: relative; padding: 16px; }
+.cvz-preview-empty {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 40px; color: var(--cvz-text-muted); font-size: 0.9rem;
+}
+.cvz-preview-frame-outer {
+  margin: 0 auto; overflow: hidden; border: 1px solid var(--cvz-border); border-radius: 8px; background: #fff;
+}
+.cvz-preview-frame-inner { transform-origin: top left; }
+.cvz-preview-frame-inner iframe { display: block; border: none; }
+
+@media (max-width: 1080px) {
+  .cvz-workspace { flex-direction: column; }
+  .cvz-chat-wrap { flex: none; width: 100%; height: 42vh; max-height: none; }
+  .cvz-preview-panel { flex: none; width: 100%; height: 68vh; max-height: none; }
+}
+
+/* Auf echten Mobil-Viewports macht eine auf ~350px herunterskalierte
+   1440px-Desktop-Ansicht den Text unlesbar klein (siehe Chat-Begruendung) -
+   der Desktop-Button wird hier komplett entfernt, nicht nur deaktiviert.
+   767px = derselbe Schwellwert wie die window.innerWidth-Standardauswahl
+   in app.js (cvzPreviewDevice), damit Default-Verhalten und sichtbare
+   Optionen konsistent sind. Chat-Bubbles bekommen hier zusaetzlich mehr
+   Breite - 85% wirkt auf schmalen Handy-Bildschirmen unnoetig schmal mit
+   viel Leerraum an der Seite. */
+@media (max-width: 767px) {
+  #cvz-device-desktop { display: none; }
+  .cvz-msg { max-width: 94%; }
+  .cvz-card { padding: 28px 20px; }
+}
+
+/* ---------- Schutzblock gegen generische Klassennamen der Host-Seite ----------
+   Muss am DATEIENDE stehen: bei gleicher Spezifitaet gewinnt die zuletzt
+   definierte Regel. Deckt Namen ab, die Webflow-Projekte typischerweise
+   selbst belegen. Langfristig besser: die Klassen im HTML auf cvz--Prefix
+   umbenennen, dann faellt dieser Block weg. */
+.cvz-app .title,
+.cvz-workspace .title,
+.cvz-app .url,
+.cvz-workspace .url,
+.cvz-workspace .version,
+.cvz-workspace .quota,
+.cvz-app .reason {
+  color: var(--cvz-text);
+}
+.cvz-app .url,
+.cvz-workspace .version,
+.cvz-workspace .quota,
+.cvz-app .reason {
+  color: var(--cvz-text-muted);
+}
+
+/* Sichtbarer Tastaturfokus - Webflow setzt haeufig outline:none global. */
+.cvz-app :focus-visible,
+.cvz-workspace :focus-visible {
+  outline: 2px solid var(--cvz-teal);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cvz-spinner, .cvz-spinner-inline { animation-duration: 2s; }
+}
