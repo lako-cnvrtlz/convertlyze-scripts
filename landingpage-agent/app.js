@@ -974,3 +974,94 @@ cvzResolveIdentity().then(identityOk => {
     if (!resumed) cvzRenderStep();
   });
 });
+// ==================== ERGÄNZUNG in cvzUpdatePreviewPanel() (bestehende Funktion) ====================
+// In der bereits vorhandenen Funktion cvzUpdatePreviewPanel(), direkt neben
+// der Zeile "document.getElementById('cvz-preview-download').disabled = false;",
+// folgende Zeile ergänzen - der Landingpage-PDF-Button soll erst klickbar
+// sein, sobald eine Struktur existiert, genau wie der HTML-Download-Button:
+//
+//   document.getElementById('cvz-export-landingpage-pdf')?.removeAttribute('disabled');
+//
+// Passend dazu im Webflow-Markup: der Button startet mit dem Attribut
+// disabled, genau wie vermutlich schon bei #cvz-preview-download der Fall.
+
+// ==================== PDF-EXPORT (Ergänzung zu app.js) ====================
+// Direkt an das Ende von app.js anhängen. Braucht nur cvzAuthHeaders() und
+// cvzState.page_project_id, die bereits weiter oben in app.js definiert
+// sind - KEINE weiteren State-Ergänzungen nötig. Der Server lädt Briefing-
+// Text und Struktur-HTML selbst aus Supabase (page_agent_messages bzw.
+// page_structures), siehe Chat-Begründung.
+
+async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
+  const label = buttonEl.querySelector('.btn-label') || buttonEl;
+  const originalText = label.textContent;
+  if (errorEl) errorEl.hidden = true;
+  buttonEl.disabled = true;
+  label.textContent = 'PDF wird erstellt…';
+
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetch(`${API_BASE}/pdf/export`, {
+        method: 'POST',
+        headers: cvzAuthHeaders(),
+        body: JSON.stringify({ pageProjectId: cvzState.page_project_id, type }),
+      });
+
+      if (response.status === 409) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'Noch nicht bereit für den Export.');
+      }
+      if (response.status === 429) {
+        throw new Error('Zu viele Anfragen. Bitte kurz warten und erneut versuchen.');
+      }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'Export fehlgeschlagen');
+      }
+
+      const { url } = await response.json();
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = downloadName;
+      a.click();
+
+      label.textContent = originalText;
+      buttonEl.disabled = false;
+      return;
+    } catch (err) {
+      if (attempt === maxAttempts) {
+        console.error(err);
+        if (errorEl) {
+          errorEl.textContent = err.message || 'PDF konnte nicht erstellt werden.';
+          errorEl.hidden = false;
+        }
+        label.textContent = originalText;
+        buttonEl.disabled = false;
+      } else {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+  }
+}
+
+// Button-Bindings - IDs müssen im Webflow-Markup rund um
+// #cvz-preview-download ergänzt werden (dort liegt bereits der
+// "Struktur als HTML"-Button).
+document.getElementById('cvz-export-briefing-pdf')?.addEventListener('click', (e) => {
+  cvzExportPdf({
+    buttonEl: e.currentTarget,
+    errorEl: document.getElementById('cvz-export-briefing-error'),
+    type: 'briefing',
+    downloadName: `convertlyze-briefing-${Date.now()}.pdf`,
+  });
+});
+
+document.getElementById('cvz-export-landingpage-pdf')?.addEventListener('click', (e) => {
+  cvzExportPdf({
+    buttonEl: e.currentTarget,
+    errorEl: document.getElementById('cvz-export-landingpage-error'),
+    type: 'landingpage',
+    downloadName: `convertlyze-landingpage-${Date.now()}.pdf`,
+  });
+});
