@@ -45,7 +45,7 @@ async function cvzResolveIdentity() {
     cvzResolvedUserId = data.user_id;
     return true;
   } catch (e) {
-    console.error('Identitaets-Aufloesung fehlgeschlagen:', e.message);
+    console.error('Identitäts-Auflösung fehlgeschlagen:', e.message);
     return false;
   }
 }
@@ -56,6 +56,11 @@ const cvzState = {
   keyword: '',
   // key aus GET /form-options, z.B. 'saas_self_service'.
   business_type: '',
+  // Frei eingetippte Kategorie. Nur gefüllt, wenn der gewählte Typ
+  // allows_custom_label hat (aktuell 'sonstiges'). Geht als eigenes Feld
+  // an /brief, NICHT als business_type - dort wäre ein freier Wert
+  // ungültig und würde alle typabhängigen Regeln aushebeln.
+  business_type_custom: '',
   target_audience: '',
   conversion_goal: '',
   funnel_stage: '',
@@ -95,34 +100,38 @@ function cvzShowError(msg) {
 
 // Die Auswahllisten kommen zur Laufzeit aus GET /api/page-agent/form-options
 // und damit aus DERSELBEN Konstante (services/businessTypes.js), gegen die
-// /brief validiert. Das ist der Grund, warum hier keine Liste mehr fest
-// eingetragen ist: eine zweite Kopie im Frontend laeuft frueher oder spaeter
-// auseinander und produziert dann ein 400 "Ungueltiger Business-Typ" fuer
-// einen Wert, der im Dropdown voellig legitim aussah.
+// /brief validiert. Deshalb steht hier keine Liste mehr fest eingetragen:
+// eine zweite Kopie im Frontend läuft früher oder später auseinander und
+// produziert dann ein 400 "Ungültiger Business-Typ" für einen Wert, der im
+// Dropdown völlig legitim aussah.
 //
-// KEIN FREITEXT: business_type steuert serverseitig Framework, Pflicht-
-// Nutzenebenen, Zertifikatsliste und Sektionsauswahl (buildBusinessProfileBlock
-// in routes/pageAgent.js). Ein unbekannter Wert wuerde dort still auf "nicht
-// gesetzt" fallen - es kaeme trotzdem eine Struktur heraus, nur ohne jede
-// typabhaengige Regel, und niemandem faellt es auf. Eine fehlende Kategorie
-// gehoert deshalb in services/businessTypes.js ergaenzt, nicht ins Formular.
+// business_type_groups kommt gruppiert:
+//   [{ key, label, hint, types: [{ key, label, allows_custom_label }] }]
+// Aktuell liefert das Backend nur die Geschäftsmodell-Gruppe plus den
+// Freitext-Eintrag. Die Struktur bleibt trotzdem gruppiert, damit eine
+// spätere zweite Gruppe ohne Frontend-Änderung erscheinen kann.
 //
-// business_type_groups kommt gruppiert: [{key, label, hint, types:[{key,label}]}]
-// Die Gruppen trennen Geschaeftsmodell und Branche, weil die Liste sonst
-// beliebig wirkt - nebeneinander steht, was nicht auf derselben Ebene liegt.
+// FREITEXT: Bei einer Option mit allows_custom_label (aktuell 'sonstiges')
+// blendet das Formular ein Textfeld ein. Der eingetragene Wert geht als
+// business_type_custom mit, NICHT als business_type – dort ist nur ein Key
+// aus der Liste gültig. Der Agent bekommt die Kategorie trotzdem und muss
+// nicht nachfragen.
 let cvzBusinessTypeGroups = [];
 let cvzFunnelStages = [];
 
 // Fallback, falls /form-options nicht erreichbar ist. Bewusst nur die
-// Funnel-Stages: ohne sie waere Schritt 1 komplett unbedienbar. Fuer
-// business_type gibt es KEINEN Fallback - eine geratene Liste ist genau
+// Funnel-Stages: ohne sie wäre Schritt 1 komplett unbedienbar. Für
+// business_type gibt es KEINEN Fallback – eine geratene Liste ist genau
 // der Fehler, der hier abgestellt werden soll. Dann lieber ein sichtbarer
 // Hinweis als ein Dropdown, das beim Launch scheitert.
 const CVZ_FUNNEL_STAGES_FALLBACK = [
   { key: 'awareness',     label: 'Awareness' },
   { key: 'consideration', label: 'Consideration' },
-  { key: 'decision',      label: 'Decision' }
+  { key: 'decision',      label: 'Decision' },
+  { key: 'full_journey',  label: 'Komplette Journey' }
 ];
+
+const CVZ_BUSINESS_TYPE_CUSTOM_MAXLEN = 60;
 
 async function cvzLoadFormOptions() {
   try {
@@ -145,6 +154,14 @@ async function cvzLoadFormOptions() {
   }
 }
 
+// true, wenn der aktuell gewählte Typ ein Freitextfeld verlangt.
+function cvzBusinessTypeAllowsCustom(key) {
+  if (!key) return false;
+  return cvzBusinessTypeGroups.some(g =>
+    (g.types || []).some(t => t.key === key && t.allows_custom_label)
+  );
+}
+
 function cvzRenderBusinessTypeField() {
   const total = cvzBusinessTypeGroups.reduce((n, g) => n + (g.types || []).length, 0);
   if (total === 0) {
@@ -157,10 +174,11 @@ function cvzRenderBusinessTypeField() {
     `;
   }
 
-  // optgroup-label traegt zusaetzlich den Gruppen-Hinweis, damit die
-  // Auswahlregel (bei Ueberschneidung gewinnt die Branche) direkt an der
-  // Stelle steht, an der entschieden wird. Ein Hinweis unter dem Feld wird
-  // beim Aufklappen nicht mitgelesen.
+  const showCustom = cvzBusinessTypeAllowsCustom(cvzState.business_type);
+
+  // optgroup-label trägt zusätzlich den Gruppen-Hinweis, damit er direkt an
+  // der Stelle steht, an der entschieden wird. Ein Hinweis unter dem Feld
+  // wird beim Aufklappen des Dropdowns nicht mitgelesen.
   const groups = cvzBusinessTypeGroups.map(g => {
     const options = (g.types || []).map(t => `
       <option value="${cvzEsc(t.key)}" ${cvzState.business_type === t.key ? 'selected' : ''}>${cvzEsc(t.label)}</option>
@@ -172,13 +190,31 @@ function cvzRenderBusinessTypeField() {
   return `
     <label class="cvz-label">Produktkategorie</label>
     <div class="cvz-select-wrap">
-      <select class="cvz-input" id="cvz-in-business-type">
+      <select class="cvz-input" id="cvz-in-business-type" onchange="cvzToggleBusinessTypeCustom(this.value)">
         <option value="" ${!cvzState.business_type ? 'selected' : ''}>Bitte wählen …</option>
         ${groups}
       </select>
     </div>
-    <p class="cvz-hint">Bestimmt Argumentationsframework, Pflicht-Nutzenebenen und Vertrauenssignale der Struktur. Wenn Geschäftsmodell und Branche beide passen, wähle die Branche.</p>
+    <input class="cvz-input ${showCustom ? '' : 'cvz-hidden'}" id="cvz-in-business-type-custom"
+      type="text" maxlength="${CVZ_BUSINESS_TYPE_CUSTOM_MAXLEN}"
+      placeholder="z.B. Tierärztliche Praxis, Ausbildungsanbieter"
+      aria-label="Eigene Produktkategorie"
+      value="${cvzEsc(cvzState.business_type_custom)}">
+    <p class="cvz-hint">Bestimmt Argumentationsframework, Pflicht-Nutzenebenen und Vertrauenssignale der Struktur. Gefragt ist das Geschäftsmodell, nicht die Branche – die steckt bereits im Thema oben.</p>
   `;
+}
+
+function cvzToggleBusinessTypeCustom(value) {
+  const custom = document.getElementById('cvz-in-business-type-custom');
+  if (!custom) return;
+  const showCustom = cvzBusinessTypeAllowsCustom(value);
+  custom.classList.toggle('cvz-hidden', !showCustom);
+  if (showCustom) {
+    custom.focus();
+  } else {
+    custom.value = '';
+    cvzState.business_type_custom = '';
+  }
 }
 
 function cvzRenderStep0() {
@@ -259,12 +295,12 @@ function cvzSelectFunnel(value) {
 function cvzRenderStep2() {
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Was macht euch aus?</h1>
-    <p class="cvz-subtitle">USPs und Features einzeln eintragen, Enter druecken zum Hinzufuegen.</p>
+    <p class="cvz-subtitle">USPs und Features einzeln eintragen, Enter drücken zum Hinzufügen.</p>
     <label class="cvz-label">USPs</label>
-    <input class="cvz-input" id="cvz-in-usp" placeholder="USP eingeben, Enter druecken" onkeydown="cvzAddChipOnEnter(event,'usps','cvz-usp-chips')">
+    <input class="cvz-input" id="cvz-in-usp" placeholder="USP eingeben, Enter drücken" onkeydown="cvzAddChipOnEnter(event,'usps','cvz-usp-chips')">
     <div class="cvz-chip-row" id="cvz-usp-chips">${cvzRenderChips(cvzState.usps, 'usps')}</div>
     <label class="cvz-label">Features</label>
-    <input class="cvz-input" id="cvz-in-feature" placeholder="Feature eingeben, Enter druecken" onkeydown="cvzAddChipOnEnter(event,'features','cvz-feature-chips')">
+    <input class="cvz-input" id="cvz-in-feature" placeholder="Feature eingeben, Enter drücken" onkeydown="cvzAddChipOnEnter(event,'features','cvz-feature-chips')">
     <div class="cvz-chip-row" id="cvz-feature-chips">${cvzRenderChips(cvzState.features, 'features')}</div>
 
     <label class="cvz-label">Häufigste Kauf-/Wechselgründe von Kunden (optional)</label>
@@ -276,9 +312,9 @@ function cvzRenderStep2() {
     <p class="cvz-hint">Das ist die Kundenperspektive, nicht eure eigene - oft aussagekräftiger als USPs/Features fürs Storytelling.</p>
 
     <label class="cvz-label">Referenz-Links (optional)</label>
-    <input class="cvz-input" id="cvz-in-refurl" placeholder="URL eingeben, Enter druecken (Seite oder YouTube-Video)" onkeydown="cvzAddRefUrlOnEnter(event)">
+    <input class="cvz-input" id="cvz-in-refurl" placeholder="URL eingeben, Enter drücken (Seite oder YouTube-Video)" onkeydown="cvzAddRefUrlOnEnter(event)">
     <div class="cvz-chip-row" id="cvz-refurl-chips">${cvzRenderRefUrlChips()}</div>
-    <p class="cvz-hint">Bis zu 3 Links werden vom Assistenten tatsaechlich abgerufen.</p>
+    <p class="cvz-hint">Bis zu 3 Links werden vom Assistenten tatsächlich abgerufen.</p>
 
     <label class="cvz-label">PDF hochladen (optional)</label>
     <input type="file" accept="application/pdf" id="cvz-in-pdf" onchange="cvzUploadPdf(event)">
@@ -290,14 +326,14 @@ function cvzRenderStep2() {
       <input type="color" id="cvz-in-brand-color-picker" value="${/^#([0-9a-fA-F]{6})$/.test(cvzState.brand_color) ? cvzState.brand_color : '#4f46e5'}" style="width:44px; height:40px; padding:2px; border-radius:8px; border:1px solid var(--cvz-border); background:var(--cvz-bg); cursor:pointer;" oninput="cvzSyncBrandColorFromPicker(this.value)">
       <input class="cvz-input" id="cvz-in-brand-color" placeholder="#4f46e5" value="${cvzEsc(cvzState.brand_color)}" style="flex:1;" oninput="cvzSyncBrandColorFromText(this.value)">
     </div>
-    <p class="cvz-hint">Direkte Eingabe hat Vorrang vor der automatischen Erkennung aus der Website unten - keine Bestaetigung im Chat noetig, da hier eindeutig.</p>
+    <p class="cvz-hint">Direkte Eingabe hat Vorrang vor der automatischen Erkennung aus der Website unten - keine Bestätigung im Chat nötig, da hier eindeutig.</p>
 
-    <label class="cvz-label">Eure Website fuer den Marken-Look (optional)</label>
+    <label class="cvz-label">Eure Website für den Marken-Look (optional)</label>
     <input class="cvz-input" id="cvz-in-brand-url" placeholder="https://eure-website.de" value="${cvzEsc(cvzState.brand_reference_url)}">
-    <p class="cvz-hint">Nur relevant, wenn oben keine Farbe eingetragen ist - dann versucht der Assistent, sie automatisch zu erkennen und schlaegt sie dir zur Bestaetigung vor.</p>
+    <p class="cvz-hint">Nur relevant, wenn oben keine Farbe eingetragen ist - dann versucht der Assistent, sie automatisch zu erkennen und schlägt sie dir zur Bestätigung vor.</p>
 
     <label class="cvz-label">Sonstiger Kontext (optional)</label>
-    <textarea class="cvz-input" id="cvz-in-existing" placeholder="Weitere Hinweise fuer den Assistenten, die nicht in ein Feld oben passen">${cvzEsc(cvzState.existing_content)}</textarea>
+    <textarea class="cvz-input" id="cvz-in-existing" placeholder="Weitere Hinweise für den Assistenten, die nicht in ein Feld oben passen">${cvzEsc(cvzState.existing_content)}</textarea>
   `;
 }
 
@@ -314,7 +350,7 @@ function cvzAddRefUrlOnEnter(event) {
   try {
     new URL(val);
   } catch {
-    cvzShowError(`"${val}" ist keine gueltige URL (mit https:// beginnen).`);
+    cvzShowError(`"${val}" ist keine gültige URL (mit https:// beginnen).`);
     return;
   }
   cvzShowError(null);
@@ -403,12 +439,12 @@ function cvzEsc(s) {
 // sie Credits und produzieren einen Vergleich ohne Aussagekraft.
 //
 // Filter in drei Stufen:
-//   1. Host-Blocklist    - Plattformen, die nie Wettbewerber-LP sein koennen
+//   1. Host-Blocklist    - Plattformen, die nie Wettbewerber-LP sein können
 //   2. Pfad-Blocklist    - Content- und Rechtsseiten derselben Domain
 //   3. Scoring + Dedupe  - eine URL pro Domain, beste zuerst
 
-const CVZ_MAX_COMPETITORS = 5;       // Hartes Limit fuer die Analyse
-const CVZ_PRESELECT_COUNT = 3;       // Vorausgewaehlt beim ersten Rendern
+const CVZ_MAX_COMPETITORS = 5;       // Hartes Limit für die Analyse
+const CVZ_PRESELECT_COUNT = 3;       // Vorausgewählt beim ersten Rendern
 const CVZ_MAX_SUGGESTIONS_SHOWN = 8; // Wie viele Vorschlaege angezeigt werden
 
 // Suffix-Match: "youtube.com" trifft auch "www." und "m.youtube.com".
@@ -429,8 +465,8 @@ const CVZ_BLOCKED_HOSTS = [
   'eventbrite.de', 'meetup.com', 'spotify.com'
 ];
 
-// Segmentweiser Vergleich, KEIN includes() - sonst wuerde "news"
-// in "/newsletter-software/" treffen und eine gueltige Seite wegwerfen.
+// Segmentweiser Vergleich, KEIN includes() - sonst würde "news"
+// in "/newsletter-software/" treffen und eine gültige Seite wegwerfen.
 const CVZ_BLOCKED_PATH_SEGMENTS = [
   'blog', 'blogs', 'news', 'newsroom', 'presse', 'press', 'pressemitteilung',
   'magazin', 'magazine', 'journal', 'insights', 'stories',
@@ -452,7 +488,7 @@ const CVZ_BLOCKED_PATH_SEGMENTS = [
   'download', 'downloads', 'whitepaper', 'ebook', 'checkliste', 'vorlage', 'vorlagen'
 ];
 
-// Sprechen fuer eine echte Angebotsseite - positiv im Scoring, keine Pflicht.
+// Sprechen für eine echte Angebotsseite - positiv im Scoring, keine Pflicht.
 const CVZ_BONUS_PATH_SEGMENTS = [
   'produkt', 'produkte', 'product', 'products',
   'software', 'tool', 'tools', 'plattform', 'platform',
@@ -469,7 +505,7 @@ const CVZ_BLOCKED_EXTENSIONS = [
   '.mp4', '.mp3', '.xml', '.json', '.csv'
 ];
 
-// Prueft eine einzelne URL.
+// Prüft eine einzelne URL.
 // -> { ok, reason, host, path, url }
 function cvzInspectUrl(rawUrl) {
   const result = { ok: false, reason: '', host: '', path: '', url: '' };
@@ -558,7 +594,7 @@ function cvzFilterCompetitorSuggestions(rawList) {
     }
 
     // Eine URL pro Domain: drei Unterseiten desselben Anbieters
-    // verbrauchen drei Slots fuer eine einzige Erkenntnis.
+    // verbrauchen drei Slots für eine einzige Erkenntnis.
     if (seenHosts.has(info.host)) {
       removed.push({ url: rawUrl, reason: 'Domain bereits enthalten' });
       return;
@@ -591,7 +627,7 @@ async function cvzRenderStep3() {
     <div id="cvz-filtered-box"></div>
     <label class="cvz-label">Weiteren Wettbewerber manuell hinzufügen</label>
     <input class="cvz-input" id="cvz-in-manual-competitor" placeholder="URL eines Wettbewerbers, z.B. https://wettbewerber.de" onkeydown="cvzAddManualCompetitorOnEnter(event)">
-    <p class="cvz-hint">Nicht eure eigene Seite — eine Seite, mit der ihr um dieselben Kunden konkurriert. Maximal ${CVZ_MAX_COMPETITORS} Wettbewerber insgesamt, eigene Eintraege haben Vorrang vor Vorschlaegen.</p>
+    <p class="cvz-hint">Nicht eure eigene Seite — eine Seite, mit der ihr um dieselben Kunden konkurriert. Maximal ${CVZ_MAX_COMPETITORS} Wettbewerber insgesamt, eigene Einträge haben Vorrang vor Vorschlägen.</p>
   `;
 
   const nothingLoadedYet =
@@ -671,7 +707,7 @@ function cvzRenderCompetitorList() {
 }
 
 // Aussortierte Vorschlaege bleiben nachvollziehbar und rueckholbar.
-// Ohne das waere ein Fehlgriff des Filters fuer den Nutzer unsichtbar.
+// Ohne das wäre ein Fehlgriff des Filters für den Nutzer unsichtbar.
 function cvzRenderFilteredBox() {
   const box = document.getElementById('cvz-filtered-box');
   if (!box) return;
@@ -733,11 +769,11 @@ function cvzAddManualCompetitorOnEnter(event) {
 
   const info = cvzInspectUrl(val);
   if (!info.host) {
-    cvzShowError(`"${val}" ist keine gueltige URL.`);
+    cvzShowError(`"${val}" ist keine gültige URL.`);
     return;
   }
 
-  // Doppelte Domains verbrauchen zwei Slots fuer eine Erkenntnis.
+  // Doppelte Domains verbrauchen zwei Slots für eine Erkenntnis.
   const dupSuggestion = cvzState.competitorSuggestions.some(s => s.selected && s.host === info.host);
   const dupManual = cvzState.manualCompetitors.some(u => cvzInspectUrl(u).host === info.host);
   if (dupSuggestion || dupManual) {
@@ -754,8 +790,8 @@ function cvzAddManualCompetitorOnEnter(event) {
   cvzState.manualCompetitors.push(info.url);
   event.target.value = '';
 
-  // Eigene Eintraege haben Vorrang: bei Ueberlauf werden Vorschlaege
-  // von hinten abgewaehlt.
+  // Eigene Einträge haben Vorrang: bei Ueberlauf werden Vorschlaege
+  // von hinten abgewählt.
   for (let i = cvzState.competitorSuggestions.length - 1; i >= 0 && cvzTotalCompetitorCount() > CVZ_MAX_COMPETITORS; i--) {
     if (cvzState.competitorSuggestions[i].selected) cvzState.competitorSuggestions[i].selected = false;
   }
@@ -774,6 +810,21 @@ function cvzSyncStep0Fields() {
   cvzState.target_audience = document.getElementById('cvz-in-audience').value.trim();
   const btSelect = document.getElementById('cvz-in-business-type');
   cvzState.business_type = btSelect ? btSelect.value : '';
+
+  // Bereinigung hier ist Komfort, kein Schutz - maxlength und dieser slice
+  // sind clientseitig und trivial umgehbar. Der Wert geht in den System-
+  // Prompt, die verbindliche Prüfung läuft serverseitig in
+  // cleanBusinessTypeCustom (services/businessTypes.js).
+  if (cvzBusinessTypeAllowsCustom(cvzState.business_type)) {
+    const custom = document.getElementById('cvz-in-business-type-custom');
+    cvzState.business_type_custom = String(custom ? custom.value : '')
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+      .slice(0, CVZ_BUSINESS_TYPE_CUSTOM_MAXLEN);
+  } else {
+    cvzState.business_type_custom = '';
+  }
 }
 function cvzSyncStep1Fields() {
   cvzState.conversion_goal = document.getElementById('cvz-in-goal').value.trim();
@@ -820,36 +871,36 @@ function cvzValidateStep() {
   if (cvzState.step === 0) {
     cvzSyncStep0Fields();
     if (!cvzState.keyword) return 'Bitte ein Thema/Keyword eingeben.';
-    // Bei "Eigene Eingabe" ohne Text bleibt business_type leer - die
-    // erste Pruefung faengt beide Faelle ab, die zweite gibt nur die
-    // passendere Meldung aus.
-    if (!cvzState.business_type) return 'Bitte eine Produktkategorie auswaehlen.';
+    if (!cvzState.business_type) return 'Bitte eine Produktkategorie auswählen.';
+    if (cvzBusinessTypeAllowsCustom(cvzState.business_type) && !cvzState.business_type_custom) {
+      return 'Bitte deine Produktkategorie eintragen.';
+    }
     if (!cvzState.target_audience) return 'Bitte eine Zielgruppe angeben.';
   }
   if (cvzState.step === 1) {
     cvzSyncStep1Fields();
     if (!cvzState.conversion_goal) return 'Bitte ein Conversion-Ziel angeben.';
-    if (!cvzState.funnel_stage) return 'Bitte eine Funnel-Stage auswaehlen.';
+    if (!cvzState.funnel_stage) return 'Bitte eine Funnel-Stage auswählen.';
   }
   if (cvzState.step === 2) {
     cvzSyncStep2Fields();
     if (cvzState.usps.length === 0) return 'Bitte mindestens eine USP eintragen.';
     if (cvzState.features.length === 0) return 'Bitte mindestens ein Feature eintragen.';
     if (cvzState.brand_color && !/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(cvzState.brand_color)) {
-      return `"${cvzState.brand_color}" ist kein gueltiger Hex-Farbcode (z.B. #4f46e5) - oder das Feld leer lassen.`;
+      return `"${cvzState.brand_color}" ist kein gültiger Hex-Farbcode (z.B. #4f46e5) - oder das Feld leer lassen.`;
     }
     if (cvzState.brand_reference_url) {
       try {
         new URL(cvzState.brand_reference_url);
       } catch {
-        return `"${cvzState.brand_reference_url}" ist keine gueltige URL (mit https:// beginnen) - oder das Feld leer lassen.`;
+        return `"${cvzState.brand_reference_url}" ist keine gültige URL (mit https:// beginnen) - oder das Feld leer lassen.`;
       }
     }
   }
   if (cvzState.step === 3) {
     const total = cvzTotalCompetitorCount();
-    if (total === 0) return 'Bitte mindestens einen Wettbewerber auswaehlen oder ergaenzen.';
-    if (total > CVZ_MAX_COMPETITORS) return `Maximal ${CVZ_MAX_COMPETITORS} Wettbewerber moeglich - bitte welche abwaehlen.`;
+    if (total === 0) return 'Bitte mindestens einen Wettbewerber auswählen oder ergänzen.';
+    if (total > CVZ_MAX_COMPETITORS) return `Maximal ${CVZ_MAX_COMPETITORS} Wettbewerber möglich - bitte welche abwählen.`;
   }
   return null;
 }
@@ -950,6 +1001,9 @@ async function cvzLaunch() {
         // Immer ein key aus /form-options, nie ein Anzeigetext und nie
         // Freitext - siehe Kommentar bei cvzLoadFormOptions.
         business_type: cvzState.business_type || null,
+        // Frei eingetippte Kategorie, nur bei Typen mit requires_custom_text.
+        // Setzt die Spalte business_type_custom in page_briefs voraus.
+        business_type_custom: cvzState.business_type_custom || null,
         usps: cvzState.usps,
         features: cvzState.features,
         keyword: cvzState.keyword,
@@ -1048,7 +1102,7 @@ function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
       measuredHeight = doc.documentElement.scrollHeight;
       iframe.style.height = measuredHeight + 'px';
     } catch (e) {
-      console.warn('Iframe-Hoehe konnte nicht ermittelt werden:', e.message);
+      console.warn('Iframe-Höhe konnte nicht ermittelt werden:', e.message);
     }
     if (onLoaded) onLoaded(measuredHeight);
   });
@@ -1102,7 +1156,7 @@ function cvzSetPreviewDevice(device) {
     cvzPreviewContentHeight = doc.documentElement.scrollHeight;
     iframe.style.height = cvzPreviewContentHeight + 'px';
   } catch (e) {
-    console.warn('Iframe-Hoehe nach Geraete-Wechsel konnte nicht neu ermittelt werden:', e.message);
+    console.warn('Iframe-Höhe nach Geräte-Wechsel konnte nicht neu ermittelt werden:', e.message);
   }
   cvzApplyPreviewScale();
 }
@@ -1225,7 +1279,7 @@ function cvzStartNewProject() {
 // frontend/embed.html: id="cvz-export-briefing-pdf" bzw.
 // id="cvz-export-landingpage-pdf", jeweils mit onclick="cvzExportPdf({...})") -
 // passend zum bestehenden Stil dieser Datei (onclick="cvzGoBack()" usw.).
-// KEIN zusaetzliches addEventListener fuer dieselben IDs - das wuerde zu
+// KEIN zusätzliches addEventListener für dieselben IDs - das würde zu
 // doppelter Ausfuehrung pro Klick fuehren. Der Server laedt Briefing-Text
 // und Struktur-HTML selbst aus Supabase (page_agent_messages bzw.
 // page_structures) - hier wird nur cvzState.page_project_id und
