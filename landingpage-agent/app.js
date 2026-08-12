@@ -1108,6 +1108,16 @@ window.addEventListener('resize', () => {
   }, 150);
 });
 
+function cvzMeasureIframeHeight(iframe) {
+  try {
+    const doc = iframe.contentDocument || iframe.contentWindow.document;
+    return doc.documentElement.scrollHeight;
+  } catch (e) {
+    console.warn('Iframe-Hoehe konnte nicht ermittelt werden:', e.message);
+    return null;
+  }
+}
+
 function cvzSetPreviewDevice(device) {
   cvzPreviewDevice = device;
   document.getElementById('cvz-device-desktop').classList.toggle('active', device === 'desktop');
@@ -1115,15 +1125,25 @@ function cvzSetPreviewDevice(device) {
 
   const iframe = document.querySelector('#cvz-preview-frame-inner iframe');
   if (!iframe) return;
+
   iframe.style.width = CVZ_DEVICE_WIDTHS[device] + 'px';
-  try {
-    const doc = iframe.contentDocument || iframe.contentWindow.document;
-    cvzPreviewContentHeight = doc.documentElement.scrollHeight;
-    iframe.style.height = cvzPreviewContentHeight + 'px';
-  } catch (e) {
-    console.warn('Iframe-Hoehe nach Geraete-Wechsel konnte nicht neu ermittelt werden:', e.message);
-  }
-  cvzApplyPreviewScale();
+
+  // Zwei verschachtelte requestAnimationFrame-Aufrufe statt sofortiger
+  // Messung: garantieren, dass der Browser die Breitenaenderung des
+  // Iframes vollstaendig gelayoutet hat, bevor die Hoehe ausgelesen wird.
+  // Ohne das kann eine zu fruehe Messung noch die Hoehe der VORHERIGEN
+  // Breite liefern - genau das liess das Fenster beim Zurueckwechseln
+  // auf Desktop klein bleiben.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const measured = cvzMeasureIframeHeight(iframe);
+      if (measured) {
+        cvzPreviewContentHeight = measured;
+        iframe.style.height = measured + 'px';
+      }
+      cvzApplyPreviewScale();
+    });
+  });
 }
 cvzSetPreviewDevice(cvzPreviewDevice);
 
