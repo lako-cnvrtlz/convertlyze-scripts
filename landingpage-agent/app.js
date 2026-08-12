@@ -94,8 +94,17 @@ function cvzShowError(msg) {
 
 // ==================== SCHRITT 0: THEMA ====================
 
-// Werte stammen 1:1 aus der Flask-Whitelist (Fehlerantwort "allowed" von
-// /api/page-agent/brief, Stand August 2026).
+// Die Liste beschreibt das GESCHAEFTSMODELL, nicht die Branche. Grund:
+// fuer Hero, Conversion und Differenzierung ist entscheidend, WIE verkauft
+// wird (Self-Service-Signup vs. Sales-Prozess vs. Warenkorb) - das aendert
+// CTA, Preisdarstellung und Trust-Signale grundlegend. Die Branche steckt
+// bereits im Thema/Keyword und wuerde hier nur eine zweite, konkurrierende
+// Dimension einziehen: ein Fintech, das SaaS im Self-Service verkauft,
+// haette sonst zwei zutreffende Optionen und muesste raten.
+//
+// 'sonstiges' gibt es bewusst nicht mehr - wer sich nicht wiederfindet,
+// nutzt "Eigene Eingabe". Das ist praeziser und zeigt dir zugleich, welche
+// Kategorie in der Liste fehlt.
 //
 // value = exakter Slug fuer Backend und Supabase (Spalte business_type)
 // label = Anzeigetext im Formular
@@ -105,23 +114,23 @@ function cvzShowError(msg) {
 // Whitelist geschlossen ist, wird das mit 400 "Ungueltiger Business-Typ"
 // abgelehnt. Reihenfolge beim Deployen: erst Backend, dann diese Datei.
 //
-// Beim Ergaenzen einer festen Kategorie ebenfalls zuerst die Whitelist
-// erweitern und deployen, danach hier eintragen.
+// NEU gegenueber der alten Backend-Liste: 'dienstleistung' und
+// 'physisches_produkt'. Beide muessen in KNOWN_BUSINESS_TYPES im Flask-
+// Code ergaenzt werden, sonst laufen sie durch die Freitext-Bereinigung
+// statt als bekannte Kategorie zu gelten.
+// ENTFALLEN: fintech, hr_tech, bildung, manufacturing, proptech, logistik,
+// sonstiges. Bestandsdatensaetze mit diesen Werten bleiben in der DB
+// gueltig - sie tauchen nur nicht mehr im Dropdown auf.
 const CVZ_BUSINESS_TYPES = [
-  { value: 'saas_self_service',   label: 'SaaS – Self-Service' },
-  { value: 'saas_enterprise',     label: 'SaaS – Enterprise' },
-  { value: 'enterprise_solutions', label: 'Enterprise Solutions' },
-  { value: 'consulting',          label: 'Beratung' },
-  { value: 'agentur',             label: 'Agentur' },
-  { value: 'ecommerce',           label: 'E-Commerce' },
-  { value: 'marktplatz',          label: 'Marktplatz / Plattform' },
-  { value: 'fintech',             label: 'Fintech' },
-  { value: 'hr_tech',             label: 'HR-Tech' },
-  { value: 'bildung',             label: 'Bildung' },
-  { value: 'manufacturing',       label: 'Manufacturing / Industrie' },
-  { value: 'proptech',            label: 'Proptech / Immobilien' },
-  { value: 'logistik',            label: 'Logistik' },
-  { value: 'sonstiges',           label: 'Sonstiges' }
+  { value: 'saas_self_service',    label: 'SaaS – Self-Service (Signup ohne Sales)' },
+  { value: 'saas_enterprise',      label: 'SaaS – Enterprise (mit Sales-Prozess)' },
+  { value: 'enterprise_solutions', label: 'Individualsoftware / Systemintegration' },
+  { value: 'consulting',           label: 'Beratung' },
+  { value: 'agentur',              label: 'Agentur' },
+  { value: 'dienstleistung',       label: 'Dienstleistung (sonstige)' },
+  { value: 'ecommerce',            label: 'E-Commerce / Onlineshop' },
+  { value: 'marktplatz',           label: 'Marktplatz / Plattform' },
+  { value: 'physisches_produkt',   label: 'Physisches Produkt / Hersteller' }
 ];
 
 // Nur ein Marker fuer die Dropdown-Option - wird NIE verschickt. Der
