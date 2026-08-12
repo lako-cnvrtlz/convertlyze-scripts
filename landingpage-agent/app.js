@@ -1055,6 +1055,12 @@ function cvzUpdateQuota(remaining, limit) {
   document.getElementById('cvz-quota').textContent = `${remaining}/${limit} Sessions übrig`;
 }
 
+// GEAENDERT (Fix "Fenster bleibt beim Zurueckwechseln klein"): der Iframe-
+// Inhalt wird jetzt zusaetzlich per ResizeObserver ueberwacht, siehe
+// cvzObserveIframeContent weiter unten. Der load-Handler hier macht nach
+// wie vor die ERSTE Messung, aktiviert danach aber den Observer, statt
+// sich bei jeder spaeteren Aenderung auf eine manuelle Neumessung zu
+// verlassen.
 function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
   const iframe = document.createElement('iframe');
   iframe.setAttribute('sandbox', 'allow-same-origin');
@@ -1066,6 +1072,7 @@ function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
       const doc = iframe.contentDocument || iframe.contentWindow.document;
       measuredHeight = doc.documentElement.scrollHeight;
       iframe.style.height = measuredHeight + 'px';
+      cvzObserveIframeContent(iframe, doc);
     } catch (e) {
       console.warn('Iframe-Hoehe konnte nicht ermittelt werden:', e.message);
     }
@@ -1078,6 +1085,28 @@ function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
 const CVZ_DEVICE_WIDTHS = { desktop: 1440, mobile: 390 };
 let cvzPreviewDevice = window.innerWidth < 768 ? 'mobile' : 'desktop';
 let cvzPreviewContentHeight = 0;
+
+// NEU: ResizeObserver statt manueller Messung nach einer Breitenaenderung.
+// Aendert sich die Breite des Iframes (z.B. durch cvzSetPreviewDevice),
+// braucht der Browser einen eigenen, vom Elternfenster unabhaengigen
+// Reflow-Zyklus fuer das EINGEBETTETE Dokument, bevor scrollHeight einen
+// korrekten Wert liefert. Ein rAF im Elternfenster garantiert diesen
+// Zyklus nicht zuverlaessig - der ResizeObserver dagegen feuert erst,
+// wenn der Browser den beobachteten Inhalt tatsaechlich fertig
+// gelayoutet hat, unabhaengig davon, wie lange das dauert.
+let cvzPreviewResizeObserver = null;
+function cvzObserveIframeContent(iframe, doc) {
+  if (cvzPreviewResizeObserver) cvzPreviewResizeObserver.disconnect();
+  cvzPreviewResizeObserver = new ResizeObserver(() => {
+    const newHeight = doc.documentElement.scrollHeight;
+    if (newHeight && newHeight !== cvzPreviewContentHeight) {
+      cvzPreviewContentHeight = newHeight;
+      iframe.style.height = newHeight + 'px';
+      cvzApplyPreviewScale();
+    }
+  });
+  cvzPreviewResizeObserver.observe(doc.documentElement);
+}
 
 function cvzApplyPreviewScale() {
   const outer = document.getElementById('cvz-preview-frame-outer');
@@ -1108,16 +1137,14 @@ window.addEventListener('resize', () => {
   }, 150);
 });
 
-function cvzMeasureIframeHeight(iframe) {
-  try {
-    const doc = iframe.contentDocument || iframe.contentWindow.document;
-    return doc.documentElement.scrollHeight;
-  } catch (e) {
-    console.warn('Iframe-Hoehe konnte nicht ermittelt werden:', e.message);
-    return null;
-  }
-}
-
+// GEAENDERT (Fix): keine manuelle scrollHeight-Messung mehr direkt nach
+// der Breitenaenderung - das war die Ursache dafuer, dass das Fenster
+// beim Zurueckwechseln auf Desktop klein blieb (die Messung kam manchmal
+// zu frueh, bevor der Iframe-Inhalt bei der neuen Breite fertig
+// umgebrochen war). cvzApplyPreviewScale() wird hier sofort mit der noch
+// bekannten (alten) Hoehe aufgerufen, damit die UI nicht "springt" - der
+// ResizeObserver aus cvzObserveIframeContent korrigiert die Hoehe
+// automatisch nach, sobald der Browser fertig gelayoutet hat.
 function cvzSetPreviewDevice(device) {
   cvzPreviewDevice = device;
   document.getElementById('cvz-device-desktop').classList.toggle('active', device === 'desktop');
@@ -1125,25 +1152,9 @@ function cvzSetPreviewDevice(device) {
 
   const iframe = document.querySelector('#cvz-preview-frame-inner iframe');
   if (!iframe) return;
-
   iframe.style.width = CVZ_DEVICE_WIDTHS[device] + 'px';
 
-  // Zwei verschachtelte requestAnimationFrame-Aufrufe statt sofortiger
-  // Messung: garantieren, dass der Browser die Breitenaenderung des
-  // Iframes vollstaendig gelayoutet hat, bevor die Hoehe ausgelesen wird.
-  // Ohne das kann eine zu fruehe Messung noch die Hoehe der VORHERIGEN
-  // Breite liefern - genau das liess das Fenster beim Zurueckwechseln
-  // auf Desktop klein bleiben.
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      const measured = cvzMeasureIframeHeight(iframe);
-      if (measured) {
-        cvzPreviewContentHeight = measured;
-        iframe.style.height = measured + 'px';
-      }
-      cvzApplyPreviewScale();
-    });
-  });
+  cvzApplyPreviewScale();
 }
 cvzSetPreviewDevice(cvzPreviewDevice);
 
