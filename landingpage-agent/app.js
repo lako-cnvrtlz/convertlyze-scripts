@@ -54,8 +54,8 @@ async function cvzResolveIdentity() {
 const cvzState = {
   step: 0,
   keyword: '',
-  // Entweder ein fester Slug (z.B. 'saas') oder der Freitext aus
-  // "Eigene Eingabe" - beides landet in derselben DB-Spalte.
+  // Entweder ein Slug aus der Backend-Liste (z.B. 'saas_self_service')
+  // oder der Freitext aus "Eigene Eingabe" - beides in derselben Spalte.
   business_type: '',
   target_audience: '',
   conversion_goal: '',
@@ -94,39 +94,45 @@ function cvzShowError(msg) {
 
 // ==================== SCHRITT 0: THEMA ====================
 
-// ACHTUNG - DIE VERBINDLICHE LISTE LIEGT IM BACKEND.
-// value = Wert, der an /api/page-agent/brief geschickt und in Supabase
-//         (Spalte business_type, text null - kein Constraint) gespeichert wird.
-// label = reiner Anzeigetext im Formular.
+// Werte stammen 1:1 aus der Flask-Whitelist (Fehlerantwort "allowed" von
+// /api/page-agent/brief, Stand August 2026).
 //
-// Die fuenf festen Slugs muessen der Whitelist in der Flask-Validierung
-// entsprechen - dort, wo "Ungueltiger Business-Typ" geworfen wird.
-// Sie sind GERATEN und vor dem Deploy gegen den Backend-Code abzugleichen.
+// value = exakter Slug fuer Backend und Supabase (Spalte business_type)
+// label = Anzeigetext im Formular
 //
-// Bei "Eigene Eingabe" wird der Freitext DIREKT als business_type
-// gespeichert. Voraussetzung: die Flask-Whitelist laesst freie Werte zu
-// (siehe Chat) - sonst kippt der Launch mit "Ungueltiger Business-Typ".
+// SETZT EINE GEOEFFNETE BACKEND-VALIDIERUNG VORAUS: bei "Eigene Eingabe"
+// geht der Freitext DIREKT als business_type raus. Solange die Flask-
+// Whitelist geschlossen ist, wird das mit 400 "Ungueltiger Business-Typ"
+// abgelehnt. Reihenfolge beim Deployen: erst Backend, dann diese Datei.
 //
-// Preis dieser Entscheidung: in der Spalte stehen ab jetzt Slugs UND
-// Freitext gemischt. Auswertungen nach Kategorie funktionieren nur noch
-// fuer die fuenf festen Werte, alles andere ist ein Sammelbecken mit
-// Varianten wie "Ausbildungsanbieter" und "Ausbildungs-Anbieter".
+// Beim Ergaenzen einer festen Kategorie ebenfalls zuerst die Whitelist
+// erweitern und deployen, danach hier eintragen.
 const CVZ_BUSINESS_TYPES = [
-  { value: 'saas',               label: 'SaaS / Software' },
-  { value: 'beratung',           label: 'Beratung / Agentur' },
-  { value: 'dienstleistung',     label: 'Dienstleistung' },
-  { value: 'physisches_produkt', label: 'Physisches Produkt' },
-  { value: 'marktplatz',         label: 'Marktplatz / Plattform' }
+  { value: 'saas_self_service',   label: 'SaaS – Self-Service' },
+  { value: 'saas_enterprise',     label: 'SaaS – Enterprise' },
+  { value: 'enterprise_solutions', label: 'Enterprise Solutions' },
+  { value: 'consulting',          label: 'Beratung' },
+  { value: 'agentur',             label: 'Agentur' },
+  { value: 'ecommerce',           label: 'E-Commerce' },
+  { value: 'marktplatz',          label: 'Marktplatz / Plattform' },
+  { value: 'fintech',             label: 'Fintech' },
+  { value: 'hr_tech',             label: 'HR-Tech' },
+  { value: 'bildung',             label: 'Bildung' },
+  { value: 'manufacturing',       label: 'Manufacturing / Industrie' },
+  { value: 'proptech',            label: 'Proptech / Immobilien' },
+  { value: 'logistik',            label: 'Logistik' },
+  { value: 'sonstiges',           label: 'Sonstiges' }
 ];
-// Nur ein Marker fuer die Dropdown-Option - wird NIE gespeichert oder
-// verschickt. Der doppelte Unterstrich macht eine Kollision mit einer
-// echten Nutzereingabe praktisch unmoeglich.
+
+// Nur ein Marker fuer die Dropdown-Option - wird NIE verschickt. Der
+// doppelte Unterstrich macht eine Kollision mit einer echten Eingabe
+// praktisch unmoeglich.
 const CVZ_BUSINESS_TYPE_CUSTOM = '__custom__';
 const CVZ_BUSINESS_TYPE_MAXLEN = 60;
 
 // Freitext liegt vor, wenn ein Wert gesetzt ist, der nicht zu den festen
-// Slugs gehoert. So ueberlebt die Auswahl auch das Zurueckspringen von
-// Schritt 2 auf Schritt 1, bei dem das Formular neu gerendert wird.
+// Slugs gehoert. So ueberlebt die Auswahl das Neurendern des Formulars
+// beim Zurueckspringen von Schritt 2 auf Schritt 1.
 function cvzBusinessTypeIsCustom() {
   return !!cvzState.business_type &&
     !CVZ_BUSINESS_TYPES.some(t => t.value === cvzState.business_type);
@@ -169,12 +175,13 @@ function cvzToggleBusinessTypeCustom(value) {
 }
 
 // Schreibt den finalen Wert in den State: entweder einen festen Slug oder
-// den bereinigten Freitext.
+// den bereinigten Freitext. Leerer Freitext laesst business_type leer,
+// damit die Validierung in cvzValidateStep greift.
 //
 // Die Bereinigung hier ist Komfort, kein Schutz - maxlength und dieser
-// slice sind clientseitig und trivial umgehbar. Der Wert landet spaeter
-// im SP1-Prompt und ist das einzige voellig freie Feld im Briefing, die
-// verbindliche Pruefung gehoert deshalb in die Flask-Schicht.
+// slice sind clientseitig und trivial umgehbar. Der Wert landet im
+// SP1-Prompt und ist ab jetzt das einzige voellig freie Feld im Briefing,
+// die verbindliche Pruefung gehoert deshalb in die Flask-Schicht.
 function cvzReadBusinessType() {
   const select = document.getElementById('cvz-in-business-type');
   const custom = document.getElementById('cvz-in-business-type-custom');
@@ -191,7 +198,6 @@ function cvzReadBusinessType() {
     .trim()
     .slice(0, CVZ_BUSINESS_TYPE_MAXLEN);
 }
-
 function cvzRenderStep0() {
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Worum geht es?</h1>
@@ -835,9 +841,9 @@ function cvzValidateStep() {
   if (cvzState.step === 0) {
     cvzSyncStep0Fields();
     if (!cvzState.keyword) return 'Bitte ein Thema/Keyword eingeben.';
-    // Bei "Eigene Eingabe" mit leerem Textfeld bleibt business_type leer,
-    // die erste Pruefung greift also fuer beide Faelle. Die zweite gibt
-    // nur die passendere Meldung aus.
+    // Bei "Eigene Eingabe" ohne Text bleibt business_type leer - die
+    // erste Pruefung faengt beide Faelle ab, die zweite gibt nur die
+    // passendere Meldung aus.
     const btSelect = document.getElementById('cvz-in-business-type');
     if (btSelect && btSelect.value === CVZ_BUSINESS_TYPE_CUSTOM && !cvzState.business_type) {
       return 'Bitte deine Produktkategorie eingeben.';
@@ -966,8 +972,9 @@ async function cvzLaunch() {
         funnel_stage: cvzState.funnel_stage,
         conversion_goal: cvzState.conversion_goal,
         target_audience: cvzState.target_audience,
-        // Fester Slug ODER Freitext - siehe Kommentar bei
-        // CVZ_BUSINESS_TYPES. Nie der Anzeigetext der festen Optionen.
+        // Fester Slug ODER Freitext, nie der Anzeigetext der Optionen.
+        // Freitext setzt die geoeffnete Flask-Validierung voraus, siehe
+        // Kommentar bei CVZ_BUSINESS_TYPES.
         business_type: cvzState.business_type || null,
         usps: cvzState.usps,
         features: cvzState.features,
@@ -1055,12 +1062,6 @@ function cvzUpdateQuota(remaining, limit) {
   document.getElementById('cvz-quota').textContent = `${remaining}/${limit} Sessions übrig`;
 }
 
-// GEAENDERT (Fix "Fenster bleibt beim Zurueckwechseln klein"): der Iframe-
-// Inhalt wird jetzt zusaetzlich per ResizeObserver ueberwacht, siehe
-// cvzObserveIframeContent weiter unten. Der load-Handler hier macht nach
-// wie vor die ERSTE Messung, aktiviert danach aber den Observer, statt
-// sich bei jeder spaeteren Aenderung auf eine manuelle Neumessung zu
-// verlassen.
 function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
   const iframe = document.createElement('iframe');
   iframe.setAttribute('sandbox', 'allow-same-origin');
@@ -1072,7 +1073,6 @@ function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
       const doc = iframe.contentDocument || iframe.contentWindow.document;
       measuredHeight = doc.documentElement.scrollHeight;
       iframe.style.height = measuredHeight + 'px';
-      cvzObserveIframeContent(iframe, doc);
     } catch (e) {
       console.warn('Iframe-Hoehe konnte nicht ermittelt werden:', e.message);
     }
@@ -1085,28 +1085,6 @@ function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
 const CVZ_DEVICE_WIDTHS = { desktop: 1440, mobile: 390 };
 let cvzPreviewDevice = window.innerWidth < 768 ? 'mobile' : 'desktop';
 let cvzPreviewContentHeight = 0;
-
-// NEU: ResizeObserver statt manueller Messung nach einer Breitenaenderung.
-// Aendert sich die Breite des Iframes (z.B. durch cvzSetPreviewDevice),
-// braucht der Browser einen eigenen, vom Elternfenster unabhaengigen
-// Reflow-Zyklus fuer das EINGEBETTETE Dokument, bevor scrollHeight einen
-// korrekten Wert liefert. Ein rAF im Elternfenster garantiert diesen
-// Zyklus nicht zuverlaessig - der ResizeObserver dagegen feuert erst,
-// wenn der Browser den beobachteten Inhalt tatsaechlich fertig
-// gelayoutet hat, unabhaengig davon, wie lange das dauert.
-let cvzPreviewResizeObserver = null;
-function cvzObserveIframeContent(iframe, doc) {
-  if (cvzPreviewResizeObserver) cvzPreviewResizeObserver.disconnect();
-  cvzPreviewResizeObserver = new ResizeObserver(() => {
-    const newHeight = doc.documentElement.scrollHeight;
-    if (newHeight && newHeight !== cvzPreviewContentHeight) {
-      cvzPreviewContentHeight = newHeight;
-      iframe.style.height = newHeight + 'px';
-      cvzApplyPreviewScale();
-    }
-  });
-  cvzPreviewResizeObserver.observe(doc.documentElement);
-}
 
 function cvzApplyPreviewScale() {
   const outer = document.getElementById('cvz-preview-frame-outer');
@@ -1137,14 +1115,6 @@ window.addEventListener('resize', () => {
   }, 150);
 });
 
-// GEAENDERT (Fix): keine manuelle scrollHeight-Messung mehr direkt nach
-// der Breitenaenderung - das war die Ursache dafuer, dass das Fenster
-// beim Zurueckwechseln auf Desktop klein blieb (die Messung kam manchmal
-// zu frueh, bevor der Iframe-Inhalt bei der neuen Breite fertig
-// umgebrochen war). cvzApplyPreviewScale() wird hier sofort mit der noch
-// bekannten (alten) Hoehe aufgerufen, damit die UI nicht "springt" - der
-// ResizeObserver aus cvzObserveIframeContent korrigiert die Hoehe
-// automatisch nach, sobald der Browser fertig gelayoutet hat.
 function cvzSetPreviewDevice(device) {
   cvzPreviewDevice = device;
   document.getElementById('cvz-device-desktop').classList.toggle('active', device === 'desktop');
@@ -1153,7 +1123,13 @@ function cvzSetPreviewDevice(device) {
   const iframe = document.querySelector('#cvz-preview-frame-inner iframe');
   if (!iframe) return;
   iframe.style.width = CVZ_DEVICE_WIDTHS[device] + 'px';
-
+  try {
+    const doc = iframe.contentDocument || iframe.contentWindow.document;
+    cvzPreviewContentHeight = doc.documentElement.scrollHeight;
+    iframe.style.height = cvzPreviewContentHeight + 'px';
+  } catch (e) {
+    console.warn('Iframe-Hoehe nach Geraete-Wechsel konnte nicht neu ermittelt werden:', e.message);
+  }
   cvzApplyPreviewScale();
 }
 cvzSetPreviewDevice(cvzPreviewDevice);
