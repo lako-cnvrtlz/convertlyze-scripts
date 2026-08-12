@@ -54,8 +54,7 @@ async function cvzResolveIdentity() {
 const cvzState = {
   step: 0,
   keyword: '',
-  // Entweder ein Slug aus der Backend-Liste (z.B. 'saas_self_service')
-  // oder der Freitext aus "Eigene Eingabe" - beides in derselben Spalte.
+  // key aus GET /form-options, z.B. 'saas_self_service'.
   business_type: '',
   target_audience: '',
   conversion_goal: '',
@@ -94,119 +93,94 @@ function cvzShowError(msg) {
 
 // ==================== SCHRITT 0: THEMA ====================
 
-// Die Liste beschreibt das GESCHAEFTSMODELL, nicht die Branche. Grund:
-// fuer Hero, Conversion und Differenzierung ist entscheidend, WIE verkauft
-// wird (Self-Service-Signup vs. Sales-Prozess vs. Warenkorb) - das aendert
-// CTA, Preisdarstellung und Trust-Signale grundlegend. Die Branche steckt
-// bereits im Thema/Keyword und wuerde hier nur eine zweite, konkurrierende
-// Dimension einziehen: ein Fintech, das SaaS im Self-Service verkauft,
-// haette sonst zwei zutreffende Optionen und muesste raten.
+// Die Auswahllisten kommen zur Laufzeit aus GET /api/page-agent/form-options
+// und damit aus DERSELBEN Konstante (services/businessTypes.js), gegen die
+// /brief validiert. Das ist der Grund, warum hier keine Liste mehr fest
+// eingetragen ist: eine zweite Kopie im Frontend laeuft frueher oder spaeter
+// auseinander und produziert dann ein 400 "Ungueltiger Business-Typ" fuer
+// einen Wert, der im Dropdown voellig legitim aussah.
 //
-// 'sonstiges' gibt es bewusst nicht mehr - wer sich nicht wiederfindet,
-// nutzt "Eigene Eingabe". Das ist praeziser und zeigt dir zugleich, welche
-// Kategorie in der Liste fehlt.
+// KEIN FREITEXT: business_type steuert serverseitig Framework, Pflicht-
+// Nutzenebenen, Zertifikatsliste und Sektionsauswahl (buildBusinessProfileBlock
+// in routes/pageAgent.js). Ein unbekannter Wert wuerde dort still auf "nicht
+// gesetzt" fallen - es kaeme trotzdem eine Struktur heraus, nur ohne jede
+// typabhaengige Regel, und niemandem faellt es auf. Eine fehlende Kategorie
+// gehoert deshalb in services/businessTypes.js ergaenzt, nicht ins Formular.
 //
-// value = exakter Slug fuer Backend und Supabase (Spalte business_type)
-// label = Anzeigetext im Formular
-//
-// SETZT EINE GEOEFFNETE BACKEND-VALIDIERUNG VORAUS: bei "Eigene Eingabe"
-// geht der Freitext DIREKT als business_type raus. Solange die Flask-
-// Whitelist geschlossen ist, wird das mit 400 "Ungueltiger Business-Typ"
-// abgelehnt. Reihenfolge beim Deployen: erst Backend, dann diese Datei.
-//
-// NEU gegenueber der alten Backend-Liste: 'dienstleistung' und
-// 'physisches_produkt'. Beide muessen in KNOWN_BUSINESS_TYPES im Flask-
-// Code ergaenzt werden, sonst laufen sie durch die Freitext-Bereinigung
-// statt als bekannte Kategorie zu gelten.
-// ENTFALLEN: fintech, hr_tech, bildung, manufacturing, proptech, logistik,
-// sonstiges. Bestandsdatensaetze mit diesen Werten bleiben in der DB
-// gueltig - sie tauchen nur nicht mehr im Dropdown auf.
-const CVZ_BUSINESS_TYPES = [
-  { value: 'saas_self_service',    label: 'SaaS – Self-Service (Signup ohne Sales)' },
-  { value: 'saas_enterprise',      label: 'SaaS – Enterprise (mit Sales-Prozess)' },
-  { value: 'enterprise_solutions', label: 'Individualsoftware / Systemintegration' },
-  { value: 'consulting',           label: 'Beratung' },
-  { value: 'agentur',              label: 'Agentur' },
-  { value: 'dienstleistung',       label: 'Dienstleistung (sonstige)' },
-  { value: 'ecommerce',            label: 'E-Commerce / Onlineshop' },
-  { value: 'marktplatz',           label: 'Marktplatz / Plattform' },
-  { value: 'physisches_produkt',   label: 'Physisches Produkt / Hersteller' }
+// business_type_groups kommt gruppiert: [{key, label, hint, types:[{key,label}]}]
+// Die Gruppen trennen Geschaeftsmodell und Branche, weil die Liste sonst
+// beliebig wirkt - nebeneinander steht, was nicht auf derselben Ebene liegt.
+let cvzBusinessTypeGroups = [];
+let cvzFunnelStages = [];
+
+// Fallback, falls /form-options nicht erreichbar ist. Bewusst nur die
+// Funnel-Stages: ohne sie waere Schritt 1 komplett unbedienbar. Fuer
+// business_type gibt es KEINEN Fallback - eine geratene Liste ist genau
+// der Fehler, der hier abgestellt werden soll. Dann lieber ein sichtbarer
+// Hinweis als ein Dropdown, das beim Launch scheitert.
+const CVZ_FUNNEL_STAGES_FALLBACK = [
+  { key: 'awareness',     label: 'Awareness' },
+  { key: 'consideration', label: 'Consideration' },
+  { key: 'decision',      label: 'Decision' }
 ];
 
-// Nur ein Marker fuer die Dropdown-Option - wird NIE verschickt. Der
-// doppelte Unterstrich macht eine Kollision mit einer echten Eingabe
-// praktisch unmoeglich.
-const CVZ_BUSINESS_TYPE_CUSTOM = '__custom__';
-const CVZ_BUSINESS_TYPE_MAXLEN = 60;
+async function cvzLoadFormOptions() {
+  try {
+    const res = await fetch(`${API_BASE}/api/page-agent/form-options`, {
+      headers: cvzAuthHeaders()
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
 
-// Freitext liegt vor, wenn ein Wert gesetzt ist, der nicht zu den festen
-// Slugs gehoert. So ueberlebt die Auswahl das Neurendern des Formulars
-// beim Zurueckspringen von Schritt 2 auf Schritt 1.
-function cvzBusinessTypeIsCustom() {
-  return !!cvzState.business_type &&
-    !CVZ_BUSINESS_TYPES.some(t => t.value === cvzState.business_type);
+    cvzBusinessTypeGroups = Array.isArray(data.business_type_groups)
+      ? data.business_type_groups
+      : [];
+    cvzFunnelStages = Array.isArray(data.funnel_stages) && data.funnel_stages.length > 0
+      ? data.funnel_stages
+      : CVZ_FUNNEL_STAGES_FALLBACK;
+  } catch (e) {
+    console.error('form-options konnten nicht geladen werden:', e.message);
+    cvzBusinessTypeGroups = [];
+    cvzFunnelStages = CVZ_FUNNEL_STAGES_FALLBACK;
+  }
 }
 
 function cvzRenderBusinessTypeField() {
-  const isCustom = cvzBusinessTypeIsCustom();
+  const total = cvzBusinessTypeGroups.reduce((n, g) => n + (g.types || []).length, 0);
+  if (total === 0) {
+    return `
+      <label class="cvz-label">Produktkategorie</label>
+      <p class="cvz-error" style="margin-top:6px;">
+        Die Auswahlliste konnte nicht geladen werden. Bitte die Seite neu laden.
+        Falls das Problem bleibt, melde dich bei uns.
+      </p>
+    `;
+  }
 
-  const options = CVZ_BUSINESS_TYPES.map(t => `
-    <option value="${cvzEsc(t.value)}" ${cvzState.business_type === t.value ? 'selected' : ''}>${cvzEsc(t.label)}</option>
-  `).join('');
+  // optgroup-label traegt zusaetzlich den Gruppen-Hinweis, damit die
+  // Auswahlregel (bei Ueberschneidung gewinnt die Branche) direkt an der
+  // Stelle steht, an der entschieden wird. Ein Hinweis unter dem Feld wird
+  // beim Aufklappen nicht mitgelesen.
+  const groups = cvzBusinessTypeGroups.map(g => {
+    const options = (g.types || []).map(t => `
+      <option value="${cvzEsc(t.key)}" ${cvzState.business_type === t.key ? 'selected' : ''}>${cvzEsc(t.label)}</option>
+    `).join('');
+    const groupLabel = g.hint ? `${g.label} — ${g.hint}` : g.label;
+    return `<optgroup label="${cvzEsc(groupLabel)}">${options}</optgroup>`;
+  }).join('');
 
   return `
     <label class="cvz-label">Produktkategorie</label>
     <div class="cvz-select-wrap">
-      <select class="cvz-input" id="cvz-in-business-type" onchange="cvzToggleBusinessTypeCustom(this.value)">
+      <select class="cvz-input" id="cvz-in-business-type">
         <option value="" ${!cvzState.business_type ? 'selected' : ''}>Bitte wählen …</option>
-        ${options}
-        <option value="${CVZ_BUSINESS_TYPE_CUSTOM}" ${isCustom ? 'selected' : ''}>→ Eigene Eingabe …</option>
+        ${groups}
       </select>
     </div>
-    <input class="cvz-input ${isCustom ? '' : 'cvz-hidden'}" id="cvz-in-business-type-custom"
-      type="text" maxlength="${CVZ_BUSINESS_TYPE_MAXLEN}"
-      placeholder="z.B. Ausbildungsanbieter" aria-label="Eigene Produktkategorie"
-      value="${isCustom ? cvzEsc(cvzState.business_type) : ''}">
-    <p class="cvz-hint">Bestimmt, welche Vergleichsmaßstäbe für Hero, Conversion und Differenzierung angelegt werden.</p>
+    <p class="cvz-hint">Bestimmt Argumentationsframework, Pflicht-Nutzenebenen und Vertrauenssignale der Struktur. Wenn Geschäftsmodell und Branche beide passen, wähle die Branche.</p>
   `;
 }
 
-function cvzToggleBusinessTypeCustom(value) {
-  const custom = document.getElementById('cvz-in-business-type-custom');
-  if (!custom) return;
-  const isCustom = value === CVZ_BUSINESS_TYPE_CUSTOM;
-  custom.classList.toggle('cvz-hidden', !isCustom);
-  if (isCustom) {
-    custom.focus();
-  } else {
-    custom.value = '';
-  }
-}
-
-// Schreibt den finalen Wert in den State: entweder einen festen Slug oder
-// den bereinigten Freitext. Leerer Freitext laesst business_type leer,
-// damit die Validierung in cvzValidateStep greift.
-//
-// Die Bereinigung hier ist Komfort, kein Schutz - maxlength und dieser
-// slice sind clientseitig und trivial umgehbar. Der Wert landet im
-// SP1-Prompt und ist ab jetzt das einzige voellig freie Feld im Briefing,
-// die verbindliche Pruefung gehoert deshalb in die Flask-Schicht.
-function cvzReadBusinessType() {
-  const select = document.getElementById('cvz-in-business-type');
-  const custom = document.getElementById('cvz-in-business-type-custom');
-  if (!select) return;
-
-  if (select.value !== CVZ_BUSINESS_TYPE_CUSTOM) {
-    cvzState.business_type = select.value;
-    return;
-  }
-
-  cvzState.business_type = String(custom ? custom.value : '')
-    .replace(/[\r\n\t]+/g, ' ')
-    .replace(/\s{2,}/g, ' ')
-    .trim()
-    .slice(0, CVZ_BUSINESS_TYPE_MAXLEN);
-}
 function cvzRenderStep0() {
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Worum geht es?</h1>
@@ -265,14 +239,9 @@ function cvzRenderStep1() {
     </div>
     <label class="cvz-label">Funnel-Stage</label>
     <div class="cvz-choice-row" id="cvz-funnel-choices">
-      ${[
-        { v: 'awareness', l: 'Awareness' },
-        { v: 'consideration', l: 'Consideration' },
-        { v: 'decision', l: 'Decision' },
-        { v: 'full_journey', l: 'Komplette Journey' }
-      ].map(({ v, l }) => `
-        <div class="cvz-choice ${cvzState.funnel_stage === v ? 'selected' : ''}" data-value="${v}" onclick="cvzSelectFunnel('${v}')">
-          ${l}
+      ${cvzFunnelStages.map(s => `
+        <div class="cvz-choice ${cvzState.funnel_stage === s.key ? 'selected' : ''}" data-value="${cvzEsc(s.key)}" onclick="cvzSelectFunnel('${cvzEsc(s.key)}')">
+          ${cvzEsc(s.label)}
         </div>`).join('')}
     </div>
   `;
@@ -803,7 +772,8 @@ function cvzRemoveManualCompetitor(i) {
 function cvzSyncStep0Fields() {
   cvzState.keyword = document.getElementById('cvz-in-keyword').value.trim();
   cvzState.target_audience = document.getElementById('cvz-in-audience').value.trim();
-  cvzReadBusinessType();
+  const btSelect = document.getElementById('cvz-in-business-type');
+  cvzState.business_type = btSelect ? btSelect.value : '';
 }
 function cvzSyncStep1Fields() {
   cvzState.conversion_goal = document.getElementById('cvz-in-goal').value.trim();
@@ -853,10 +823,6 @@ function cvzValidateStep() {
     // Bei "Eigene Eingabe" ohne Text bleibt business_type leer - die
     // erste Pruefung faengt beide Faelle ab, die zweite gibt nur die
     // passendere Meldung aus.
-    const btSelect = document.getElementById('cvz-in-business-type');
-    if (btSelect && btSelect.value === CVZ_BUSINESS_TYPE_CUSTOM && !cvzState.business_type) {
-      return 'Bitte deine Produktkategorie eingeben.';
-    }
     if (!cvzState.business_type) return 'Bitte eine Produktkategorie auswaehlen.';
     if (!cvzState.target_audience) return 'Bitte eine Zielgruppe angeben.';
   }
@@ -981,9 +947,8 @@ async function cvzLaunch() {
         funnel_stage: cvzState.funnel_stage,
         conversion_goal: cvzState.conversion_goal,
         target_audience: cvzState.target_audience,
-        // Fester Slug ODER Freitext, nie der Anzeigetext der Optionen.
-        // Freitext setzt die geoeffnete Flask-Validierung voraus, siehe
-        // Kommentar bei CVZ_BUSINESS_TYPES.
+        // Immer ein key aus /form-options, nie ein Anzeigetext und nie
+        // Freitext - siehe Kommentar bei cvzLoadFormOptions.
         business_type: cvzState.business_type || null,
         usps: cvzState.usps,
         features: cvzState.features,
@@ -1325,7 +1290,9 @@ cvzResolveIdentity().then(identityOk => {
     document.getElementById('cvz-form-card').style.display = 'none';
     return;
   }
-  cvzTryResume().then(resumed => {
+  // Auswahllisten VOR dem ersten Render laden - cvzRenderStep0 und
+  // cvzRenderStep1 lesen sie synchron aus cvzBusinessTypeGroups/cvzFunnelStages.
+  cvzLoadFormOptions().then(() => cvzTryResume()).then(resumed => {
     if (!resumed) cvzRenderStep();
   });
 });
