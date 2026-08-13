@@ -933,6 +933,61 @@ function cvzRenderStep() {
   if (cvzState.step === 3) cvzRenderStep3();
 }
 
+// ==================== ASYNCHRONE TURNS: POLLING (siehe Chat-Begründung) ====================
+// /start-session (Kickoff) und /chat antworten seit dem Backend-Umbau nicht
+// mehr sofort mit dem fertigen Ergebnis, sondern mit 202 + { turn_id,
+// status: 'processing' }. Der eigentliche Agent-Lauf läuft im Hintergrund
+// weiter, das Ergebnis muss über GET /chat/status/:turn_id abgeholt werden.
+//
+// GENAU DAS fehlte bisher: cvzOpenChat() und cvzSendMessage() haben die
+// 202-Antwort direkt an marked() weitergereicht, die aber kein message-Feld
+// enthält - daher "marked(): input parameter is undefined or null".
+//
+// cvzPollTurnStatus() kapselt das Warten: fragt in Intervallen nach, bis
+// status "done" (liefert das Ergebnis) oder "error" (wirft) zurückkommt.
+const CVZ_POLL_INTERVAL_MS = 2500;
+// 15 Minuten - synchron zum serverseitigen Sicherheitsnetz
+// BACKGROUND_TURN_TIMEOUT_MS in pageAgent.js. Laenger warten hat keinen
+// Sinn, der Server hätte den Turn bis dahin ohnehin selbst abgebrochen.
+const CVZ_POLL_MAX_MS = 15 * 60 * 1000;
+
+async function cvzPollTurnStatus(turnId) {
+  const headers = cvzAuthHeaders();
+  const start = Date.now();
+
+  while (true) {
+    if (Date.now() - start > CVZ_POLL_MAX_MS) {
+      throw new Error('Zeitüberschreitung - die Antwort hat zu lange gedauert. Bitte erneut versuchen.');
+    }
+
+    const res = await fetch(`${API_BASE}/api/page-agent/chat/status/${turnId}`, {
+      method: 'GET',
+      headers
+    });
+    const data = await res.json();
+
+    if (!res.ok && data.status !== 'error') {
+      // 403/404/500 auf den Status-Endpoint selbst, nicht zu verwechseln
+      // mit einem Turn, der MIT status:'error' erfolgreich zu Ende kam.
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    if (data.status === 'processing') {
+      await new Promise(r => setTimeout(r, CVZ_POLL_INTERVAL_MS));
+      continue;
+    }
+
+    if (data.status === 'error') {
+      throw new Error(data.error || 'Unbekannter Fehler bei der Verarbeitung.');
+    }
+
+    // status === 'done' - data enthaelt message, sessions_used/limit/
+    // remaining und ggf. structure_html_document/structure_version, exakt
+    // dieselben Felder wie frueher der synchrone Response-Body.
+    return data;
+  }
+}
+
 // ==================== LAUNCH ====================
 const CVZ_KICKOFF_MESSAGES = [
   'Hier wird die nächsten 2-3 Minuten malocht. Hol dir in der Zeit gerne einen Kaffee',
@@ -1029,7 +1084,19 @@ async function cvzLaunch() {
 
     cvzState.session_id = sessionData.session_id;
     cvzState.page_project_id = page_project_id;
-    cvzOpenChat(sessionData);
+
+    // GEAENDERT (siehe Chat-Begründung, marked()-undefined-Fehler):
+    // /start-session antwortet für eine WIRKLICH NEUE Session jetzt sofort
+    // mit turn_id + status:'processing' (kein message-Feld). Nur der
+    // "reused"-Pfad (bereits aktive Session) liefert weiterhin synchron ein
+    // vollstaendiges message-Feld direkt - dort gibt es keine turn_id, dann
+    // ist nichts abzuwarten.
+    let finalSessionData = sessionData;
+    if (sessionData.turn_id) {
+      finalSessionData = await cvzPollTurnStatus(sessionData.turn_id);
+    }
+
+    cvzOpenChat(finalSessionData);
   } catch (err) {
     if (cvzLoadingStopTicker) { cvzLoadingStopTicker(); cvzLoadingStopTicker = null; }
     document.getElementById('cvz-loading').style.display = 'none';
@@ -1303,21 +1370,30 @@ async function cvzSendMessage() {
   const loadingLabel = loadingBubble.querySelector('.cvz-loading-label');
   const stopTicker = cvzStartProgressTicker('Denkt nach …', CVZ_STRUCTURE_MESSAGES, t => { loadingLabel.textContent = t; });
 
+  // GEAENDERT (siehe Chat-Begründung, marked()-undefined-Fehler): /chat
+  // antwortet jetzt sofort mit 202 + { turn_id, status: 'processing' },
+  // OHNE message-Feld. Das eigentliche Ergebnis kommt erst über
+  // cvzPollTurnStatus() zurück - vorher wurde data.message direkt aus der
+  // 202-Antwort an cvzAppendMessage/marked() weitergereicht.
   try {
     const res = await fetch(`${API_BASE}/api/page-agent/chat`, {
       method: 'POST', headers: cvzAuthHeaders(),
       body: JSON.stringify({ user_id: cvzUserId(), session_id: cvzState.session_id, message })
     });
     const data = await res.json();
-    stopTicker();
-    loadingBubble.remove();
 
     if (!res.ok) {
-      cvzAppendMessage('assistant', `Fehler: ${data.error || res.status}`);
-    } else {
-      cvzAppendMessage('assistant', data.message, data.structure_html_document, data.structure_version);
-      cvzUpdateQuota(data.sessions_remaining, data.sessions_limit);
+      throw new Error(data.error || `HTTP ${res.status}`);
     }
+
+    // data = { turn_id, status: 'processing' } - jetzt auf das eigentliche
+    // Ergebnis warten, waehrend die Ladeblase/der Ticker weiterlaeuft.
+    const finalData = await cvzPollTurnStatus(data.turn_id);
+
+    stopTicker();
+    loadingBubble.remove();
+    cvzAppendMessage('assistant', finalData.message, finalData.structure_html_document, finalData.structure_version);
+    cvzUpdateQuota(finalData.sessions_remaining, finalData.sessions_limit);
   } catch (err) {
     stopTicker();
     loadingBubble.remove();
