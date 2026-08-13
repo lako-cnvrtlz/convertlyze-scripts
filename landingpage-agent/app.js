@@ -1,7 +1,7 @@
 // ==================== KONFIGURATION ====================
 const API_BASE = 'https://convertlyze-agent-api-production.up.railway.app';
 
-// ==================== IDENTITAET (echter Memberstack-Login) ====================
+// ==================== IDENTITÄT (echter Memberstack-Login) ====================
 let cvzMemberstackId = null;
 let cvzResolvedUserId = null;
 
@@ -48,6 +48,111 @@ async function cvzResolveIdentity() {
     console.error('Identitäts-Auflösung fehlgeschlagen:', e.message);
     return false;
   }
+}
+
+// ==================== SESSIONS-KONTINGENT (Anzeige vor Formularstart) ====================
+// NEU: zeigt vorab an, wie viele Sessions in diesem Monat noch verfuegbar
+// sind, und sperrt den Weiter/Launch-Button, wenn nichts mehr uebrig ist.
+// Verhindert, dass jemand das komplette 4-Schritte-Formular ausfuellt und
+// erst beim finalen Launch-Klick den 402-Fehler sieht.
+let cvzQuota = { remaining: null, limit: null, recurring: null, next_reset: null };
+
+async function cvzLoadQuota() {
+  try {
+    const res = await fetch(`${API_BASE}/api/page-agent/quota?user_id=${encodeURIComponent(cvzUserId())}`, {
+      headers: cvzAuthHeaders()
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    cvzQuota = {
+      remaining: data.sessions_remaining,
+      limit: data.sessions_limit,
+      recurring: data.recurring,
+      next_reset: data.next_reset
+    };
+  } catch (e) {
+    console.error('Kontingent konnte nicht geladen werden:', e.message);
+    // Bei einem fehlgeschlagenen Quota-Request bleibt remaining=null - der
+    // Button wird dann NICHT gesperrt (siehe cvzUpdateNextButtonState),
+    // damit ein einzelner Netzwerkfehler niemanden aussperrt, der
+    // tatsaechlich noch Kontingent haette. Die verbindliche Pruefung
+    // passiert ohnehin serverseitig beim Launch-Request selbst.
+    cvzQuota = { remaining: null, limit: null, recurring: null, next_reset: null };
+  }
+  cvzRenderQuotaBanner();
+  cvzUpdateNextButtonState();
+}
+
+function cvzFormatNextReset(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  } catch {
+    return '';
+  }
+}
+
+// Erstellt (beim ersten Aufruf) oder aktualisiert eine Banner-Zeile direkt
+// über dem Formular. Wird per JS eingehaengt statt fest ins HTML-Embed
+// geschrieben, damit diese Aenderung ohne Anpassung von frontend/embed.html
+// auskommt - falls das Embed spaeter einen festen Container dafuer bekommt
+// (z.B. <div id="cvz-quota-banner"></div> direkt ueber #cvz-steps), wird
+// dieser automatisch verwendet statt einen neuen zu erzeugen.
+function cvzRenderQuotaBanner() {
+  const formCard = document.getElementById('cvz-form-card');
+  if (!formCard) return;
+
+  let banner = document.getElementById('cvz-quota-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'cvz-quota-banner';
+    formCard.insertBefore(banner, formCard.firstChild);
+  }
+
+  if (cvzQuota.remaining === null) {
+    banner.style.display = 'none';
+    banner.textContent = '';
+    return;
+  }
+
+  const depleted = cvzQuota.remaining <= 0;
+  banner.style.display = 'block';
+  banner.style.cssText = `
+    display: block;
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    border: 1px solid ${depleted ? 'var(--cvz-danger)' : 'var(--cvz-border)'};
+    color: ${depleted ? 'var(--cvz-danger)' : 'var(--cvz-text-muted)'};
+    background: var(--cvz-bg);
+  `;
+
+  if (depleted) {
+    const resetHint = cvzQuota.recurring && cvzQuota.next_reset
+      ? ` Naechste Zuruecksetzung am ${cvzFormatNextReset(cvzQuota.next_reset)}.`
+      : '';
+    banner.textContent = `Kein Sessions-Kontingent mehr verfuegbar (0 von ${cvzQuota.limit}).${resetHint}`;
+  } else {
+    banner.textContent = `${cvzQuota.remaining} von ${cvzQuota.limit} Sessions in diesem Monat verfuegbar.`;
+  }
+}
+
+// Sperrt den Weiter/Launch-Button optisch UND funktional, solange kein
+// Kontingent mehr verfuegbar ist. disabled=true allein wuerde in manchen
+// Browsern/Themes visuell kaum auffallen, deshalb zusätzlich Opacity und
+// Cursor direkt gesetzt statt nur auf eine CSS-Klasse zu vertrauen, die im
+// Embed moeglicherweise noch nicht existiert.
+function cvzUpdateNextButtonState() {
+  const btn = document.getElementById('cvz-btn-next');
+  if (!btn) return;
+
+  const depleted = cvzQuota.remaining !== null && cvzQuota.remaining <= 0;
+  btn.disabled = depleted;
+  btn.style.opacity = depleted ? '0.5' : '';
+  btn.style.cursor = depleted ? 'not-allowed' : '';
+  btn.title = depleted ? 'Kein Sessions-Kontingent mehr verfuegbar in diesem Monat.' : '';
 }
 
 // ==================== FORMULAR-STATE ====================
@@ -256,11 +361,39 @@ const CONVERSION_GOAL_GROUPS = {
   ]
 };
 
+// Kurzbeschreibungen je Funnel-Stage, ausschliesslich fuer die Hint-Zeile
+// unter dem Dropdown - /form-options liefert nur key+label, keine
+// Beschreibung (siehe cvzLoadFormOptions). Rein clientseitige Deko, hat
+// keinen Einfluss auf den gesendeten Wert (immer der key aus dem Dropdown).
+const CVZ_FUNNEL_STAGE_HINTS = {
+  awareness: 'Problem noch nicht bewusst oder gerade erst erkannt.',
+  consideration: 'Problem klar, Lösungswege werden verglichen.',
+  decision: 'Anbieter stehen zur Wahl, Entscheidung steht an.',
+  full_journey: 'Seite bedient alle Phasen.'
+};
+
+function cvzFunnelStageHint(key) {
+  return CVZ_FUNNEL_STAGE_HINTS[key] || '';
+}
+
+function cvzOnFunnelStageChange(value) {
+  cvzState.funnel_stage = value;
+  const hint = document.getElementById('cvz-funnel-stage-hint');
+  if (hint) hint.textContent = cvzFunnelStageHint(value);
+}
+
 function cvzRenderStep1() {
   const optgroups = Object.entries(CONVERSION_GOAL_GROUPS).map(([group, options]) => `
     <optgroup label="${cvzEsc(group)}">
       ${options.map(o => `<option value="${cvzEsc(o)}" ${cvzState.conversion_goal === o ? 'selected' : ''}>${cvzEsc(o)}</option>`).join('')}
     </optgroup>
+  `).join('');
+
+  // Funnel-Stage jetzt als Dropdown statt Auswahl-Kacheln, konsistent mit
+  // dem Conversion-Ziel-Feld direkt darueber (gleiche cvz-select-wrap/
+  // cvz-input-Struktur).
+  const funnelOptions = cvzFunnelStages.map(s => `
+    <option value="${cvzEsc(s.key)}" ${cvzState.funnel_stage === s.key ? 'selected' : ''}>${cvzEsc(s.label)}</option>
   `).join('');
 
   document.getElementById('cvz-step-content').innerHTML = `
@@ -274,20 +407,15 @@ function cvzRenderStep1() {
       </select>
     </div>
     <label class="cvz-label">Funnel-Stage</label>
-    <div class="cvz-choice-row" id="cvz-funnel-choices">
-      ${cvzFunnelStages.map(s => `
-        <div class="cvz-choice ${cvzState.funnel_stage === s.key ? 'selected' : ''}" data-value="${cvzEsc(s.key)}" onclick="cvzSelectFunnel('${cvzEsc(s.key)}')">
-          ${cvzEsc(s.label)}
-        </div>`).join('')}
+    <div class="cvz-select-wrap">
+      <select class="cvz-input" id="cvz-in-funnel-stage" onchange="cvzOnFunnelStageChange(this.value)">
+        <option value="" disabled ${!cvzState.funnel_stage ? 'selected' : ''}>Funnel-Stage auswählen …</option>
+        ${funnelOptions}
+      </select>
     </div>
+    <p class="cvz-hint" id="cvz-funnel-stage-hint">${cvzEsc(cvzFunnelStageHint(cvzState.funnel_stage))}</p>
   `;
   document.getElementById('cvz-btn-back').style.visibility = 'visible';
-}
-function cvzSelectFunnel(value) {
-  cvzState.funnel_stage = value;
-  document.querySelectorAll('#cvz-funnel-choices .cvz-choice').forEach(el => {
-    el.classList.toggle('selected', el.dataset.value === value);
-  });
 }
 
 // ==================== SCHRITT 2: ANGEBOT ====================
@@ -828,6 +956,8 @@ function cvzSyncStep0Fields() {
 }
 function cvzSyncStep1Fields() {
   cvzState.conversion_goal = document.getElementById('cvz-in-goal').value.trim();
+  const funnelSelect = document.getElementById('cvz-in-funnel-stage');
+  cvzState.funnel_stage = funnelSelect ? funnelSelect.value : '';
 }
 function cvzSyncStep2Fields() {
   cvzState.existing_content = document.getElementById('cvz-in-existing').value.trim();
@@ -906,6 +1036,17 @@ function cvzValidateStep() {
 }
 
 async function cvzGoNext() {
+  // NEU: harte Sperre VOR jeder Feld-Validierung, falls kein Kontingent
+  // mehr verfuegbar ist. Der Button ist zwar bereits per disabled/opacity
+  // gesperrt (siehe cvzUpdateNextButtonState), aber ein disabled-Attribut
+  // laesst sich per DevTools entfernen - diese Pruefung ist die zweite,
+  // tatsaechlich wirksame Sperre auf Client-Seite. Verbindlich bleibt
+  // ohnehin die serverseitige Pruefung beim eigentlichen Launch-Request.
+  if (cvzQuota.remaining !== null && cvzQuota.remaining <= 0) {
+    cvzShowError('Kein Sessions-Kontingent mehr verfuegbar in diesem Monat.');
+    return;
+  }
+
   const error = cvzValidateStep();
   if (error) { cvzShowError(error); return; }
   cvzShowError(null);
@@ -931,6 +1072,12 @@ function cvzRenderStep() {
   if (cvzState.step === 1) cvzRenderStep1();
   if (cvzState.step === 2) cvzRenderStep2();
   if (cvzState.step === 3) cvzRenderStep3();
+  // Banner/Button-Zustand nach jedem Render-Wechsel erneut anwenden - der
+  // Button selbst liegt ausserhalb von #cvz-step-content und wird beim
+  // Schrittwechsel nicht neu erzeugt, aber diese Zeile macht die Funktion
+  // robust gegen ein spaeteres Embed, das den Button doch neu rendert.
+  cvzRenderQuotaBanner();
+  cvzUpdateNextButtonState();
 }
 
 // ==================== ASYNCHRONE TURNS: POLLING (siehe Chat-Begründung) ====================
@@ -1028,6 +1175,28 @@ function cvzShowLoading(text) {
   });
 }
 
+// NEU: Ladezustand fuer die allererste Sekunde nach Seitenaufruf, bevor
+// feststeht, ob ueberhaupt ein Formular gezeigt wird (neues Projekt) oder
+// direkt in einen bestehenden Workspace gewechselt wird (Resume). Vorher
+// stand das leere Formular schon sichtbar da, waehrend Identitaet,
+// Formularoptionen und der Resume-Check noch liefen - das wirkte wie ein
+// kaputtes/leeres Formular, teils mehrere Sekunden lang. Nutzt bewusst
+// dieselben #cvz-loading/#cvz-loading-text-Elemente wie cvzShowLoading,
+// aber ohne Ticker-Nachrichten - die KICKOFF/STRUCTURE-Texte ("Kaffee schon
+// geholt? ...") passen inhaltlich nicht zu einem simplen Seiten-Ladevorgang.
+function cvzShowInitialLoading() {
+  const formCard = document.getElementById('cvz-form-card');
+  const loading = document.getElementById('cvz-loading');
+  const loadingText = document.getElementById('cvz-loading-text');
+  if (formCard) formCard.style.display = 'none';
+  if (loadingText) loadingText.textContent = 'Wird geladen …';
+  if (loading) loading.style.display = 'block';
+}
+function cvzHideInitialLoading() {
+  const loading = document.getElementById('cvz-loading');
+  if (loading) loading.style.display = 'none';
+}
+
 async function cvzLaunch() {
   const headers = cvzAuthHeaders();
   const userId = cvzUserId();
@@ -1079,15 +1248,26 @@ async function cvzLaunch() {
       method: 'POST', headers,
       body: JSON.stringify({ user_id: userId, page_project_id })
     });
-    if (!sessionRes.ok) throw new Error((await sessionRes.json()).error || 'Analyse fehlgeschlagen');
+    if (!sessionRes.ok) {
+      const err = await sessionRes.json();
+      // NEU: bei 402 (Kontingent aufgebraucht) lokalen Quota-Stand sofort
+      // korrigieren, damit Banner und Button auch dann konsistent sind,
+      // falls der User in einem zweiten Tab noch ein Kontingent gesehen
+      // hatte, das inzwischen woanders verbraucht wurde.
+      if (sessionRes.status === 402) {
+        cvzQuota.remaining = 0;
+        cvzRenderQuotaBanner();
+        cvzUpdateNextButtonState();
+      }
+      throw new Error(err.error || 'Analyse fehlgeschlagen');
+    }
     const sessionData = await sessionRes.json();
 
     cvzState.session_id = sessionData.session_id;
     cvzState.page_project_id = page_project_id;
 
-    // GEAENDERT (siehe Chat-Begründung, marked()-undefined-Fehler):
-    // /start-session antwortet für eine WIRKLICH NEUE Session jetzt sofort
-    // mit turn_id + status:'processing' (kein message-Feld). Nur der
+    // /start-session antwortet für eine WIRKLICH NEUE Session sofort mit
+    // turn_id + status:'processing' (kein message-Feld). Nur der
     // "reused"-Pfad (bereits aktive Session) liefert weiterhin synchron ein
     // vollstaendiges message-Feld direkt - dort gibt es keine turn_id, dann
     // ist nichts abzuwarten.
@@ -1370,11 +1550,9 @@ async function cvzSendMessage() {
   const loadingLabel = loadingBubble.querySelector('.cvz-loading-label');
   const stopTicker = cvzStartProgressTicker('Denkt nach …', CVZ_STRUCTURE_MESSAGES, t => { loadingLabel.textContent = t; });
 
-  // GEAENDERT (siehe Chat-Begründung, marked()-undefined-Fehler): /chat
-  // antwortet jetzt sofort mit 202 + { turn_id, status: 'processing' },
-  // OHNE message-Feld. Das eigentliche Ergebnis kommt erst über
-  // cvzPollTurnStatus() zurück - vorher wurde data.message direkt aus der
-  // 202-Antwort an cvzAppendMessage/marked() weitergereicht.
+  // /chat antwortet sofort mit 202 + { turn_id, status: 'processing' }, OHNE
+  // message-Feld. Das eigentliche Ergebnis kommt erst über
+  // cvzPollTurnStatus() zurück.
   try {
     const res = await fetch(`${API_BASE}/api/page-agent/chat`, {
       method: 'POST', headers: cvzAuthHeaders(),
@@ -1482,8 +1660,16 @@ async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
 }
 
 // ==================== INIT ====================
+// Sofort beim Laden, noch vor jedem await: Formular ausblenden und einen
+// simplen Ladezustand zeigen. Ohne das war für die Dauer von
+// cvzResolveIdentity + cvzLoadFormOptions + cvzTryResume (Netzwerk-
+// Roundtrips, teils mehrere Sekunden) das leere, unbefuellte Formular
+// sichtbar, bevor überhaupt feststand, ob es gezeigt werden soll.
+cvzShowInitialLoading();
+
 cvzResolveIdentity().then(identityOk => {
   if (!identityOk) {
+    cvzHideInitialLoading();
     document.getElementById('cvz-auth-gate').style.display = 'block';
     document.getElementById('cvz-form-card').style.display = 'none';
     return;
@@ -1491,6 +1677,20 @@ cvzResolveIdentity().then(identityOk => {
   // Auswahllisten VOR dem ersten Render laden - cvzRenderStep0 und
   // cvzRenderStep1 lesen sie synchron aus cvzBusinessTypeGroups/cvzFunnelStages.
   cvzLoadFormOptions().then(() => cvzTryResume()).then(resumed => {
-    if (!resumed) cvzRenderStep();
+    cvzHideInitialLoading();
+    if (!resumed) {
+      // cvzShowInitialLoading() hatte cvz-form-card ausgeblendet - jetzt,
+      // wo feststeht dass das Formular tatsächlich gezeigt wird, wieder
+      // einblenden, bevor cvzRenderStep() es befuellt.
+      const formCard = document.getElementById('cvz-form-card');
+      if (formCard) formCard.style.display = 'block';
+      cvzRenderStep();
+      // Kontingent erst NACH dem ersten Render laden, damit
+      // cvzRenderQuotaBanner() bereits ein vorhandenes #cvz-form-card
+      // vorfindet und der Banner nicht ins Leere versucht einzuhaengen.
+      cvzLoadQuota();
+    }
+    // Falls resumed === true, hat cvzTryResume() bereits selbst zu
+    // #cvz-workspace gewechselt - hier ist nichts weiter zu tun.
   });
 });
