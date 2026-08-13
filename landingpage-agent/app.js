@@ -51,7 +51,7 @@ async function cvzResolveIdentity() {
 }
 
 // ==================== SESSIONS-KONTINGENT (Anzeige vor Formularstart) ====================
-// NEU: zeigt vorab an, wie viele Sessions in diesem Monat noch verfuegbar
+// NEU: zeigt vorab an, wie viele Sessions in diesem Monat noch verfügbar
 // sind, und sperrt den Weiter/Launch-Button, wenn nichts mehr uebrig ist.
 // Verhindert, dass jemand das komplette 4-Schritte-Formular ausfuellt und
 // erst beim finalen Launch-Klick den 402-Fehler sieht.
@@ -133,14 +133,14 @@ function cvzRenderQuotaBanner() {
     const resetHint = cvzQuota.recurring && cvzQuota.next_reset
       ? ` Naechste Zuruecksetzung am ${cvzFormatNextReset(cvzQuota.next_reset)}.`
       : '';
-    banner.textContent = `Kein Sessions-Kontingent mehr verfuegbar (0 von ${cvzQuota.limit}).${resetHint}`;
+    banner.textContent = `Kein Sessions-Kontingent mehr verfügbar (0 von ${cvzQuota.limit}).${resetHint}`;
   } else {
-    banner.textContent = `${cvzQuota.remaining} von ${cvzQuota.limit} Sessions in diesem Monat verfuegbar.`;
+    banner.textContent = `${cvzQuota.remaining} von ${cvzQuota.limit} Sessions in diesem Monat verfügbar.`;
   }
 }
 
 // Sperrt den Weiter/Launch-Button optisch UND funktional, solange kein
-// Kontingent mehr verfuegbar ist. disabled=true allein wuerde in manchen
+// Kontingent mehr verfügbar ist. disabled=true allein wuerde in manchen
 // Browsern/Themes visuell kaum auffallen, deshalb zusätzlich Opacity und
 // Cursor direkt gesetzt statt nur auf eine CSS-Klasse zu vertrauen, die im
 // Embed moeglicherweise noch nicht existiert.
@@ -152,7 +152,7 @@ function cvzUpdateNextButtonState() {
   btn.disabled = depleted;
   btn.style.opacity = depleted ? '0.5' : '';
   btn.style.cursor = depleted ? 'not-allowed' : '';
-  btn.title = depleted ? 'Kein Sessions-Kontingent mehr verfuegbar in diesem Monat.' : '';
+  btn.title = depleted ? 'Kein Sessions-Kontingent mehr verfügbar in diesem Monat.' : '';
 }
 
 // ==================== FORMULAR-STATE ====================
@@ -1037,13 +1037,13 @@ function cvzValidateStep() {
 
 async function cvzGoNext() {
   // NEU: harte Sperre VOR jeder Feld-Validierung, falls kein Kontingent
-  // mehr verfuegbar ist. Der Button ist zwar bereits per disabled/opacity
+  // mehr verfügbar ist. Der Button ist zwar bereits per disabled/opacity
   // gesperrt (siehe cvzUpdateNextButtonState), aber ein disabled-Attribut
   // laesst sich per DevTools entfernen - diese Pruefung ist die zweite,
   // tatsaechlich wirksame Sperre auf Client-Seite. Verbindlich bleibt
   // ohnehin die serverseitige Pruefung beim eigentlichen Launch-Request.
   if (cvzQuota.remaining !== null && cvzQuota.remaining <= 0) {
-    cvzShowError('Kein Sessions-Kontingent mehr verfuegbar in diesem Monat.');
+    cvzShowError('Kein Sessions-Kontingent mehr verfügbar in diesem Monat.');
     return;
   }
 
