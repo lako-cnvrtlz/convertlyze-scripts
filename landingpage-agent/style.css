@@ -1,3 +1,19 @@
+/* ============================================================================
+   WICHTIG - SCOPING
+   Diese Datei wird per <link> im Webflow-Embed geladen und gilt damit fuer das
+   GESAMTE Dokument, nicht nur fuer den Assistenten.
+
+   Frueher stand hier "body { display:flex; align-items:center; padding:24px }".
+   Das macht den kompletten Webflow-Body zu einem horizontalen Flex-Container:
+   Navbar, Embed und Footer werden zu Flex-Items NEBENEINANDER. Da .cvz-app /
+   .cvz-workspace width:100% haben, wird die Navbar auf Minimalbreite gequetscht
+   und ist auf dem Handy praktisch unsichtbar.
+
+   Regel fuer die Zukunft: in dieser Datei NIE auf body, html oder nackte
+   Element-Selektoren (h1, p, input, *) stylen - immer unter .cvz-app oder
+   .cvz-workspace haengen.
+   ============================================================================ */
+
 :root {
   --cvz-bg: #0d1117;
   --cvz-bg-elevated: #161b22;
@@ -10,23 +26,32 @@
   --cvz-radius: 12px;
 }
 
-* { box-sizing: border-box; }
+/* Frueher: "* { box-sizing: border-box }" - global fuer die ganze Seite.
+   Webflow setzt border-box ohnehin selbst, aber die Regel hat auch fremde
+   Elemente erfasst. Jetzt nur noch innerhalb der beiden Container. */
+.cvz-app, .cvz-app *,
+.cvz-workspace, .cvz-workspace * { box-sizing: border-box; }
 
-body {
-  margin: 0;
-  background: var(--cvz-bg);
-  color: var(--cvz-text);
+/* Frueher standen font-family, color und background auf body. Jetzt auf den
+   Containern - alles darin erbt es.
+   HINWEIS: Der dunkle SEITEN-Hintergrund kommt damit nicht mehr aus dieser
+   Datei. Den bitte im Webflow-Designer am Body bzw. an der Section setzen -
+   das ist ohnehin der richtige Ort dafuer. */
+.cvz-app,
+.cvz-workspace {
   /* Geist wird von der Host-Seite (convertlyze.com) global geladen -
      hier nur referenziert, nicht per @font-face nachgeladen. */
   font-family: 'Geist', ui-sans-serif, -apple-system, BlinkMacSystemFont, sans-serif;
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
+  color: var(--cvz-text);
 }
 
-.cvz-app { width: 100%; max-width: 640px; }
+/* Zentrierung frueher ueber body{justify-content:center} - jetzt per
+   margin:auto direkt am Container. Vertikale Zentrierung faellt bewusst weg:
+   auf einer Seite mit Navigation ist "mittig im Viewport" ohnehin falsch. */
+.cvz-app {
+  width: 100%; max-width: 640px;
+  margin: 0 auto; padding: 24px 0;
+}
 
 /* Utility: wird von app.js zum Ein-/Ausblenden des Freitextfeldes
    (business_type) und der Liste gefilterter Vorschlaege genutzt. */
@@ -70,38 +95,42 @@ body {
 
 /* h1 wird von Webflow global eingefaerbt - ohne explizites color gewinnt
    die Host-Regel gegen die Vererbung von .cvz-card. */
-h1.cvz-title {
+.cvz-app h1.cvz-title {
   font-size: 1.6rem; font-weight: 700; margin: 0 0 8px; line-height: 1.25;
   color: var(--cvz-text);
 }
-p.cvz-subtitle { color: var(--cvz-teal); margin: 0 0 28px; font-size: 0.95rem; }
+.cvz-app p.cvz-subtitle { color: var(--cvz-teal); margin: 0 0 28px; font-size: 0.95rem; }
 
-label.cvz-label {
+.cvz-app label.cvz-label {
   display: block; font-size: 0.82rem; font-weight: 600;
   color: var(--cvz-text); margin: 18px 0 6px;
 }
-label.cvz-label:first-of-type { margin-top: 0; }
+.cvz-app label.cvz-label:first-of-type { margin-top: 0; }
 
-input.cvz-input, textarea.cvz-input, select.cvz-input {
+.cvz-app input.cvz-input,
+.cvz-app textarea.cvz-input,
+.cvz-app select.cvz-input {
   width: 100%; padding: 12px 14px; background: var(--cvz-bg);
   border: 1px solid var(--cvz-border); border-radius: 10px;
   color: var(--cvz-text); font-size: 0.95rem; font-family: inherit;
 }
 /* appearance:none entfernt auch den nativen Dropdown-Pfeil - der wird
    unten als CSS-Chevron ueber .cvz-select-wrap wieder ergaenzt. */
-select.cvz-input { appearance: none; cursor: pointer; padding-right: 40px; }
+.cvz-app select.cvz-input { appearance: none; cursor: pointer; padding-right: 40px; }
 /* Optionsliste rendert das Betriebssystem, nicht die Seite. Firefox und
    Windows-Chrome uebernehmen aber background/color, wenn man sie setzt -
-   sonst schwarze Schrift auf hellem Systemgrau (siehe Screenshot). */
-select.cvz-input option {
+   sonst schwarze Schrift auf hellem Systemgrau. */
+.cvz-app select.cvz-input option {
   background: var(--cvz-bg-elevated);
   color: var(--cvz-text);
 }
-input.cvz-input:focus, textarea.cvz-input:focus, select.cvz-input:focus {
+.cvz-app input.cvz-input:focus,
+.cvz-app textarea.cvz-input:focus,
+.cvz-app select.cvz-input:focus {
   outline: none; border-color: var(--cvz-teal);
   box-shadow: 0 0 0 3px var(--cvz-teal-dim);
 }
-textarea.cvz-input { resize: vertical; min-height: 70px; }
+.cvz-app textarea.cvz-input { resize: vertical; min-height: 70px; }
 
 .cvz-select-wrap { position: relative; }
 .cvz-select-wrap::after {
@@ -112,8 +141,9 @@ textarea.cvz-input { resize: vertical; min-height: 70px; }
   transform: rotate(45deg); pointer-events: none;
 }
 
-input[type="file"] { color: var(--cvz-text); font-size: 0.85rem; }
-input[type="file"]::file-selector-button {
+/* Frueher ungescoped - hat jedes File-Upload-Feld der ganzen Seite umgefaerbt. */
+.cvz-app input[type="file"] { color: var(--cvz-text); font-size: 0.85rem; }
+.cvz-app input[type="file"]::file-selector-button {
   background: var(--cvz-teal); color: var(--cvz-bg); border: none;
   border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer;
   font-family: inherit; margin-right: 10px;
@@ -150,8 +180,7 @@ input[type="file"]::file-selector-button {
 .cvz-competitor-item .cvz-competitor-body { min-width: 0; flex: 1; }
 /* .title / .url sind generische Klassennamen, die Webflow-Projekte haeufig
    selbst belegen. Ohne explizites color gewinnt die Host-Regel, weil
-   Vererbung gegen jede direkt matchende Regel verliert - genau das war der
-   unlesbare dunkle Text im Screenshot. */
+   Vererbung gegen jede direkt matchende Regel verliert. */
 .cvz-competitor-item .title {
   font-weight: 600; font-size: 0.92rem; color: var(--cvz-text);
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -195,14 +224,19 @@ input[type="file"]::file-selector-button {
 
 .cvz-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 32px; }
 
-button.cvz-btn-primary, button.cvz-btn-secondary {
+.cvz-app button.cvz-btn-primary, .cvz-app button.cvz-btn-secondary,
+.cvz-workspace button.cvz-btn-primary, .cvz-workspace button.cvz-btn-secondary {
   font-family: inherit; font-size: 0.95rem; font-weight: 600;
   padding: 13px 26px; border-radius: 10px; cursor: pointer; border: none;
 }
-button.cvz-btn-primary { background: var(--cvz-teal); color: var(--cvz-bg); }
-button.cvz-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-button.cvz-btn-secondary { background: transparent; color: var(--cvz-text); }
-button.cvz-btn-secondary:hover { color: var(--cvz-teal); }
+.cvz-app button.cvz-btn-primary,
+.cvz-workspace button.cvz-btn-primary { background: var(--cvz-teal); color: var(--cvz-bg); }
+.cvz-app button.cvz-btn-primary:disabled,
+.cvz-workspace button.cvz-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.cvz-app button.cvz-btn-secondary,
+.cvz-workspace button.cvz-btn-secondary { background: transparent; color: var(--cvz-text); }
+.cvz-app button.cvz-btn-secondary:hover,
+.cvz-workspace button.cvz-btn-secondary:hover { color: var(--cvz-teal); }
 
 .cvz-hint { font-size: 0.78rem; color: var(--cvz-text-muted); margin-top: 6px; }
 .cvz-error {
@@ -225,6 +259,7 @@ button.cvz-btn-secondary:hover { color: var(--cvz-teal); }
 .cvz-workspace {
   display: none; gap: 20px; width: 100%; max-width: 1400px;
   align-items: flex-start;
+  margin: 0 auto; padding: 24px 0;
 }
 .cvz-chat-wrap { display: flex; flex-direction: column; height: 80vh; max-height: 760px; flex: 0 0 440px; min-width: 0; }
 .cvz-chat-header {
@@ -233,12 +268,9 @@ button.cvz-btn-secondary:hover { color: var(--cvz-teal); }
 }
 .cvz-chat-header .title { font-weight: 700; color: var(--cvz-text); }
 .cvz-chat-header .quota { font-size: 0.78rem; color: var(--cvz-text-muted); }
-/* .cvz-btn-secondary ist bewusst transparent/text-artig (siehe Definition
-   weiter oben) - im Chat-Header braucht der Button aber eine sichtbare
-   Umrandung, sonst wirkt er wie normaler Text statt wie ein klickbares
-   Element (siehe Chat-Screenshot). Chat-Header-spezifischer Zusatz statt
-   die globale .cvz-btn-secondary-Definition zu aendern, die an anderer
-   Stelle bewusst dezent bleiben soll. */
+/* .cvz-btn-secondary ist bewusst transparent/text-artig - im Chat-Header
+   braucht der Button aber eine sichtbare Umrandung, sonst wirkt er wie
+   normaler Text statt wie ein klickbares Element. */
 .cvz-chat-header button.cvz-btn-secondary {
   border: 1px solid var(--cvz-border); border-radius: 8px;
 }
@@ -247,6 +279,10 @@ button.cvz-btn-secondary:hover { color: var(--cvz-teal); }
   flex: 1; min-height: 0; overflow-y: auto; padding: 20px;
   display: flex; flex-direction: column; gap: 16px;
   background: var(--cvz-bg-elevated); border-left: 1px solid var(--cvz-border); border-right: 1px solid var(--cvz-border);
+  /* Verhindert Scroll-Chaining: am Listenende scrollt nicht ploetzlich die
+     ganze Seite weiter. Auf dem Handy, wo Chat und Vorschau untereinander
+     stehen, ist das sonst sehr unangenehm. */
+  overscroll-behavior: contain;
 }
 .cvz-msg { max-width: 85%; padding: 12px 16px; border-radius: 14px; font-size: 0.92rem; line-height: 1.5; }
 .cvz-msg.user { align-self: flex-end; background: var(--cvz-teal); color: var(--cvz-bg); border-bottom-right-radius: 4px; white-space: pre-wrap; }
@@ -256,10 +292,8 @@ button.cvz-btn-secondary:hover { color: var(--cvz-teal); }
 }
 .cvz-msg.assistant.loading { color: var(--cvz-text-muted); font-style: italic; display: flex; align-items: center; gap: 10px; }
 /* Kleiner Inline-Spinner fuer die Chat-Ladeblase - nutzt dieselbe
-   cvz-spin-Animation wie der grosse Kickoff-Spinner oben, nur kompakter,
-   damit bei langen Struktur-Turns (mehrere get_methodology-Runden, siehe
-   Chat-Begruendung) sichtbar bleibt, dass noch gearbeitet wird und nicht
-   nur ein statischer Text steht. */
+   cvz-spin-Animation wie der grosse Kickoff-Spinner, nur kompakter, damit
+   bei langen Struktur-Turns sichtbar bleibt, dass noch gearbeitet wird. */
 .cvz-spinner-inline {
   flex-shrink: 0; width: 14px; height: 14px; border: 2px solid var(--cvz-border);
   border-top-color: var(--cvz-teal); border-radius: 50%; animation: cvz-spin 0.8s linear infinite;
@@ -308,12 +342,7 @@ button.cvz-btn-secondary:hover { color: var(--cvz-teal); }
 
 /* Persistentes Vorschau-Panel: zeigt IMMER nur die AKTUELLSTE Struktur-
    Version (nicht jede Zwischenversion aus dem Chat-Verlauf) - Ziel ist eine
-   grosse, gut sichtbare Live-Ansicht als Arbeitsgrundlage fuer Optimierung,
-   kein Verlauf. Der Chat selbst bekommt bei einer neuen Version nur einen
-   kurzen Hinweis-Text statt eines eigenen eingebetteten Mockups (siehe
-   cvzAppendMessage/cvzUpdatePreviewPanel) - sonst waeren dieselben Inhalte
-   doppelt zu sehen.
-*/
+   grosse, gut sichtbare Live-Ansicht als Arbeitsgrundlage, kein Verlauf. */
 .cvz-preview-panel {
   flex: 1; min-width: 0; height: 80vh; max-height: 760px;
   display: flex; flex-direction: column;
@@ -333,20 +362,17 @@ button.cvz-btn-secondary:hover { color: var(--cvz-teal); }
   cursor: pointer; font-family: inherit;
 }
 .cvz-device-btn.active { background: var(--cvz-teal-dim); color: var(--cvz-teal); }
-/* Skalierter Rahmen statt horizontalem Scrollen (siehe Chat-Begruendung):
-   .cvz-preview-frame-outer bekommt die tatsaechliche SICHTBARE (skalierte)
-   Groesse und zentriert sich per margin:auto im Panel. .cvz-preview-frame-
-   inner enthaelt das Iframe in NATUERLICHER Groesse (Geraetebreite x
-   Content-Hoehe) und wird per CSS transform:scale() verkleinert - das
-   Iframe selbst rendert intern immer bei der vollen Geraetebreite (ein
-   transform aendert nur die Darstellung, nicht den internen Viewport),
-   "Desktop" zeigt also wirklich das Desktop-Layout, nur verkleinert statt
-   abgeschnitten. Bei "Mobile" faellt die Skalierung meist auf 1 (kein
-   Verkleinern), da 390px selten breiter ist als der verfuegbare Platz -
-   das ergibt die gewuenschte "Handy-Rahmen"-Optik statt eines gestreckten
-   breiten Panels.
-*/
-.cvz-preview-body { flex: 1; min-height: 0; overflow: auto; background: var(--cvz-bg); position: relative; padding: 16px; }
+/* Skalierter Rahmen statt horizontalem Scrollen: .cvz-preview-frame-outer
+   bekommt die SICHTBARE (skalierte) Groesse und zentriert sich per
+   margin:auto. .cvz-preview-frame-inner enthaelt das Iframe in NATUERLICHER
+   Groesse und wird per transform:scale() verkleinert - das Iframe rendert
+   intern weiter bei voller Geraetebreite, "Desktop" zeigt also wirklich das
+   Desktop-Layout, nur verkleinert statt abgeschnitten. */
+.cvz-preview-body {
+  flex: 1; min-height: 0; overflow: auto; background: var(--cvz-bg);
+  position: relative; padding: 16px;
+  overscroll-behavior: contain;
+}
 .cvz-preview-empty {
   height: 100%; display: flex; align-items: center; justify-content: center;
   text-align: center; padding: 40px; color: var(--cvz-text-muted); font-size: 0.9rem;
@@ -357,24 +383,84 @@ button.cvz-btn-secondary:hover { color: var(--cvz-teal); }
 .cvz-preview-frame-inner { transform-origin: top left; }
 .cvz-preview-frame-inner iframe { display: block; border: none; }
 
+/* ---------- Gestapeltes Layout (Tablet + Handy) ----------
+   FRUEHER: feste Hoehe (42vh/68vh) auf den AEUSSEREN Containern. Davon gehen
+   Chat-Header, Eingabezeile bzw. Vorschau-Header ab - zusammen ein nahezu
+   konstanter Betrag von ~230px. Auf dem Desktop (80vh/760px) sind das ~30%,
+   auf einem Handy (42vh = ~350px) ~64%: vom Chat blieben real nur noch
+   ~100px Nachrichtenflaeche uebrig.
+
+   JETZT: die Hoehe haengt an den tatsaechlich SCROLLENDEN Flaechen
+   (.cvz-chat-messages / .cvz-preview-body), die Container wachsen mit. */
 @media (max-width: 1080px) {
-  .cvz-workspace { flex-direction: column; }
-  .cvz-chat-wrap { flex: none; width: 100%; height: 42vh; max-height: none; }
-  .cvz-preview-panel { flex: none; width: 100%; height: 68vh; max-height: none; }
+  .cvz-workspace { flex-direction: column; gap: 16px; }
+
+  .cvz-chat-wrap,
+  .cvz-preview-panel { flex: none; width: 100%; height: auto; max-height: none; }
+
+  /* flex:none, damit die feste Hoehe nicht von flex:1 ueberschrieben wird.
+     vh-Fallback zuerst, dann dvh (= sichtbare Hoehe ohne Browser-Leiste). */
+  .cvz-chat-messages {
+    flex: none;
+    height: 45vh;
+    height: 45dvh;
+  }
+  .cvz-preview-body {
+    flex: none;
+    height: 62vh;
+    height: 62dvh;
+  }
 }
 
 /* Auf echten Mobil-Viewports macht eine auf ~350px herunterskalierte
-   1440px-Desktop-Ansicht den Text unlesbar klein (siehe Chat-Begruendung) -
-   der Desktop-Button wird hier komplett entfernt, nicht nur deaktiviert.
-   767px = derselbe Schwellwert wie die window.innerWidth-Standardauswahl
-   in app.js (cvzPreviewDevice), damit Default-Verhalten und sichtbare
-   Optionen konsistent sind. Chat-Bubbles bekommen hier zusaetzlich mehr
-   Breite - 85% wirkt auf schmalen Handy-Bildschirmen unnoetig schmal mit
-   viel Leerraum an der Seite. */
+   1440px-Desktop-Ansicht den Text unlesbar klein - der Desktop-Button wird
+   hier komplett entfernt, nicht nur deaktiviert. 767px = derselbe
+   Schwellwert wie die window.innerWidth-Standardauswahl in app.js
+   (cvzPreviewDevice), damit Default-Verhalten und sichtbare Optionen
+   konsistent sind. */
 @media (max-width: 767px) {
   #cvz-device-desktop { display: none; }
   .cvz-msg { max-width: 94%; }
   .cvz-card { padding: 28px 20px; }
+
+  /* Frueher body{padding:12px} - das hat die ganze Seite verschoben. */
+  .cvz-app, .cvz-workspace { padding: 12px 0; }
+
+  /* Der Chat-Header war flex-direction:column: Titel, Quota, "Briefing als
+     PDF" und "Neues Projekt" standen untereinander - allein ~150px reine
+     Kopfzeile. Als umbrechende Zeile sind es ~80px. */
+  .cvz-chat-header {
+    flex-direction: row; flex-wrap: wrap; align-items: center;
+    gap: 8px 10px; padding: 12px 14px;
+  }
+  .cvz-chat-header .title { flex: 1 1 100%; }
+  .cvz-chat-header .quota { flex: 1 1 auto; }
+
+  .cvz-preview-header { padding: 12px 14px; gap: 8px; row-gap: 8px; }
+  /* Version-Text auf eigene Zeile, damit die Buttons nebeneinander passen. */
+  .cvz-preview-header .version { flex: 1 1 100%; }
+
+  /* !important ist noetig, weil die Buttons im Webflow-Embed Inline-Styles
+     tragen (style="padding: 6px 12px; font-size: 0.8rem;"). Inline schlaegt
+     jede externe Regel ohne !important. Sauberer waere, die Inline-Styles
+     aus dem Embed-HTML zu entfernen. */
+  .cvz-chat-header button.cvz-btn-secondary,
+  .cvz-preview-header button.cvz-btn-secondary {
+    padding: 6px 10px !important;
+    font-size: 0.75rem !important;
+  }
+
+  .cvz-preview-body { padding: 8px; }
+  .cvz-chat-input-row { padding: 12px 14px; }
+
+  /* iOS Safari zoomt beim Antippen automatisch in Eingabefelder mit weniger
+     als 16px Schriftgroesse hinein und reisst damit das Layout auseinander. */
+  .cvz-chat-input-row textarea,
+  .cvz-app input.cvz-input,
+  .cvz-app textarea.cvz-input,
+  .cvz-app select.cvz-input {
+    font-size: 16px;
+  }
 }
 
 /* ---------- Schutzblock gegen generische Klassennamen der Host-Seite ----------
