@@ -1,23 +1,25 @@
 /* ============================================================================
+   CONVERTLYZE LANDINGPAGE-ASSISTENT - style.css
+   Stand: Toolbar-Layout (Kopfzeile ueber beiden Spalten)
+
+   SELBSTTEST NACH DEM DEPLOY:
+   Diese Datei im Browser oeffnen und nach "cvz-workspace-cols" suchen.
+   Kein Treffer = jsDelivr liefert noch die alte Version, dann stimmt der
+   Commit-Hash im Embed nicht.
+
    WICHTIG - SCOPING
-   Diese Datei wird per <link> im Webflow-Embed geladen und gilt damit fuer das
-   GESAMTE Dokument, nicht nur fuer den Assistenten.
+   Diese Datei wird per <link> im Webflow-Embed geladen und gilt fuer das
+   GESAMTE Dokument. Frueher stand hier "body { display:flex; ... }" - das
+   macht den kompletten Webflow-Body zu einem horizontalen Flex-Container,
+   quetscht die Navbar zusammen und laesst sie auf dem Handy verschwinden.
+   Regel: hier NIE auf body, html oder nackte Element-Selektoren (h1, p,
+   input, *) stylen - immer unter .cvz-app oder .cvz-workspace haengen.
 
-   Frueher stand hier "body { display:flex; align-items:center; padding:24px }".
-   Das macht den kompletten Webflow-Body zu einem horizontalen Flex-Container:
-   Navbar, Embed und Footer werden zu Flex-Items NEBENEINANDER, die Navbar wird
-   auf Minimalbreite gequetscht und ist auf dem Handy unsichtbar.
-
-   Regel fuer die Zukunft: hier NIE auf body, html oder nackte Element-Selektoren
-   (h1, p, input, *) stylen - immer unter .cvz-app oder .cvz-workspace haengen.
-
-   LAYOUT-STRUKTUR (seit der Toolbar-Umstellung):
+   LAYOUT-STRUKTUR:
    .cvz-workspace              (Spalte)
      .cvz-toolbar              (volle Breite: Titel, Sessions, Buttons)
-     .cvz-workspace-cols       (Zeile)
+     .cvz-workspace-cols       (Zeile, ab 1080px abwaerts Spalte)
        .cvz-chat-wrap          |  .cvz-preview-panel
-   Chat und Vorschau sind dadurch exakt gleich hoch - der frueher in der
-   Chat-Spalte sitzende Header verbraucht keine Chat-Hoehe mehr.
    ============================================================================ */
 
 :root {
@@ -30,19 +32,16 @@
   --cvz-text-muted: #8b949e;
   --cvz-danger: #f87171;
   --cvz-radius: 12px;
-  /* Zentrale Hoehensteuerung fuer Chat + Vorschau. Einmal aendern statt an
-     zwei Stellen. 780px Deckel, damit es auf 27"-Monitoren nicht ausufert. */
+  /* Zentrale Hoehensteuerung fuer Chat + Vorschau auf dem Desktop. */
   --cvz-panel-height: 78vh;
   --cvz-panel-height-max: 780px;
 }
 
-/* Frueher "* { box-sizing: border-box }" - global fuer die ganze Seite.
-   Webflow setzt border-box ohnehin selbst. */
+/* Frueher "* { box-sizing: border-box }" - global fuer die ganze Seite. */
 .cvz-app, .cvz-app *,
 .cvz-workspace, .cvz-workspace * { box-sizing: border-box; }
 
-/* Frueher standen font-family, color und background auf body. Jetzt auf den
-   Containern - alles darin erbt es.
+/* Frueher standen font-family, color und background auf body.
    HINWEIS: Der dunkle SEITEN-Hintergrund kommt nicht mehr aus dieser Datei.
    Den bitte im Webflow-Designer am Body bzw. an der Section setzen. */
 .cvz-app,
@@ -52,9 +51,6 @@
   color: var(--cvz-text);
 }
 
-/* Zentrierung frueher ueber body{justify-content:center} - jetzt per
-   margin:auto am Container. Vertikale Zentrierung faellt bewusst weg: auf
-   einer Seite mit Navigation ist "mittig im Viewport" ohnehin falsch. */
 .cvz-app {
   width: 100%; max-width: 640px;
   margin: 0 auto; padding: 24px 0;
@@ -82,8 +78,6 @@
 }
 
 /* ---------- Formular-Karte ---------- */
-/* color explizit: die Karte liegt in einem Webflow-Dokument, dessen
-   Wrapper-Regeln sonst eigene Farben vererben koennen. */
 .cvz-card {
   background: var(--cvz-bg-elevated);
   border: 1px solid var(--cvz-border);
@@ -262,6 +256,9 @@
 
 /* ============================ WORKSPACE ============================ */
 
+/* flex-direction:column ist die Regel, an der man erkennt, ob diese Datei
+   wirklich geladen ist: steht die Toolbar LINKS neben dem Chat statt
+   darueber, laeuft noch eine alte Version. */
 .cvz-workspace {
   display: none;              /* app.js schaltet auf flex */
   flex-direction: column;
@@ -289,6 +286,7 @@
 .cvz-preview-header button.cvz-btn-secondary {
   padding: 8px 14px; font-size: 0.82rem;
   border: 1px solid var(--cvz-border); border-radius: 8px;
+  white-space: nowrap;
 }
 .cvz-toolbar button.cvz-btn-secondary:hover,
 .cvz-preview-header button.cvz-btn-secondary:hover { border-color: var(--cvz-teal); }
@@ -310,17 +308,17 @@
   display: flex; gap: 20px; width: 100%; align-items: stretch;
 }
 
-/* Beide Spalten bekommen dieselbe Hoehe aus derselben Variable. Da der
-   Header raus ist, entspricht die Chat-Hoehe jetzt wirklich der Vorschau.
+/* Beide Spalten bekommen dieselbe Hoehe aus derselben Variable.
    clamp() statt fixer 440px: auf breiten Monitoren wird die Chat-Spalte
-   breiter, damit weniger Zeilenumbrueche entstehen. */
+   breiter, damit weniger Zeilenumbrueche entstehen. min-width:0 verhindert,
+   dass langer Text die Spalte ueber den Container hinausdrueckt. */
 .cvz-chat-wrap {
   display: flex; flex-direction: column; min-width: 0;
   flex: 0 0 clamp(400px, 32%, 560px);
   height: var(--cvz-panel-height); max-height: var(--cvz-panel-height-max);
 }
 .cvz-preview-panel {
-  flex: 1; min-width: 0;
+  flex: 1 1 0; min-width: 0;
   height: var(--cvz-panel-height); max-height: var(--cvz-panel-height-max);
   display: flex; flex-direction: column;
   background: var(--cvz-bg-elevated); border: 1px solid var(--cvz-border); border-radius: 20px;
@@ -328,8 +326,8 @@
 }
 
 /* ---------- Chat ---------- */
-/* border-top + obere Rundung sind neu: der frueher darueberliegende
-   Chat-Header hat den oberen Abschluss geliefert. */
+/* border-top + obere Rundung sind noetig, seit der frueher darueberliegende
+   Chat-Header in die Toolbar gewandert ist. */
 .cvz-chat-messages {
   flex: 1; min-height: 0; overflow-y: auto; padding: 20px;
   display: flex; flex-direction: column; gap: 16px;
@@ -347,6 +345,19 @@
   align-self: flex-start; background: var(--cvz-bg); border: 1px solid var(--cvz-border);
   border-bottom-left-radius: 4px; color: var(--cvz-text);
 }
+
+/* Die allererste Nachricht im Chat ist der automatisch erzeugte Kickoff-
+   Prompt nach dem Formular. Er geht weiterhin an die API, soll aber nicht
+   sichtbar sein - der Verlauf beginnt direkt mit der Analyse.
+   :first-child trifft ausschliesslich die erste Nachricht ueberhaupt;
+   spaetere eigene Nachrichten sind nie first-child und bleiben sichtbar.
+
+   UEBERGANGSLOESUNG: Sauberer waere, die Nachricht in app.js gar nicht erst
+   in den DOM zu haengen (nur in den messages-Array fuer die API). Dann kann
+   sie auch nicht kurz aufblitzen, bevor das Stylesheet greift, und
+   Screenreader lesen sie nicht vor. */
+.cvz-chat-messages > .cvz-msg.user:first-child { display: none; }
+
 .cvz-msg.assistant.loading { color: var(--cvz-text-muted); font-style: italic; display: flex; align-items: center; gap: 10px; }
 /* Kleiner Inline-Spinner fuer die Chat-Ladeblase - dieselbe cvz-spin-
    Animation wie oben, nur kompakter, damit bei langen Struktur-Turns
@@ -384,12 +395,15 @@
   border-radius: 0 0 20px 20px; background: var(--cvz-bg-elevated);
 }
 .cvz-chat-input-row textarea {
-  flex: 1; resize: none; padding: 12px 14px; border-radius: 10px;
+  flex: 1; min-width: 0; resize: none; padding: 12px 14px; border-radius: 10px;
   background: var(--cvz-bg); border: 1px solid var(--cvz-border);
   color: var(--cvz-text); font-family: inherit; font-size: 0.92rem; max-height: 120px;
 }
 .cvz-chat-input-row textarea:focus { outline: none; border-color: var(--cvz-teal); }
+/* flex:0 0 auto - sonst kann der Senden-Button auf schmalen Breiten
+   zusammengedrueckt oder aus dem sichtbaren Bereich geschoben werden. */
 .cvz-chat-input-row button {
+  flex: 0 0 auto;
   background: var(--cvz-teal); color: var(--cvz-bg); border: none;
   border-radius: 10px; padding: 0 22px; font-weight: 600; cursor: pointer; font-family: inherit;
 }
@@ -436,9 +450,9 @@
 
 /* ---------- Gestapeltes Layout (Tablet + Handy) ----------
    Die Hoehe haengt hier NICHT am aeusseren Container, sondern an den
-   tatsaechlich scrollenden Flaechen. Sonst fressen Header und Eingabezeile
-   einen fast konstanten Betrag, der auf dem Handy fast die ganze Hoehe
-   ausmacht (vorher blieben real ~100px Nachrichtenflaeche uebrig). */
+   tatsaechlich scrollenden Flaechen. Sonst fressen Kopfzeile und
+   Eingabezeile einen fast konstanten Betrag, der auf dem Handy fast die
+   ganze Hoehe ausmacht. */
 @media (max-width: 1080px) {
   .cvz-workspace-cols { flex-direction: column; gap: 16px; }
 
@@ -449,8 +463,8 @@
      vh-Fallback zuerst, dann dvh (= sichtbare Hoehe ohne Browser-Leiste). */
   .cvz-chat-messages {
     flex: none;
-    height: 52vh;
-    height: 52dvh;
+    height: 55vh;
+    height: 55dvh;
   }
   .cvz-preview-body {
     flex: none;
@@ -470,19 +484,42 @@
 
   .cvz-app, .cvz-workspace { padding: 12px 0; }
 
-  .cvz-toolbar, .cvz-preview-header { padding: 10px 12px; gap: 8px 10px; }
-  .cvz-toolbar .cvz-toolbar-title,
+  /* Toolbar gestapelt: Titel, Sessions und die Buttonzeile jeweils
+     untereinander. Nebeneinander wird es auf 390px zu gedraengt. */
+  .cvz-toolbar {
+    flex-direction: column; align-items: stretch; gap: 8px;
+    padding: 12px 14px;
+  }
+  .cvz-toolbar .cvz-toolbar-title { font-size: 0.95rem; }
+  .cvz-toolbar .quota { font-size: 0.75rem; }
+  /* flex-basis:0 verteilt die Breite gleichmaessig auf beide Buttons,
+     unabhaengig von der Textlaenge. */
+  .cvz-toolbar-actions { margin-left: 0; width: 100%; flex-wrap: nowrap; }
+  .cvz-toolbar-actions button { flex: 1 1 0; min-width: 0; }
+  .cvz-toolbar-error { text-align: left; }
+
+  .cvz-preview-header { padding: 12px 14px; gap: 8px 10px; }
   .cvz-preview-header .title { font-size: 0.95rem; }
-  .cvz-toolbar .quota { font-size: 0.72rem; }
-  /* flex:1 auf den Buttons zwingt beide in eine gemeinsame Zeile, statt dass
-     der zweite einzeln umbricht. */
-  .cvz-toolbar-actions, .cvz-preview-actions { flex: 1 1 100%; margin-left: 0; }
-  .cvz-toolbar-actions button, .cvz-preview-actions button { flex: 1 1 auto; }
+  .cvz-preview-actions { flex: 1 1 100%; margin-left: 0; flex-wrap: nowrap; }
+  .cvz-preview-actions button { flex: 1 1 0; min-width: 0; }
   .cvz-toolbar button.cvz-btn-secondary,
-  .cvz-preview-header button.cvz-btn-secondary { padding: 7px 10px; font-size: 0.75rem; }
+  .cvz-preview-header button.cvz-btn-secondary {
+    padding: 8px 8px; font-size: 0.75rem;
+    /* nowrap aus der Grundregel hier aufheben: bei zwei gleich breiten
+       Buttons darf "Als HTML herunterladen" umbrechen statt ueberzulaufen. */
+    white-space: normal;
+  }
+
+  /* Chat bekommt hier mehr Hoehe als auf dem Tablet - auf dem Handy ist er
+     die Hauptarbeitsflaeche, die Vorschau dient nur der Kontrolle. */
+  .cvz-chat-messages {
+    height: 60vh;
+    height: 60dvh;
+  }
 
   .cvz-preview-body { padding: 8px; }
   .cvz-chat-input-row { padding: 12px 14px; }
+  .cvz-chat-input-row button { padding: 0 16px; }
 
   /* iOS Safari zoomt beim Antippen automatisch in Eingabefelder mit weniger
      als 16px Schriftgroesse hinein und reisst das Layout auseinander. */
