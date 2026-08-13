@@ -1066,11 +1066,27 @@ async function cvzTryResume() {
     document.getElementById('cvz-workspace').style.display = 'flex';
     cvzUpdateQuota(data.sessions_remaining, data.sessions_limit);
 
-    (data.messages || []).forEach(m => cvzAppendMessage(m.role, m.content));
+    // Die erste Nachricht ist der von start-session erzeugte Kickoff-Prompt.
+    // Er gehoert in die Historie fuer das Modell, aber nicht in die Ansicht -
+    // der Verlauf soll direkt mit der Analyse der Ausgangslage beginnen.
+    //
+    // ANNAHME ueber die API: der Kickoff-Prompt ist immer das erste Element
+    // von data.messages und hat role 'user'. Sauberer waere, wenn der Server
+    // ihn gar nicht erst zurueckgibt oder mit einem Flag markiert - dann
+    // pruefen wir hier ein Feld statt eines Index.
+    let lastBubble = null;
+    (data.messages || []).forEach((m, i) => {
+      if (i === 0 && m.role === 'user') return;
+      lastBubble = cvzAppendMessage(m.role, m.content, null, null, { scroll: 'none' });
+    });
+
     if (data.structure_html_document) {
       cvzUpdatePreviewPanel(data.structure_html_document, data.structure_version);
     }
-    document.getElementById('cvz-chat-messages').scrollTop = document.getElementById('cvz-chat-messages').scrollHeight;
+
+    // Einmal am Schluss scrollen statt bei jeder Nachricht: der ANFANG der
+    // letzten Antwort steht oben, nicht deren Ende.
+    cvzScrollChatTo(lastBubble, 'top');
     return true;
   } catch (e) {
     console.error('Resume fehlgeschlagen:', e);
@@ -1084,6 +1100,8 @@ function cvzOpenChat(sessionData) {
   document.getElementById('cvz-form-app').style.display = 'none';
   document.getElementById('cvz-workspace').style.display = 'flex';
   cvzUpdateQuota(sessionData.sessions_remaining, sessionData.sessions_limit);
+  // Nur die Antwort des Assistenten wird gerendert - der Kickoff-Prompt
+  // entsteht serverseitig und taucht hier ohnehin nicht auf.
   cvzAppendMessage('assistant', sessionData.message);
 }
 function cvzUpdateQuota(remaining, limit) {
@@ -1121,6 +1139,11 @@ function cvzApplyPreviewScale() {
 
   const deviceWidth = CVZ_DEVICE_WIDTHS[cvzPreviewDevice];
   const body = document.getElementById('cvz-preview-body');
+  // 32px = das horizontale Padding von .cvz-preview-body (2x16px).
+  // Unter 768px reduziert die CSS-Datei das auf 2x8px - der kleine
+  // Unterschied kostet nur ein paar Pixel Skalierung und ist bewusst
+  // nicht nachgezogen, um hier keine zweite Quelle fuer denselben Wert
+  // zu haben.
   const availableWidth = body.clientWidth - 32;
   const scale = Math.min(1, Math.max(availableWidth, 100) / deviceWidth);
 
@@ -1199,7 +1222,36 @@ function cvzDownloadCurrentStructure() {
   URL.revokeObjectURL(url);
 }
 
-function cvzAppendMessage(role, text, structureHtmlDocument, structureVersion) {
+// Scrollsteuerung fuer das Chatfenster.
+//   mode 'end' - ans untere Ende
+//   mode 'top' - der ANFANG von el steht oben im sichtbaren Bereich
+//
+// Hintergrund: Antworten des Assistenten sind regelmaessig laenger als das
+// Chatfenster. Scrollt man wie bisher immer ans Ende, landet der Nutzer
+// mitten im Text und muss erst zurueckscrollen, um den Anfang zu lesen.
+function cvzScrollChatTo(el, mode) {
+  const wrap = document.getElementById('cvz-chat-messages');
+  if (!wrap) return;
+
+  if (mode === 'end' || !el) {
+    wrap.scrollTop = wrap.scrollHeight;
+    return;
+  }
+
+  // getBoundingClientRect statt offsetTop: offsetTop bezieht sich auf den
+  // naechsten POSITIONIERTEN Vorfahren. .cvz-chat-messages ist static, der
+  // Wert waere also nicht der Abstand innerhalb des Chatfensters.
+  const delta = el.getBoundingClientRect().top - wrap.getBoundingClientRect().top;
+  wrap.scrollTop += delta - 12; // 12px Luft ueber der Nachricht
+}
+
+// options.scroll:
+//   'auto' (Standard) - eigene Nachrichten ans Ende, Antworten des
+//                       Assistenten an ihren ANFANG
+//   'end'             - immer ans Ende (Ladeblase: Spinner soll sichtbar bleiben)
+//   'none'            - gar nicht scrollen (Aufbau des Verlaufs beim Resume,
+//                       dort wird einmal am Schluss gescrollt)
+function cvzAppendMessage(role, text, structureHtmlDocument, structureVersion, options = {}) {
   const wrap = document.getElementById('cvz-chat-messages');
   const bubble = document.createElement('div');
   bubble.className = `cvz-msg ${role}`;
@@ -1218,7 +1270,14 @@ function cvzAppendMessage(role, text, structureHtmlDocument, structureVersion) {
     note.textContent = structureVersion ? `Vorschau aktualisiert (Version ${structureVersion})` : 'Vorschau aktualisiert';
     wrap.appendChild(note);
   }
-  wrap.scrollTop = wrap.scrollHeight;
+
+  const mode = options.scroll || 'auto';
+  if (mode === 'end') {
+    cvzScrollChatTo(null, 'end');
+  } else if (mode === 'auto') {
+    cvzScrollChatTo(bubble, role === 'assistant' ? 'top' : 'end');
+  }
+
   return bubble;
 }
 
@@ -1235,7 +1294,10 @@ async function cvzSendMessage() {
   document.getElementById('cvz-chat-send').disabled = true;
 
   cvzAppendMessage('user', message);
-  const loadingBubble = cvzAppendMessage('assistant', 'Denkt nach …');
+  // scroll:'end' - die Ladeblase ist kurz, ihr Spinner soll unten sichtbar
+  // stehen. Mit 'auto' wuerde sie als Assistenten-Nachricht behandelt und
+  // koennte aus dem Bild rutschen.
+  const loadingBubble = cvzAppendMessage('assistant', 'Denkt nach …', null, null, { scroll: 'end' });
   loadingBubble.classList.add('loading');
   loadingBubble.innerHTML = '<span class="cvz-spinner-inline"></span><span class="cvz-loading-label">Denkt nach …</span>';
   const loadingLabel = loadingBubble.querySelector('.cvz-loading-label');
@@ -1313,10 +1375,16 @@ async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
       }
 
       const { url } = await response.json();
+      // Das Anchor-Element MUSS im DOM haengen: Firefox ignoriert click()
+      // auf nicht eingehaengten Anchors, der Download passierte dort
+      // stillschweigend nicht. Gleiches Vorgehen wie in
+      // cvzDownloadCurrentStructure.
       const a = document.createElement('a');
       a.href = url;
       a.download = downloadName;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
 
       label.textContent = originalText;
       buttonEl.disabled = false;
