@@ -1,4 +1,3 @@
-oard v6 · JS
 /**
  * dashboard-v6.js
  * ----------------
