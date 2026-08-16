@@ -1,3 +1,4 @@
+oard v6 · JS
 /**
  * dashboard-v6.js
  * ----------------
@@ -213,20 +214,25 @@
   // Monatliches Aufbau-Session-Kontingent des Plans laden.
   // Das Limit liegt bewusst NICHT denormalisiert auf users (wie credits_limit),
   // sondern wird live aus plans.page_agent_sessions_limit gelesen.
-  // WHY maybeSingle statt single: nicht jeder license_type hat zwingend eine Zeile in plans
-  // (z.B. Pay-per-Use, Beta) - dann ist das Kontingent einfach 0, kein Fehler.
+  // WHY limit(1) statt maybeSingle/single: plans enthaelt aktuell doppelte Zeilen
+  // pro Plan-Name (z.B. zwei "Enterprise"-Zeilen) - maybeSingle() wirft dabei einen
+  // Fehler ("multiple rows returned") und das Kontingent faellt still auf 0 zurueck.
+  // limit(1) nimmt einfach die erste Treffer-Zeile, bricht also nicht.
+  // WICHTIG: Das behebt nur das Symptom hier - die Duplikate in plans sollten in
+  // Supabase direkt bereinigt werden, sonst kann das an anderer Stelle wieder zuschlagen.
   async function fetchPlanSessionsLimit(planName) {
     if (!planName) return 0;
     var result = await window.supabase
       .from('plans')
       .select('page_agent_sessions_limit')
       .eq('name', planName)
-      .maybeSingle();
+      .limit(1);
     if (result.error) {
       console.warn('[CVZ] fetchPlanSessionsLimit:', result.error);
       return 0;
     }
-    return result.data ? Math.round(Number(result.data.page_agent_sessions_limit || 0)) : 0;
+    var row = result.data && result.data[0];
+    return row ? Math.round(Number(row.page_agent_sessions_limit || 0)) : 0;
   }
  
   async function fetchAnalysesForMember(memberstackId) {
