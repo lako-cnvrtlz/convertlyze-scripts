@@ -16,6 +16,7 @@
  * - Team-Einladungen annehmen (Cookie cvz_invite)
  * - PPU Pay-per-Use Checkout Button
  * - Purchase Success Modal nach Kauf
+ * - Aufbau-Sessions-Kontingent (Landingpage-Creation-Agent), Limit aus plans.page_agent_sessions_limit
  *
  * KRITISCH: PDF_SECRET liegt hier als Klartext.
  * Bei Rotation: dashboard-v5.js + Railway PDF Service ENV aktualisieren.
@@ -24,21 +25,30 @@
  * - Container: erstes .table-list parent
  * - Analyse-Rows: .table-list
  * - User-Daten: [data-dashboard="..."], [data-user="..."]
+ *
+ * NEU (Aufbau-Sessions) - folgende Elemente per Custom Attribute in Webflow anlegen:
+ * - [data-dashboard="aufbau-sessions-card"]           -> Wrapper der Karte (wird bei Kontingent=0 versteckt)
+ * - [data-dashboard="aufbau-sessions-used"]            -> Text "3/5 Aufbau-Sessions"
+ * - [data-dashboard="aufbau-sessions-percent"]         -> Text "60% des Kontingents genutzt"
+ * - [data-dashboard="aufbau-sessions-progress-bar"]    -> Balken-Element (Breite wird per JS gesetzt)
+ * - [data-dashboard="aufbau-sessions-remaining"]       -> Zahl der verbleibenden Sessions
+ * - [data-dashboard="aufbau-sessions-renewal-label"]   -> Label ueber dem Reset-Datum
+ * - [data-dashboard="aufbau-sessions-renewal"]         -> Reset-Datum / Status-Text
  */
-
+ 
 // -- Sofort verstecken wenn Plan im sessionStorage --------------------------
 (function () {
   if (sessionStorage.getItem('selected_plan')) {
     document.documentElement.style.visibility = 'hidden';
   }
 })();
-
+ 
 // ==================== DASHBOARD LOGIK ====================
 (function () {
   'use strict';
-
+ 
   // -- Config -----------------------------------------------------------------
-
+ 
   var CONFIG = {
     // WHY: PDF_SERVICE_URL und PDF_SECRET wurden aus dem Frontend entfernt.
     // generate-pdf-report Edge Function fuegt das Secret serverseitig hinzu.
@@ -57,9 +67,9 @@
       enterprise: { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' },
     },
   };
-
+ 
   // -- State ------------------------------------------------------------------
-
+ 
   var state = {
     analysesData:    [],
     currentPage:     1,
@@ -73,13 +83,13 @@
     realtimeChannel: null,
     pollingTimer:    null,
   };
-
+ 
   // -- Utilities --------------------------------------------------------------
-
+ 
   function sleep(ms) {
     return new Promise(function (r) { setTimeout(r, ms); });
   }
-
+ 
   function retry(fn, maxAttempts, intervalMs) {
     var attempts = 0;
     return new Promise(function (resolve, reject) {
@@ -90,7 +100,7 @@
       })();
     });
   }
-
+ 
   // WHY escapeHtml: User-Daten (URLs, Keywords) nie direkt als innerHTML setzen.
   // XSS-Schutz - alle User-Inhalte werden durch diese Funktion gefiltert.
   function escapeHtml(str) {
@@ -102,38 +112,38 @@
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
   }
-
+ 
   function truncate(str, max) {
     if (!str) return '-';
     return str.length > max ? str.substring(0, max - 3) + '...' : str;
   }
-
+ 
   function setText(selector, value) {
     var el = document.querySelector(selector);
     if (el) el.textContent = (value != null) ? value : '';
   }
-
+ 
   function showEl(el, show, displayValue) {
     if (el) el.style.display = show ? (displayValue || '') : 'none';
   }
-
+ 
   function getParam(key) {
     return new URLSearchParams(window.location.search).get(key);
   }
-
-  // -- Cookie helpers ---------------------------------------------------------
-
+ 
+  // -- Cookie helpers -----------------------------------------------------------
+ 
   function getCookie(name) {
     var match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
     return match ? decodeURIComponent(match[2]) : null;
   }
-
+ 
   function deleteCookie(name) {
     document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;SameSite=Lax';
   }
-
-  // -- Deps -------------------------------------------------------------------
-
+ 
+  // -- Deps -----------------------------------------------------------------
+ 
   async function waitForDependencies() {
     for (var i = 0; i < 100; i++) {
       if (
@@ -145,9 +155,9 @@
     console.warn('[CVZ] Timeout: Supabase oder Memberstack nicht geladen.');
     return false;
   }
-
+ 
   // -- Data layer -------------------------------------------------------------
-
+ 
   // WHY _billingUser: Bei Team-Members laeuft Billing ueber den Owner.
   // Plan-Felder muessen vom Owner geholt werden, nicht vom Member selbst.
   function checkPdfAccess(user) {
@@ -161,12 +171,12 @@
     if (status === 'canceling' && bu.license_expires_at && new Date(bu.license_expires_at) > new Date()) return true;
     return false;
   }
-
+ 
   function canAccessPdf(analysis) {
     var source = (analysis.analysis_source || '').toLowerCase();
     return CONFIG.PDF_ACCESS_SOURCES.indexOf(source) !== -1 || state.hasPdfAccess;
   }
-
+ 
   function getInitials(name) {
     if (!name || typeof name !== 'string') return '';
     var parts = name.trim().split(/\s+/);
@@ -174,21 +184,21 @@
     if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
     return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
   }
-
+ 
   async function fetchUser(memberstackId, maxAttempts) {
     maxAttempts = maxAttempts || 1;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       var result = await window.supabase
         .from('users')
-        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits')
+        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, page_agent_sessions_used_current_period')
         .eq('memberstack_id', memberstackId)
         .single();
-
+ 
       if (result.data) {
         if (result.data.owner_user_id) {
           var ownerResult = await window.supabase
             .from('users')
-            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price')
+            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price, page_agent_sessions_used_current_period')
             .eq('id', result.data.owner_user_id)
             .single();
           if (ownerResult.data) result.data._billingUser = ownerResult.data;
@@ -200,7 +210,27 @@
     }
     return null;
   }
-
+ 
+  // NEU: Monatliches Aufbau-Session-Kontingent des Plans laden.
+  // Das Limit liegt bewusst NICHT denormalisiert auf users (wie credits_limit),
+  // sondern wird live aus plans.page_agent_sessions_limit gelesen - damit es nie mit dem
+  // Plan auseinanderlaufen kann (siehe die frueheren reserved_credits-Drift-Bugs).
+  // WHY maybeSingle statt single: nicht jeder license_type hat zwingend eine Zeile in plans
+  // (z.B. Pay-per-Use, Beta) - dann ist das Kontingent einfach 0, kein Fehler.
+  async function fetchPlanSessionsLimit(planName) {
+    if (!planName) return 0;
+    var result = await window.supabase
+      .from('plans')
+      .select('page_agent_sessions_limit')
+      .eq('name', planName)
+      .maybeSingle();
+    if (result.error) {
+      console.warn('[CVZ] fetchPlanSessionsLimit:', result.error);
+      return 0;
+    }
+    return result.data ? Math.round(Number(result.data.page_agent_sessions_limit || 0)) : 0;
+  }
+ 
   async function fetchAnalysesForMember(memberstackId) {
     if (!memberstackId) return [];
     var result = await window.supabase.rpc('get_analyses_for_member', { p_memberstack_id: memberstackId });
@@ -210,7 +240,7 @@
     }
     return result.data || [];
   }
-
+ 
   async function triggerCreditResetIfPaid(user) {
     try {
       var bu = user._billingUser || user;
@@ -224,32 +254,32 @@
       return false;
     }
   }
-
+ 
   // -- Purchase Success Modal -------------------------------------------------
-
+ 
   function showPurchaseSuccessModal(licenseType) {
     var planName = licenseType || 'deinen neuen Plan';
-
+ 
     var overlay = document.createElement('div');
     overlay.id = 'cvz-purchase-modal';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
-
+ 
     var box = document.createElement('div');
     box.style.cssText = 'background:#161b22;border:1px solid #30363d;border-radius:12px;padding:40px;max-width:480px;width:90%;text-align:center;font-family:Geist,sans-serif;position:relative';
-
+ 
     var xBtn = document.createElement('button');
-    xBtn.textContent = '\u2715';
+    xBtn.textContent = '✕';
     xBtn.style.cssText = 'position:absolute;top:12px;right:16px;background:none;border:none;color:#8b98a5;font-size:16px;cursor:pointer;line-height:1;padding:0';
     xBtn.onclick = function () { overlay.remove(); };
-
+ 
     var emoji = document.createElement('div');
-    emoji.textContent = '\uD83C\uDF89';
+    emoji.textContent = '🎉';
     emoji.style.cssText = 'font-size:48px;margin-bottom:16px';
-
+ 
     var h = document.createElement('h2');
     h.textContent = 'Willkommen an Bord!';
     h.style.cssText = 'margin:0 0 12px;font-size:22px;color:#4fd1c5;font-weight:700';
-
+ 
     var p1 = document.createElement('p');
     p1.style.cssText = 'margin:0 0 8px;color:#8b98a5;font-size:15px';
     var strong = document.createElement('strong');
@@ -258,11 +288,11 @@
     p1.appendChild(document.createTextNode('Du hast erfolgreich den '));
     p1.appendChild(strong);
     p1.appendChild(document.createTextNode(' gebucht.'));
-
+ 
     var p2 = document.createElement('p');
-    p2.textContent = 'Dein Konto ist jetzt aktiv \u2013 analysiere deine erste Landingpage.';
+    p2.textContent = 'Dein Konto ist jetzt aktiv – analysiere deine erste Landingpage.';
     p2.style.cssText = 'margin:0 0 28px;color:#8b98a5;font-size:14px';
-
+ 
     var ctaBtn = document.createElement('button');
     ctaBtn.textContent = 'Erste Analyse starten';
     ctaBtn.style.cssText = 'background:#4fd1c5;color:#0d1117;border:none;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:600;cursor:pointer;width:100%';
@@ -270,19 +300,19 @@
       overlay.remove();
       window.location.href = '/analyse/formular';
     };
-
+ 
     box.append(xBtn, emoji, h, p1, p2, ctaBtn);
     overlay.appendChild(box);
     overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
     document.body.appendChild(overlay);
   }
-
-  // -- UI: Dashboard render ---------------------------------------------------
-
-  function renderUserDashboard(user) {
+ 
+  // -- UI: Dashboard render -----------------------------------------------------
+ 
+  function renderUserDashboard(user, sessionsLimit) {
     // FIX: skeletons verbergen bevor Daten gesetzt werden (mobil critical)
     hideDashboardSkeletons();
-
+ 
     var bu           = user._billingUser || user;
     var isTeamMember = !!user.owner_user_id;
     var reserved     = Math.max(0, Math.round(Number(bu.reserved_credits || 0)));
@@ -291,31 +321,31 @@
     var ppuCredits   = Math.round(Number(user.ppu_credits || 0));
     var ppuReserved  = Math.round(Number(user.reserved_ppu_credits || 0));
     var ppuAvailable = Math.max(ppuCredits - ppuReserved, 0);
-
+ 
     var analysesLeft = bu.credits_remaining != null
       ? Math.max(0, Math.round(Number(bu.credits_remaining)) - reserved)
       : Math.max(0, limit - used - reserved);
-
+ 
     var chatUsed  = Math.round(Number(user.chat_messages_used_current_period || 0));
     var chatLimit = Math.round(Number(user.chat_messages_limit || 0));
     var chatLeft  = Math.max(chatLimit - chatUsed, 0);
-
+ 
     var percentRaw = limit ? ((used + reserved) / limit) * 100 : 0;
-
+ 
     // Credits & progress
     var usedDisplay = reserved > 0
       ? (used + '/' + limit + ' Analysen (' + reserved + ' in Bearbeitung)')
       : (used + '/' + limit + ' Analysen');
     setText('[data-dashboard="credits_used_current_period"]', usedDisplay);
     setText('[data-dashboard="analyses-percent"]', Math.round(percentRaw) + '% des Limits genutzt');
-
+ 
     var progressBar = document.querySelector('[data-dashboard="progress-bar"]');
     if (progressBar) progressBar.style.width = Math.min(percentRaw, 100) + '%';
-
+ 
     setText('[data-dashboard="credits-remaining"]',      analysesLeft);
     setText('[data-dashboard="chat-messages-remaining"]', chatLeft);
     setText('[data-dashboard="chat-messages-used"]',      chatUsed + '/' + chatLimit);
-
+ 
     // PPU
     setText('[data-dashboard="ppu-credits"]', ppuAvailable);
     var ppuLabelText = ppuCredits === 0
@@ -327,19 +357,19 @@
           : ppuCredits + ' Pay-per-Use Analyse' + (ppuCredits > 1 ? 'n' : '') + ' verfuegbar';
     setText('[data-dashboard="ppu-label"]', ppuLabelText);
     showEl(document.querySelector('[data-dashboard="ppu-card"]'), ppuCredits > 0, 'block');
-
+ 
     // Plan type flags
     var isPaid      = CONFIG.PAID_PLANS.indexOf(bu.license_type) !== -1;
     var isPayPerUse = bu.license_type === 'Pay-per-Use';
     var isFreePlan  = bu.license_type === 'Free';
     var isBetaPlan  = bu.license_type === 'Beta';
-
+ 
     // Renewal
     var renewalLabel = 'Analysen erneuern sich am';
     var renewalText  = '';
     if (isPaid) {
       var renewalDate = null;
-      if (bu.license_expires_at)       renewalDate = new Date(bu.license_expires_at).toLocaleDateString('de-DE');
+      if (bu.license_expires_at)          renewalDate = new Date(bu.license_expires_at).toLocaleDateString('de-DE');
       else if (bu.next_credit_reset_date) renewalDate = new Date(bu.next_credit_reset_date).toLocaleDateString('de-DE');
       else if (bu.period_start_date) {
         var d = new Date(bu.period_start_date);
@@ -359,7 +389,35 @@
     }
     setText('[data-dashboard="credits-renewal-label"]', renewalLabel);
     setText('[data-dashboard="credits-renewal"]',       renewalText);
-
+ 
+    // NEU: Aufbau-Sessions (Landingpage-Creation-Agent)
+    // Verbrauch kommt vom gleichen Billing-User (Team-Pool) wie die Analysen-Credits,
+    // das Kontingent aus dem separat geladenen sessionsLimit (plans.page_agent_sessions_limit).
+    var sessionsUsed     = Math.round(Number(bu.page_agent_sessions_used_current_period || 0));
+    var sessionsLimitNum = Math.round(Number(sessionsLimit || 0));
+    var sessionsLeft     = Math.max(sessionsLimitNum - sessionsUsed, 0);
+    var sessionsPercent  = sessionsLimitNum ? (sessionsUsed / sessionsLimitNum) * 100 : 0;
+ 
+    setText('[data-dashboard="aufbau-sessions-used"]', sessionsUsed + '/' + sessionsLimitNum + ' Aufbau-Sessions');
+    setText('[data-dashboard="aufbau-sessions-percent"]', Math.round(sessionsPercent) + '% des Kontingents genutzt');
+    setText('[data-dashboard="aufbau-sessions-remaining"]', sessionsLeft);
+ 
+    var aufbauProgressBar = document.querySelector('[data-dashboard="aufbau-sessions-progress-bar"]');
+    if (aufbauProgressBar) aufbauProgressBar.style.width = Math.min(sessionsPercent, 100) + '%';
+ 
+    // Free-Plan: einmaliges Kontingent, erneuert sich nicht monatlich (analog Analysen-Logik oben)
+    var aufbauRenewalLabel = 'Aufbau-Sessions erneuern sich am';
+    var aufbauRenewalText  = renewalText; // gleiche Abrechnungsperiode wie die Analysen-Credits
+    if (isFreePlan) {
+      aufbauRenewalLabel = 'Aufbau-Session-Status';
+      aufbauRenewalText  = sessionsLeft > 0 ? '1 kostenlose Aufbau-Session verfuegbar' : 'Kostenlose Aufbau-Session bereits genutzt';
+    }
+    setText('[data-dashboard="aufbau-sessions-renewal-label"]', aufbauRenewalLabel);
+    setText('[data-dashboard="aufbau-sessions-renewal"]',       aufbauRenewalText);
+ 
+    // Karte nur zeigen, wenn der Plan ueberhaupt Aufbau-Sessions enthaelt
+    showEl(document.querySelector('[data-dashboard="aufbau-sessions-card"]'), sessionsLimitNum > 0, 'block');
+ 
     // Plan name & description
     var planName = bu.license_type || '-';
     if (planName.length > 0 && !isPayPerUse) planName = planName.charAt(0).toUpperCase() + planName.slice(1);
@@ -368,32 +426,34 @@
     setText('[data-dashboard="plan-description"]', limit
       ? (isPaid ? limit + ' Analysen pro Monat' : isPayPerUse ? '1 Analyse, kein Abo' : limit + ' Analyse(n)')
       : '');
-
+ 
     // User info
     setText('[data-user="name"]',  user.full_name || 'Unbekannt');
     setText('[data-user="email"]', user.email     || '');
-
+ 
     var avatarEl = document.querySelector('[data-user="avatar"]');
     if (avatarEl) {
       avatarEl.textContent = getInitials(user.full_name || '');
       avatarEl.style.cssText += ';display:flex;align-items:center;justify-content:center';
     }
-
+ 
     // Team section
     var hasTeam = CONFIG.TEAM_PLANS.indexOf(bu.license_type) !== -1;
     showEl(document.getElementById('open-team-modal'), hasTeam);
     showEl(document.getElementById('team-section'),    hasTeam);
-
+ 
     // Pre-Shimmer deaktivieren - echte Werte sind jetzt gesetzt
     document.body.classList.add('content-loaded');
   }
-
-  // -- UI: Skeleton -----------------------------------------------------------
-
+ 
+  // -- UI: Skeleton -------------------------------------------------------------
+ 
   var SKELETON_STYLE_ID = 'cvz-skeleton-style';
   var SHIMMER_BG   = 'linear-gradient(90deg,#1a2133 25%,#252d3d 50%,#1a2133 75%)';
   var SHIMMER_ANIM = 'cvz-shimmer 1.4s infinite';
-
+  // NEU: beide Balken-Elemente bekommen die "voller Balken"-Skeleton-Behandlung statt eines Text-Blocks
+  var PROGRESS_BAR_KEYS = ['progress-bar', 'aufbau-sessions-progress-bar'];
+ 
   function injectSkeletonStyle() {
     if (document.getElementById(SKELETON_STYLE_ID)) return;
     var s = document.createElement('style');
@@ -404,7 +464,7 @@
       '@keyframes cvz-pulse{0%,100%{opacity:1}50%{opacity:0.55}}';
     document.head.appendChild(s);
   }
-
+ 
   function applySkeletonStyle(el, minWidth) {
     el.dataset.cvzOrigColor      = el.style.color           || '';
     el.dataset.cvzOrigBackground = el.style.background      || '';
@@ -423,7 +483,7 @@
     el.style.minWidth       = minWidth || '60px';
     el.style.display        = el.style.display || 'inline-block';
   }
-
+ 
   function removeSkeletonStyle(el) {
     if (!el.dataset.cvzSkeleton) return;
     el.style.opacity        = el.dataset.cvzOrigOpacity || '';
@@ -435,7 +495,7 @@
     el.style.minWidth       = el.dataset.cvzOrigMinWidth;
     delete el.dataset.cvzSkeleton;
   }
-
+ 
   var SKELETON_WIDTHS = {
     'credits_used_current_period': '140px',
     'analyses-percent':            '120px',
@@ -445,13 +505,17 @@
     'plan-description':            '120px',
     'ppu-credits':                 '40px',
     'ppu-label':                   '100px',
+    'aufbau-sessions-used':        '160px',
+    'aufbau-sessions-percent':     '140px',
+    'aufbau-sessions-remaining':   '40px',
+    'aufbau-sessions-renewal':     '80px',
   };
-
+ 
   function showDashboardSkeletons() {
     injectSkeletonStyle();
     document.querySelectorAll('[data-dashboard]').forEach(function (el) {
       var key = el.getAttribute('data-dashboard');
-      if (key === 'progress-bar') {
+      if (PROGRESS_BAR_KEYS.indexOf(key) !== -1) {
         el.style.opacity        = '1';
         el.style.background     = SHIMMER_BG;
         el.style.backgroundSize = '400px 100%';
@@ -466,11 +530,11 @@
       applySkeletonStyle(el, el.getAttribute('data-user') === 'name' ? '100px' : '140px');
     });
   }
-
+ 
   function hideDashboardSkeletons() {
     document.querySelectorAll('[data-dashboard], [data-user]').forEach(function (el) {
       if (!el.dataset.cvzSkeleton) return;
-      if (el.getAttribute('data-dashboard') === 'progress-bar') {
+      if (PROGRESS_BAR_KEYS.indexOf(el.getAttribute('data-dashboard')) !== -1) {
         el.style.background     = '';
         el.style.backgroundSize = '';
         el.style.animation      = '';
@@ -481,7 +545,7 @@
       }
     });
   }
-
+ 
   // SVG assets
   var CVZ_SPINNER_SVG =
     '<svg xmlns="http://www.w3.org/2000/svg" width="52" height="52" viewBox="0 0 100 100" fill="none">' +
@@ -501,7 +565,7 @@
         '<path d="M 74 31 A 30 30 0 1 0 74 69" stroke="#7ee8e0" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.35"/>' +
       '</g>' +
     '</svg>';
-
+ 
   var CVZ_DOTS_LOADER =
     '<div id="cvz-dots-loader" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;grid-column:1/-1;">' +
       '<svg xmlns="http://www.w3.org/2000/svg" width="52" height="16" viewBox="0 0 80 20" fill="none">' +
@@ -520,15 +584,15 @@
         '</g>' +
       '</svg>' +
     '</div>';
-
-  // -- UI: Empty / error states -----------------------------------------------
-
+ 
+  // -- UI: Empty / error states -------------------------------------------------
+ 
   function removeLoadingSkeleton() {
     if (!state.container) return;
     var skeleton = state.container.querySelector('.loading-skeleton');
     if (skeleton) skeleton.remove();
   }
-
+ 
   function showLoadingSkeleton() {
     if (!state.container) return;
     state.container.innerHTML =
@@ -537,7 +601,7 @@
         '<p style="margin-top:20px;color:#7a8ba8;font-size:14px;">Lade Dashboard...</p>' +
       '</div>';
   }
-
+ 
   function showNoUserMessage() {
     if (!state.container) return;
     removeLoadingSkeleton();
@@ -547,7 +611,7 @@
         '<p style="font-size:14px;color:#7a8ba8;">Bitte melde dich erneut an oder kontaktiere den Support.</p>' +
       '</div>';
   }
-
+ 
   function showEmptyState() {
     if (!state.container) return;
     removeLoadingSkeleton();
@@ -557,16 +621,16 @@
         '<p style="margin:0;font-size:14px;">Starte deine erste Analyse!</p>' +
       '</div>';
   }
-
+ 
   // Skeleton beim Scriptstart setzen - verhindert dass Webflow-Platzhalter sichtbar werden
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', showDashboardSkeletons);
   } else {
     showDashboardSkeletons();
   }
-
-  // -- UI: Sticky header ------------------------------------------------------
-
+ 
+  // -- UI: Sticky header --------------------------------------------------------
+ 
   function fixStickyHeader() {
     var header = document.querySelector('.analysis-row-header');
     if (!header) return;
@@ -588,7 +652,7 @@
     header.style.zIndex          = '100';
     header.style.backgroundColor = '#0d1117';
   }
-
+ 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', fixStickyHeader);
   } else {
@@ -596,9 +660,9 @@
   }
   setTimeout(fixStickyHeader, 500);
   setTimeout(fixStickyHeader, 1500);
-
-  // -- UI: Pagination ---------------------------------------------------------
-
+ 
+  // -- UI: Pagination -------------------------------------------------------------
+ 
   function initPagination(container) {
     if (state.paginationEl) return;
     state.paginationEl = document.createElement('div');
@@ -616,7 +680,7 @@
     });
     updatePaginationInfo();
   }
-
+ 
   function updatePaginationInfo() {
     if (!state.paginationEl) return;
     var info    = state.paginationEl.querySelector('.pagination-info');
@@ -626,9 +690,9 @@
     prevBtn.disabled = state.currentPage <= 1;
     nextBtn.disabled = state.currentPage >= state.totalPages;
   }
-
-  // -- UI: Analysis rows ------------------------------------------------------
-
+ 
+  // -- UI: Analysis rows ----------------------------------------------------------
+ 
   function ensureHeaderExists(container) {
     var header = container.querySelector('.analysis-row-header');
     if (!header) {
@@ -647,20 +711,20 @@
     }
     return header;
   }
-
+ 
   var ICONS = {
     download: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0l-4-4m4 4l4-4" stroke="#e8edf5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="#e8edf5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     eye:      '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5C6.5 4.5 2.15 8 0.75 12c1.4 4 5.75 7.5 11.25 7.5s9.85-3.5 11.25-7.5C21.85 8 17.5 4.5 12 4.5z" fill="#e8edf5"/><circle cx="12" cy="12" r="3.2" fill="#252d3d"/></svg>',
     agent:    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="6" y="8" width="12" height="10" rx="2" fill="#e8edf5"/><circle cx="9" cy="12" r="1.5" fill="#252d3d"/><circle cx="15" cy="12" r="1.5" fill="#252d3d"/><rect x="10" y="15" width="4" height="1.5" rx="0.75" fill="#252d3d"/><rect x="11" y="4" width="2" height="4" rx="1" fill="#e8edf5"/><circle cx="12" cy="5" r="2" fill="#e8edf5"/></svg>',
   };
-
+ 
   var STATUS_MAP = {
     completed:  { text: 'Abgeschlossen', cls: 'status-completed' },
     processing: { text: 'In Bearbeitung', cls: 'status-processing' },
     error:      { text: 'Fehler',         cls: 'status-error' },
     failed:     { text: 'Fehler',         cls: 'status-error' },
   };
-
+ 
   // NEU: Score-Farblogik fuer overall_score_weighted
   // 8-10 = gruen, 6-7.9 = tuerkis, 4-5.9 = orange, 0-3.9 = rot
   function getScoreColor(score) {
@@ -669,7 +733,7 @@
     if (score >= 4)  return '#f59e0b';
     return '#ef4444';
   }
-
+ 
   function createScoreBadge(score) {
     var hasScore = typeof score === 'number' && !isNaN(score);
     var badge = document.createElement('div');
@@ -692,19 +756,19 @@
     }
     return badge;
   }
-
+ 
   function createAnalysisRow(analysis) {
     var isMobile    = window.innerWidth <= 768;
     var isCompleted = analysis.status === 'completed';
     var canDownload = isCompleted && canAccessPdf(analysis);
     var actionClass = isCompleted ? '' : 'action-disabled';
-
+ 
     // NEU: Ist der eingeloggte User der Ersteller dieser Analyse?
     // KI-Agent ist NUR fuer den Ersteller (Backend erzwingt das ohnehin via
     // verifyAnalysisOwnership -> 403 NOT_ANALYSIS_OWNER). Hier nur UX: Button sperren,
     // damit Team-Mitglieder gar nicht erst auf einen Button klicken, der ablehnt.
     var isCreator = !!state.supabaseUserId && analysis.user_id === state.supabaseUserId;
-
+ 
     var statusInfo  = STATUS_MAP[analysis.status] || STATUS_MAP.completed;
     var formattedDate = '-';
     try {
@@ -712,25 +776,25 @@
         day: '2-digit', month: '2-digit', year: 'numeric'
       });
     } catch (e) {}
-
+ 
     var downloadTitle = !isCompleted
       ? 'Analyse muss abgeschlossen sein'
       : !canAccessPdf(analysis)
         ? 'PDF-Report nur fuer kostenpflichtige Plaene oder Pay-per-Use verfuegbar'
         : 'Report herunterladen';
-
+ 
     var dlBtnHtml =
       '<button class="aktion-link download-link ' + (canDownload ? '' : 'action-disabled') + '"' +
       ' aria-label="Report herunterladen" title="' + escapeHtml(downloadTitle) + '"' +
       (canDownload ? '' : ' disabled') + '>' + ICONS.download + '</button>';
-
+ 
     // KI-Agent: bekommt zusaetzlich action-disabled, wenn nicht abgeschlossen ODER nicht Ersteller
     var agentEnabled   = isCompleted && isCreator;
     var agentClass     = agentEnabled ? '' : 'action-disabled';
-
+ 
     var row = document.createElement('div');
     row.className = 'table-list';
-
+ 
     if (isMobile) {
       row.innerHTML =
         '<div class="analysis-url"><div class="text-block-url"></div></div>' +
@@ -754,7 +818,7 @@
         '<div class="action-cell">' + dlBtnHtml + '</div>' +
         '<div class="analysis-score" style="display:flex;align-items:center;justify-content:center;"></div>';
     }
-
+ 
     // XSS-safe: User-Daten per textContent
     var maxUrl     = isMobile ? 40 : 70;
     var maxKeyword = isMobile ? 25 : 40;
@@ -762,20 +826,20 @@
     row.querySelector('.text-block-keyword').textContent = truncate(analysis.keyword, maxKeyword);
     row.querySelector('.status-badge').textContent       = statusInfo.text;
     row.querySelector('.text-block-date').textContent    = formattedDate;
-
+ 
     // NEU: Score-Badge einfuegen (overall_score_weighted)
     var scoreVal = parseFloat(analysis.overall_score_weighted);
     row.querySelector('.analysis-score').appendChild(createScoreBadge(scoreVal));
-
+ 
     // Links per href (kein innerHTML)
     var links = row.querySelectorAll('a.aktion-link');
-
+ 
     // links[0] = Ansicht (Report) -> fuer alle Team-Mitglieder verfuegbar
     if (links[0]) {
       links[0].href = '/analyse/resultat?id=' + encodeURIComponent(analysis.id);
       if (!isCompleted) links[0].title = 'Analyse ist noch nicht abgeschlossen';
     }
-
+ 
     // links[1] = KI-Agent -> nur Ersteller + nur wenn abgeschlossen
     if (links[1]) {
       if (agentEnabled) {
@@ -790,18 +854,18 @@
         links[1].addEventListener('click', function (e) { e.preventDefault(); });
       }
     }
-
+ 
     if (canDownload) {
       var dlBtn = row.querySelector('.download-link');
       if (dlBtn) dlBtn.addEventListener('click', function () { handleReportDownload(dlBtn, analysis.id); });
     }
-
+ 
     return row;
   }
-
+ 
   function renderAnalysesPage(container, page) {
     state.currentPage = page;
-
+ 
     // Header sicherstellen und explizit sichtbar machen
     var header = ensureHeaderExists(container);
     if (header) {
@@ -809,10 +873,10 @@
       header.style.visibility = '';
       header.style.opacity    = '';
     }
-
+ 
     // Alte Rows entfernen
     container.querySelectorAll('.table-list').forEach(function (r) { r.remove(); });
-
+ 
     // Neue Rows einfuegen - FIX: explizites display/visibility/opacity fuer mobile Webflow-CSS
     var items = state.analysesData.slice((page - 1) * CONFIG.PAGE_SIZE, page * CONFIG.PAGE_SIZE);
     items.forEach(function (item) {
@@ -823,18 +887,18 @@
       row.style.opacity    = '';
       container.appendChild(row);
     });
-
+ 
     updatePaginationInfo();
   }
-
-  // -- UI: Dots loader --------------------------------------------------------
-
+ 
+  // -- UI: Dots loader ------------------------------------------------------------
+ 
   function showDotsLoader() {
     if (!state.container || document.getElementById('cvz-dots-loader')) return;
     state.container.querySelectorAll('.table-list').forEach(function (r) { r.style.opacity = '0.4'; });
     state.container.insertAdjacentHTML('afterbegin', CVZ_DOTS_LOADER);
   }
-
+ 
   function hideDotsLoader() {
     var loader = document.getElementById('cvz-dots-loader');
     if (loader) loader.remove();
@@ -842,42 +906,42 @@
       state.container.querySelectorAll('.table-list').forEach(function (r) { r.style.opacity = ''; });
     }
   }
-
+ 
   // -- Data load & render -----------------------------------------------------
-
+ 
   async function loadAndRenderAnalyses(keepPage) {
     if (!state.container || !state.memberstackId) { showEmptyState(); return; }
     if (keepPage) showDotsLoader();
-
+ 
     var data         = await fetchAnalysesForMember(state.memberstackId);
     state.analysesData = data || [];
     state.totalPages   = Math.max(1, Math.ceil(state.analysesData.length / CONFIG.PAGE_SIZE));
-
+ 
     hideDotsLoader();
-
+ 
     if (!state.analysesData.length) { showEmptyState(); return; }
     removeLoadingSkeleton();
     state.currentPage = keepPage ? Math.min(state.currentPage, state.totalPages) : 1;
     renderAnalysesPage(state.container, state.currentPage);
   }
-
+ 
   // -- PDF download -----------------------------------------------------------
-
+ 
   async function triggerBlobDownload(url, fileName) {
     var res = await fetch(url);
-
+ 
     if (!res.ok) {
       var errText = await res.text();
       throw new Error('Download fehlgeschlagen (' + res.status + '): ' + errText.slice(0, 200));
     }
-
+ 
     // Storage liefert bei Fehlern JSON statt PDF - abfangen bevor es als .pdf landet
     var contentType = res.headers.get('content-type') || '';
     if (contentType.indexOf('application/json') !== -1) {
       var body = await res.text();
       throw new Error('Unerwartete Antwort: ' + body.slice(0, 200));
     }
-
+ 
     var blob    = await res.blob();
     var blobUrl = URL.createObjectURL(blob);
     var a = document.createElement('a');
@@ -888,16 +952,16 @@
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 5000);
   }
-
+ 
   async function handleReportDownload(btn, analysisId) {
     if (!state.supabaseUserId) return;
     var analysis = state.analysesData.find(function (a) { return a.id === analysisId; });
     if (!analysis || !canAccessPdf(analysis)) return;
-
+ 
     var isAgency = (state.licenseType || '').toLowerCase() === 'agency';
     btn.classList.add('loading');
     btn.title = 'Wird generiert...';
-
+ 
     try {
       var domain = 'report', datetime = '';
       try {
@@ -905,10 +969,10 @@
         var d    = new Date(analysis.created_at);
         datetime = '-' + d.toISOString().slice(0, 10) + '-' + d.toISOString().slice(11, 16).replace(':', '-');
       } catch (e) {}
-
+ 
       var ext      = isAgency ? 'docx' : 'pdf';
       var fileName = 'convertlyze-' + domain + datetime + '.' + ext;
-
+ 
       var response = await fetch(
         CONFIG.generateReportUrl,
         {
@@ -928,13 +992,13 @@
         var err = await response.json();
         throw new Error(err.error || 'Generierung fehlgeschlagen');
       }
-
+ 
       var downloadUrl = (await response.json()).downloadUrl;
-
+ 
       await triggerBlobDownload(downloadUrl, fileName);
       btn.classList.remove('loading');
       btn.title = 'Report herunterladen';
-
+ 
     } catch (err) {
       console.error('[CVZ] Report-Download Fehler:', err);
       btn.classList.remove('loading');
@@ -943,21 +1007,21 @@
       setTimeout(function () { btn.style.backgroundColor = ''; }, 2500);
     }
   }
-
+ 
   // -- Realtime + Polling -----------------------------------------------------
-
+ 
   // WHY Polling als Fallback: Supabase Realtime kann bei Verbindungsproblemen
   // ausfallen. Polling alle 10s stellt sicher dass Status-Updates ankommen.
   // Polling stoppt automatisch wenn keine Analysen mehr processing sind.
   function hasProcessingAnalyses() {
     return state.analysesData.some(function (a) { return a.status === 'processing'; });
   }
-
+ 
   async function silentRefresh() {
     if (!state.memberstackId) return;
     var freshData = await fetchAnalysesForMember(state.memberstackId);
     if (!freshData) return;
-
+ 
     var changed = false;
     freshData.forEach(function (fresh) {
       var idx = state.analysesData.findIndex(function (a) { return a.id === fresh.id; });
@@ -967,15 +1031,15 @@
         return;
       }
       if (state.analysesData[idx].status === fresh.status) return;
-
+ 
       state.analysesData[idx] = fresh;
       changed = true;
-
+ 
       var row = state.container
         ? state.container.querySelector('[data-analysis-id="' + fresh.id + '"]')
         : null;
       if (!row) return;
-
+ 
       // Status-Badge direkt patchen
       var badge    = row.querySelector('.status-badge');
       var newInfo  = STATUS_MAP[fresh.status] || STATUS_MAP.completed;
@@ -990,24 +1054,24 @@
         row.parentNode.replaceChild(newRow, row);
       }
     });
-
+ 
     if (changed) {
       state.totalPages = Math.max(1, Math.ceil(state.analysesData.length / CONFIG.PAGE_SIZE));
       updatePaginationInfo();
     }
     if (!hasProcessingAnalyses()) stopPolling();
   }
-
+ 
   function startPolling() {
     stopPolling();
     if (!hasProcessingAnalyses()) return;
     state.pollingTimer = setInterval(silentRefresh, CONFIG.POLL_INTERVAL_MS);
   }
-
+ 
   function stopPolling() {
     if (state.pollingTimer) { clearInterval(state.pollingTimer); state.pollingTimer = null; }
   }
-
+ 
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
       stopPolling();
@@ -1015,7 +1079,7 @@
       silentRefresh().then(startPolling);
     }
   });
-
+ 
   function subscribeToAnalysisChanges(userId) {
     try {
       if (!window.supabase || !window.supabase.channel) return;
@@ -1034,18 +1098,18 @@
       console.warn('[CVZ] Realtime-Subscription fehlgeschlagen:', e);
     }
   }
-
+ 
   // -- Init -------------------------------------------------------------------
-
+ 
   async function initDashboard() {
     try {
       var ready = await waitForDependencies();
       if (!ready) return;
-
+ 
       var firstTableList = document.querySelector('.table-list');
       state.container    = firstTableList ? firstTableList.parentElement : null;
       if (state.container) showLoadingSkeleton();
-
+ 
       var memberstackId = null;
       try {
         var member    = await window.$memberstackDom.getCurrentMember();
@@ -1053,22 +1117,22 @@
       } catch (e) {
         console.error('[CVZ] Memberstack Fehler:', e);
       }
-
+ 
       if (!memberstackId) {
         if (state.container) showNoUserMessage();
         document.body.classList.add('content-loaded');
         return;
       }
-
+ 
       state.memberstackId = memberstackId;
-
+ 
       // Checkout aus sessionStorage
       var savedPlan       = sessionStorage.getItem('selected_plan');
       var savedBilling    = sessionStorage.getItem('selected_billing') || 'monthly';
       var checkoutPriceId = (savedPlan && CONFIG.CHECKOUT_PRICE_IDS[savedPlan]) ? CONFIG.CHECKOUT_PRICE_IDS[savedPlan][savedBilling] : null;
       sessionStorage.removeItem('selected_plan');
       sessionStorage.removeItem('selected_billing');
-
+ 
       if (checkoutPriceId) {
         window.$memberstackDom.purchasePlansWithCheckout({
           priceId:    checkoutPriceId,
@@ -1076,31 +1140,31 @@
         }).catch(function () { document.documentElement.style.visibility = 'visible'; });
         return;
       }
-
+ 
       document.documentElement.style.visibility = 'visible';
-
-      // -- Purchase Success Modal -------------------------------------------
+ 
+      // -- Purchase Success Modal --------------------------------------------
       var isPurchaseSuccess = getParam('purchase') === 'success';
       if (isPurchaseSuccess) {
         window.history.replaceState({}, document.title, window.location.pathname);
       }
-
+ 
       var currentUser = await fetchUser(memberstackId, 1) || await fetchUser(memberstackId, 5);
       if (!currentUser) {
         if (state.container) showNoUserMessage();
         document.body.classList.add('content-loaded');
         return;
       }
-
+ 
       state.supabaseUserId = currentUser.id;
       state.licenseType    = (currentUser._billingUser || currentUser).license_type || '';
       state.hasPdfAccess   = checkPdfAccess(currentUser);
-
+ 
       // Modal nach fetchUser zeigen, damit Plan-Name verfuegbar ist
       if (isPurchaseSuccess) {
         showPurchaseSuccessModal(state.licenseType);
       }
-
+ 
       // Team-Invite annehmen
       var pendingInvite = getCookie('cvz_invite');
       if (pendingInvite) {
@@ -1122,43 +1186,46 @@
           console.error('[CVZ] Team-Invite Fehler:', e);
         }
       }
-
+ 
       // Credit-Reset
       if (await triggerCreditResetIfPaid(currentUser)) {
         currentUser = await fetchUser(memberstackId, 1) || currentUser;
       }
-
-      renderUserDashboard(currentUser);
-
+ 
+      // NEU: Aufbau-Sessions-Kontingent des Plans laden (plans.page_agent_sessions_limit)
+      var sessionsLimit = await fetchPlanSessionsLimit(state.licenseType);
+ 
+      renderUserDashboard(currentUser, sessionsLimit);
+ 
       if (state.container) {
         initPagination(state.container);
         await loadAndRenderAnalyses(false);
         subscribeToAnalysisChanges(currentUser.id);
         startPolling();
       }
-
+ 
       document.body.classList.add('content-loaded');
-
+ 
     } catch (err) {
       console.error('[CVZ] Dashboard-Fehler:', err);
       document.body.classList.add('content-loaded');
     }
   }
-
+ 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initDashboard);
   } else {
     initDashboard();
   }
-
+ 
 })();
-
+ 
 // ==================== PAY-PER-USE BUTTON ====================
 (function () {
   'use strict';
-
+ 
   var PAY_PER_USE_PRICE_ID = 'prc_pay-per-use-14750y0n';
-
+ 
   function retry(fn, maxAttempts, intervalMs) {
     var attempts = 0;
     return new Promise(function (resolve, reject) {
@@ -1169,7 +1236,7 @@
       })();
     });
   }
-
+ 
   function initPPUButton() {
     document.querySelectorAll(
       '[data-plan-upgrade="' + PAY_PER_USE_PRICE_ID + '"], [data-upgrade-plan="' + PAY_PER_USE_PRICE_ID + '"]'
@@ -1186,17 +1253,18 @@
       });
     });
   }
-
+ 
   function init() {
     retry(function () { return !!window.$memberstackDom; }, 10, 500)
       .then(initPPUButton)
       .catch(function () { console.warn('[CVZ] PPU: Memberstack nicht geladen.'); });
   }
-
+ 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
-
+ 
 })();
+ 
