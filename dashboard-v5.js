@@ -189,7 +189,7 @@
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       var result = await window.supabase
         .from('users')
-        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, page_agent_sessions_used_current_period')
+        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, page_agent_sessions_used_current_period, page_agent_sessions_period_start')
         .eq('memberstack_id', memberstackId)
         .single();
  
@@ -197,7 +197,7 @@
         if (result.data.owner_user_id) {
           var ownerResult = await window.supabase
             .from('users')
-            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price, page_agent_sessions_used_current_period')
+            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price, page_agent_sessions_used_current_period, page_agent_sessions_period_start')
             .eq('id', result.data.owner_user_id)
             .single();
           if (ownerResult.data) result.data._billingUser = ownerResult.data;
@@ -414,11 +414,12 @@
  
     root.innerHTML =
       '<div class="cvz-d-stats">' +
-        statCardHtml({ wrapperId: 'cvz-d-c1', iconKey: 'barChart', label: 'Analysen diesen Monat', valueId: 'cvz-d-c1-value', subId: 'cvz-d-c1-sub', withBar: true, barFillId: 'cvz-d-c1-bar' }) +
-        statCardHtml({ wrapperId: 'cvz-d-c2', iconKey: 'check',    label: 'Verbleibende Analysen',  valueId: 'cvz-d-c2-value', subId: 'cvz-d-c2-sub', withBar: false }) +
-        statCardHtml({ wrapperId: 'cvz-d-c3', iconKey: 'plan',     label: 'Aktiver Plan',            valueId: 'cvz-d-c3-value', subId: 'cvz-d-c3-sub', withBar: false }) +
-        statCardHtml({ wrapperId: 'cvz-d-c4', iconKey: 'cart',     label: 'Pay-per-Use Analysen',    valueId: 'cvz-d-c4-value', subId: 'cvz-d-c4-sub', withBar: false, hidden: true }) +
-        statCardHtml({ wrapperId: 'cvz-d-c5', iconKey: 'aufbau',   label: 'Aufbau-Sessions',         valueId: 'cvz-d-c5-value', subId: 'cvz-d-c5-sub', withBar: true, barFillId: 'cvz-d-c5-bar', hidden: true }) +
+        statCardHtml({ wrapperId: 'cvz-d-c1', iconKey: 'barChart', label: 'Analysen diesen Monat',        valueId: 'cvz-d-c1-value', subId: 'cvz-d-c1-sub', withBar: true, barFillId: 'cvz-d-c1-bar' }) +
+        statCardHtml({ wrapperId: 'cvz-d-c2', iconKey: 'check',    label: 'Verbleibende Analysen',         valueId: 'cvz-d-c2-value', subId: 'cvz-d-c2-sub', withBar: false }) +
+        statCardHtml({ wrapperId: 'cvz-d-c3', iconKey: 'plan',     label: 'Aktiver Plan',                   valueId: 'cvz-d-c3-value', subId: 'cvz-d-c3-sub', withBar: false }) +
+        statCardHtml({ wrapperId: 'cvz-d-c4', iconKey: 'aufbau',   label: 'Aufbau-Sessions diesen Monat',   valueId: 'cvz-d-c4-value', subId: 'cvz-d-c4-sub', withBar: true, barFillId: 'cvz-d-c4-bar', hidden: true }) +
+        statCardHtml({ wrapperId: 'cvz-d-c5', iconKey: 'check',    label: 'Verbleibende Aufbau-Sessions',  valueId: 'cvz-d-c5-value', subId: 'cvz-d-c5-sub', withBar: false, hidden: true }) +
+        statCardHtml({ wrapperId: 'cvz-d-c6', iconKey: 'cart',     label: 'Pay-per-Use Analysen',          valueId: 'cvz-d-c6-value', subId: 'cvz-d-c6-sub', withBar: false, hidden: true }) +
       '</div>' +
       '<div class="cvz-d-actions">' +
         '<a id="cvz-d-btn-new-analysis" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">Neue Analyse</a>' +
@@ -532,7 +533,37 @@
       ? (isPaid ? limit + ' Analysen pro Monat' : isPayPerUse ? '1 Analyse, kein Abo' : limit + ' Analyse(n)')
       : '');
  
-    // Karte 4: Pay-per-Use (nur wenn vorhanden)
+    // Karte 4+5: Aufbau-Sessions (nur wenn Plan ueberhaupt Kontingent hat), im gleichen
+    // Zwei-Karten-Muster wie die Analysen (Verbrauch diesen Monat + Verbleibend).
+    // WHY eigenes Reset-Datum: Aufbau-Sessions laufen auf einer eigenen Periode
+    // (page_agent_sessions_period_start), nicht auf der Analysen-Credits-Periode.
+    var sessionsUsed     = Math.round(Number(bu.page_agent_sessions_used_current_period || 0));
+    var sessionsLimitNum = Math.round(Number(sessionsLimit || 0));
+    var sessionsLeft     = Math.max(sessionsLimitNum - sessionsUsed, 0);
+    var sessionsPercent  = sessionsLimitNum ? (sessionsUsed / sessionsLimitNum) * 100 : 0;
+    var showAufbauCards  = sessionsLimitNum > 0;
+ 
+    setText('cvz-d-c4-value', sessionsUsed + '/' + sessionsLimitNum + ' Aufbau-Sessions');
+    setText('cvz-d-c4-sub', Math.round(sessionsPercent) + '% des Kontingents genutzt');
+    var bar4 = document.getElementById('cvz-d-c4-bar');
+    if (bar4) bar4.style.width = Math.min(sessionsPercent, 100) + '%';
+    showEl(document.getElementById('cvz-d-c4'), showAufbauCards, 'flex');
+ 
+    var aufbauRenewalSub = '';
+    if (isFreePlan) {
+      aufbauRenewalSub = sessionsLeft > 0 ? '1 kostenlose Aufbau-Session verfügbar' : 'Kostenlose Aufbau-Session bereits genutzt';
+    } else if (bu.page_agent_sessions_period_start) {
+      var aufbauRenewalDate = new Date(bu.page_agent_sessions_period_start);
+      aufbauRenewalDate.setMonth(aufbauRenewalDate.getMonth() + 1);
+      aufbauRenewalSub = 'Erneuert sich am ' + aufbauRenewalDate.toLocaleDateString('de-DE');
+    } else {
+      aufbauRenewalSub = '-';
+    }
+    setText('cvz-d-c5-value', sessionsLeft);
+    setText('cvz-d-c5-sub', aufbauRenewalSub);
+    showEl(document.getElementById('cvz-d-c5'), showAufbauCards, 'flex');
+ 
+    // Karte 6: Pay-per-Use (nur wenn vorhanden)
     var ppuLabelText = ppuCredits === 0
       ? 'Keine Pay-per-Use Analysen'
       : ppuReserved > 0 && ppuAvailable === 0
@@ -540,24 +571,9 @@
         : ppuReserved > 0
           ? ppuAvailable + ' verfügbar (' + ppuReserved + ' in Bearbeitung)'
           : ppuCredits + ' Pay-per-Use Analyse' + (ppuCredits > 1 ? 'n' : '') + ' verfügbar';
-    setText('cvz-d-c4-value', ppuAvailable);
-    setText('cvz-d-c4-sub', ppuLabelText);
-    showEl(document.getElementById('cvz-d-c4'), ppuCredits > 0, 'flex');
- 
-    // Karte 5: Aufbau-Sessions (nur wenn Plan ueberhaupt Kontingent hat)
-    var sessionsUsed     = Math.round(Number(bu.page_agent_sessions_used_current_period || 0));
-    var sessionsLimitNum = Math.round(Number(sessionsLimit || 0));
-    var sessionsLeft     = Math.max(sessionsLimitNum - sessionsUsed, 0);
-    var sessionsPercent  = sessionsLimitNum ? (sessionsUsed / sessionsLimitNum) * 100 : 0;
- 
-    setText('cvz-d-c5-value', sessionsUsed + '/' + sessionsLimitNum + ' Aufbau-Sessions');
-    var aufbauSub = isFreePlan
-      ? (sessionsLeft > 0 ? '1 kostenlose Aufbau-Session verfügbar' : 'Kostenlose Aufbau-Session bereits genutzt')
-      : (Math.round(sessionsPercent) + '% des Kontingents genutzt');
-    setText('cvz-d-c5-sub', aufbauSub);
-    var bar5 = document.getElementById('cvz-d-c5-bar');
-    if (bar5) bar5.style.width = Math.min(sessionsPercent, 100) + '%';
-    showEl(document.getElementById('cvz-d-c5'), sessionsLimitNum > 0, 'flex');
+    setText('cvz-d-c6-value', ppuAvailable);
+    setText('cvz-d-c6-sub', ppuLabelText);
+    showEl(document.getElementById('cvz-d-c6'), ppuCredits > 0, 'flex');
  
     // User-Kopfbereich (weiterhin Webflow-Elemente, unveraendert)
     setUserHeader(user);
