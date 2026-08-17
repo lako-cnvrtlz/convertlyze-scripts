@@ -135,7 +135,7 @@ function cvzRenderQuotaBanner() {
       : '';
     banner.textContent = `Kein Sessions-Kontingent mehr verfügbar (0 von ${cvzQuota.limit}).${resetHint}`;
   } else {
-    banner.textContent = `${cvzQuota.remaining} von ${cvzQuota.limit} Sessions in diesem Monat verfügbar.`;
+    banner.textContent = `${cvzQuota.remaining} von ${cvzQuota.limit} Sessions in diesem Monat verf\u00FCgbar.`;
   }
 }
 
