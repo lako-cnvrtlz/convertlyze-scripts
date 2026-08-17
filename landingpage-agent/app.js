@@ -1136,33 +1136,70 @@ async function cvzPollTurnStatus(turnId) {
 }
  
 // ==================== LAUNCH ====================
+ 
+// ==================== FORTSCHRITTS-TEXTE (zeitbasiert statt fester 20s-Takt) ====================
+// GEÄNDERT (siehe Chat-Begründung): Vorher rückte die Nachricht alle 20s
+// weiter, unabhängig von der Array-Länge - bei 4 Einträgen stand nach 80s
+// bereits die LETZTE Nachricht ("Fast durch...") fest, obwohl der Kickoff
+// real typischerweise ~350s dauert. Jetzt trägt jede Nachricht einen eigenen
+// "ab wann sichtbar"-Zeitpunkt (Sekunden), an der tatsächlichen typischen
+// Dauer ausgerichtet. "Fast fertig"-Formulierungen stehen jetzt bewusst erst
+// kurz vor den üblichen ~350s, nicht mehr pauschal nach 80s.
+//
+// Format: { at: Sekunden-Schwelle, text: Anzeigetext }
+// Die Liste MUSS nach "at" aufsteigend sortiert sein.
 const CVZ_KICKOFF_MESSAGES = [
-  'Hier wird die nächsten 2-3 Minuten malocht. Hol dir in der Zeit gerne einen Kaffee',
-  'Kaffee schon geholt? Wir wühlen noch in Keywords und Wettbewerbern',
-  'Buying-Center-Rollen werden einsortiert',
-  'Fast durch, letzte Erkenntnisse werden zusammengetragen'
+  { at: 8,   text: 'Hier wird die nächsten Minuten malocht. Hol dir in der Zeit gerne einen Kaffee' },
+  { at: 30,  text: 'Keyword-Daten und Suchintent werden geprüft' },
+  { at: 70,  text: 'Kaffee schon geholt? Wir wühlen noch in Wettbewerber-Seiten' },
+  { at: 120, text: 'Buying-Center-Rollen werden einsortiert' },
+  { at: 180, text: 'Content-Gap-Analyse läuft' },
+  { at: 250, text: 'Letzte Erkenntnisse werden zusammengetragen' },
+  { at: 320, text: 'Fast durch, gleich ist die Analyse fertig' },
+  { at: 420, text: 'Läuft noch - bei umfangreichen Briefings kann das schon mal 6-7 Minuten dauern' },
+  { at: 600, text: 'Braucht in diesem Fall spürbar länger als sonst, bitte noch etwas Geduld' }
 ];
+ 
+// Struktur-Turns sind erfahrungsgemäß deutlich kürzer (2-3 Minuten) als der
+// Kickoff, deshalb eigene, engere Schwellen.
 const CVZ_STRUCTURE_MESSAGES = [
-  'Denkt nach',
-  'Baut Sektion für Sektion auf',
-  'Bei einer kompletten Seite dauert das schon mal 2-3 Minuten',
-  'Feilt an Überschriften und Trust-Signalen',
-  'Fast fertig, letzte Handgriffe'
+  { at: 8,   text: 'Denkt nach' },
+  { at: 20,  text: 'Baut Sektion für Sektion auf' },
+  { at: 45,  text: 'Bei einer kompletten Seite dauert das schon mal 2 bis 3 Minuten' },
+  { at: 90,  text: 'Feilt an Überschriften und Trust-Signalen' },
+  { at: 140, text: 'Fast fertig, letzte Handgriffe' },
+  { at: 200, text: 'Läuft noch - bei umfangreichen Strukturen kann das etwas länger dauern' }
 ];
+ 
+// Wählt die Nachricht, deren "at"-Schwelle zuletzt unterschritten wurde -
+// also die "aktuellste" für die verstrichene Zeit. Vor der ersten Schwelle
+// (elapsedSec < messages[0].at) wird baseText verwendet, nicht die erste
+// Nachricht - das entspricht dem bisherigen Verhalten (baseText für die
+// ersten paar Sekunden).
+function cvzPickTimedMessage(messages, elapsedSec) {
+  let chosen = null;
+  for (const entry of messages) {
+    if (elapsedSec >= entry.at) chosen = entry;
+    else break; // Liste ist aufsteigend sortiert, weitere Einträge liegen noch in der Zukunft
+  }
+  return chosen;
+}
  
 function cvzStartProgressTicker(baseText, messages, onUpdate) {
   const startTime = Date.now();
-  let msgIndex = 0;
   const tick = () => {
     const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
-    let text = elapsedSec >= 8 ? `${messages[Math.min(msgIndex, messages.length - 1)]} …` : baseText;
+    const picked = cvzPickTimedMessage(messages, elapsedSec);
+    let text = picked ? `${picked.text} …` : baseText;
     if (elapsedSec >= 30) text += ` (${elapsedSec}s)`;
     onUpdate(text);
   };
   tick();
-  const messageTimer = setInterval(() => { msgIndex++; }, 20000);
   const tickTimer = setInterval(tick, 1000);
-  return () => { clearInterval(messageTimer); clearInterval(tickTimer); };
+  // Kein separater messageTimer mehr nötig - cvzPickTimedMessage wertet
+  // elapsedSec bei jedem tick() (jede Sekunde) direkt neu aus, statt in
+  // einem festen 20s-Takt unabhängig hochzuzählen.
+  return () => { clearInterval(tickTimer); };
 }
  
 let cvzLoadingStopTicker = null;
@@ -1243,7 +1280,7 @@ async function cvzLaunch() {
       throw new Error(err.error + (err.missing_fields ? ` (${err.missing_fields.join(', ')})` : ''));
     }
  
-    cvzShowLoading('Hier wird die nächsten 2-3 Minuten malocht. Hol dir in der Zeit gerne einen Kaffee …');
+    cvzShowLoading('Hier wird die nächsten Minuten malocht. Hol dir in der Zeit gerne einen Kaffee …');
     const sessionRes = await fetch(`${API_BASE}/api/page-agent/start-session`, {
       method: 'POST', headers,
       body: JSON.stringify({ user_id: userId, page_project_id })
