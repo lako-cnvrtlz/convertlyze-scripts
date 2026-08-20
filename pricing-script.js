@@ -1,37 +1,32 @@
 (function () {
   'use strict';
-
   // ── Konfiguration ────────────────────────────────────────────────────────────
-
   var CONFIG = {
     supabaseUrl:     'https://zpkifipmyeunorhtepzq.supabase.co',
     supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU',
     ppuPriceIds: [
-  'prc_pay-per-use-14750y0n',
-  'prc_pay-per-use-5-analysen--el1dg0ay4',
-  'prc_pay-per-use-10-analysen-131g30jzh',
-  'prc_pay-per-use-aufbau-1--ad1fj0jrg',
-  'prc_pay-per-use-aufbau-5--mq1hg07on',
-  'prc_pay-per-use-aufbau-10--7g1dk0atm',
-],
-priceIds: {
-  'starter':     { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
-  'pro':         { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
-  'enterprise':  { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' },
-  'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      },
-  'analyse-5':   { monthly: 'prc_pay-per-use-5-analysen--el1dg0ay4', annual: 'prc_pay-per-use-5-analysen--el1dg0ay4' },
-  'analyse-10':  { monthly: 'prc_pay-per-use-10-analysen-131g30jzh', annual: 'prc_pay-per-use-10-analysen-131g30jzh' },
-  'aufbau-1':    { monthly: 'prc_pay-per-use-aufbau-1--ad1fj0jrg',   annual: 'prc_pay-per-use-aufbau-1--ad1fj0jrg'   },
-  'aufbau-5':    { monthly: 'prc_pay-per-use-aufbau-5--mq1hg07on',   annual: 'prc_pay-per-use-aufbau-5--mq1hg07on'   },
-  'aufbau-10':   { monthly: 'prc_pay-per-use-aufbau-10--7g1dk0atm',  annual: 'prc_pay-per-use-aufbau-10--7g1dk0atm'  },
-},
+      'prc_pay-per-use-14750y0n',
+      'prc_pay-per-use-5-analysen--el1dg0ay4',
+      'prc_pay-per-use-10-analysen-131g30jzh',
+      'prc_pay-per-use-aufbau-1--ad1fj0jrg',
+      'prc_pay-per-use-aufbau-5--mq1hg07on',
+      'prc_pay-per-use-aufbau-10--7g1dk0atm',
+    ],
+    priceIds: {
+      'starter':     { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
+      'pro':         { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
+      'enterprise':  { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' },
+      'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      },
+      'analyse-5':   { monthly: 'prc_pay-per-use-5-analysen--el1dg0ay4', annual: 'prc_pay-per-use-5-analysen--el1dg0ay4' },
+      'analyse-10':  { monthly: 'prc_pay-per-use-10-analysen-131g30jzh', annual: 'prc_pay-per-use-10-analysen-131g30jzh' },
+      'aufbau-1':    { monthly: 'prc_pay-per-use-aufbau-1--ad1fj0jrg',   annual: 'prc_pay-per-use-aufbau-1--ad1fj0jrg'   },
+      'aufbau-5':    { monthly: 'prc_pay-per-use-aufbau-5--mq1hg07on',   annual: 'prc_pay-per-use-aufbau-5--mq1hg07on'   },
+      'aufbau-10':   { monthly: 'prc_pay-per-use-aufbau-10--7g1dk0atm',  annual: 'prc_pay-per-use-aufbau-10--7g1dk0atm'  },
+    },
   };
-
   // Supabase-Client – wird in init() erstellt sobald SDK geladen ist
   var sb = null;
-
   // ── Utilities ────────────────────────────────────────────────────────────────
-
   function retry(fn, maxAttempts, intervalMs) {
     var attempts = 0;
     return new Promise(function (resolve, reject) {
@@ -42,13 +37,10 @@ priceIds: {
       })();
     });
   }
-
   function depsReady() {
     return !!window.$memberstackDom && !!window.supabase?.createClient;
   }
-
   // ── Data layer ───────────────────────────────────────────────────────────────
-
   async function fetchCurrentPriceId(memberstackId) {
     var res = await sb
       .from('users')
@@ -58,7 +50,6 @@ priceIds: {
     if (res.error) console.warn('[CVZ] fetchCurrentPriceId error:', res.error);
     return res.data?.current_price_id || null;
   }
-
   async function fetchStripePortalUrl(memberstackId) {
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/stripe-portal', {
       method:  'POST',
@@ -71,9 +62,7 @@ priceIds: {
     var data = await res.json();
     return data?.url || null;
   }
-
   // ── UI: Pricing Toggle ───────────────────────────────────────────────────────
-
   function initPricingToggle() {
     var switcher = document.querySelector('.switcher');
     var leftBtn  = document.querySelector('.switch .left');
@@ -81,13 +70,11 @@ priceIds: {
     var monthly  = document.querySelector('.monthly');
     var annually = document.querySelector('.annually');
     if (!switcher || !monthly || !annually) return;
-
     var switchContainer = document.querySelector('.switch');
     if (switchContainer) {
       switchContainer.style.position = 'relative';
       switchContainer.style.overflow = 'hidden';
     }
-
     switcher.style.position     = 'absolute';
     switcher.style.top          = '2px';
     switcher.style.left         = '2px';
@@ -96,11 +83,9 @@ priceIds: {
     switcher.style.transition   = 'transform 0.3s ease';
     switcher.style.zIndex       = '1';
     switcher.style.borderRadius = 'inherit';
-
     [leftBtn, rightBtn].forEach(function (b) {
       if (b) { b.style.position = 'relative'; b.style.zIndex = '2'; b.style.cursor = 'pointer'; }
     });
-
     function showMonthly() {
       monthly.style.display  = 'block';
       annually.style.display = 'none';
@@ -109,7 +94,6 @@ priceIds: {
       switcher.style.transform = 'translateX(0px)';
       switcher.classList.remove('is-annual');
     }
-
     function showAnnually() {
       monthly.style.display  = 'none';
       annually.style.display = 'block';
@@ -119,7 +103,6 @@ priceIds: {
       switcher.style.transform = 'translateX(' + offset + 'px)';
       switcher.classList.add('is-annual');
     }
-
     showMonthly();
     if (leftBtn)  leftBtn.addEventListener('click', showMonthly);
     if (rightBtn) rightBtn.addEventListener('click', showAnnually);
@@ -127,48 +110,36 @@ priceIds: {
       switcher.classList.contains('is-annual') ? showMonthly() : showAnnually();
     });
   }
-
   // ── UI: Modal ────────────────────────────────────────────────────────────────
-
   var Modal = (function () {
     var overlay, box;
-
     function build() {
       if (document.getElementById('cvz-modal')) return;
-
       overlay = document.createElement('div');
       overlay.id = 'cvz-modal';
       overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
       overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
-
       box = document.createElement('div');
       box.style.cssText = 'background:#0d1117;border:1px solid #2d3748;border-radius:12px;padding:32px;max-width:420px;width:90%;text-align:center;font-family:Geist,sans-serif';
-
       overlay.appendChild(box);
       document.body.appendChild(overlay);
     }
-
     function show(cfg) {
       if (!overlay || !box) return;
       box.innerHTML = '';
-
       var h = document.createElement('h3');
       h.textContent = cfg.title || '';
       h.style.cssText = 'color:#e8edf5;font-size:18px;font-weight:600;margin:0 0 12px';
-
       var p = document.createElement('p');
       p.textContent = cfg.text || '';
       p.style.cssText = 'color:#8b98a5;font-size:14px;line-height:1.6;margin:0 0 24px';
-
       var row = document.createElement('div');
       row.style.cssText = 'display:flex;gap:10px;justify-content:center';
-
       var closeBtn = document.createElement('button');
-      closeBtn.textContent = 'Schlie\u00dfen';
+      closeBtn.textContent = 'Schließen';
       closeBtn.style.cssText = 'background:#252d3d;color:#e8edf5;border:1px solid #2a3550;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:500;cursor:pointer';
       closeBtn.onclick = close;
       row.appendChild(closeBtn);
-
       if (cfg.confirmLabel && cfg.onConfirm) {
         var confirmBtn = document.createElement('button');
         confirmBtn.textContent = cfg.confirmLabel;
@@ -176,58 +147,50 @@ priceIds: {
         confirmBtn.onclick = function () { close(); cfg.onConfirm(); };
         row.appendChild(confirmBtn);
       }
-
       box.append(h, p, row);
       overlay.style.display = 'flex';
     }
-
     function close() {
       if (overlay) overlay.style.display = 'none';
     }
-
     function showMemberError() {
       show({
         title: 'Keine Berechtigung',
-        text:  'Plan-\u00c4nderungen k\u00f6nnen nur vom Account-Inhaber vorgenommen werden. Wende dich an deinen Administrator.',
+        text:  'Plan-Änderungen können nur vom Account-Inhaber vorgenommen werden. Wende dich an deinen Administrator.',
       });
     }
-
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', build);
     } else {
       build();
     }
-
     return { show: show, close: close, showMemberError: showMemberError };
   })();
-
   // Fuer externe Scripts zugaenglich machen (toast.js etc.)
   window.cvzShowModal       = Modal.show;
   window.cvzCloseModal      = Modal.close;
   window.cvzShowMemberModal = Modal.showMemberError;
-
   // ── UI: Plan Buttons ─────────────────────────────────────────────────────────
-
   function setBtnLoading(btn) {
     btn.dataset.originalText = btn.dataset.originalText || btn.textContent;
-    btn.textContent          = 'Wird geladen\u2026';
+    btn.textContent          = 'Wird geladen…';
     btn.style.opacity        = '0.6';
     btn.style.pointerEvents  = 'none';
   }
-
   function resetBtn(btn) {
-    btn.textContent         = btn.dataset.originalText || 'Plan w\u00e4hlen';
+    btn.textContent         = btn.dataset.originalText || 'Plan wählen';
     btn.style.opacity       = '1';
     btn.style.pointerEvents = 'auto';
   }
-
   async function handlePlanClick(btn, memberstackId, priceId) {
     setBtnLoading(btn);
-
     try {
       var currentPriceId = await fetchCurrentPriceId(memberstackId);
-      var isPPU          = priceId === CONFIG.ppuPriceId;
-
+      // BUGFIX: CONFIG.ppuPriceId (Singular) existierte nicht - isPPU war dadurch
+      // immer false. Jetzt Pruefung gegen das tatsaechliche Array ppuPriceIds,
+      // plus Unterscheidung Analyse- vs. Aufbau-PPU fuer den Erfolgs-Redirect.
+      var isPPU       = CONFIG.ppuPriceIds.indexOf(priceId) !== -1;
+      var isAufbauPPU = isPPU && priceId.indexOf('aufbau') !== -1;
       // PPU kann immer direkt gekauft werden - kein Portal noetig
       if (currentPriceId && !isPPU) {
         var portalUrl = await fetchStripePortalUrl(memberstackId);
@@ -237,46 +200,42 @@ priceIds: {
         }
         resetBtn(btn);
         Modal.show({
-          title: 'Fehler beim \u00d6ffnen',
-          text:  'Das Abrechnungsportal konnte nicht ge\u00f6ffnet werden. Bitte versuche es erneut oder kontaktiere den Support.',
+          title: 'Fehler beim Öffnen',
+          text:  'Das Abrechnungsportal konnte nicht geöffnet werden. Bitte versuche es erneut oder kontaktiere den Support.',
         });
         return;
       }
-
       resetBtn(btn);
+      var successPath = '/member/danke';
+      if (isAufbauPPU)      successPath = '/member/landingpage-assistant';
+      else if (isPPU)       successPath = '/analyse/formular';
       window.$memberstackDom.purchasePlansWithCheckout({
         priceId:    priceId,
-        successUrl: window.location.origin + (isPPU ? '/analyse/formular' : '/member/danke'),
+        successUrl: window.location.origin + successPath,
       }).catch(function (e) { console.error('[CVZ] Checkout error:', e); });
-
     } catch (e) {
       console.error('[CVZ] handlePlanClick error:', e);
       resetBtn(btn);
       Modal.show({
         title: 'Verbindungsfehler',
-        text:  'Es konnte keine Verbindung zum Server hergestellt werden. Bitte pr\u00fcfe deine Internetverbindung.',
+        text:  'Es konnte keine Verbindung zum Server hergestellt werden. Bitte prüfe deine Internetverbindung.',
       });
     }
   }
-
   async function initPlanButtons() {
     // Member-Status ermitteln - null wenn nicht eingeloggt
     var member        = await window.$memberstackDom.getCurrentMember();
     var memberstackId = member?.data?.id || null;
-
     // Handler immer anhaengen, unabhaengig vom Login-Status
     document.querySelectorAll('a[href*="/register?plan="]').forEach(function (btn) {
       btn.dataset.originalText = btn.textContent;
-
       btn.addEventListener('click', async function (e) {
         e.preventDefault();
-
         // Nicht eingeloggt → normaler Redirect auf Register
         if (!memberstackId) {
           window.location.href = btn.href;
           return;
         }
-
         // Eingeloggt → Plan-Flow
         var url        = new URL(btn.href);
         var plan       = url.searchParams.get('plan');
@@ -288,9 +247,7 @@ priceIds: {
       });
     });
   }
-
   // ── Init ─────────────────────────────────────────────────────────────────────
-
   function init() {
     initPricingToggle();
     retry(depsReady, 30, 300)
@@ -301,11 +258,9 @@ priceIds: {
       })
       .catch(function (err) { console.warn('[CVZ] Init failed:', err); });
   }
-
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
-
 })();
