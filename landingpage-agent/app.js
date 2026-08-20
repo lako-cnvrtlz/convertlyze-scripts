@@ -1,10 +1,10 @@
 // ==================== KONFIGURATION ====================
 const API_BASE = 'https://convertlyze-agent-api-production.up.railway.app';
- 
+
 // ==================== IDENTITÄT (echter Memberstack-Login) ====================
 let cvzMemberstackId = null;
 let cvzResolvedUserId = null;
- 
+
 function cvzAuthHeaders() {
   return {
     'Authorization': `Bearer ${cvzMemberstackId}`,
@@ -14,7 +14,7 @@ function cvzAuthHeaders() {
 function cvzUserId() {
   return cvzResolvedUserId;
 }
- 
+
 function cvzWaitForMemberstack(timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
@@ -26,22 +26,22 @@ function cvzWaitForMemberstack(timeoutMs = 5000) {
     check();
   });
 }
- 
+
 async function cvzResolveIdentity() {
   try {
     const memberstackDom = await cvzWaitForMemberstack();
     const { data: member } = await memberstackDom.getCurrentMember();
     if (!member) return false;
- 
+
     cvzMemberstackId = member.id;
- 
+
     const res = await fetch(`${API_BASE}/api/page-agent/me`, {
       headers: { 'Authorization': `Bearer ${cvzMemberstackId}` }
     });
     if (!res.ok) return false;
     const data = await res.json();
     if (!data.user_id) return false;
- 
+
     cvzResolvedUserId = data.user_id;
     return true;
   } catch (e) {
@@ -49,14 +49,22 @@ async function cvzResolveIdentity() {
     return false;
   }
 }
- 
+
 // ==================== SESSIONS-KONTINGENT (Anzeige vor Formularstart) ====================
 // NEU: zeigt vorab an, wie viele Sessions in diesem Monat noch verfügbar
 // sind, und sperrt den Weiter/Launch-Button, wenn nichts mehr uebrig ist.
 // Verhindert, dass jemand das komplette 4-Schritte-Formular ausfuellt und
 // erst beim finalen Launch-Klick den 402-Fehler sieht.
-let cvzQuota = { remaining: null, limit: null, recurring: null, next_reset: null };
- 
+//
+// GEÄNDERT: Sperr-Entscheidung beruht jetzt auf canStart (Plan-Kontingent
+// ODER gekaufte Aufbau-PPU-Credits), nicht mehr allein auf remaining
+// (Plan-Kontingent). Vorher wurde der Button hart gesperrt, sobald das
+// monatliche Kontingent aufgebraucht war - selbst wenn noch bezahlte
+// Aufbau-Pay-per-Use-Credits vorhanden waren, die /start-session laengst
+// als Fallback akzeptiert. Der servereitige /quota-Endpoint liefert dafuer
+// jetzt zusaetzlich ppu_aufbau_credits_available und can_start_session.
+let cvzQuota = { remaining: null, limit: null, recurring: null, next_reset: null, ppuAufbauAvailable: 0, canStart: null };
+
 async function cvzLoadQuota() {
   try {
     const res = await fetch(`${API_BASE}/api/page-agent/quota?user_id=${encodeURIComponent(cvzUserId())}`, {
@@ -68,21 +76,23 @@ async function cvzLoadQuota() {
       remaining: data.sessions_remaining,
       limit: data.sessions_limit,
       recurring: data.recurring,
-      next_reset: data.next_reset
+      next_reset: data.next_reset,
+      ppuAufbauAvailable: data.ppu_aufbau_credits_available ?? 0,
+      canStart: data.can_start_session ?? null
     };
   } catch (e) {
     console.error('Kontingent konnte nicht geladen werden:', e.message);
-    // Bei einem fehlgeschlagenen Quota-Request bleibt remaining=null - der
+    // Bei einem fehlgeschlagenen Quota-Request bleibt canStart=null - der
     // Button wird dann NICHT gesperrt (siehe cvzUpdateNextButtonState),
     // damit ein einzelner Netzwerkfehler niemanden aussperrt, der
     // tatsaechlich noch Kontingent haette. Die verbindliche Pruefung
     // passiert ohnehin serverseitig beim Launch-Request selbst.
-    cvzQuota = { remaining: null, limit: null, recurring: null, next_reset: null };
+    cvzQuota = { remaining: null, limit: null, recurring: null, next_reset: null, ppuAufbauAvailable: 0, canStart: null };
   }
   cvzRenderQuotaBanner();
   cvzUpdateNextButtonState();
 }
- 
+
 function cvzFormatNextReset(iso) {
   if (!iso) return '';
   try {
@@ -91,7 +101,7 @@ function cvzFormatNextReset(iso) {
     return '';
   }
 }
- 
+
 // Erstellt (beim ersten Aufruf) oder aktualisiert eine Banner-Zeile direkt
 // über dem Formular. Wird per JS eingehaengt statt fest ins HTML-Embed
 // geschrieben, damit diese Aenderung ohne Anpassung von frontend/embed.html
@@ -101,21 +111,26 @@ function cvzFormatNextReset(iso) {
 function cvzRenderQuotaBanner() {
   const formCard = document.getElementById('cvz-form-card');
   if (!formCard) return;
- 
+
   let banner = document.getElementById('cvz-quota-banner');
   if (!banner) {
     banner = document.createElement('div');
     banner.id = 'cvz-quota-banner';
     formCard.insertBefore(banner, formCard.firstChild);
   }
- 
+
   if (cvzQuota.remaining === null) {
     banner.style.display = 'none';
     banner.textContent = '';
     return;
   }
- 
-  const depleted = cvzQuota.remaining <= 0;
+
+  // depleted = wirklich nichts mehr verfuegbar, weder Plan-Kontingent noch
+  // gekaufte Aufbau-PPU-Credits. canStart===null (Request fehlgeschlagen)
+  // gilt bewusst NICHT als depleted, siehe Kommentar in cvzLoadQuota.
+  const depleted = cvzQuota.canStart === false;
+  const planDepletedButHasPpu = cvzQuota.remaining <= 0 && cvzQuota.ppuAufbauAvailable > 0;
+
   banner.style.display = 'block';
   banner.style.cssText = `
     display: block;
@@ -128,17 +143,19 @@ function cvzRenderQuotaBanner() {
     color: ${depleted ? 'var(--cvz-danger)' : 'var(--cvz-text-muted)'};
     background: var(--cvz-bg);
   `;
- 
+
   if (depleted) {
     const resetHint = cvzQuota.recurring && cvzQuota.next_reset
       ? ` Naechste Zuruecksetzung am ${cvzFormatNextReset(cvzQuota.next_reset)}.`
       : '';
     banner.textContent = `Kein Sessions-Kontingent mehr verfügbar (0 von ${cvzQuota.limit}).${resetHint}`;
+  } else if (planDepletedButHasPpu) {
+    banner.textContent = `Monatliches Kontingent aufgebraucht (0 von ${cvzQuota.limit}) - du hast aber noch ${cvzQuota.ppuAufbauAvailable} gekaufte Aufbau-Session${cvzQuota.ppuAufbauAvailable > 1 ? 's' : ''} übrig, die jetzt automatisch genutzt wird.`;
   } else {
-    banner.textContent = `${cvzQuota.remaining} von ${cvzQuota.limit} Sessions in diesem Monat verf\u00FCgbar.`;
+    banner.textContent = `${cvzQuota.remaining} von ${cvzQuota.limit} Sessions in diesem Monat verfügbar.`;
   }
 }
- 
+
 // Sperrt den Weiter/Launch-Button optisch UND funktional, solange kein
 // Kontingent mehr verfügbar ist. disabled=true allein wuerde in manchen
 // Browsern/Themes visuell kaum auffallen, deshalb zusätzlich Opacity und
@@ -147,14 +164,14 @@ function cvzRenderQuotaBanner() {
 function cvzUpdateNextButtonState() {
   const btn = document.getElementById('cvz-btn-next');
   if (!btn) return;
- 
-  const depleted = cvzQuota.remaining !== null && cvzQuota.remaining <= 0;
+
+  const depleted = cvzQuota.canStart === false;
   btn.disabled = depleted;
   btn.style.opacity = depleted ? '0.5' : '';
   btn.style.cursor = depleted ? 'not-allowed' : '';
   btn.title = depleted ? 'Kein Sessions-Kontingent mehr verfügbar in diesem Monat.' : '';
 }
- 
+
 // ==================== FORMULAR-STATE ====================
 const cvzState = {
   step: 0,
@@ -184,9 +201,9 @@ const cvzState = {
   filteredOutCompetitors: [],
   manualCompetitors: []
 };
- 
+
 const STEP_LABELS = ['Thema', 'Ziel', 'Angebot', 'Wettbewerber'];
- 
+
 function cvzRenderSteps() {
   const el = document.getElementById('cvz-steps');
   el.innerHTML = STEP_LABELS.map((label, i) => {
@@ -194,15 +211,15 @@ function cvzRenderSteps() {
     return `<div class="step ${cls}">${i + 1} · ${label}</div>`;
   }).join('');
 }
- 
+
 function cvzShowError(msg) {
   const el = document.getElementById('cvz-error');
   el.textContent = msg;
   el.style.display = msg ? 'block' : 'none';
 }
- 
+
 // ==================== SCHRITT 0: THEMA ====================
- 
+
 // Die Auswahllisten kommen zur Laufzeit aus GET /api/page-agent/form-options
 // und damit aus DERSELBEN Konstante (services/businessTypes.js), gegen die
 // /brief validiert. Deshalb steht hier keine Liste mehr fest eingetragen:
@@ -223,7 +240,7 @@ function cvzShowError(msg) {
 // nicht nachfragen.
 let cvzBusinessTypeGroups = [];
 let cvzFunnelStages = [];
- 
+
 // Fallback, falls /form-options nicht erreichbar ist. Bewusst nur die
 // Funnel-Stages: ohne sie wäre Schritt 1 komplett unbedienbar. Für
 // business_type gibt es KEINEN Fallback – eine geratene Liste ist genau
@@ -235,9 +252,9 @@ const CVZ_FUNNEL_STAGES_FALLBACK = [
   { key: 'decision',      label: 'Decision' },
   { key: 'full_journey',  label: 'Komplette Journey' }
 ];
- 
+
 const CVZ_BUSINESS_TYPE_CUSTOM_MAXLEN = 60;
- 
+
 async function cvzLoadFormOptions() {
   try {
     const res = await fetch(`${API_BASE}/api/page-agent/form-options`, {
@@ -245,7 +262,7 @@ async function cvzLoadFormOptions() {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
- 
+
     cvzBusinessTypeGroups = Array.isArray(data.business_type_groups)
       ? data.business_type_groups
       : [];
@@ -258,7 +275,7 @@ async function cvzLoadFormOptions() {
     cvzFunnelStages = CVZ_FUNNEL_STAGES_FALLBACK;
   }
 }
- 
+
 // true, wenn der aktuell gewählte Typ ein Freitextfeld verlangt.
 function cvzBusinessTypeAllowsCustom(key) {
   if (!key) return false;
@@ -266,7 +283,7 @@ function cvzBusinessTypeAllowsCustom(key) {
     (g.types || []).some(t => t.key === key && t.allows_custom_label)
   );
 }
- 
+
 function cvzRenderBusinessTypeField() {
   const total = cvzBusinessTypeGroups.reduce((n, g) => n + (g.types || []).length, 0);
   if (total === 0) {
@@ -278,9 +295,9 @@ function cvzRenderBusinessTypeField() {
       </p>
     `;
   }
- 
+
   const showCustom = cvzBusinessTypeAllowsCustom(cvzState.business_type);
- 
+
   // optgroup-label trägt zusätzlich den Gruppen-Hinweis, damit er direkt an
   // der Stelle steht, an der entschieden wird. Ein Hinweis unter dem Feld
   // wird beim Aufklappen des Dropdowns nicht mitgelesen.
@@ -291,7 +308,7 @@ function cvzRenderBusinessTypeField() {
     const groupLabel = g.hint ? `${g.label} — ${g.hint}` : g.label;
     return `<optgroup label="${cvzEsc(groupLabel)}">${options}</optgroup>`;
   }).join('');
- 
+
   return `
     <label class="cvz-label">Produktkategorie</label>
     <div class="cvz-select-wrap">
@@ -308,7 +325,7 @@ function cvzRenderBusinessTypeField() {
     <p class="cvz-hint">Bestimmt Argumentationsframework, Pflicht-Nutzenebenen und Vertrauenssignale der Struktur. Gefragt ist das Geschäftsmodell, nicht die Branche – die steckt bereits im Thema oben.</p>
   `;
 }
- 
+
 function cvzToggleBusinessTypeCustom(value) {
   const custom = document.getElementById('cvz-in-business-type-custom');
   if (!custom) return;
@@ -321,7 +338,7 @@ function cvzToggleBusinessTypeCustom(value) {
     cvzState.business_type_custom = '';
   }
 }
- 
+
 function cvzRenderStep0() {
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Worum geht es?</h1>
@@ -335,9 +352,9 @@ function cvzRenderStep0() {
   `;
   document.getElementById('cvz-btn-back').style.visibility = 'hidden';
 }
- 
+
 // ==================== SCHRITT 1: ZIEL ====================
- 
+
 const CONVERSION_GOAL_GROUPS = {
   'Primary Conversions (Sales & Umsatz)': [
     'Demo-Anfrage', 'Angebotsanfrage / Pricing Request', 'Audit / Assessment buchen',
@@ -360,7 +377,7 @@ const CONVERSION_GOAL_GROUPS = {
     'Video Completion', 'Ressourcen- oder Blog-Seite besucht', 'Externe Weiterleitung'
   ]
 };
- 
+
 // Kurzbeschreibungen je Funnel-Stage, ausschliesslich fuer die Hint-Zeile
 // unter dem Dropdown - /form-options liefert nur key+label, keine
 // Beschreibung (siehe cvzLoadFormOptions). Rein clientseitige Deko, hat
@@ -371,31 +388,31 @@ const CVZ_FUNNEL_STAGE_HINTS = {
   decision: 'Anbieter stehen zur Wahl, Entscheidung steht an.',
   full_journey: 'Seite bedient alle Phasen.'
 };
- 
+
 function cvzFunnelStageHint(key) {
   return CVZ_FUNNEL_STAGE_HINTS[key] || '';
 }
- 
+
 function cvzOnFunnelStageChange(value) {
   cvzState.funnel_stage = value;
   const hint = document.getElementById('cvz-funnel-stage-hint');
   if (hint) hint.textContent = cvzFunnelStageHint(value);
 }
- 
+
 function cvzRenderStep1() {
   const optgroups = Object.entries(CONVERSION_GOAL_GROUPS).map(([group, options]) => `
     <optgroup label="${cvzEsc(group)}">
       ${options.map(o => `<option value="${cvzEsc(o)}" ${cvzState.conversion_goal === o ? 'selected' : ''}>${cvzEsc(o)}</option>`).join('')}
     </optgroup>
   `).join('');
- 
+
   // Funnel-Stage jetzt als Dropdown statt Auswahl-Kacheln, konsistent mit
   // dem Conversion-Ziel-Feld direkt darueber (gleiche cvz-select-wrap/
   // cvz-input-Struktur).
   const funnelOptions = cvzFunnelStages.map(s => `
     <option value="${cvzEsc(s.key)}" ${cvzState.funnel_stage === s.key ? 'selected' : ''}>${cvzEsc(s.label)}</option>
   `).join('');
- 
+
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Was soll auf der Seite passieren?</h1>
     <p class="cvz-subtitle">Conversion-Ziel und Phase der Kaufentscheidung.</p>
@@ -417,9 +434,9 @@ function cvzRenderStep1() {
   `;
   document.getElementById('cvz-btn-back').style.visibility = 'visible';
 }
- 
+
 // ==================== SCHRITT 2: ANGEBOT ====================
- 
+
 function cvzRenderStep2() {
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Was macht euch aus?</h1>
@@ -430,7 +447,7 @@ function cvzRenderStep2() {
     <label class="cvz-label">Features</label>
     <input class="cvz-input" id="cvz-in-feature" placeholder="Feature eingeben, Enter drücken" onkeydown="cvzAddChipOnEnter(event,'features','cvz-feature-chips')">
     <div class="cvz-chip-row" id="cvz-feature-chips">${cvzRenderChips(cvzState.features, 'features')}</div>
- 
+
     <label class="cvz-label">Häufigste Kauf-/Wechselgründe von Kunden (optional)</label>
     <textarea class="cvz-input" id="cvz-in-customer-reasons" placeholder="Was hast du von Kunden im Verkaufsgespräch oder Support am häufigsten als Grund gehört?" ${cvzState.no_customer_reasons ? 'disabled' : ''}>${cvzEsc(cvzState.customer_reasons)}</textarea>
     <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:0.85rem; color:var(--cvz-text-muted); cursor:pointer; font-weight:400;">
@@ -438,33 +455,33 @@ function cvzRenderStep2() {
       Keine Informationen vorhanden
     </label>
     <p class="cvz-hint">Das ist die Kundenperspektive, nicht eure eigene - oft aussagekräftiger als USPs/Features fürs Storytelling.</p>
- 
+
     <label class="cvz-label">Referenz-Links (optional)</label>
     <input class="cvz-input" id="cvz-in-refurl" placeholder="URL eingeben, Enter drücken (Seite oder YouTube-Video)" onkeydown="cvzAddRefUrlOnEnter(event)">
     <div class="cvz-chip-row" id="cvz-refurl-chips">${cvzRenderRefUrlChips()}</div>
     <p class="cvz-hint">Bis zu 3 Links werden vom Assistenten tatsächlich abgerufen.</p>
- 
+
     <label class="cvz-label">PDF hochladen (optional)</label>
     <input type="file" accept="application/pdf" id="cvz-in-pdf" onchange="cvzUploadPdf(event)">
     <div id="cvz-pdf-status" style="margin-top:8px;"></div>
     <div class="cvz-chip-row" id="cvz-pdf-chips">${cvzRenderPdfChips()}</div>
- 
+
     <label class="cvz-label">Eure Markenfarbe (optional)</label>
     <div style="display:flex; gap:10px; align-items:center;">
       <input type="color" id="cvz-in-brand-color-picker" value="${/^#([0-9a-fA-F]{6})$/.test(cvzState.brand_color) ? cvzState.brand_color : '#4f46e5'}" style="width:44px; height:40px; padding:2px; border-radius:8px; border:1px solid var(--cvz-border); background:var(--cvz-bg); cursor:pointer;" oninput="cvzSyncBrandColorFromPicker(this.value)">
       <input class="cvz-input" id="cvz-in-brand-color" placeholder="#4f46e5" value="${cvzEsc(cvzState.brand_color)}" style="flex:1;" oninput="cvzSyncBrandColorFromText(this.value)">
     </div>
     <p class="cvz-hint">Direkte Eingabe hat Vorrang vor der automatischen Erkennung aus der Website unten - keine Bestätigung im Chat nötig, da hier eindeutig.</p>
- 
+
     <label class="cvz-label">Eure Website für den Marken-Look (optional)</label>
     <input class="cvz-input" id="cvz-in-brand-url" placeholder="https://eure-website.de" value="${cvzEsc(cvzState.brand_reference_url)}">
     <p class="cvz-hint">Nur relevant, wenn oben keine Farbe eingetragen ist - dann versucht der Assistent, sie automatisch zu erkennen und schlägt sie dir zur Bestätigung vor.</p>
- 
+
     <label class="cvz-label">Sonstiger Kontext (optional)</label>
     <textarea class="cvz-input" id="cvz-in-existing" placeholder="Weitere Hinweise für den Assistenten, die nicht in ein Feld oben passen">${cvzEsc(cvzState.existing_content)}</textarea>
   `;
 }
- 
+
 function cvzRenderRefUrlChips() {
   return cvzState.reference_urls.map((url, i) => `
     <span class="cvz-chip">${cvzEsc(url)} <button onclick="cvzRemoveRefUrl(${i})">×</button></span>
@@ -490,7 +507,7 @@ function cvzRemoveRefUrl(i) {
   cvzState.reference_urls.splice(i, 1);
   document.getElementById('cvz-refurl-chips').innerHTML = cvzRenderRefUrlChips();
 }
- 
+
 function cvzRenderPdfChips() {
   return cvzState.pdfExtracts.map((p, i) => `
     <span class="cvz-chip">📄 ${cvzEsc(p.filename)} <button onclick="cvzRemovePdf(${i})">×</button></span>
@@ -501,10 +518,10 @@ async function cvzUploadPdf(event) {
   if (!file) return;
   const statusEl = document.getElementById('cvz-pdf-status');
   statusEl.innerHTML = '<p class="cvz-hint">Extrahiere Text …</p>';
- 
+
   const formData = new FormData();
   formData.append('file', file);
- 
+
   try {
     const res = await fetch(`${API_BASE}/api/page-agent/upload-pdf`, {
       method: 'POST',
@@ -513,7 +530,7 @@ async function cvzUploadPdf(event) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Upload fehlgeschlagen');
- 
+
     cvzState.pdfExtracts.push({ filename: data.filename, text: data.text });
     document.getElementById('cvz-pdf-chips').innerHTML = cvzRenderPdfChips();
     statusEl.innerHTML = `<p class="cvz-hint" style="color:var(--cvz-teal);">Text aus "${cvzEsc(data.filename)}" erfolgreich extrahiert.</p>`;
@@ -546,7 +563,7 @@ function cvzRemoveChip(field, index) {
   const containerId = field === 'usps' ? 'cvz-usp-chips' : 'cvz-feature-chips';
   document.getElementById(containerId).innerHTML = cvzRenderChips(cvzState[field], field);
 }
- 
+
 // Escaped jetzt auch Anfuehrungszeichen. Vorher brach ein " im Wert
 // (z.B. in einer USP oder einem Keyword) aus value="..." aus und
 // zerlegte das Markup - der Fehler war still, das Feld blieb nur leer.
@@ -558,7 +575,7 @@ function cvzEsc(s) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
- 
+
 // ==================== SCHRITT 3: WETTBEWERBER ====================
 //
 // Die Vorschlaege aus suggest-competitors enthalten regelmaessig
@@ -570,11 +587,11 @@ function cvzEsc(s) {
 //   1. Host-Blocklist    - Plattformen, die nie Wettbewerber-LP sein können
 //   2. Pfad-Blocklist    - Content- und Rechtsseiten derselben Domain
 //   3. Scoring + Dedupe  - eine URL pro Domain, beste zuerst
- 
+
 const CVZ_MAX_COMPETITORS = 5;       // Hartes Limit für die Analyse
 const CVZ_PRESELECT_COUNT = 3;       // Vorausgewählt beim ersten Rendern
 const CVZ_MAX_SUGGESTIONS_SHOWN = 8; // Wie viele Vorschlaege angezeigt werden
- 
+
 // Suffix-Match: "youtube.com" trifft auch "www." und "m.youtube.com".
 const CVZ_BLOCKED_HOSTS = [
   'youtube.com', 'youtu.be', 'vimeo.com', 'dailymotion.com', 'twitch.tv',
@@ -592,7 +609,7 @@ const CVZ_BLOCKED_HOSTS = [
   'apple.com', 'play.google.com', 'apps.apple.com',
   'eventbrite.de', 'meetup.com', 'spotify.com'
 ];
- 
+
 // Segmentweiser Vergleich, KEIN includes() - sonst würde "news"
 // in "/newsletter-software/" treffen und eine gültige Seite wegwerfen.
 const CVZ_BLOCKED_PATH_SEGMENTS = [
@@ -615,7 +632,7 @@ const CVZ_BLOCKED_PATH_SEGMENTS = [
   'login', 'signin', 'anmelden', 'register', 'registrieren', 'account',
   'download', 'downloads', 'whitepaper', 'ebook', 'checkliste', 'vorlage', 'vorlagen'
 ];
- 
+
 // Sprechen für eine echte Angebotsseite - positiv im Scoring, keine Pflicht.
 const CVZ_BONUS_PATH_SEGMENTS = [
   'produkt', 'produkte', 'product', 'products',
@@ -626,13 +643,13 @@ const CVZ_BONUS_PATH_SEGMENTS = [
   'preise', 'pricing', 'preis', 'tarife', 'kosten',
   'demo', 'testen', 'trial'
 ];
- 
+
 const CVZ_BLOCKED_EXTENSIONS = [
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
   '.zip', '.rar', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp',
   '.mp4', '.mp3', '.xml', '.json', '.csv'
 ];
- 
+
 // Prüft eine einzelne URL.
 // -> { ok, reason, host, path, url }
 function cvzInspectUrl(rawUrl) {
@@ -642,10 +659,10 @@ function cvzInspectUrl(rawUrl) {
     result.reason = 'leer';
     return result;
   }
- 
+
   // Ohne Protokoll parst der URL-Konstruktor nicht.
   if (!/^https?:\/\//i.test(input)) input = 'https://' + input;
- 
+
   let parsed;
   try {
     parsed = new URL(input);
@@ -653,24 +670,24 @@ function cvzInspectUrl(rawUrl) {
     result.reason = 'ungültige URL';
     return result;
   }
- 
+
   const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
   const path = parsed.pathname.toLowerCase();
- 
+
   result.host = host;
   result.path = path;
   result.url = parsed.origin + parsed.pathname + parsed.search;
- 
+
   if (CVZ_BLOCKED_HOSTS.some(b => host === b || host.endsWith('.' + b))) {
     result.reason = 'keine Wettbewerber-Seite';
     return result;
   }
- 
+
   if (CVZ_BLOCKED_EXTENSIONS.some(ext => path.endsWith(ext))) {
     result.reason = 'kein HTML';
     return result;
   }
- 
+
   const segments = path.split('/').filter(Boolean);
   let hit = null;
   for (const seg of segments) {
@@ -682,45 +699,45 @@ function cvzInspectUrl(rawUrl) {
     result.reason = `Content-Seite (/${hit}/)`;
     return result;
   }
- 
+
   result.ok = true;
   return result;
 }
- 
+
 // Hoeher = eher eine echte Landingpage.
 function cvzScoreUrl(info) {
   let score = 100;
   const segments = info.path.split('/').filter(Boolean);
- 
+
   score -= segments.length * 12;                       // Tiefe im Baum
   if (segments.length === 0) score += 25;              // Startseite
   if (segments.some(s => CVZ_BONUS_PATH_SEGMENTS.includes(s))) score += 20;
- 
+
   const last = segments[segments.length - 1] || '';
   if (last.length > 40) score -= 15;                   // Artikel-Slug
   if ((last.match(/-/g) || []).length >= 5) score -= 12;
   if ((info.host.match(/\./g) || []).length > 1) score -= 10; // Subdomain
- 
+
   return score;
 }
- 
+
 // Filtert, dedupliziert und sortiert die Rohvorschlaege.
 // -> { items: [...], removed: [{url, reason}] }
 function cvzFilterCompetitorSuggestions(rawList) {
   const items = [];
   const removed = [];
   const seenHosts = new Set();
- 
+
   (rawList || []).forEach(entry => {
     const rawUrl = typeof entry === 'string' ? entry : (entry && entry.url) || '';
     const title = (entry && entry.title) || '';
- 
+
     const info = cvzInspectUrl(rawUrl);
     if (!info.ok) {
       removed.push({ url: rawUrl, reason: info.reason });
       return;
     }
- 
+
     // Eine URL pro Domain: drei Unterseiten desselben Anbieters
     // verbrauchen drei Slots für eine einzige Erkenntnis.
     if (seenHosts.has(info.host)) {
@@ -728,7 +745,7 @@ function cvzFilterCompetitorSuggestions(rawList) {
       return;
     }
     seenHosts.add(info.host);
- 
+
     items.push({
       url: info.url,
       host: info.host,
@@ -738,15 +755,15 @@ function cvzFilterCompetitorSuggestions(rawList) {
       recommended: false
     });
   });
- 
+
   items.sort((a, b) => b.score - a.score);
   return { items, removed };
 }
- 
+
 function cvzTotalCompetitorCount() {
   return cvzState.competitorSuggestions.filter(s => s.selected).length + cvzState.manualCompetitors.length;
 }
- 
+
 async function cvzRenderStep3() {
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Wettbewerber bestätigen</h1>
@@ -757,11 +774,11 @@ async function cvzRenderStep3() {
     <input class="cvz-input" id="cvz-in-manual-competitor" placeholder="URL eines Wettbewerbers, z.B. https://wettbewerber.de" onkeydown="cvzAddManualCompetitorOnEnter(event)">
     <p class="cvz-hint">Nicht eure eigene Seite — eine Seite, mit der ihr um dieselben Kunden konkurriert. Maximal ${CVZ_MAX_COMPETITORS} Wettbewerber insgesamt, eigene Einträge haben Vorrang vor Vorschlägen.</p>
   `;
- 
+
   const nothingLoadedYet =
     cvzState.competitorSuggestions.length === 0 &&
     cvzState.filteredOutCompetitors.length === 0;
- 
+
   if (nothingLoadedYet) {
     try {
       const res = await fetch(`${API_BASE}/api/page-agent/suggest-competitors`, {
@@ -772,12 +789,12 @@ async function cvzRenderStep3() {
         })
       });
       const data = await res.json();
- 
+
       // WICHTIG: erst filtern, dann kuerzen. Vorher wurde auf 5 gekuerzt
       // und danach gefiltert - dabei gingen gute Kandidaten auf Position
       // 6+ verloren, sobald oben Blog- oder Video-Treffer standen.
       const filtered = cvzFilterCompetitorSuggestions(data.suggestions || []);
- 
+
       cvzState.competitorSuggestions = filtered.items
         .slice(0, CVZ_MAX_SUGGESTIONS_SHOWN)
         .map((s, i) => ({
@@ -795,17 +812,17 @@ async function cvzRenderStep3() {
   }
   cvzRenderCompetitorList();
 }
- 
+
 function cvzRenderCompetitorList() {
   const container = document.getElementById('cvz-competitor-list');
   const total = cvzTotalCompetitorCount();
   const atCap = total >= CVZ_MAX_COMPETITORS;
- 
+
   const counter = `
     <p class="cvz-selection-count ${atCap ? 'limit' : ''}">
       ${total} von ${CVZ_MAX_COMPETITORS} ausgewählt${atCap ? ' – mehr geht nicht' : ' – du kannst weitere ergänzen oder abwählen'}
     </p>`;
- 
+
   const suggested = cvzState.competitorSuggestions.map((s, i) => {
     const locked = atCap && !s.selected;
     const badge = s.recommended ? '<span class="cvz-badge">Empfohlen</span>' : '';
@@ -819,7 +836,7 @@ function cvzRenderCompetitorList() {
     </div>
   `;
   }).join('');
- 
+
   const manual = cvzState.manualCompetitors.map((url, i) => `
     <div class="cvz-competitor-item selected">
       <input type="checkbox" checked disabled>
@@ -827,24 +844,24 @@ function cvzRenderCompetitorList() {
       <button onclick="cvzRemoveManualCompetitor(${i})" style="background:none;border:none;color:var(--cvz-text-muted);cursor:pointer;">×</button>
     </div>
   `).join('');
- 
+
   const list = (suggested + manual) || '<p class="cvz-hint">Keine Vorschläge übrig — bitte manuell ergänzen.</p>';
   container.innerHTML = counter + list;
- 
+
   cvzRenderFilteredBox();
 }
- 
+
 // Aussortierte Vorschlaege bleiben nachvollziehbar und rueckholbar.
 // Ohne das wäre ein Fehlgriff des Filters für den Nutzer unsichtbar.
 function cvzRenderFilteredBox() {
   const box = document.getElementById('cvz-filtered-box');
   if (!box) return;
- 
+
   if (cvzState.filteredOutCompetitors.length === 0) {
     box.innerHTML = '';
     return;
   }
- 
+
   const rows = cvzState.filteredOutCompetitors.map((entry, i) => `
     <li>
       <span>${cvzEsc(entry.url)}</span>
@@ -852,7 +869,7 @@ function cvzRenderFilteredBox() {
       <button onclick="cvzRestoreFilteredCompetitor(${i})">Trotzdem prüfen</button>
     </li>
   `).join('');
- 
+
   box.innerHTML = `
     <details class="cvz-filtered-box">
       <summary>${cvzState.filteredOutCompetitors.length} Vorschläge ausgeblendet (Videos, Blog- und Glossarseiten)</summary>
@@ -860,11 +877,11 @@ function cvzRenderFilteredBox() {
     </details>
   `;
 }
- 
+
 function cvzRestoreFilteredCompetitor(i) {
   const entry = cvzState.filteredOutCompetitors[i];
   if (!entry) return;
- 
+
   const info = cvzInspectUrl(entry.url);
   cvzState.filteredOutCompetitors.splice(i, 1);
   cvzState.competitorSuggestions.push({
@@ -877,7 +894,7 @@ function cvzRestoreFilteredCompetitor(i) {
   });
   cvzRenderCompetitorList();
 }
- 
+
 function cvzToggleCompetitor(i) {
   const s = cvzState.competitorSuggestions[i];
   if (!s.selected && cvzTotalCompetitorCount() >= CVZ_MAX_COMPETITORS) {
@@ -888,19 +905,19 @@ function cvzToggleCompetitor(i) {
   s.selected = !s.selected;
   cvzRenderCompetitorList();
 }
- 
+
 function cvzAddManualCompetitorOnEnter(event) {
   if (event.key !== 'Enter') return;
   event.preventDefault();
   const val = event.target.value.trim();
   if (!val) return;
- 
+
   const info = cvzInspectUrl(val);
   if (!info.host) {
     cvzShowError(`"${val}" ist keine gültige URL.`);
     return;
   }
- 
+
   // Doppelte Domains verbrauchen zwei Slots für eine Erkenntnis.
   const dupSuggestion = cvzState.competitorSuggestions.some(s => s.selected && s.host === info.host);
   const dupManual = cvzState.manualCompetitors.some(u => cvzInspectUrl(u).host === info.host);
@@ -908,37 +925,37 @@ function cvzAddManualCompetitorOnEnter(event) {
     cvzShowError('Diese Domain ist schon in der Auswahl.');
     return;
   }
- 
+
   if (cvzState.manualCompetitors.length >= CVZ_MAX_COMPETITORS) {
     cvzShowError(`Maximal ${CVZ_MAX_COMPETITORS} eigene Wettbewerber möglich - entferne zuerst einen.`);
     return;
   }
   cvzShowError(null);
- 
+
   cvzState.manualCompetitors.push(info.url);
   event.target.value = '';
- 
+
   // Eigene Einträge haben Vorrang: bei Ueberlauf werden Vorschlaege
   // von hinten abgewählt.
   for (let i = cvzState.competitorSuggestions.length - 1; i >= 0 && cvzTotalCompetitorCount() > CVZ_MAX_COMPETITORS; i--) {
     if (cvzState.competitorSuggestions[i].selected) cvzState.competitorSuggestions[i].selected = false;
   }
- 
+
   cvzRenderCompetitorList();
 }
- 
+
 function cvzRemoveManualCompetitor(i) {
   cvzState.manualCompetitors.splice(i, 1);
   cvzRenderCompetitorList();
 }
- 
+
 // ==================== NAVIGATION ====================
 function cvzSyncStep0Fields() {
   cvzState.keyword = document.getElementById('cvz-in-keyword').value.trim();
   cvzState.target_audience = document.getElementById('cvz-in-audience').value.trim();
   const btSelect = document.getElementById('cvz-in-business-type');
   cvzState.business_type = btSelect ? btSelect.value : '';
- 
+
   // Bereinigung hier ist Komfort, kein Schutz - maxlength und dieser slice
   // sind clientseitig und trivial umgehbar. Der Wert geht in den System-
   // Prompt, die verbindliche Prüfung läuft serverseitig in
@@ -967,7 +984,7 @@ function cvzSyncStep2Fields() {
     cvzState.customer_reasons = document.getElementById('cvz-in-customer-reasons').value.trim();
   }
 }
- 
+
 function cvzSyncBrandColorFromPicker(hex) {
   cvzState.brand_color = hex;
   document.getElementById('cvz-in-brand-color').value = hex;
@@ -978,7 +995,7 @@ function cvzSyncBrandColorFromText(value) {
     document.getElementById('cvz-in-brand-color-picker').value = cvzState.brand_color;
   }
 }
- 
+
 function cvzToggleNoCustomerReasons(checked) {
   cvzState.no_customer_reasons = checked;
   const textarea = document.getElementById('cvz-in-customer-reasons');
@@ -988,7 +1005,7 @@ function cvzToggleNoCustomerReasons(checked) {
     cvzState.customer_reasons = '';
   }
 }
- 
+
 function cvzBuildExistingContent() {
   const parts = [];
   if (cvzState.existing_content) parts.push(cvzState.existing_content);
@@ -996,7 +1013,7 @@ function cvzBuildExistingContent() {
   cvzState.pdfExtracts.forEach(p => parts.push(`[PDF: ${p.filename}]\n${p.text}`));
   return parts.join('\n\n');
 }
- 
+
 function cvzValidateStep() {
   if (cvzState.step === 0) {
     cvzSyncStep0Fields();
@@ -1034,23 +1051,22 @@ function cvzValidateStep() {
   }
   return null;
 }
- 
+
 async function cvzGoNext() {
-  // NEU: harte Sperre VOR jeder Feld-Validierung, falls kein Kontingent
-  // mehr verfügbar ist. Der Button ist zwar bereits per disabled/opacity
-  // gesperrt (siehe cvzUpdateNextButtonState), aber ein disabled-Attribut
-  // laesst sich per DevTools entfernen - diese Pruefung ist die zweite,
-  // tatsaechlich wirksame Sperre auf Client-Seite. Verbindlich bleibt
-  // ohnehin die serverseitige Pruefung beim eigentlichen Launch-Request.
-  if (cvzQuota.remaining !== null && cvzQuota.remaining <= 0) {
+  // GEÄNDERT: Sperre jetzt anhand von canStart (Plan-Kontingent ODER
+  // gekaufte Aufbau-PPU-Credits), nicht mehr allein anhand von remaining -
+  // sonst waere ein Kunde mit aufgebrauchtem Plan-Kontingent, aber noch
+  // vorhandenen PPU-Credits, hier faelschlich blockiert worden, obwohl
+  // /start-session seinen Kauf laengst als Fallback akzeptiert.
+  if (cvzQuota.canStart === false) {
     cvzShowError('Kein Sessions-Kontingent mehr verfügbar in diesem Monat.');
     return;
   }
- 
+
   const error = cvzValidateStep();
   if (error) { cvzShowError(error); return; }
   cvzShowError(null);
- 
+
   if (cvzState.step < STEP_LABELS.length - 1) {
     cvzState.step++;
     cvzRenderStep();
@@ -1079,7 +1095,7 @@ function cvzRenderStep() {
   cvzRenderQuotaBanner();
   cvzUpdateNextButtonState();
 }
- 
+
 // ==================== ASYNCHRONE TURNS: POLLING (siehe Chat-Begründung) ====================
 // /start-session (Kickoff) und /chat antworten seit dem Backend-Umbau nicht
 // mehr sofort mit dem fertigen Ergebnis, sondern mit 202 + { turn_id,
@@ -1097,46 +1113,46 @@ const CVZ_POLL_INTERVAL_MS = 2500;
 // BACKGROUND_TURN_TIMEOUT_MS in pageAgent.js. Laenger warten hat keinen
 // Sinn, der Server hätte den Turn bis dahin ohnehin selbst abgebrochen.
 const CVZ_POLL_MAX_MS = 15 * 60 * 1000;
- 
+
 async function cvzPollTurnStatus(turnId) {
   const headers = cvzAuthHeaders();
   const start = Date.now();
- 
+
   while (true) {
     if (Date.now() - start > CVZ_POLL_MAX_MS) {
       throw new Error('Zeitüberschreitung - die Antwort hat zu lange gedauert. Bitte erneut versuchen.');
     }
- 
+
     const res = await fetch(`${API_BASE}/api/page-agent/chat/status/${turnId}`, {
       method: 'GET',
       headers
     });
     const data = await res.json();
- 
+
     if (!res.ok && data.status !== 'error') {
       // 403/404/500 auf den Status-Endpoint selbst, nicht zu verwechseln
       // mit einem Turn, der MIT status:'error' erfolgreich zu Ende kam.
       throw new Error(data.error || `HTTP ${res.status}`);
     }
- 
+
     if (data.status === 'processing') {
       await new Promise(r => setTimeout(r, CVZ_POLL_INTERVAL_MS));
       continue;
     }
- 
+
     if (data.status === 'error') {
       throw new Error(data.error || 'Unbekannter Fehler bei der Verarbeitung.');
     }
- 
+
     // status === 'done' - data enthaelt message, sessions_used/limit/
     // remaining und ggf. structure_html_document/structure_version, exakt
     // dieselben Felder wie frueher der synchrone Response-Body.
     return data;
   }
 }
- 
+
 // ==================== LAUNCH ====================
- 
+
 // ==================== FORTSCHRITTS-TEXTE (zeitbasiert statt fester 20s-Takt) ====================
 // GEÄNDERT (siehe Chat-Begründung): Vorher rückte die Nachricht alle 20s
 // weiter, unabhängig von der Array-Länge - bei 4 Einträgen stand nach 80s
@@ -1159,7 +1175,7 @@ const CVZ_KICKOFF_MESSAGES = [
   { at: 420, text: 'Läuft noch - bei umfangreichen Briefings kann das schon mal 6-7 Minuten dauern' },
   { at: 600, text: 'Braucht in diesem Fall spürbar länger als sonst, bitte noch etwas Geduld' }
 ];
- 
+
 // Struktur-Turns sind erfahrungsgemäß deutlich kürzer (2-3 Minuten) als der
 // Kickoff, deshalb eigene, engere Schwellen.
 const CVZ_STRUCTURE_MESSAGES = [
@@ -1170,7 +1186,7 @@ const CVZ_STRUCTURE_MESSAGES = [
   { at: 140, text: 'Fast fertig, letzte Handgriffe' },
   { at: 200, text: 'Läuft noch - bei umfangreichen Strukturen kann das etwas länger dauern' }
 ];
- 
+
 // Wählt die Nachricht, deren "at"-Schwelle zuletzt unterschritten wurde -
 // also die "aktuellste" für die verstrichene Zeit. Vor der ersten Schwelle
 // (elapsedSec < messages[0].at) wird baseText verwendet, nicht die erste
@@ -1184,7 +1200,7 @@ function cvzPickTimedMessage(messages, elapsedSec) {
   }
   return chosen;
 }
- 
+
 function cvzStartProgressTicker(baseText, messages, onUpdate) {
   const startTime = Date.now();
   const tick = () => {
@@ -1201,7 +1217,7 @@ function cvzStartProgressTicker(baseText, messages, onUpdate) {
   // einem festen 20s-Takt unabhängig hochzuzählen.
   return () => { clearInterval(tickTimer); };
 }
- 
+
 let cvzLoadingStopTicker = null;
 function cvzShowLoading(text) {
   document.getElementById('cvz-form-card').style.display = 'none';
@@ -1211,7 +1227,7 @@ function cvzShowLoading(text) {
     document.getElementById('cvz-loading-text').textContent = t;
   });
 }
- 
+
 // NEU: Ladezustand fuer die allererste Sekunde nach Seitenaufruf, bevor
 // feststeht, ob ueberhaupt ein Formular gezeigt wird (neues Projekt) oder
 // direkt in einen bestehenden Workspace gewechselt wird (Resume). Vorher
@@ -1233,7 +1249,7 @@ function cvzHideInitialLoading() {
   const loading = document.getElementById('cvz-loading');
   if (loading) loading.style.display = 'none';
 }
- 
+
 async function cvzLaunch() {
   const headers = cvzAuthHeaders();
   const userId = cvzUserId();
@@ -1241,7 +1257,7 @@ async function cvzLaunch() {
     ...cvzState.competitorSuggestions.filter(s => s.selected).map(s => s.url),
     ...cvzState.manualCompetitors
   ].slice(0, CVZ_MAX_COMPETITORS);
- 
+
   try {
     cvzShowLoading('Projekt wird angelegt …');
     const projectRes = await fetch(`${API_BASE}/api/page-agent/project`, {
@@ -1250,7 +1266,7 @@ async function cvzLaunch() {
     });
     if (!projectRes.ok) throw new Error((await projectRes.json()).error || 'Projekt konnte nicht angelegt werden');
     const { page_project_id } = await projectRes.json();
- 
+
     cvzShowLoading('Briefing wird gespeichert …');
     const briefRes = await fetch(`${API_BASE}/api/page-agent/brief`, {
       method: 'POST', headers,
@@ -1279,7 +1295,7 @@ async function cvzLaunch() {
       const err = await briefRes.json();
       throw new Error(err.error + (err.missing_fields ? ` (${err.missing_fields.join(', ')})` : ''));
     }
- 
+
     cvzShowLoading('Hier wird die nächsten Minuten malocht. Hol dir in der Zeit gerne einen Kaffee …');
     const sessionRes = await fetch(`${API_BASE}/api/page-agent/start-session`, {
       method: 'POST', headers,
@@ -1287,28 +1303,30 @@ async function cvzLaunch() {
     });
     if (!sessionRes.ok) {
       const err = await sessionRes.json();
-      // NEU: bei 402 (Kontingent aufgebraucht) lokalen Quota-Stand sofort
+      // Bei 402 (Kontingent aufgebraucht) lokalen Quota-Stand sofort
       // korrigieren, damit Banner und Button auch dann konsistent sind,
       // falls der User in einem zweiten Tab noch ein Kontingent gesehen
-      // hatte, das inzwischen woanders verbraucht wurde.
+      // hatte, das inzwischen woanders verbraucht wurde. canStart wird
+      // hier bewusst NICHT hart auf false gesetzt, sondern per erneutem
+      // cvzLoadQuota() neu ermittelt - falls parallel doch noch ein
+      // PPU-Credit gekauft wurde, soll das sofort wieder freischalten.
       if (sessionRes.status === 402) {
         cvzQuota.remaining = 0;
-        cvzRenderQuotaBanner();
-        cvzUpdateNextButtonState();
+        cvzLoadQuota();
       }
       throw new Error(err.error || 'Analyse fehlgeschlagen');
     }
     const sessionData = await sessionRes.json();
- 
+
     cvzState.session_id = sessionData.session_id;
     cvzState.page_project_id = page_project_id;
- 
+
     // FIX: URL jetzt auf dieses konkrete neue Projekt festnageln. Ohne das
     // stand hier weiterhin ?new=1 (oder gar nichts) in der Adresszeile -
     // ein Reload ab jetzt landet wieder ohne ID im Resume-Aufruf und laedt
     // faelschlich das "letzte" Projekt statt dieses gerade erst gestartete.
     window.history.replaceState({}, '', window.location.pathname + '?project=' + encodeURIComponent(page_project_id));
- 
+
     // /start-session antwortet für eine WIRKLICH NEUE Session sofort mit
     // turn_id + status:'processing' (kein message-Feld). Nur der
     // "reused"-Pfad (bereits aktive Session) liefert weiterhin synchron ein
@@ -1318,7 +1336,7 @@ async function cvzLaunch() {
     if (sessionData.turn_id) {
       finalSessionData = await cvzPollTurnStatus(sessionData.turn_id);
     }
- 
+
     cvzOpenChat(finalSessionData);
   } catch (err) {
     if (cvzLoadingStopTicker) { cvzLoadingStopTicker(); cvzLoadingStopTicker = null; }
@@ -1327,11 +1345,11 @@ async function cvzLaunch() {
     cvzShowError(err.message);
   }
 }
- 
+
 // ==================== SESSION-WIEDERAUFNAHME ====================
 async function cvzTryResume() {
   const urlParams = new URLSearchParams(window.location.search);
- 
+
   if (urlParams.get('new')) {
     // FIX: ?new=1 bleibt bewusst in der URL stehen, solange noch KEIN
     // echtes Projekt existiert (cvzState.page_project_id wird erst in
@@ -1341,26 +1359,26 @@ async function cvzTryResume() {
     // Resume-Aufruf ohne ID und lud faelschlich das letzte fertige Projekt.
     return false;
   }
- 
+
   const explicitProjectId = urlParams.get('project');
- 
+
   const userId = cvzUserId();
   const headers = cvzAuthHeaders();
   let url = `${API_BASE}/api/page-agent/resume?user_id=${encodeURIComponent(userId)}`;
   if (explicitProjectId) url += `&page_project_id=${encodeURIComponent(explicitProjectId)}`;
- 
+
   try {
     const res = await fetch(url, { method: 'GET', headers });
     if (!res.ok) return false;
- 
+
     const data = await res.json();
     cvzState.session_id = data.session_id;
     cvzState.page_project_id = data.page_project_id;
- 
+
     document.getElementById('cvz-form-app').style.display = 'none';
     document.getElementById('cvz-workspace').style.display = 'flex';
     cvzUpdateQuota(data.sessions_remaining, data.sessions_limit);
- 
+
     // Die erste Nachricht ist der von start-session erzeugte Kickoff-Prompt.
     // Er gehoert in die Historie fuer das Modell, aber nicht in die Ansicht -
     // der Verlauf soll direkt mit der Analyse der Ausgangslage beginnen.
@@ -1374,11 +1392,11 @@ async function cvzTryResume() {
       if (i === 0 && m.role === 'user') return;
       lastBubble = cvzAppendMessage(m.role, m.content, null, null, { scroll: 'none' });
     });
- 
+
     if (data.structure_html_document) {
       cvzUpdatePreviewPanel(data.structure_html_document, data.structure_version);
     }
- 
+
     // Einmal am Schluss scrollen statt bei jeder Nachricht: der ANFANG der
     // letzten Antwort steht oben, nicht deren Ende.
     cvzScrollChatTo(lastBubble, 'top');
@@ -1388,7 +1406,7 @@ async function cvzTryResume() {
     return false;
   }
 }
- 
+
 // ==================== CHAT ====================
 function cvzOpenChat(sessionData) {
   if (cvzLoadingStopTicker) { cvzLoadingStopTicker(); cvzLoadingStopTicker = null; }
@@ -1402,7 +1420,7 @@ function cvzOpenChat(sessionData) {
 function cvzUpdateQuota(remaining, limit) {
   document.getElementById('cvz-quota').textContent = `${remaining}/${limit} Sessions übrig`;
 }
- 
+
 function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
   const iframe = document.createElement('iframe');
   iframe.setAttribute('sandbox', 'allow-same-origin');
@@ -1422,16 +1440,16 @@ function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
   container.appendChild(iframe);
   return iframe;
 }
- 
+
 const CVZ_DEVICE_WIDTHS = { desktop: 1440, mobile: 390 };
 let cvzPreviewDevice = window.innerWidth < 768 ? 'mobile' : 'desktop';
 let cvzPreviewContentHeight = 0;
- 
+
 function cvzApplyPreviewScale() {
   const outer = document.getElementById('cvz-preview-frame-outer');
   const inner = document.getElementById('cvz-preview-frame-inner');
   if (!outer || !inner || !cvzPreviewContentHeight) return;
- 
+
   const deviceWidth = CVZ_DEVICE_WIDTHS[cvzPreviewDevice];
   const body = document.getElementById('cvz-preview-body');
   // 32px = das horizontale Padding von .cvz-preview-body (2x16px).
@@ -1441,14 +1459,14 @@ function cvzApplyPreviewScale() {
   // zu haben.
   const availableWidth = body.clientWidth - 32;
   const scale = Math.min(1, Math.max(availableWidth, 100) / deviceWidth);
- 
+
   inner.style.width = deviceWidth + 'px';
   inner.style.height = cvzPreviewContentHeight + 'px';
   inner.style.transform = `scale(${scale})`;
   outer.style.width = Math.round(deviceWidth * scale) + 'px';
   outer.style.height = Math.round(cvzPreviewContentHeight * scale) + 'px';
 }
- 
+
 let cvzResizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(cvzResizeTimer);
@@ -1460,12 +1478,12 @@ window.addEventListener('resize', () => {
     }
   }, 150);
 });
- 
+
 function cvzSetPreviewDevice(device) {
   cvzPreviewDevice = device;
   document.getElementById('cvz-device-desktop').classList.toggle('active', device === 'desktop');
   document.getElementById('cvz-device-mobile').classList.toggle('active', device === 'mobile');
- 
+
   const iframe = document.querySelector('#cvz-preview-frame-inner iframe');
   if (!iframe) return;
   iframe.style.width = CVZ_DEVICE_WIDTHS[device] + 'px';
@@ -1479,16 +1497,16 @@ function cvzSetPreviewDevice(device) {
   cvzApplyPreviewScale();
 }
 cvzSetPreviewDevice(cvzPreviewDevice);
- 
+
 let cvzLatestStructureHtml = null;
 function cvzUpdatePreviewPanel(htmlDocument, version) {
   if (!htmlDocument) return;
   cvzLatestStructureHtml = htmlDocument;
- 
+
   const body = document.getElementById('cvz-preview-body');
   body.innerHTML = '<div class="cvz-preview-frame-outer" id="cvz-preview-frame-outer"><div class="cvz-preview-frame-inner" id="cvz-preview-frame-inner"></div></div>';
   const inner = document.getElementById('cvz-preview-frame-inner');
- 
+
   const iframe = cvzRenderStructureIframe(inner, htmlDocument, measuredHeight => {
     if (measuredHeight) cvzPreviewContentHeight = measuredHeight;
     cvzApplyPreviewScale();
@@ -1496,14 +1514,14 @@ function cvzUpdatePreviewPanel(htmlDocument, version) {
     body.scrollLeft = 0;
   });
   iframe.style.width = CVZ_DEVICE_WIDTHS[cvzPreviewDevice] + 'px';
- 
+
   document.getElementById('cvz-preview-version').textContent = version ? `Version ${version}` : '';
   document.getElementById('cvz-preview-download').disabled = false;
   // PDF-Export: Landingpage-Button erst klickbar, sobald eine Struktur
   // existiert - genau wie der HTML-Download-Button direkt darüber.
   document.getElementById('cvz-export-landingpage-pdf').disabled = false;
 }
- 
+
 function cvzDownloadCurrentStructure() {
   if (!cvzLatestStructureHtml) return;
   const blob = new Blob([cvzLatestStructureHtml], { type: 'text/html' });
@@ -1516,7 +1534,7 @@ function cvzDownloadCurrentStructure() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
- 
+
 // Scrollsteuerung fuer das Chatfenster.
 //   mode 'end' - ans untere Ende
 //   mode 'top' - der ANFANG von el steht oben im sichtbaren Bereich
@@ -1527,19 +1545,19 @@ function cvzDownloadCurrentStructure() {
 function cvzScrollChatTo(el, mode) {
   const wrap = document.getElementById('cvz-chat-messages');
   if (!wrap) return;
- 
+
   if (mode === 'end' || !el) {
     wrap.scrollTop = wrap.scrollHeight;
     return;
   }
- 
+
   // getBoundingClientRect statt offsetTop: offsetTop bezieht sich auf den
   // naechsten POSITIONIERTEN Vorfahren. .cvz-chat-messages ist static, der
   // Wert waere also nicht der Abstand innerhalb des Chatfensters.
   const delta = el.getBoundingClientRect().top - wrap.getBoundingClientRect().top;
   wrap.scrollTop += delta - 12; // 12px Luft ueber der Nachricht
 }
- 
+
 // options.scroll:
 //   'auto' (Standard) - eigene Nachrichten ans Ende, Antworten des
 //                       Assistenten an ihren ANFANG
@@ -1556,7 +1574,7 @@ function cvzAppendMessage(role, text, structureHtmlDocument, structureVersion, o
     bubble.textContent = text;
   }
   wrap.appendChild(bubble);
- 
+
   if (structureHtmlDocument) {
     cvzUpdatePreviewPanel(structureHtmlDocument, structureVersion);
     const note = document.createElement('div');
@@ -1565,19 +1583,19 @@ function cvzAppendMessage(role, text, structureHtmlDocument, structureVersion, o
     note.textContent = structureVersion ? `Vorschau aktualisiert (Version ${structureVersion})` : 'Vorschau aktualisiert';
     wrap.appendChild(note);
   }
- 
+
   const mode = options.scroll || 'auto';
   if (mode === 'end') {
     cvzScrollChatTo(null, 'end');
   } else if (mode === 'auto') {
     cvzScrollChatTo(bubble, role === 'assistant' ? 'top' : 'end');
   }
- 
+
   return bubble;
 }
- 
+
 let cvzIsSending = false;
- 
+
 async function cvzSendMessage() {
   if (cvzIsSending) return;
   const input = document.getElementById('cvz-chat-input');
@@ -1587,7 +1605,7 @@ async function cvzSendMessage() {
   input.value = '';
   input.disabled = true;
   document.getElementById('cvz-chat-send').disabled = true;
- 
+
   cvzAppendMessage('user', message);
   // scroll:'end' - die Ladeblase ist kurz, ihr Spinner soll unten sichtbar
   // stehen. Mit 'auto' wuerde sie als Assistenten-Nachricht behandelt und
@@ -1597,7 +1615,7 @@ async function cvzSendMessage() {
   loadingBubble.innerHTML = '<span class="cvz-spinner-inline"></span><span class="cvz-loading-label">Denkt nach …</span>';
   const loadingLabel = loadingBubble.querySelector('.cvz-loading-label');
   const stopTicker = cvzStartProgressTicker('Denkt nach …', CVZ_STRUCTURE_MESSAGES, t => { loadingLabel.textContent = t; });
- 
+
   // /chat antwortet sofort mit 202 + { turn_id, status: 'processing' }, OHNE
   // message-Feld. Das eigentliche Ergebnis kommt erst über
   // cvzPollTurnStatus() zurück.
@@ -1607,15 +1625,15 @@ async function cvzSendMessage() {
       body: JSON.stringify({ user_id: cvzUserId(), session_id: cvzState.session_id, message })
     });
     const data = await res.json();
- 
+
     if (!res.ok) {
       throw new Error(data.error || `HTTP ${res.status}`);
     }
- 
+
     // data = { turn_id, status: 'processing' } - jetzt auf das eigentliche
     // Ergebnis warten, waehrend die Ladeblase/der Ticker weiterlaeuft.
     const finalData = await cvzPollTurnStatus(data.turn_id);
- 
+
     stopTicker();
     loadingBubble.remove();
     cvzAppendMessage('assistant', finalData.message, finalData.structure_html_document, finalData.structure_version);
@@ -1633,11 +1651,11 @@ async function cvzSendMessage() {
 document.getElementById('cvz-chat-input')?.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); cvzSendMessage(); }
 });
- 
+
 function cvzStartNewProject() {
   window.location.href = window.location.pathname + '?new=1';
 }
- 
+
 // ==================== PDF-EXPORT ====================
 // Buttons werden per onclick direkt im HTML-Embed verdrahtet (siehe
 // frontend/embed.html: id="cvz-export-briefing-pdf" bzw.
@@ -1654,7 +1672,7 @@ async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
   if (errorEl) errorEl.hidden = true;
   buttonEl.disabled = true;
   label.textContent = 'PDF wird erstellt…';
- 
+
   const maxAttempts = 2;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -1663,7 +1681,7 @@ async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
         headers: cvzAuthHeaders(),
         body: JSON.stringify({ pageProjectId: cvzState.page_project_id, type }),
       });
- 
+
       if (response.status === 409) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error || 'Noch nicht bereit für den Export.');
@@ -1675,7 +1693,7 @@ async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error || 'Export fehlgeschlagen');
       }
- 
+
       const { url } = await response.json();
       // Das Anchor-Element MUSS im DOM haengen: Firefox ignoriert click()
       // auf nicht eingehaengten Anchors, der Download passierte dort
@@ -1687,7 +1705,7 @@ async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
- 
+
       label.textContent = originalText;
       buttonEl.disabled = false;
       return;
@@ -1706,7 +1724,7 @@ async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
     }
   }
 }
- 
+
 // ==================== INIT ====================
 // Sofort beim Laden, noch vor jedem await: Formular ausblenden und einen
 // simplen Ladezustand zeigen. Ohne das war für die Dauer von
@@ -1714,7 +1732,7 @@ async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
 // Roundtrips, teils mehrere Sekunden) das leere, unbefuellte Formular
 // sichtbar, bevor überhaupt feststand, ob es gezeigt werden soll.
 cvzShowInitialLoading();
- 
+
 cvzResolveIdentity().then(identityOk => {
   if (!identityOk) {
     cvzHideInitialLoading();
