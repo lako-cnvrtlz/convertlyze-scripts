@@ -189,7 +189,7 @@
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       var result = await window.supabase
         .from('users')
-        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, page_agent_sessions_used_current_period, page_agent_sessions_period_start')
+        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, ppu_aufbau_credits, reserved_ppu_aufbau_credits, page_agent_sessions_used_current_period, page_agent_sessions_period_start')
         .eq('memberstack_id', memberstackId)
         .single();
  
@@ -425,6 +425,7 @@
         statCardHtml({ wrapperId: 'cvz-d-c4', iconKey: 'aufbau',   label: 'Aufbau-Sessions diesen Monat',   valueId: 'cvz-d-c4-value', subId: 'cvz-d-c4-sub', withBar: true, barFillId: 'cvz-d-c4-bar', hidden: true }) +
         statCardHtml({ wrapperId: 'cvz-d-c5', iconKey: 'check',    label: 'Verbleibende Aufbau-Sessions',  valueId: 'cvz-d-c5-value', subId: 'cvz-d-c5-sub', withBar: false, hidden: true }) +
         statCardHtml({ wrapperId: 'cvz-d-c6', iconKey: 'cart',     label: 'Pay-per-Use Analysen',          valueId: 'cvz-d-c6-value', subId: 'cvz-d-c6-sub', withBar: false, hidden: true }) +
+        statCardHtml({ wrapperId: 'cvz-d-c7', iconKey: 'cart',     label: 'Pay-per-Use Aufbau-Sessions',   valueId: 'cvz-d-c7-value', subId: 'cvz-d-c7-sub', withBar: false, hidden: true }) +
       '</div>' +
       '<div class="cvz-d-actions">' +
         '<a id="cvz-d-btn-new-analysis" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">Neue Analyse</a>' +
@@ -479,6 +480,11 @@
     var ppuCredits   = Math.round(Number(user.ppu_credits || 0));
     var ppuReserved  = Math.round(Number(user.reserved_ppu_credits || 0));
     var ppuAvailable = Math.max(ppuCredits - ppuReserved, 0);
+    // Aufbau-PPU liegt wie ppu_credits auf der eigenen users-Zeile des Members
+    // (nicht auf bu/billingUser) - siehe Kommentar bei Karte 6/7 weiter unten.
+    var ppuAufbauCredits   = Math.round(Number(user.ppu_aufbau_credits || 0));
+    var ppuAufbauReserved  = Math.round(Number(user.reserved_ppu_aufbau_credits || 0));
+    var ppuAufbauAvailable = Math.max(ppuAufbauCredits - ppuAufbauReserved, 0);
  
     var analysesLeft = bu.credits_remaining != null
       ? Math.max(0, Math.round(Number(bu.credits_remaining)) - reserved)
@@ -579,7 +585,20 @@
     setText('cvz-d-c6-value', ppuAvailable);
     setText('cvz-d-c6-sub', ppuLabelText);
     showEl(document.getElementById('cvz-d-c6'), ppuCredits > 0, 'flex');
- 
+
+    // Karte 7: Pay-per-Use Aufbau-Sessions (nur wenn vorhanden) - exakt dasselbe
+    // Muster wie Karte 6, nur fuer ppu_aufbau_credits statt ppu_credits.
+    var ppuAufbauLabelText = ppuAufbauCredits === 0
+      ? 'Keine Pay-per-Use Aufbau-Sessions'
+      : ppuAufbauReserved > 0 && ppuAufbauAvailable === 0
+        ? 'Session wird gerade verarbeitet...'
+        : ppuAufbauReserved > 0
+          ? ppuAufbauAvailable + ' verfügbar (' + ppuAufbauReserved + ' in Bearbeitung)'
+          : ppuAufbauCredits + ' Pay-per-Use Aufbau-Session' + (ppuAufbauCredits > 1 ? 's' : '') + ' verfügbar';
+    setText('cvz-d-c7-value', ppuAufbauAvailable);
+    setText('cvz-d-c7-sub', ppuAufbauLabelText);
+    showEl(document.getElementById('cvz-d-c7'), ppuAufbauCredits > 0, 'flex');
+
     // User-Kopfbereich (weiterhin Webflow-Elemente, unveraendert)
     setUserHeader(user);
   }
@@ -1151,4 +1170,3 @@
   }
  
 })();
- 
