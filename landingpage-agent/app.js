@@ -151,6 +151,12 @@ function cvzRenderQuotaBanner() {
     banner.textContent = `Kein Sessions-Kontingent mehr verfügbar (0 von ${cvzQuota.limit}).${resetHint}`;
   } else if (planDepletedButHasPpu) {
     banner.textContent = `Monatliches Kontingent aufgebraucht (0 von ${cvzQuota.limit}) - du hast aber noch ${cvzQuota.ppuAufbauAvailable} gekaufte Aufbau-Session${cvzQuota.ppuAufbauAvailable > 1 ? 's' : ''} übrig, die jetzt automatisch genutzt wird.`;
+  } else if (cvzQuota.ppuAufbauAvailable > 0) {
+    // Plan-Kontingent ist noch nicht aufgebraucht, aber es liegen zusaetzlich
+    // gekaufte Aufbau-PPU-Credits bereit - die sollen direkt nach dem Kauf
+    // sichtbar sein, nicht erst wenn das Plan-Kontingent auf 0 faellt. Sonst
+    // wirkt ein bezahlter Credit fuer den Kunden wie "verschwunden".
+    banner.textContent = `${cvzQuota.remaining} von ${cvzQuota.limit} Sessions in diesem Monat verfügbar. Zusätzlich: ${cvzQuota.ppuAufbauAvailable} gekaufte Aufbau-Session${cvzQuota.ppuAufbauAvailable > 1 ? 's' : ''} in Reserve.`;
   } else {
     banner.textContent = `${cvzQuota.remaining} von ${cvzQuota.limit} Sessions in diesem Monat verfügbar.`;
   }
