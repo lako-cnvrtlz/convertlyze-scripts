@@ -1,58 +1,50 @@
 /**
- * dashboard-v7.js
+ * dashboard-v8.js
  * ----------------
  * Member-Dashboard: Stat-Karten, Aktions-Buttons, Analysen-Liste, PDF-Download,
- * Team-Einladungen (Sichtbarkeit) - komplett aus JS generiert, kein Custom-Attribute-
- * Bauplan mehr in Webflow noetig.
+ * Team-Einladungen (Sichtbarkeit), "Zuletzt aktiv"-Uebersicht - komplett aus JS
+ * generiert, kein Custom-Attribute-Bauplan mehr in Webflow noetig.
  *
  * Seite: /member/dashboard
- * Embedding: jsDelivr (<script src=".../dashboard-v7.js">)
+ * Embedding: jsDelivr (<script src=".../dashboard-v8.js">)
  * Dependencies: window.supabase (global), window.$memberstackDom
  *
- * ÄNDERUNGEN ggü. v6 (differenzierte Download-Fehlermeldung):
- *   - handleReportDownload(): der catch-Block unterscheidet jetzt anhand
- *     von err.code === 'PLAN_RESTRICTED' (aus der generate-pdf-report
- *     Edge Function) zwischen einer Plan-Sperre und einem generischen
- *     Fehler. Bei der Plan-Sperre ist "erneut versuchen" irrefuehrend, da
- *     ein zweiter Klick am Plan nichts aendert - der Button zeigt
- *     stattdessen einen erklaerenden Text.
- *     Analog zur selben Aenderung in report.js (attachPdfDownloadHandler).
- *   - createAnalysisRow(): der Tooltip auf dem ausgegrauten Report-Button
- *     unterscheidet jetzt Free-Analysen ("PDF-Report ist im Free Plan
- *     nicht enthalten") von anderen nicht zugriffsberechtigten Quellen
- *     (weiterhin der generische Text). Vorher zeigten alle gesperrten
- *     Analysen denselben generischen Tooltip.
- *   - BUGFIX: .cvz-a-icon-btn.cvz-a-disabled hatte pointer-events:none -
- *     das unterdrueckt auch mouseover, wodurch der native title-Tooltip
- *     (inkl. der neuen Free-Plan-Meldung) auf ausgegrauten Icons NIE
- *     erschien, egal was im title-Attribut stand. pointer-events:none
- *     entfernt; als Ersatz-Klickschutz bekommt der Ansicht-Button bei
- *     !isCompleted jetzt href='#' + preventDefault (analog zum
- *     KI-Agent-Button). Der Report-Button war schon vorher sicher, da der
- *     Klick-Handler nur bei canDownload angehaengt wird.
- *   - BUGFIX: der KI-Agent-Button bekam ein title-Attribut bisher NUR im
- *     deaktivierten Zustand. Im aktiven Zustand (abgeschlossen + Ersteller)
- *     fehlte jeder Hover-Text, anders als bei Ansicht ("Ansehen") und
- *     Report ("Report herunterladen"). Ergaenzt um "Mit KI-Agent
- *     optimieren" im aktiven Fall.
- *   - BUGFIX (Verdacht, noch zu bestaetigen): der deaktivierte Zustand von
- *     viewBtn/agentBtn traegt aria-disabled="true" - falls irgendwo global
- *     auf der Seite eine Regel wie [aria-disabled="true"]{pointer-events:
- *     none;} existiert (gaengiges A11y-Pattern fuer nicht-native disabled-
- *     Links), waere genau derselbe Hover-Bug wie bei .cvz-a-disabled zurueck,
- *     nur ueber einen anderen Selektor. dlBtn war davon nie betroffen, da er
- *     kein aria-disabled traegt - das erklaert, warum Report/Ansehen
- *     funktionierten, der Agent-Button (haeufiger im disabled-Zustand
- *     getestet, da an isCreator gekoppelt) aber nicht. Beide Buttons
- *     bekommen jetzt zusaetzlich inline pointer-events:auto, das jede
- *     externe Klassen-/Attribut-Regel uebersteuert.
- * *   - NEU: showClickHint() - alle drei Aktions-Icons (Ansicht, KI-Agent,
- *     Report) zeigen ihren Hinweistext jetzt zusaetzlich per Klick als kleine
- *     Sprechblase, wenn sie deaktiviert sind. WHY: title-Tooltips loesen nur
- *     bei Hover aus - auf Touch-Geraeten (kein Hover) kam die Erklaerung
- *     bisher nie an, und der Klick auf den deaktivierten Report-Button tat
- *     bisher schlicht gar nichts.
- * In Webflow wird NUR NOCH EIN leerer Container gebraucht:
+ * ÄNDERUNGEN ggü. v7 (neue Section "Zuletzt aktiv"):
+ *   - NEU: Section "Zuletzt aktiv" oberhalb der Stat-Karten. Zeigt die
+ *     jeweils letzten Aktivitaeten aus drei Quellen zusammengefuehrt und
+ *     nach Zeitstempel sortiert (neueste zuerst, max. CONFIG.RECENT_ACTIVITY_LIMIT
+ *     Eintraege): Analysen (aus den ohnehin geladenen state.analysesData),
+ *     Aufbau-Projekte (Tabelle page_projects) und KI-Agent-Chats (Tabelle
+ *     ai_chat_sessions, nur Sessions mit total_messages > 0, damit leere,
+ *     nie genutzte Sessions nicht auftauchen). Klick auf einen Eintrag
+ *     oeffnet die jeweilige Zielseite in einem neuen Tab, genauso wie die
+ *     bestehenden Ansicht-/KI-Agent-Icons in der Analysen-Tabelle.
+ *   - ANNAHME (bitte pruefen): Die URL fuer ein bestehendes Aufbau-Projekt
+ *     wurde als '/member/landingpage-assistant?project_id=<id>' geraten,
+ *     abgeleitet aus dem Muster von CONFIG.NEW_LANDINGPAGE_URL. Falls die
+ *     tatsaechliche Route anders aussieht: siehe buildAufbauProjectUrl().
+ *   - EINSCHRAENKUNG: Aufbau-Projekte werden per .eq('user_id', ...) nur
+ *     fuer den eingeloggten User selbst geladen. Laut bisherigen Notizen
+ *     sind Aufbau-Projekte inzwischen team-weit sichtbar (analog zum
+ *     Session-Kontingent) - dafuer gibt es aber (anders als
+ *     get_analyses_for_member fuer Analysen) noch keine team-faehige RPC,
+ *     und page_projects hat aktuell keine erkennbare Team-Spalte.
+ *     Team-Mitglieder sehen hier also NUR ihre eigenen Aufbau-Projekte,
+ *     nicht die des ganzen Teams. Bewusst NICHT den Filter entfernt und
+ *     auf RLS verlassen, da unklar ist, ob die RLS-Policy auf page_projects
+ *     bereits team-scoped ist - im Zweifel lieber zu wenig zeigen als
+ *     versehentlich fremde Projekte anzuzeigen. Falls Team-Sichtbarkeit
+ *     hier wichtig ist: RPC analog zu get_analyses_for_member bauen.
+ *   - KI-Agent-Sessions werden bewusst weiterhin nur fuer den eingeloggten
+ *     User geladen (kein Team-Fall) - das deckt sich mit der bestehenden
+ *     Regel, dass der KI-Agent nur dem Ersteller der Analyse zur Verfuegung
+ *     steht (siehe agentEnabled = isCompleted && isCreator weiter unten).
+ *   - "Zuletzt aktiv" aktualisiert sich NICHT live ueber Realtime/Polling,
+ *     anders als die Analysen-Tabelle - nur beim initialen Laden der Seite.
+ *     Bewusste Vereinfachung fuer den ersten Wurf; bei Bedarf laesst sich
+ *     ein Aufruf von loadRecentActivity() leicht in silentRefresh() ergaenzen.
+ *
+ * In Webflow wird NUR EIN leerer Container gebraucht:
  *   <div id="cvz-dashboard-app"></div>
  * Alle bisherigen Custom-Attribute-Elemente ([data-dashboard="..."], .table-list,
  * .analysis-row-header, Pagination-Wrapper, "Neue Analyse"/"Analyse kaufen"-Buttons)
@@ -65,7 +57,7 @@
  *   nicht mehr referenziert.
  *
  * Features:
- * - Skeleton-Loading (Shimmer) fuer Stat-Karten + Analysen-Tabelle
+ * - Skeleton-Loading (Shimmer) fuer Stat-Karten + Analysen-Tabelle + "Zuletzt aktiv"
  * - Pagination (10 Analysen pro Seite)
  * - Realtime-Updates via Supabase Postgres Changes + Polling-Fallback (10s)
  * - PDF/Word Download via convertlyze-pdf-service
@@ -73,9 +65,10 @@
  * - "Neue Analyse" / "Neue Landingpage" Buttons
  * - Purchase Success Modal nach Kauf
  * - Aufbau-Sessions-Kontingent (Landingpage-Creation-Agent), Limit aus plans.page_agent_sessions_limit
+ * - "Zuletzt aktiv": kombinierte Uebersicht aus Analysen, Aufbau-Projekten, KI-Agent-Chats
  *
  * KRITISCH: PDF_SECRET liegt hier als Klartext.
- * Bei Rotation: dashboard-v7.js + Railway PDF Service ENV aktualisieren.
+ * Bei Rotation: dashboard-v8.js + Railway PDF Service ENV aktualisieren.
  *
  * OFFENE FRAGE (nicht automatisch geloest): chat_messages_used_current_period /
  * chat_messages_limit werden weiterhin geladen und berechnet, aber NICHT mehr in
@@ -87,6 +80,15 @@
  * report.js (PDF_ACCESS_SOURCES) und in der generate-pdf-report Edge
  * Function (dort der eigentliche Sicherheits-Check). Bei Aenderung (neuer
  * Plan-Name o.ae.) IMMER alle drei Stellen synchron halten.
+ *
+ * WHY page_projects hier direkt per Supabase-Client gelesen wird (nicht ueber
+ * die Page-Agent-API wie in page-projects-embed.html): Fuer die "Zuletzt
+ * aktiv"-Vorschau reichen 5 Datensaetze mit 3 Feldern - ein zusaetzlicher
+ * API-Roundtrip waere hier unnoetig. WICHTIG: Falls die Page-Agent-API
+ * zusaetzliche Business-Logik anwendet (z.B. Status-Berechnung, Soft-Deletes,
+ * Team-Aufloesung), die die rohe Tabelle nicht abbildet, kann diese Vorschau
+ * von der vollen Liste in page-projects-embed.html abweichen. Falls das
+ * auffaellt: hier auf die gleiche API umstellen statt der Rohtabelle.
  */
  
 // -- Sofort verstecken wenn Plan im sessionStorage --------------------------
@@ -110,6 +112,7 @@
     SUPABASE_ANON:     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU',
     PAGE_SIZE:         10,
     POLL_INTERVAL_MS:  10000,
+    RECENT_ACTIVITY_LIMIT: 5,
     PDF_ACCESS_SOURCES: ['starter', 'pro', 'enterprise', 'pay-per-use', 'beta', 'agency'],
     PAID_PLANS:        ['Starter', 'Pro', 'Enterprise'],
     NEW_ANALYSIS_URL:  '/analyse/formular',
@@ -176,6 +179,23 @@
  
   function getParam(key) {
     return new URLSearchParams(window.location.search).get(key);
+  }
+ 
+  // WHY eigene relative Zeitfunktion (kein Datepicker/Library): Der Bedarf ist
+  // simpel genug (Minuten/Stunden/Tage), eine kleine Library nur dafuer waere
+  // unnoetig Overhead fuer ein Webflow-Embed-Script.
+  function formatRelativeTime(dateStr) {
+    if (!dateStr) return '-';
+    var diffMs = Date.now() - new Date(dateStr).getTime();
+    var diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'gerade eben';
+    if (diffMin < 60) return 'vor ' + diffMin + ' Min.';
+    var diffH = Math.floor(diffMin / 60);
+    if (diffH < 24) return 'vor ' + diffH + ' Std.';
+    var diffD = Math.floor(diffH / 24);
+    if (diffD === 1) return 'gestern';
+    if (diffD < 7) return 'vor ' + diffD + ' Tagen';
+    return new Date(dateStr).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
  
   // -- Cookie helpers -----------------------------------------------------------
@@ -286,6 +306,45 @@
     var result = await window.supabase.rpc('get_analyses_for_member', { p_memberstack_id: memberstackId });
     if (result.error) {
       console.error('[CVZ] Analysen laden fehlgeschlagen:', result.error);
+      return [];
+    }
+    return result.data || [];
+  }
+ 
+  // Letzte Aufbau-Projekte fuer "Zuletzt aktiv" - siehe WHY-Kommentar im Dateikopf
+  // zur bewussten Entscheidung, hier direkt page_projects statt der Page-Agent-API
+  // zu lesen, und zur Team-Sichtbarkeits-Einschraenkung.
+  async function fetchRecentPageProjects(userId, limit) {
+    if (!userId) return [];
+    var result = await window.supabase
+      .from('page_projects')
+      .select('id, name, status, updated_at')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(limit);
+    if (result.error) {
+      console.warn('[CVZ] fetchRecentPageProjects:', result.error);
+      return [];
+    }
+    return result.data || [];
+  }
+ 
+  // Letzte KI-Agent-Sessions fuer "Zuletzt aktiv". analyses(...) ist ein
+  // PostgREST-Embed ueber den FK ai_chat_sessions.analysis_id -> analyses.id,
+  // liefert URL/Keyword der zugehoerigen Analyse gleich mit (kein zweiter Call).
+  // Nur Sessions mit total_messages > 0, damit gestartete-aber-nie-genutzte
+  // Sessions die Liste nicht mit leeren Eintraegen fuellen.
+  async function fetchRecentAgentSessions(userId, limit) {
+    if (!userId) return [];
+    var result = await window.supabase
+      .from('ai_chat_sessions')
+      .select('id, analysis_id, updated_at, total_messages, analyses(landing_page_url, keyword)')
+      .eq('user_id', userId)
+      .gt('total_messages', 0)
+      .order('updated_at', { ascending: false })
+      .limit(limit);
+    if (result.error) {
+      console.warn('[CVZ] fetchRecentAgentSessions:', result.error);
       return [];
     }
     return result.data || [];
@@ -431,6 +490,20 @@
         'transition:opacity .15s ease,transform .15s ease;' +
       '}' +
       '.cvz-click-hint.cvz-click-hint-visible{opacity:1;transform:translateY(0);}' +
+      // -- NEU: "Zuletzt aktiv" -------------------------------------------------
+      '.cvz-ract-list{display:flex;flex-direction:column;gap:8px;margin-bottom:32px;}' +
+      '.cvz-ract-item{display:flex;align-items:center;gap:14px;background:var(--cvz-card);' +
+        'border:1px solid var(--cvz-border);border-radius:12px;padding:12px 16px;' +
+        'text-decoration:none;transition:border-color .15s ease,background .15s ease;}' +
+      '.cvz-ract-item:hover{border-color:var(--cvz-teal);background:rgba(79,209,197,0.04);}' +
+      '.cvz-ract-icon{width:36px;height:36px;border-radius:10px;background:var(--cvz-teal-dim);' +
+        'display:flex;align-items:center;justify-content:center;flex-shrink:0;}' +
+      '.cvz-ract-main{flex:1;min-width:0;}' +
+      '.cvz-ract-type{font-size:12px;font-weight:600;color:var(--cvz-teal);text-transform:uppercase;letter-spacing:.03em;}' +
+      '.cvz-ract-context{font-size:14px;color:var(--cvz-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+      '.cvz-ract-time{font-size:13px;color:var(--cvz-muted);flex-shrink:0;white-space:nowrap;}' +
+      '.cvz-ract-item.cvz-ract-skel{height:56px;background:linear-gradient(90deg,#1a2133 25%,#252d3d 50%,#1a2133 75%);' +
+        'background-size:400px 100%;animation:cvz-shimmer 1.4s infinite;pointer-events:none;}' +
       '@media (max-width:768px){' +
         '.cvz-a-header{display:none;}' +
         '.cvz-a-row{grid-template-columns:1fr 1fr;row-gap:10px;padding:18px 16px;}' +
@@ -438,6 +511,7 @@
         '.cvz-a-date{text-align:right;}' +
         '.cvz-a-score-cell{grid-column:1/-1;margin-top:4px;}' +
         '.cvz-a-actions{display:flex!important;grid-column:1/-1;justify-content:center;gap:20px;margin-top:8px;}' +
+        '.cvz-ract-time{display:none;}' +
       '}';
     document.head.appendChild(s);
   }
@@ -474,6 +548,10 @@
     injectDashboardStyle();
  
     root.innerHTML =
+      // "Zuletzt aktiv" startet unsichtbar (display:none) - wird von
+      // loadRecentActivity() eingeblendet, sobald geladen wird / Daten da sind.
+      // So flackert beim ersten Rendern keine leere Section auf.
+      '<div id="cvz-ract-wrap" style="display:none"></div>' +
       '<div class="cvz-d-stats">' +
         statCardHtml({ wrapperId: 'cvz-d-c1', iconKey: 'barChart', label: 'Analysen diesen Monat',        valueId: 'cvz-d-c1-value', subId: 'cvz-d-c1-sub', withBar: true, barFillId: 'cvz-d-c1-bar' }) +
         statCardHtml({ wrapperId: 'cvz-d-c2', iconKey: 'check',    label: 'Verbleibende Analysen',         valueId: 'cvz-d-c2-value', subId: 'cvz-d-c2-sub', withBar: false }) +
@@ -932,6 +1010,129 @@
     nextBtn.disabled = state.currentPage >= state.totalPages;
   }
  
+  // -- UI: "Zuletzt aktiv" ----------------------------------------------------
+  // Kombiniert drei Aktivitaets-Quellen (Analyse, Aufbau-Projekt, KI-Agent-Chat)
+  // zu einer einzigen, nach Zeitstempel sortierten Liste. Jede build...-Funktion
+  // wandelt die rohen DB-Zeilen einer Quelle in ein einheitliches Item-Format um:
+  // { type, iconKey, title, context, timestamp, href }
+ 
+  // Bestaetigtes URL-Muster fuer ein bestehendes Aufbau-Projekt: Parameter
+  // heisst 'project' (nicht 'project_id'), Wert ist die page_projects.id.
+  function buildAufbauProjectUrl(projectId) {
+    return '/member/landingpage-assistant?project=' + encodeURIComponent(projectId);
+  }
+ 
+  // state.analysesData ist bereits geladen (siehe loadAndRenderAnalyses) - hier
+  // kein weiterer Netzwerk-Call noetig, nur sortieren und die ersten `limit` nehmen.
+  function buildAnalyseActivityItems(limit) {
+    var sorted = state.analysesData.slice().sort(function (a, b) {
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
+    return sorted.slice(0, limit).map(function (a) {
+      return {
+        type:      'analyse',
+        iconKey:   'barChart',
+        title:     'Analyse',
+        context:   truncate(a.landing_page_url || a.keyword || '-', 60),
+        timestamp: a.created_at,
+        href:      '/analyse/resultat?id=' + encodeURIComponent(a.id),
+      };
+    });
+  }
+ 
+  function buildAufbauActivityItems(projects) {
+    return projects.map(function (p) {
+      return {
+        type:      'aufbau',
+        iconKey:   'aufbau',
+        title:     'Aufbau-Session',
+        context:   truncate(p.name || 'Unbenanntes Projekt', 60),
+        timestamp: p.updated_at,
+        href:      buildAufbauProjectUrl(p.id),
+      };
+    });
+  }
+ 
+  function buildAgentActivityItems(sessions) {
+    return sessions.map(function (s) {
+      var ctx = '-';
+      if (s.analyses) {
+        ctx = s.analyses.keyword || s.analyses.landing_page_url || '-';
+      }
+      return {
+        type:      'agent',
+        iconKey:   'agent',
+        title:     'KI-Agent',
+        context:   truncate(ctx, 60),
+        timestamp: s.updated_at,
+        href:      '/analyse/optimization-agent?analysis_id=' + encodeURIComponent(s.analysis_id),
+      };
+    });
+  }
+ 
+  function mergeActivityItems(analyseItems, aufbauItems, agentItems, limit) {
+    var all = analyseItems.concat(aufbauItems, agentItems);
+    all.sort(function (a, b) { return new Date(b.timestamp) - new Date(a.timestamp); });
+    return all.slice(0, limit);
+  }
+ 
+  function renderRecentActivity(items) {
+    var wrap = document.getElementById('cvz-ract-wrap');
+    if (!wrap) return;
+ 
+    // Leer -> Section komplett ausblenden statt eine leere Box zu zeigen.
+    if (!items.length) {
+      wrap.style.display = 'none';
+      wrap.innerHTML = '';
+      return;
+    }
+ 
+    wrap.style.display = '';
+    var html = '<h2 class="cvz-d-title" style="margin-bottom:12px;">Zuletzt aktiv</h2><div class="cvz-ract-list">';
+    items.forEach(function (item) {
+      html +=
+        '<a class="cvz-ract-item" href="' + item.href + '" target="_blank" rel="noopener">' +
+          '<div class="cvz-ract-icon">' + ICONS[item.iconKey] + '</div>' +
+          '<div class="cvz-ract-main">' +
+            '<div class="cvz-ract-type">' + escapeHtml(item.title) + '</div>' +
+            '<div class="cvz-ract-context">' + escapeHtml(item.context) + '</div>' +
+          '</div>' +
+          '<div class="cvz-ract-time">' + escapeHtml(formatRelativeTime(item.timestamp)) + '</div>' +
+        '</a>';
+    });
+    html += '</div>';
+    wrap.innerHTML = html;
+  }
+ 
+  // Orchestriert das Laden der "Zuletzt aktiv"-Section: Skeleton anzeigen,
+  // Aufbau-Projekte + KI-Agent-Sessions parallel laden (Analysen sind schon da),
+  // zusammenfuehren, rendern.
+  async function loadRecentActivity(userId) {
+    var wrap = document.getElementById('cvz-ract-wrap');
+    if (wrap) {
+      wrap.style.display = '';
+      wrap.innerHTML =
+        '<h2 class="cvz-d-title" style="margin-bottom:12px;">Zuletzt aktiv</h2>' +
+        '<div class="cvz-ract-list">' +
+          '<div class="cvz-ract-item cvz-ract-skel"></div>' +
+          '<div class="cvz-ract-item cvz-ract-skel"></div>' +
+          '<div class="cvz-ract-item cvz-ract-skel"></div>' +
+        '</div>';
+    }
+ 
+    var results = await Promise.all([
+      fetchRecentPageProjects(userId, CONFIG.RECENT_ACTIVITY_LIMIT),
+      fetchRecentAgentSessions(userId, CONFIG.RECENT_ACTIVITY_LIMIT),
+    ]);
+ 
+    var aufbauItems  = buildAufbauActivityItems(results[0]);
+    var agentItems   = buildAgentActivityItems(results[1]);
+    var analyseItems = buildAnalyseActivityItems(CONFIG.RECENT_ACTIVITY_LIMIT);
+ 
+    var merged = mergeActivityItems(analyseItems, aufbauItems, agentItems, CONFIG.RECENT_ACTIVITY_LIMIT);
+    renderRecentActivity(merged);
+  }
+ 
   // -- UI: Loading / Empty / Error States -----------------------------------------
  
   var CVZ_SPINNER_SVG =
@@ -1309,6 +1510,9 @@
       renderStatCards(currentUser, sessionsLimit);
  
       await loadAndRenderAnalyses(false);
+      // "Zuletzt aktiv" erst NACH loadAndRenderAnalyses(), weil
+      // buildAnalyseActivityItems() auf state.analysesData zugreift.
+      await loadRecentActivity(currentUser.id);
       subscribeToAnalysisChanges(currentUser.id);
       startPolling();
  
