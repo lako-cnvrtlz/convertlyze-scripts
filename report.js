@@ -29,6 +29,11 @@
  *     aria-disabled="true" + Styling; Klickschutz bleibt bestehen, da der
  *     Handler ohnehin nur bei pdfAllowed angehängt wird (analog zum Fix
  *     in dashboard-v7.js, wo dieselbe Ursache über pointer-events:none lag).
+ *   - NEU: showClickHint() - der deaktivierte PDF-Button zeigt seinen
+ *     Hinweistext jetzt zusätzlich per Klick als kleine Sprechblase. WHY:
+ *     title-Tooltips lösen nur bei Hover aus - auf Touch-Geräten kommt die
+ *     Erklärung sonst nie an, und ein Klick auf den deaktivierten Button tat
+ *     bisher schlicht gar nichts. Identische Logik wie in dashboard-v7.js.
  *
  * ÄNDERUNGEN ggü. v5 (Performance & AI Sichtbarkeit in Executive Summary):
  *   - renderExecSummary() rendert jetzt zusätzlich zwei Balken für
@@ -439,6 +444,15 @@
       .cvz-pdf-btn:hover{border-color:rgba(255,255,255,.35);color:#fff;transform:translateY(-2px);}
       .cvz-pdf-btn:disabled,.cvz-pdf-btn.loading{opacity:.5;cursor:not-allowed;transform:none;}
       .cvz-pdf-btn svg{flex-shrink:0;}
+      .cvz-click-hint{
+        position:fixed;z-index:10000;max-width:220px;
+        background:#161b22;border:1px solid rgba(255,255,255,.12);color:#e2e8f0;
+        font-family:'Geist','DM Sans',sans-serif;font-size:12px;line-height:1.4;
+        padding:8px 12px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.4);
+        pointer-events:none;opacity:0;transform:translateY(4px);
+        transition:opacity .15s ease,transform .15s ease;
+      }
+      .cvz-click-hint.cvz-click-hint-visible{opacity:1;transform:translateY(0);}
       .cvz-agent-hint{
         max-width:1200px;margin:0 auto;padding:0 24px 12px;text-align:center;
         font-size:12px;color:#4a5568;line-height:1.6;font-family:'Geist','DM Sans',sans-serif;
@@ -817,6 +831,55 @@
     if (!d) return '-';
     try { return new Date(d).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); }
     catch(e) { return d; }
+  }
+
+  // ── UI: Klick-Hinweis (Ersatz/Ergaenzung fuer Hover) ────────────────────────
+  // WHY: title-Tooltips loesen nur bei Hover aus - auf Touch-Geraeten (kein
+  // Hover) kommt die Erklaerung sonst nie an. Bei Klick auf einen
+  // deaktivierten Button zeigen wir den title-Text zusaetzlich als kleine
+  // Sprechblase an. Ein zweiter Klick woanders auf der Seite oder ein
+  // Timeout schliesst sie wieder. Identische Logik wie in dashboard-v7.js.
+  const CVZ_CLICK_HINT_ID = 'cvz-click-hint';
+  let cvzClickHintTimer = null;
+
+  function hideClickHint() {
+    if (cvzClickHintTimer) { clearTimeout(cvzClickHintTimer); cvzClickHintTimer = null; }
+    const existing = document.getElementById(CVZ_CLICK_HINT_ID);
+    if (existing) existing.remove();
+    document.removeEventListener('click', handleDocClickForHint, true);
+  }
+
+  function handleDocClickForHint(e) {
+    const hint = document.getElementById(CVZ_CLICK_HINT_ID);
+    if (hint && !hint.contains(e.target)) hideClickHint();
+  }
+
+  function showClickHint(anchorEl, text) {
+    if (!text) return;
+    hideClickHint();
+
+    const hint = document.createElement('div');
+    hint.id = CVZ_CLICK_HINT_ID;
+    hint.className = 'cvz-click-hint';
+    hint.setAttribute('role', 'status');
+    hint.textContent = text;
+    document.body.appendChild(hint);
+
+    const rect     = anchorEl.getBoundingClientRect();
+    const hintRect = hint.getBoundingClientRect();
+    let top  = rect.top - hintRect.height - 8;
+    if (top < 8) top = rect.bottom + 8; // nicht genug Platz oben -> unterhalb anzeigen
+    let left = rect.left + (rect.width / 2) - (hintRect.width / 2);
+    left = Math.max(8, Math.min(left, window.innerWidth - hintRect.width - 8));
+    hint.style.top  = top + 'px';
+    hint.style.left = left + 'px';
+
+    requestAnimationFrame(() => { hint.classList.add('cvz-click-hint-visible'); });
+
+    cvzClickHintTimer = setTimeout(hideClickHint, 3000);
+    // WHY setTimeout(...,0): verhindert, dass der Klick, der showClickHint
+    // ausgeloest hat, den Listener sofort wieder selbst feuert.
+    setTimeout(() => { document.addEventListener('click', handleDocClickForHint, true); }, 0);
   }
 
   // ── PDF-Download Handler (ausgelagert, damit er fuer Ersteller UND Team-Mitglied
@@ -1426,10 +1489,16 @@
           <p class="cvz-agent-hint">Der KI-Agent steht nur dem Ersteller dieser Analyse zur Verfügung.</p>`;
       }
 
-      // PDF-Handler nur anhängen, wenn der Plan den Zugriff erlaubt - sonst
-      // feuert der (disabled) Button ohnehin keine Klicks.
+      // PDF-Handler nur anhängen, wenn der Plan den Zugriff erlaubt. Ohne
+      // Zugriff bekommt der Button stattdessen einen Klick-Hinweis, da vorher
+      // ein Klick auf den deaktivierten Button gar keine Rückmeldung gab.
       if (pdfAllowed) {
         attachPdfDownloadHandler(el.querySelector('.cvz-pdf-btn'), analysis, analysisId);
+      } else {
+        const disabledBtn = el.querySelector('.cvz-pdf-btn');
+        if (disabledBtn) {
+          disabledBtn.addEventListener('click', () => showClickHint(disabledBtn, disabledBtn.title));
+        }
       }
     });
 
