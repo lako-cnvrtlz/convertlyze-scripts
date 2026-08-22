@@ -22,6 +22,14 @@
  *     nicht enthalten") von anderen nicht zugriffsberechtigten Quellen
  *     (weiterhin der generische Text). Vorher zeigten alle gesperrten
  *     Analysen denselben generischen Tooltip.
+ *   - BUGFIX: .cvz-a-icon-btn.cvz-a-disabled hatte pointer-events:none -
+ *     das unterdrueckt auch mouseover, wodurch der native title-Tooltip
+ *     (inkl. der neuen Free-Plan-Meldung) auf ausgegrauten Icons NIE
+ *     erschien, egal was im title-Attribut stand. pointer-events:none
+ *     entfernt; als Ersatz-Klickschutz bekommt der Ansicht-Button bei
+ *     !isCompleted jetzt href='#' + preventDefault (analog zum
+ *     KI-Agent-Button). Der Report-Button war schon vorher sicher, da der
+ *     Klick-Handler nur bei canDownload angehaengt wird.
  *
  * BREAKING CHANGE ggue. dashboard-v5.js:
  * In Webflow wird NUR NOCH EIN leerer Container gebraucht:
@@ -384,7 +392,7 @@
       '.cvz-a-actions{display:contents;}' +
       '.cvz-a-icon-btn{width:36px;height:36px;border-radius:999px;background:#21262d;border:none;display:flex;' +
         'align-items:center;justify-content:center;cursor:pointer;color:#e8edf5;text-decoration:none;}' +
-      '.cvz-a-icon-btn.cvz-a-disabled{opacity:.35;pointer-events:none;cursor:not-allowed;}' +
+      '.cvz-a-icon-btn.cvz-a-disabled{opacity:.35;cursor:not-allowed;}' +
       '.cvz-a-icon-btn.cvz-a-loading-btn svg{animation:cvz-spin 1s linear infinite;}' +
       '.cvz-a-score-cell{display:flex;align-items:center;justify-content:center;}' +
       '.cvz-a-pagination{display:none;align-items:center;justify-content:center;gap:12px;margin-top:20px;}' +
@@ -731,9 +739,22 @@
     var viewBtn = document.createElement('a');
     viewBtn.className = 'cvz-a-icon-btn' + (isCompleted ? '' : ' cvz-a-disabled');
     viewBtn.innerHTML = ICONS.eye;
-    viewBtn.href = '/analyse/resultat?id=' + encodeURIComponent(analysis.id);
     viewBtn.target = '_blank';
-    viewBtn.title = isCompleted ? 'Report ansehen' : 'Analyse ist noch nicht abgeschlossen';
+    if (isCompleted) {
+      viewBtn.href = '/analyse/resultat?id=' + encodeURIComponent(analysis.id);
+      viewBtn.title = 'Ansehen';
+    } else {
+      // WHY href='#' + preventDefault statt nur pointer-events:none: Die CSS-Regel
+      // pointer-events:none wurde entfernt, damit der native title-Tooltip auf
+      // ausgegrauten Icons wieder per Hover ausgeloest wird (pointer-events:none
+      // unterdrueckt auch mouseover, nicht nur click). Der Klickschutz muss daher
+      // jetzt hier explizit passieren, sonst waere der Button trotz "disabled"-
+      // Optik navigierbar.
+      viewBtn.href = '#';
+      viewBtn.setAttribute('aria-disabled', 'true');
+      viewBtn.title = 'Analyse ist noch nicht abgeschlossen';
+      viewBtn.addEventListener('click', function (e) { e.preventDefault(); });
+    }
     actionsCell.appendChild(viewBtn);
  
     var agentEnabled = isCompleted && isCreator;
