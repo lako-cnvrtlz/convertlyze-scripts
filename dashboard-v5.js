@@ -589,7 +589,7 @@
       '</div>' +
       '<div class="cvz-d-actions">' +
         '<a id="cvz-d-btn-new-analysis" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">Neue Analyse</a>' +
-        '<a id="cvz-d-btn-new-page" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">Neue Landingpage</a>' +
+        '<a id="cvz-d-btn-new-page" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">Landingpage entwerfen</a>' +
         '<button id="cvz-d-btn-buy-ppu" type="button" class="cvz-d-btn cvz-d-btn-outline">Analyse kaufen</button>' +
       '</div>' +
       '<h2 class="cvz-d-title">Meine Analysen</h2>' +
