@@ -17,6 +17,11 @@
  *     ein zweiter Klick am Plan nichts aendert - der Button zeigt
  *     stattdessen einen erklaerenden Text.
  *     Analog zur selben Aenderung in report.js (attachPdfDownloadHandler).
+ *   - createAnalysisRow(): der Tooltip auf dem ausgegrauten Report-Button
+ *     unterscheidet jetzt Free-Analysen ("PDF-Report ist im Free Plan
+ *     nicht enthalten") von anderen nicht zugriffsberechtigten Quellen
+ *     (weiterhin der generische Text). Vorher zeigten alle gesperrten
+ *     Analysen denselben generischen Tooltip.
  *
  * BREAKING CHANGE ggue. dashboard-v5.js:
  * In Webflow wird NUR NOCH EIN leerer Container gebraucht:
@@ -748,10 +753,13 @@
     }
     actionsCell.appendChild(agentBtn);
  
+    var isFreeAnalysis = (analysis.analysis_source || '').toLowerCase() === 'free';
     var downloadTitle = !isCompleted
       ? 'Analyse muss abgeschlossen sein'
       : !canAccessPdf(analysis)
-        ? 'PDF-Report nur für kostenpflichtige Pläne oder Pay-per-Use verfügbar'
+        ? (isFreeAnalysis
+            ? 'PDF-Report ist im Free Plan nicht enthalten'
+            : 'PDF-Report nur für kostenpflichtige Pläne oder Pay-per-Use verfügbar')
         : 'Report herunterladen';
     var dlBtn = document.createElement('button');
     dlBtn.type = 'button';
