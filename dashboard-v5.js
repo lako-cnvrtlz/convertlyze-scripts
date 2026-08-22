@@ -588,9 +588,9 @@
         statCardHtml({ wrapperId: 'cvz-d-c7', iconKey: 'cart',     label: 'Pay-per-Use Aufbau-Sessions',   valueId: 'cvz-d-c7-value', subId: 'cvz-d-c7-sub', withBar: false, hidden: true }) +
       '</div>' +
       '<div class="cvz-d-actions">' +
-        '<a id="cvz-d-btn-new-analysis" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">Neue Analyse</a>' +
-        '<a id="cvz-d-btn-new-page" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">Landingpage aufbauen</a>' +
-        '<button id="cvz-d-btn-buy-ppu" type="button" class="cvz-d-btn cvz-d-btn-outline">Analyse kaufen</button>' +
+        '<a id="cvz-d-btn-new-analysis" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">NEUE ANALYSE</a>' +
+        '<a id="cvz-d-btn-new-page" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">LANDINGPAGE AUFBAUEN</a>' +
+        '<a id="cvz-d-btn-change-plan" class="cvz-d-btn cvz-d-btn-outline" href="/preise">Plan ändern</a>' +
       '</div>' +
       '<h2 class="cvz-d-title">Meine Analysen</h2>' +
       '<div class="cvz-a-card">' +
