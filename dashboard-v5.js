@@ -46,8 +46,12 @@
  *     getestet, da an isCreator gekoppelt) aber nicht. Beide Buttons
  *     bekommen jetzt zusaetzlich inline pointer-events:auto, das jede
  *     externe Klassen-/Attribut-Regel uebersteuert.
- *
- * BREAKING CHANGE ggue. dashboard-v5.js:
+ * *   - NEU: showClickHint() - alle drei Aktions-Icons (Ansicht, KI-Agent,
+ *     Report) zeigen ihren Hinweistext jetzt zusaetzlich per Klick als kleine
+ *     Sprechblase, wenn sie deaktiviert sind. WHY: title-Tooltips loesen nur
+ *     bei Hover aus - auf Touch-Geraeten (kein Hover) kam die Erklaerung
+ *     bisher nie an, und der Klick auf den deaktivierten Report-Button tat
+ *     bisher schlicht gar nichts.
  * In Webflow wird NUR NOCH EIN leerer Container gebraucht:
  *   <div id="cvz-dashboard-app"></div>
  * Alle bisherigen Custom-Attribute-Elemente ([data-dashboard="..."], .table-list,
@@ -418,6 +422,15 @@
       '.cvz-a-pagebtn.cvz-a-pagebtn-accent:not(:disabled){color:var(--cvz-teal);border-color:var(--cvz-teal);}' +
       '.cvz-a-pageinfo{background:var(--cvz-card);border:1px solid var(--cvz-border);color:var(--cvz-text);' +
         'font-size:.85rem;font-weight:600;padding:8px 18px;border-radius:999px;}' +
+      '.cvz-click-hint{' +
+        'position:fixed;z-index:10000;max-width:220px;' +
+        'background:var(--cvz-card);border:1px solid var(--cvz-border);color:var(--cvz-text);' +
+        'font-family:Geist,sans-serif;font-size:12px;line-height:1.4;' +
+        'padding:8px 12px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.4);' +
+        'pointer-events:none;opacity:0;transform:translateY(4px);' +
+        'transition:opacity .15s ease,transform .15s ease;' +
+      '}' +
+      '.cvz-click-hint.cvz-click-hint-visible{opacity:1;transform:translateY(0);}' +
       '@media (max-width:768px){' +
         '.cvz-a-header{display:none;}' +
         '.cvz-a-row{grid-template-columns:1fr 1fr;row-gap:10px;padding:18px 16px;}' +
@@ -659,6 +672,57 @@
     }
   }
  
+  // -- UI: Klick-Hinweis (Ersatz/Ergaenzung fuer Hover) -----------------------
+  // WHY: title-Tooltips loesen nur bei Hover aus - auf Touch-Geraeten (kein
+  // Hover) und offenbar teils auch auf Desktop (siehe die pointer-events-
+  // Debugging-Runde weiter oben) kommt die Erklaerung sonst nie an. Bei Klick
+  // auf einen deaktivierten Button zeigen wir den title-Text zusaetzlich als
+  // kleine Sprechblase an - unabhaengig davon, ob Hover ueberhaupt geklappt
+  // haette. Ein zweiter Klick woanders auf der Seite oder ein Timeout
+  // schliesst sie wieder.
+  var CVZ_CLICK_HINT_ID = 'cvz-click-hint';
+  var cvzClickHintTimer = null;
+ 
+  function hideClickHint() {
+    if (cvzClickHintTimer) { clearTimeout(cvzClickHintTimer); cvzClickHintTimer = null; }
+    var existing = document.getElementById(CVZ_CLICK_HINT_ID);
+    if (existing) existing.remove();
+    document.removeEventListener('click', handleDocClickForHint, true);
+  }
+ 
+  function handleDocClickForHint(e) {
+    var hint = document.getElementById(CVZ_CLICK_HINT_ID);
+    if (hint && !hint.contains(e.target)) hideClickHint();
+  }
+ 
+  function showClickHint(anchorEl, text) {
+    if (!text) return;
+    hideClickHint();
+ 
+    var hint = document.createElement('div');
+    hint.id = CVZ_CLICK_HINT_ID;
+    hint.className = 'cvz-click-hint';
+    hint.setAttribute('role', 'status');
+    hint.textContent = text;
+    document.body.appendChild(hint);
+ 
+    var rect     = anchorEl.getBoundingClientRect();
+    var hintRect = hint.getBoundingClientRect();
+    var top  = rect.top - hintRect.height - 8;
+    if (top < 8) top = rect.bottom + 8; // nicht genug Platz oben -> unterhalb anzeigen
+    var left = rect.left + (rect.width / 2) - (hintRect.width / 2);
+    left = Math.max(8, Math.min(left, window.innerWidth - hintRect.width - 8));
+    hint.style.top  = top + 'px';
+    hint.style.left = left + 'px';
+ 
+    requestAnimationFrame(function () { hint.classList.add('cvz-click-hint-visible'); });
+ 
+    cvzClickHintTimer = setTimeout(hideClickHint, 3000);
+    // WHY setTimeout(...,0): verhindert, dass der Klick, der showClickHint
+    // ausgeloest hat, den Listener sofort wieder selbst feuert.
+    setTimeout(function () { document.addEventListener('click', handleDocClickForHint, true); }, 0);
+  }
+ 
   // -- UI: Analysen-Tabelle -------------------------------------------------------
  
   var STATUS_STYLES = {
@@ -768,16 +832,20 @@
       // Optik navigierbar.
       viewBtn.href = '#';
       viewBtn.setAttribute('aria-disabled', 'true');
-      // WHY pointer-events:auto inline: Vermutlich existiert irgendwo global auf
-      // der Webflow-Seite eine Accessibility-Regel wie [aria-disabled="true"]{
-      // pointer-events:none;} (gaengiges Pattern, um nicht-native disabled-Links
-      // unklickbar zu machen). Die wuerde denselben Hover-Bug wieder einschleppen,
-      // den wir gerade erst ueber .cvz-a-disabled behoben haben. Inline-Style
-      // gewinnt gegen jede externe Klassen-Regel, unabhaengig davon ob/wo sie
-      // im Stylesheet der Seite steht.
-      viewBtn.style.pointerEvents = 'auto';
+      // WHY pointer-events:auto !important inline: Auf der Seite existiert
+      // vermutlich eine Regel wie a[aria-disabled="true"]{pointer-events:none
+      // !important;} (gaengiges Pattern fuer nicht-native disabled-Links,
+      // z.B. aus Memberstack/Webflow-Nav-Komponenten). Ein einfaches
+      // style.pointerEvents='auto' (ohne !important) verliert gegen eine
+      // !important-Regel im externen Stylesheet, unabhaengig von Spezifitaet -
+      // nur ein ebenfalls mit !important gesetzter Inline-Wert gewinnt
+      // zuverlaessig dagegen.
+      viewBtn.style.setProperty('pointer-events', 'auto', 'important');
       viewBtn.title = 'Analyse ist noch nicht abgeschlossen';
-      viewBtn.addEventListener('click', function (e) { e.preventDefault(); });
+      viewBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        showClickHint(viewBtn, viewBtn.title);
+      });
     }
     actionsCell.appendChild(viewBtn);
  
@@ -792,15 +860,18 @@
     } else {
       agentBtn.href = '#';
       agentBtn.setAttribute('aria-disabled', 'true');
-      // WHY pointer-events:auto inline: siehe Kommentar bei viewBtn weiter oben -
-      // gleiche vermutete Ursache (globale [aria-disabled]-Regel), hier ist sie
-      // sichtbar geworden, weil der Agent-Button in der Praxis oefter im
-      // disabled-Zustand getestet wird (Nicht-Ersteller) als der View-Button.
-      agentBtn.style.pointerEvents = 'auto';
+      // WHY !important: siehe Kommentar bei viewBtn weiter oben. Betrifft hier
+      // vermutlich haeufiger sichtbar, weil der Agent-Button in der Praxis
+      // oefter im disabled-Zustand getestet wird (Nicht-Ersteller) als der
+      // View-Button.
+      agentBtn.style.setProperty('pointer-events', 'auto', 'important');
       agentBtn.title = !isCompleted
         ? 'Analyse ist noch nicht abgeschlossen'
         : 'Der KI-Agent steht nur dem Ersteller der Analyse zur Verfügung';
-      agentBtn.addEventListener('click', function (e) { e.preventDefault(); });
+      agentBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        showClickHint(agentBtn, agentBtn.title);
+      });
     }
     actionsCell.appendChild(agentBtn);
  
@@ -818,7 +889,14 @@
     dlBtn.innerHTML = ICONS.download;
     dlBtn.setAttribute('aria-label', 'Report herunterladen');
     dlBtn.title = downloadTitle;
-    if (canDownload) dlBtn.addEventListener('click', function () { handleReportDownload(dlBtn, analysis.id); });
+    if (canDownload) {
+      dlBtn.addEventListener('click', function () { handleReportDownload(dlBtn, analysis.id); });
+    } else {
+      // WHY eigener Handler statt Wegfall: vorher passierte bei Klick auf den
+      // deaktivierten Button gar nichts - keine Rueckmeldung, warum. Jetzt
+      // zeigt der Klick denselben Text wie der (Hover-)Tooltip.
+      dlBtn.addEventListener('click', function () { showClickHint(dlBtn, downloadTitle); });
+    }
     actionsCell.appendChild(dlBtn);
  
     row.appendChild(actionsCell);
