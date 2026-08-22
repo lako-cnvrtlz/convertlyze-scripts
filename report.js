@@ -1,6 +1,28 @@
 /**
- * Convertlyze – Report Script v6
+ * Convertlyze – Report Script v7
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
+ *
+ * ÄNDERUNGEN ggü. v6 (PDF-Zugriffsprüfung im Frontend):
+ *   - NEU: PDF_ACCESS_SOURCES + canAccessPdf() (identische Liste/Logik wie
+ *     dashboard-v6.js CONFIG.PDF_ACCESS_SOURCES / CONFIG.PAID_PLANS).
+ *   - PDF-Button ist bei Analysen ohne Zugriff (analysis_source nicht in
+ *     PDF_ACCESS_SOURCES) jetzt disabled + Tooltip "PDF-Report nur für
+ *     Analysen aus kostenpflichtigen Plänen verfügbar". Der Klick-Handler
+ *     (attachPdfDownloadHandler) wird in diesem Fall gar nicht erst
+ *     angehängt.
+ *   - NEU: attachPdfDownloadHandler() unterscheidet im catch-Block anhand
+ *     von err.code === 'PLAN_RESTRICTED' (aus der generate-pdf-report Edge
+ *     Function) zwischen Plan-Sperre und generischem Fehler - relevant für
+ *     den Edge Case, dass die Sperre erst serverseitig greift (z.B. Plan-
+ *     Downgrade waehrend die Seite noch offen war).
+ *   - WHY doppelt abgesichert: Die eigentliche Sperre liegt in der
+ *     generate-pdf-report Edge Function (serverseitiger Check, siehe dort).
+ *     Dieser Frontend-Check ist reine UX (kein aktivierbarer Button, kein
+ *     unnötiger Klick) - kein Ersatz für den Server-Check.
+ *   - WHY dupliziert: PDF_ACCESS_SOURCES liegt zusätzlich in
+ *     dashboard-v6.js (CONFIG.PDF_ACCESS_SOURCES) und in der
+ *     generate-pdf-report Edge Function. Bei Änderung (neuer Plan-Name o.ä.)
+ *     IMMER alle drei Stellen synchron halten.
  *
  * ÄNDERUNGEN ggü. v5 (Performance & AI Sichtbarkeit in Executive Summary):
  *   - renderExecSummary() rendert jetzt zusätzlich zwei Balken für
@@ -91,6 +113,18 @@
   // ── Supabase Config ─────────────────────────────────────────────────────────
   const SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
+
+  // ── PDF-Zugriffsprüfung (UX-Ebene) ──────────────────────────────────────────
+  // Identische Liste/Logik wie dashboard-v6.js CONFIG.PDF_ACCESS_SOURCES.
+  // Die eigentliche Sperre liegt serverseitig in der generate-pdf-report
+  // Edge Function - hier geht es nur darum, den Button gar nicht erst
+  // klickbar zu machen und einen erklärenden Tooltip zu zeigen.
+  const PDF_ACCESS_SOURCES = ['starter', 'pro', 'enterprise', 'pay-per-use', 'beta', 'agency'];
+
+  function canAccessPdf(analysis) {
+    const source = (analysis.analysis_source || '').toLowerCase();
+    return PDF_ACCESS_SOURCES.indexOf(source) !== -1;
+  }
 
   // ── CSS injizieren ──────────────────────────────────────────────────────────
   function injectStyles() {
@@ -804,7 +838,9 @@
         );
         if (!resp.ok) {
           const e = await resp.json();
-          throw new Error(e.error || 'Generierung fehlgeschlagen');
+          const err = new Error(e.error || 'Generierung fehlgeschlagen');
+          err.code = e.code;
+          throw err;
         }
         const { downloadUrl } = await resp.json();
 
@@ -834,7 +870,13 @@
         pdfBtn.innerHTML = CVZ_PDF_ICON + ' PDF-Report';
       } catch (err) {
         console.error('[CVZ] PDF-Download:', err);
-        pdfBtn.innerHTML = '⚠ Fehler – erneut versuchen';
+        // WHY code statt Text-Match: err.code kommt direkt aus der Edge
+        // Function (PLAN_RESTRICTED) - stabil gegen spaetere Aenderungen am
+        // Fehlertext, anders als ein Regex auf err.message es waere.
+        const isPlanError = err.code === 'PLAN_RESTRICTED';
+        pdfBtn.innerHTML = isPlanError
+          ? '⚠ Nur mit bezahltem Plan verfügbar'
+          : '⚠ Fehler – erneut versuchen';
         setTimeout(() => { pdfBtn.innerHTML = origText; }, 3000);
       } finally {
         pdfBtn.disabled = false;
@@ -1335,10 +1377,32 @@
     // ── KI-Agent Buttons ──────────────────────────────────────────────────────
     // KI-Agent-Button NUR fuer den Ersteller. Team-Mitglieder sehen
     // nur den PDF-Button + einen Hinweis. Backend erzwingt dies ohnehin (403),
-    // hier nur UX. PDF-Download steht dem ganzen Team offen.
+    // hier nur UX. PDF-Download steht dem ganzen Team offen (sofern der Plan
+    // der Analyse den Zugriff erlaubt, siehe canAccessPdf/pdfAllowed unten).
     const isCreator = !!currentUserId && analysis.user_id === currentUserId;
 
     document.querySelectorAll('.section-ki-agent-btn').forEach(el => {
+      // NEU: PDF-Button ist bei Analysen ohne Plan-Zugriff (z.B. Free)
+      // deaktiviert und zeigt einen erklärenden Tooltip statt aktiv zu sein.
+      // Die eigentliche Sperre liegt in der generate-pdf-report Edge Function -
+      // das hier verhindert nur den unnötigen Klick/Request im Normalfall.
+      const pdfAllowed = canAccessPdf(analysis);
+      const pdfBtnHtml = pdfAllowed
+        ? `<button class="cvz-pdf-btn"
+                   data-analysis-id="${analysisId}"
+                   aria-label="PDF-Report herunterladen"
+                   title="PDF-Report herunterladen">
+             ${CVZ_PDF_ICON} PDF-Report
+           </button>`
+        : `<button class="cvz-pdf-btn"
+                   data-analysis-id="${analysisId}"
+                   aria-label="PDF-Report nicht verfügbar"
+                   title="PDF-Report nur für Analysen aus kostenpflichtigen Plänen verfügbar"
+                   disabled
+                   style="opacity:.5;cursor:not-allowed;">
+             ${CVZ_PDF_ICON} PDF-Report
+           </button>`;
+
       if (isCreator) {
         el.innerHTML = `
           <div class="cvz-ki-btn-wrap">
@@ -1347,28 +1411,21 @@
                aria-label="Mit KI-Agent optimieren">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="6" y="8" width="12" height="10" rx="2" fill="currentColor" opacity=".9"/><circle cx="9" cy="12" r="1.5" fill="#0d1117"/><circle cx="15" cy="12" r="1.5" fill="#0d1117"/><rect x="10" y="15" width="4" height="1.5" rx=".75" fill="#0d1117"/><rect x="11" y="4" width="2" height="4" rx="1" fill="currentColor" opacity=".9"/><circle cx="12" cy="5" r="2" fill="currentColor" opacity=".9"/></svg> Mit KI-Agent optimieren
             </a>
-            <button class="cvz-pdf-btn"
-                    data-analysis-id="${analysisId}"
-                    aria-label="PDF-Report herunterladen"
-                    title="PDF-Report herunterladen">
-              ${CVZ_PDF_ICON} PDF-Report
-            </button>
+            ${pdfBtnHtml}
           </div>`;
       } else {
         el.innerHTML = `
           <div class="cvz-ki-btn-wrap">
-            <button class="cvz-pdf-btn"
-                    data-analysis-id="${analysisId}"
-                    aria-label="PDF-Report herunterladen"
-                    title="PDF-Report herunterladen">
-              ${CVZ_PDF_ICON} PDF-Report
-            </button>
+            ${pdfBtnHtml}
           </div>
           <p class="cvz-agent-hint">Der KI-Agent steht nur dem Ersteller dieser Analyse zur Verfügung.</p>`;
       }
 
-      // PDF-Handler in beiden Faellen anhaengen
-      attachPdfDownloadHandler(el.querySelector('.cvz-pdf-btn'), analysis, analysisId);
+      // PDF-Handler nur anhängen, wenn der Plan den Zugriff erlaubt - sonst
+      // feuert der (disabled) Button ohnehin keine Klicks.
+      if (pdfAllowed) {
+        attachPdfDownloadHandler(el.querySelector('.cvz-pdf-btn'), analysis, analysisId);
+      }
     });
 
     // Sektions-Überschriften – nach allen Renders einfügen
