@@ -758,7 +758,7 @@
     viewBtn.target = '_blank';
     if (isCompleted) {
       viewBtn.href = '/analyse/resultat?id=' + encodeURIComponent(analysis.id);
-      viewBtn.title = 'Report ansehen';
+      viewBtn.title = 'Ansehen';
     } else {
       // WHY href='#' + preventDefault statt nur pointer-events:none: Die CSS-Regel
       // pointer-events:none wurde entfernt, damit der native title-Tooltip auf
