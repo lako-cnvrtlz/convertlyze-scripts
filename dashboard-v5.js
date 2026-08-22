@@ -30,6 +30,22 @@
  *     !isCompleted jetzt href='#' + preventDefault (analog zum
  *     KI-Agent-Button). Der Report-Button war schon vorher sicher, da der
  *     Klick-Handler nur bei canDownload angehaengt wird.
+ *   - BUGFIX: der KI-Agent-Button bekam ein title-Attribut bisher NUR im
+ *     deaktivierten Zustand. Im aktiven Zustand (abgeschlossen + Ersteller)
+ *     fehlte jeder Hover-Text, anders als bei Ansicht ("Ansehen") und
+ *     Report ("Report herunterladen"). Ergaenzt um "Mit KI-Agent
+ *     optimieren" im aktiven Fall.
+ *   - BUGFIX (Verdacht, noch zu bestaetigen): der deaktivierte Zustand von
+ *     viewBtn/agentBtn traegt aria-disabled="true" - falls irgendwo global
+ *     auf der Seite eine Regel wie [aria-disabled="true"]{pointer-events:
+ *     none;} existiert (gaengiges A11y-Pattern fuer nicht-native disabled-
+ *     Links), waere genau derselbe Hover-Bug wie bei .cvz-a-disabled zurueck,
+ *     nur ueber einen anderen Selektor. dlBtn war davon nie betroffen, da er
+ *     kein aria-disabled traegt - das erklaert, warum Report/Ansehen
+ *     funktionierten, der Agent-Button (haeufiger im disabled-Zustand
+ *     getestet, da an isCreator gekoppelt) aber nicht. Beide Buttons
+ *     bekommen jetzt zusaetzlich inline pointer-events:auto, das jede
+ *     externe Klassen-/Attribut-Regel uebersteuert.
  *
  * BREAKING CHANGE ggue. dashboard-v5.js:
  * In Webflow wird NUR NOCH EIN leerer Container gebraucht:
@@ -752,6 +768,14 @@
       // Optik navigierbar.
       viewBtn.href = '#';
       viewBtn.setAttribute('aria-disabled', 'true');
+      // WHY pointer-events:auto inline: Vermutlich existiert irgendwo global auf
+      // der Webflow-Seite eine Accessibility-Regel wie [aria-disabled="true"]{
+      // pointer-events:none;} (gaengiges Pattern, um nicht-native disabled-Links
+      // unklickbar zu machen). Die wuerde denselben Hover-Bug wieder einschleppen,
+      // den wir gerade erst ueber .cvz-a-disabled behoben haben. Inline-Style
+      // gewinnt gegen jede externe Klassen-Regel, unabhaengig davon ob/wo sie
+      // im Stylesheet der Seite steht.
+      viewBtn.style.pointerEvents = 'auto';
       viewBtn.title = 'Analyse ist noch nicht abgeschlossen';
       viewBtn.addEventListener('click', function (e) { e.preventDefault(); });
     }
@@ -764,9 +788,15 @@
     agentBtn.target = '_blank';
     if (agentEnabled) {
       agentBtn.href = '/analyse/optimization-agent?analysis_id=' + encodeURIComponent(analysis.id);
+      agentBtn.title = 'Mit KI-Agent optimieren';
     } else {
       agentBtn.href = '#';
       agentBtn.setAttribute('aria-disabled', 'true');
+      // WHY pointer-events:auto inline: siehe Kommentar bei viewBtn weiter oben -
+      // gleiche vermutete Ursache (globale [aria-disabled]-Regel), hier ist sie
+      // sichtbar geworden, weil der Agent-Button in der Praxis oefter im
+      // disabled-Zustand getestet wird (Nicht-Ersteller) als der View-Button.
+      agentBtn.style.pointerEvents = 'auto';
       agentBtn.title = !isCompleted
         ? 'Analyse ist noch nicht abgeschlossen'
         : 'Der KI-Agent steht nur dem Ersteller der Analyse zur Verfügung';
