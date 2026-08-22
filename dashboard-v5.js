@@ -1,13 +1,33 @@
 /**
- * dashboard-v8.js
+ * dashboard-v9.js
  * ----------------
  * Member-Dashboard: Stat-Karten, Aktions-Buttons, Analysen-Liste, PDF-Download,
  * Team-Einladungen (Sichtbarkeit), "Zuletzt aktiv"-Uebersicht - komplett aus JS
  * generiert, kein Custom-Attribute-Bauplan mehr in Webflow noetig.
  *
  * Seite: /member/dashboard
- * Embedding: jsDelivr (<script src=".../dashboard-v8.js">)
+ * Embedding: jsDelivr (<script src=".../dashboard-v9.js">)
  * Dependencies: window.supabase (global), window.$memberstackDom
+ *
+ * ÄNDERUNGEN ggü. v8 (RLS-Bugfix "Zuletzt aktiv"):
+ *   - BUGFIX: "Zuletzt aktiv" zeigte in v8 nur Analysen, nie Aufbau-Projekte
+ *     oder KI-Agent-Chats, obwohl beide vorhanden waren. Ursache: v8 fragte
+ *     page_projects/ai_chat_sessions per direktem Tabellen-Select ab. Diese
+ *     Tabellen sind RLS-geschuetzt, das Frontend authentifiziert sich aber
+ *     ueber Memberstack + Anon-Key statt echtem Supabase Auth - auth.uid()
+ *     ist bei jedem Request also null, RLS filtert dadurch still ALLE Zeilen
+ *     raus (200 OK, leeres Array, kein Fehler im Log). get_analyses_for_member
+ *     umgeht das schon laenger ueber eine SECURITY DEFINER RPC - genau dieses
+ *     Muster fehlte bei den zwei neuen Quellen. Fix: zwei neue RPCs
+ *     get_recent_page_projects(p_user_id, p_limit) und
+ *     get_recent_agent_sessions(p_user_id, p_limit), beide SECURITY DEFINER,
+ *     muessen VOR diesem Script per SQL in Supabase angelegt werden (siehe
+ *     recent-activity-rpcs.sql). fetchRecentPageProjects/
+ *     fetchRecentAgentSessions rufen jetzt diese RPCs statt .from(...).select(...) auf.
+ *   - get_recent_agent_sessions liefert landing_page_url/keyword jetzt als
+ *     flache Felder (SQL JOIN in der RPC) statt als verschachteltes
+ *     PostgREST-Embed wie in v8 (s.analyses.keyword) - buildAgentActivityItems()
+ *     entsprechend angepasst.
  *
  * ÄNDERUNGEN ggü. v7 (neue Section "Zuletzt aktiv"):
  *   - NEU: Section "Zuletzt aktiv" oberhalb der Stat-Karten. Zeigt die
@@ -81,14 +101,20 @@
  * Function (dort der eigentliche Sicherheits-Check). Bei Aenderung (neuer
  * Plan-Name o.ae.) IMMER alle drei Stellen synchron halten.
  *
- * WHY page_projects hier direkt per Supabase-Client gelesen wird (nicht ueber
- * die Page-Agent-API wie in page-projects-embed.html): Fuer die "Zuletzt
- * aktiv"-Vorschau reichen 5 Datensaetze mit 3 Feldern - ein zusaetzlicher
- * API-Roundtrip waere hier unnoetig. WICHTIG: Falls die Page-Agent-API
- * zusaetzliche Business-Logik anwendet (z.B. Status-Berechnung, Soft-Deletes,
- * Team-Aufloesung), die die rohe Tabelle nicht abbildet, kann diese Vorschau
- * von der vollen Liste in page-projects-embed.html abweichen. Falls das
- * auffaellt: hier auf die gleiche API umstellen statt der Rohtabelle.
+ * WHY get_recent_page_projects als eigene RPC statt der Page-Agent-API (wie
+ * in page-projects-embed.html): Fuer die "Zuletzt aktiv"-Vorschau reichen 5
+ * Datensaetze mit 3 Feldern - ein zusaetzlicher API-Roundtrip waere hier
+ * unnoetig. WICHTIG: Falls die Page-Agent-API zusaetzliche Business-Logik
+ * anwendet (z.B. Status-Berechnung, Soft-Deletes), die die rohe Tabelle nicht
+ * abbildet, kann diese Vorschau von der vollen Liste in page-projects-embed.html
+ * abweichen. Falls das auffaellt: RPC entsprechend erweitern oder auf die
+ * gleiche API umstellen.
+ *
+ * VORAUSSETZUNG: Die SQL-Funktionen get_recent_page_projects und
+ * get_recent_agent_sessions muessen in Supabase existieren, bevor dieses
+ * Script live geht (siehe recent-activity-rpcs.sql). Ohne sie liefert
+ * "Zuletzt aktiv" wieder nur Analysen, mit einem console.warn pro fehlgeschlagenem
+ * RPC-Call ("function ... does not exist").
  */
  
 // -- Sofort verstecken wenn Plan im sessionStorage --------------------------
@@ -311,17 +337,18 @@
     return result.data || [];
   }
  
-  // Letzte Aufbau-Projekte fuer "Zuletzt aktiv" - siehe WHY-Kommentar im Dateikopf
-  // zur bewussten Entscheidung, hier direkt page_projects statt der Page-Agent-API
-  // zu lesen, und zur Team-Sichtbarkeits-Einschraenkung.
+  // Letzte Aufbau-Projekte fuer "Zuletzt aktiv". Laeuft ueber eine SECURITY
+  // DEFINER RPC (nicht .from('page_projects').select(...)), weil das Frontend
+  // per Memberstack + Anon-Key arbeitet, nicht per echtem Supabase Auth -
+  // auth.uid() ist bei jedem Request null, ein direkter Select wuerde daher
+  // durch RLS still leer zurueckkommen (200 OK, 0 Zeilen, kein Fehler). Siehe
+  // recent-activity-rpcs.sql fuer die Funktionsdefinition.
   async function fetchRecentPageProjects(userId, limit) {
     if (!userId) return [];
-    var result = await window.supabase
-      .from('page_projects')
-      .select('id, name, status, updated_at')
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false })
-      .limit(limit);
+    var result = await window.supabase.rpc('get_recent_page_projects', {
+      p_user_id: userId,
+      p_limit:   limit,
+    });
     if (result.error) {
       console.warn('[CVZ] fetchRecentPageProjects:', result.error);
       return [];
@@ -329,20 +356,19 @@
     return result.data || [];
   }
  
-  // Letzte KI-Agent-Sessions fuer "Zuletzt aktiv". analyses(...) ist ein
-  // PostgREST-Embed ueber den FK ai_chat_sessions.analysis_id -> analyses.id,
-  // liefert URL/Keyword der zugehoerigen Analyse gleich mit (kein zweiter Call).
-  // Nur Sessions mit total_messages > 0, damit gestartete-aber-nie-genutzte
-  // Sessions die Liste nicht mit leeren Eintraegen fuellen.
+  // Letzte KI-Agent-Sessions fuer "Zuletzt aktiv" - gleiches RLS-Problem wie
+  // bei fetchRecentPageProjects, gleiche Loesung ueber eine RPC. Die RPC
+  // joint analyses direkt in SQL und liefert landing_page_url/keyword als
+  // flache Felder zurueck (kein PostgREST-Embed hier, weil RPC-Rueckgaben
+  // keine Foreign-Table-Embeds unterstuetzen). Nur Sessions mit
+  // total_messages > 0, damit gestartete-aber-nie-genutzte Sessions die
+  // Liste nicht mit leeren Eintraegen fuellen (Filter sitzt in der RPC).
   async function fetchRecentAgentSessions(userId, limit) {
     if (!userId) return [];
-    var result = await window.supabase
-      .from('ai_chat_sessions')
-      .select('id, analysis_id, updated_at, total_messages, analyses(landing_page_url, keyword)')
-      .eq('user_id', userId)
-      .gt('total_messages', 0)
-      .order('updated_at', { ascending: false })
-      .limit(limit);
+    var result = await window.supabase.rpc('get_recent_agent_sessions', {
+      p_user_id: userId,
+      p_limit:   limit,
+    });
     if (result.error) {
       console.warn('[CVZ] fetchRecentAgentSessions:', result.error);
       return [];
@@ -1055,10 +1081,10 @@
  
   function buildAgentActivityItems(sessions) {
     return sessions.map(function (s) {
-      var ctx = '-';
-      if (s.analyses) {
-        ctx = s.analyses.keyword || s.analyses.landing_page_url || '-';
-      }
+      // WHY flach statt s.analyses.keyword: get_recent_agent_sessions liefert
+      // landing_page_url/keyword per SQL-JOIN als eigene Spalten zurueck,
+      // nicht als verschachteltes Objekt wie beim frueheren PostgREST-Embed.
+      var ctx = s.keyword || s.landing_page_url || '-';
       return {
         type:      'agent',
         iconKey:   'agent',
