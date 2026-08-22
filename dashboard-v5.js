@@ -609,17 +609,6 @@
  
     state.container = document.getElementById('cvz-a-body');
  
-    // "Analyse kaufen" direkt verdrahtet (statt ueber die generische
-    // [data-plan-upgrade]-Attribut-Suche - vermeidet eine Race Condition,
-    // falls diese Karte erst nach dem Memberstack-Ready-Check im DOM landet).
-    document.getElementById('cvz-d-btn-buy-ppu').addEventListener('click', function () {
-      if (!window.$memberstackDom) return;
-      window.$memberstackDom.purchasePlansWithCheckout({
-        priceId:    CONFIG.PAY_PER_USE_PRICE_ID,
-        successUrl: window.location.origin + CONFIG.NEW_ANALYSIS_URL,
-      }).catch(function (err) { console.error('[CVZ] PPU Checkout error:', err); });
-    });
- 
     document.getElementById('cvz-a-prev').addEventListener('click', function () {
       if (state.currentPage > 1) renderAnalysesPage(state.currentPage - 1);
     });
