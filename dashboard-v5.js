@@ -733,7 +733,7 @@
     viewBtn.innerHTML = ICONS.eye;
     viewBtn.href = '/analyse/resultat?id=' + encodeURIComponent(analysis.id);
     viewBtn.target = '_blank';
-    viewBtn.title = isCompleted ? 'Ansehen' : 'Analyse ist noch nicht abgeschlossen';
+    viewBtn.title = isCompleted ? 'Report ansehen' : 'Analyse ist noch nicht abgeschlossen';
     actionsCell.appendChild(viewBtn);
  
     var agentEnabled = isCompleted && isCreator;
