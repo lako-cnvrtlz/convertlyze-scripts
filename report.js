@@ -23,6 +23,12 @@
  *     dashboard-v6.js (CONFIG.PDF_ACCESS_SOURCES) und in der
  *     generate-pdf-report Edge Function. Bei Änderung (neuer Plan-Name o.ä.)
  *     IMMER alle drei Stellen synchron halten.
+ *   - BUGFIX: der PDF-Button nutzte bei fehlendem Zugriff das native
+ *     disabled-Attribut - das unterdrückt in den meisten Browsern auch
+ *     mouseover, wodurch der title-Tooltip nie erschien. Ersetzt durch
+ *     aria-disabled="true" + Styling; Klickschutz bleibt bestehen, da der
+ *     Handler ohnehin nur bei pdfAllowed angehängt wird (analog zum Fix
+ *     in dashboard-v7.js, wo dieselbe Ursache über pointer-events:none lag).
  *
  * ÄNDERUNGEN ggü. v5 (Performance & AI Sichtbarkeit in Executive Summary):
  *   - renderExecSummary() rendert jetzt zusätzlich zwei Balken für
@@ -943,7 +949,6 @@
       el.style.opacity    = '1';
     });
   }
-
   // ── Render: Executive Summary ───────────────────────────────────────────────
   function renderExecSummary(analysis) {
     const container = document.querySelector('.section-executive-summary');
@@ -1397,8 +1402,8 @@
         : `<button class="cvz-pdf-btn"
                    data-analysis-id="${analysisId}"
                    aria-label="PDF-Report nicht verfügbar"
+                   aria-disabled="true"
                    title="PDF-Report nur für Analysen aus kostenpflichtigen Plänen verfügbar"
-                   disabled
                    style="opacity:.5;cursor:not-allowed;">
              ${CVZ_PDF_ICON} PDF-Report
            </button>`;
