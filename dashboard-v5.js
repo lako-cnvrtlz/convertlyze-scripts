@@ -1,13 +1,22 @@
 /**
- * dashboard-v6.js
+ * dashboard-v7.js
  * ----------------
  * Member-Dashboard: Stat-Karten, Aktions-Buttons, Analysen-Liste, PDF-Download,
  * Team-Einladungen (Sichtbarkeit) - komplett aus JS generiert, kein Custom-Attribute-
  * Bauplan mehr in Webflow noetig.
  *
  * Seite: /member/dashboard
- * Embedding: jsDelivr (<script src=".../dashboard-v6.js">)
+ * Embedding: jsDelivr (<script src=".../dashboard-v7.js">)
  * Dependencies: window.supabase (global), window.$memberstackDom
+ *
+ * ÄNDERUNGEN ggü. v6 (differenzierte Download-Fehlermeldung):
+ *   - handleReportDownload(): der catch-Block unterscheidet jetzt anhand
+ *     von err.code === 'PLAN_RESTRICTED' (aus der generate-pdf-report
+ *     Edge Function) zwischen einer Plan-Sperre und einem generischen
+ *     Fehler. Bei der Plan-Sperre ist "erneut versuchen" irrefuehrend, da
+ *     ein zweiter Klick am Plan nichts aendert - der Button zeigt
+ *     stattdessen einen erklaerenden Text.
+ *     Analog zur selben Aenderung in report.js (attachPdfDownloadHandler).
  *
  * BREAKING CHANGE ggue. dashboard-v5.js:
  * In Webflow wird NUR NOCH EIN leerer Container gebraucht:
@@ -33,13 +42,18 @@
  * - Aufbau-Sessions-Kontingent (Landingpage-Creation-Agent), Limit aus plans.page_agent_sessions_limit
  *
  * KRITISCH: PDF_SECRET liegt hier als Klartext.
- * Bei Rotation: dashboard-v6.js + Railway PDF Service ENV aktualisieren.
+ * Bei Rotation: dashboard-v7.js + Railway PDF Service ENV aktualisieren.
  *
  * OFFENE FRAGE (nicht automatisch geloest): chat_messages_used_current_period /
  * chat_messages_limit werden weiterhin geladen und berechnet, aber NICHT mehr in
  * einer eigenen Karte angezeigt - im Screenshot, an dem sich dieses Redesign
  * orientiert, gab es keine "Chat-Nachrichten"-Karte. Falls die doch irgendwo
  * gebraucht wird, bitte Bescheid geben.
+ *
+ * WHY PDF_ACCESS_SOURCES dupliziert: Dieselbe Liste liegt zusaetzlich in
+ * report.js (PDF_ACCESS_SOURCES) und in der generate-pdf-report Edge
+ * Function (dort der eigentliche Sicherheits-Check). Bei Aenderung (neuer
+ * Plan-Name o.ae.) IMMER alle drei Stellen synchron halten.
  */
  
 // -- Sofort verstecken wenn Plan im sessionStorage --------------------------
@@ -64,7 +78,7 @@
     PAGE_SIZE:         10,
     POLL_INTERVAL_MS:  10000,
     PDF_ACCESS_SOURCES: ['starter', 'pro', 'enterprise', 'pay-per-use', 'beta', 'agency'],
-    PAID_PLANS:        ['Starter', 'Growth', 'Pro', 'Professional', 'Enterprise'],
+    PAID_PLANS:        ['Starter', 'Pro', 'Enterprise'],
     NEW_ANALYSIS_URL:  '/analyse/formular',
     // TODO: echten Pfad eintragen, sobald die Chat-Seite unter convertlyze.com liegt.
     // WHY doppelt gepflegt: page-projects-embed.html hat dieselbe Konstante,
@@ -449,7 +463,7 @@
  
     state.container = document.getElementById('cvz-a-body');
  
-    // "Analyse kaufen" direkt verdrahten (statt ueber die generische
+    // "Analyse kaufen" direkt verdrahtet (statt ueber die generische
     // [data-plan-upgrade]-Attribut-Suche - vermeidet eine Race Condition,
     // falls diese Karte erst nach dem Memberstack-Ready-Check im DOM landet).
     document.getElementById('cvz-d-btn-buy-ppu').addEventListener('click', function () {
@@ -940,8 +954,10 @@
         }
       );
       if (!response.ok) {
-        var err = await response.json();
-        throw new Error(err.error || 'Generierung fehlgeschlagen');
+        var errBody = await response.json();
+        var err = new Error(errBody.error || 'Generierung fehlgeschlagen');
+        err.code = errBody.code;
+        throw err;
       }
  
       var downloadUrl = (await response.json()).downloadUrl;
@@ -953,7 +969,11 @@
     } catch (err) {
       console.error('[CVZ] Report-Download Fehler:', err);
       btn.classList.remove('cvz-a-loading-btn');
-      btn.title = 'Fehler - erneut versuchen';
+      // WHY code statt Text-Match: err.code kommt direkt aus der Edge
+      // Function (PLAN_RESTRICTED) - stabil gegen spaetere Aenderungen am
+      // Fehlertext. Gleiche Logik wie in report.js.
+      var isPlanError = err.code === 'PLAN_RESTRICTED';
+      btn.title = isPlanError ? 'Nur mit bezahltem Plan verfügbar' : 'Fehler - erneut versuchen';
       btn.style.backgroundColor = '#3a1a1e';
       setTimeout(function () { btn.style.backgroundColor = ''; }, 2500);
     }
