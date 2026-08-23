@@ -380,7 +380,23 @@
 .cvz-msg.assistant a { color: var(--cvz-teal); text-decoration: underline; }
 .cvz-msg.assistant ul, .cvz-msg.assistant ol { margin: 0 0 10px; padding-left: 20px; color: var(--cvz-text); }
 .cvz-msg.assistant li { margin-bottom: 4px; }
-.cvz-msg.assistant table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.85rem; }
+.cvz-msg.assistant table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 0.85rem;
+}
+.cvz-msg.assistant th,
+.cvz-msg.assistant td {
+  border: 1px solid var(--cvz-border);
+  padding: 8px 10px;
+  text-align: left;
+  color: var(--cvz-text);
+  word-break: break-word;
+}
 .cvz-msg.assistant th, .cvz-msg.assistant td {
   border: 1px solid var(--cvz-border); padding: 8px 10px; text-align: left; color: var(--cvz-text);
 }
