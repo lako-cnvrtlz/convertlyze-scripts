@@ -314,7 +314,7 @@
    dass langer Text die Spalte über den Container hinausdrueckt. */
 .cvz-chat-wrap {
   display: flex; flex-direction: column; min-width: 0;
-  flex: 0 0 clamp(400px, 32%, 560px);
+  flex: 0 0 clamp(400px, 32%, 680px);
   height: var(--cvz-panel-height); max-height: var(--cvz-panel-height-max);
 }
 .cvz-preview-panel {
