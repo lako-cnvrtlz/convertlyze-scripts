@@ -582,6 +582,31 @@ function cvzEsc(s) {
     .replace(/'/g, '&#39;');
 }
 
+// ==================== TABELLEN IM CHAT MOBILTAUGLICH MACHEN ====================
+// Kopiert die <thead>-Überschriften als data-label auf jede <td>-Zelle.
+// Das CSS blendet ab <=1080px den Header aus und zeigt das Label über
+// dem jeweiligen Wert - aus einer Zeile wird eine Karte.
+// Greift nur bei Tabellen, die auch einen thead haben.
+// Wird direkt aus cvzAppendMessage() aufgerufen, kein MutationObserver nötig.
+function cvzLabelTablesForCards(container) {
+  var tables = container.querySelectorAll('table:not([data-cvz-labeled])');
+  for (var t = 0; t < tables.length; t++) {
+    var table = tables[t];
+    var headCells = table.querySelectorAll('thead th');
+    if (!headCells.length) continue;
+    var labels = [];
+    for (var h = 0; h < headCells.length; h++) labels.push(headCells[h].textContent.trim());
+    var rows = table.querySelectorAll('tbody tr');
+    for (var r = 0; r < rows.length; r++) {
+      for (var c = 0; c < rows[r].children.length; c++) {
+        if (labels[c]) rows[r].children[c].setAttribute('data-label', labels[c]);
+      }
+    }
+    table.classList.add('cvz-table-cards');
+    table.setAttribute('data-cvz-labeled', '1');
+  }
+}
+
 // ==================== SCHRITT 3: WETTBEWERBER ====================
 //
 // Die Vorschlaege aus suggest-competitors enthalten regelmaessig
@@ -1576,6 +1601,7 @@ function cvzAppendMessage(role, text, structureHtmlDocument, structureVersion, o
   bubble.className = `cvz-msg ${role}`;
   if (role === 'assistant' && typeof marked !== 'undefined') {
     bubble.innerHTML = marked.parse(text);
+    cvzLabelTablesForCards(bubble);
   } else {
     bubble.textContent = text;
   }
