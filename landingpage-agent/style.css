@@ -263,7 +263,7 @@
   display: none;              /* app.js schaltet auf flex */
   flex-direction: column;
   gap: 16px;
-  width: 100%; max-width: 1500px;
+  width: 100%; max-width: 1400px;
   margin: 0 auto; padding: 24px 0;
 }
 
@@ -314,7 +314,7 @@
    dass langer Text die Spalte über den Container hinausdrueckt. */
 .cvz-chat-wrap {
   display: flex; flex-direction: column; min-width: 0;
-  flex: 0 0 clamp(400px, 32%, 680px);
+  flex: 0 0 clamp(400px, 32%, 560px);
   height: var(--cvz-panel-height); max-height: var(--cvz-panel-height-max);
 }
 .cvz-preview-panel {
@@ -389,6 +389,9 @@
   margin: 12px 0;
   font-size: 0.85rem;
 }
+/* GEAENDERT: Duplikat entfernt. Vorher stand dieser Block zweimal
+   hintereinander - einmal mehrzeilig, einmal als Einzeiler. Der Einzeiler
+   ist gestrichen, diese mehrzeilige Version bleibt als einzige. */
 .cvz-msg.assistant th,
 .cvz-msg.assistant td {
   border: 1px solid var(--cvz-border);
@@ -396,9 +399,6 @@
   text-align: left;
   color: var(--cvz-text);
   word-break: break-word;
-}
-.cvz-msg.assistant th, .cvz-msg.assistant td {
-  border: 1px solid var(--cvz-border); padding: 8px 10px; text-align: left; color: var(--cvz-text);
 }
 .cvz-msg.assistant th { background: var(--cvz-bg-elevated); color: var(--cvz-teal); }
 .cvz-msg.assistant code {
@@ -486,6 +486,65 @@
     flex: none;
     height: 62vh;
     height: 62dvh;
+  }
+
+  /* ---------- Tabellen als Karten ab Tablet ----------
+     Greift nur bei Tabellen, die app.js per cvzLabelTablesForCards() mit
+     data-label-Attributen und der Klasse cvz-table-cards versehen hat.
+     Fällt das JS aus, bleibt die normale Tabellendarstellung erhalten -
+     kein kopfloser Datensalat. */
+  .cvz-msg.assistant table.cvz-table-cards,
+  .cvz-msg.assistant table.cvz-table-cards tbody,
+  .cvz-msg.assistant table.cvz-table-cards tr,
+  .cvz-msg.assistant table.cvz-table-cards td {
+    display: block;
+    width: 100%;
+  }
+  .cvz-msg.assistant table.cvz-table-cards {
+    overflow-x: visible;
+    font-size: 0.88rem;
+  }
+  /* Header wird pro Zelle über ::before wiederholt und ist oben überflüssig. */
+  .cvz-msg.assistant table.cvz-table-cards thead {
+    display: none;
+  }
+  .cvz-msg.assistant table.cvz-table-cards tr {
+    background: var(--cvz-bg);
+    border: 1px solid var(--cvz-border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .cvz-msg.assistant table.cvz-table-cards tr:last-child {
+    margin-bottom: 0;
+  }
+  .cvz-msg.assistant table.cvz-table-cards td {
+    border: none;
+    border-bottom: 1px solid var(--cvz-border);
+    padding: 8px 0;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+  .cvz-msg.assistant table.cvz-table-cards td:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+  .cvz-msg.assistant table.cvz-table-cards td:first-child {
+    padding-top: 0;
+  }
+  .cvz-msg.assistant table.cvz-table-cards td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 3px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--cvz-teal);
+  }
+  /* Leere Zellen erzeugen sonst eine Karte mit nacktem Label. */
+  .cvz-msg.assistant table.cvz-table-cards td:empty {
+    display: none;
   }
 }
 
