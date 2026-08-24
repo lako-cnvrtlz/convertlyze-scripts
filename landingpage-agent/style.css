@@ -263,7 +263,7 @@
   display: none;              /* app.js schaltet auf flex */
   flex-direction: column;
   gap: 16px;
-  width: 100%; max-width: 1400px;
+  width: 100%; max-width: 1500px;
   margin: 0 auto; padding: 24px 0;
 }
 
