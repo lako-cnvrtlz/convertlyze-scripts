@@ -11,6 +11,12 @@
       'prc_pay-per-use-aufbau-1--ad1fj0jrg',
       'prc_pay-per-use-aufbau-5--mq1hg07on',
       'prc_pay-per-use-aufbau-10--7g1dk0atm',
+      // NEU (siehe Chat-Verlauf): Strategie-PPU-Preise ergaenzt, analog zu Aufbau.
+      // Echte Memberstack-Price-IDs (dieselben, die auch in
+      // memberstack-plan-update' PPU_PRICE_MAP eingetragen sind).
+      'prc_strategie-1--kpn10a65',
+      'prc_strategie-5--05mj0j7r',
+      'prc_strategie-10--1jn30a61',
     ],
     priceIds: {
       'starter':     { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
@@ -22,6 +28,12 @@
       'aufbau-1':    { monthly: 'prc_pay-per-use-aufbau-1--ad1fj0jrg',   annual: 'prc_pay-per-use-aufbau-1--ad1fj0jrg'   },
       'aufbau-5':    { monthly: 'prc_pay-per-use-aufbau-5--mq1hg07on',   annual: 'prc_pay-per-use-aufbau-5--mq1hg07on'   },
       'aufbau-10':   { monthly: 'prc_pay-per-use-aufbau-10--7g1dk0atm',  annual: 'prc_pay-per-use-aufbau-10--7g1dk0atm'  },
+      // NEU: Strategie-Pakete, gleiche Struktur wie Aufbau (Einmalkauf, daher
+      // monthly === annual - der "billing"-URL-Parameter ist fuer PPU-Pakete
+      // ohnehin irrelevant, siehe Kommentar bei aufbau-1 oben).
+      'strategie-1':  { monthly: 'prc_strategie-1--kpn10a65',  annual: 'prc_strategie-1--kpn10a65'  },
+      'strategie-5':  { monthly: 'prc_strategie-5--05mj0j7r',  annual: 'prc_strategie-5--05mj0j7r'  },
+      'strategie-10': { monthly: 'prc_strategie-10--1jn30a61', annual: 'prc_strategie-10--1jn30a61' },
     },
   };
   // Supabase-Client – wird in init() erstellt sobald SDK geladen ist
@@ -188,9 +200,12 @@
       var currentPriceId = await fetchCurrentPriceId(memberstackId);
       // BUGFIX: CONFIG.ppuPriceId (Singular) existierte nicht - isPPU war dadurch
       // immer false. Jetzt Pruefung gegen das tatsaechliche Array ppuPriceIds,
-      // plus Unterscheidung Analyse- vs. Aufbau-PPU fuer den Erfolgs-Redirect.
-      var isPPU       = CONFIG.ppuPriceIds.indexOf(priceId) !== -1;
-      var isAufbauPPU = isPPU && priceId.indexOf('aufbau') !== -1;
+      // plus Unterscheidung Analyse- vs. Aufbau- vs. Strategie-PPU fuer den
+      // Erfolgs-Redirect.
+      var isPPU          = CONFIG.ppuPriceIds.indexOf(priceId) !== -1;
+      var isAufbauPPU    = isPPU && priceId.indexOf('aufbau') !== -1;
+      // NEU: Strategie-PPU-Erkennung analog zu Aufbau.
+      var isStrategiePPU = isPPU && priceId.indexOf('strategie') !== -1;
       // PPU kann immer direkt gekauft werden - kein Portal noetig
       if (currentPriceId && !isPPU) {
         var portalUrl = await fetchStripePortalUrl(memberstackId);
@@ -207,8 +222,12 @@
       }
       resetBtn(btn);
       var successPath = '/member/danke';
-      if (isAufbauPPU)      successPath = '/member/landingpage-assistant';
-      else if (isPPU)       successPath = '/analyse/formular';
+      if (isAufbauPPU)         successPath = '/member/landingpage-assistant';
+      // TODO (siehe Chat-Verlauf): Ziel-URL bestätigen/ersetzen - vermutlich die
+      // Seite, auf der contentStrategyAgent.app.js/contentStrategySettings.app.js
+      // eingebunden sind. Ich kenne die tatsächliche Slug nicht.
+      else if (isStrategiePPU) successPath = '/member/content-strategie';
+      else if (isPPU)          successPath = '/analyse/formular';
       window.$memberstackDom.purchasePlansWithCheckout({
         priceId:    priceId,
         successUrl: window.location.origin + successPath,
