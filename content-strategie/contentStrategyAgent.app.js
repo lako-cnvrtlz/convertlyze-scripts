@@ -18,8 +18,10 @@
 //
 // WICHTIGER HINWEIS ZUR LAUFZEIT: /generate liefert sofort (202) einen turn_id zurück und läuft
 // im Hintergrund weiter - ein kompletter Lauf (Themen-Analyse + Domain-Abgleich + GEO-Check,
-// optional mit bis zu 3 echten LLM-Prompt-Tests) kann 20 Sekunden bis mehrere Minuten dauern.
-// Dieses Script pollt deshalb GET /status/:turn_id, statt auf die Antwort von /generate zu warten.
+// standardmäßig MIT 3 echten LLM-Prompt-Tests, siehe promptTestCheckbox) dauert inzwischen
+// meist 10-15 Minuten, nicht mehr nur ein paar Sekunden (siehe CVZ_CS_PROGRESS_MESSAGES weiter
+// unten für die zeitbasierten Lade-Texte). Dieses Script pollt deshalb GET /status/:turn_id,
+// statt auf die Antwort von /generate zu warten.
 //
 // NICHT ENTHALTEN (bewusst, siehe Chat-Verlauf): ein Kauf-Flow für PPU-Strategie-Pakete
 // (1er/5er/10er). Dieses Script zeigt nur die verbleibenden PPU-Credits an und ruft bei
@@ -49,7 +51,15 @@
     // dashboard-v5.js bzw. CONFIG.chatPageUrl in page-projects-embed.html - bitte synchron halten).
     landingpageAssistantUrl: '/member/landingpage-assistant',
     pollIntervalMs: 3000,
-    pollTimeoutMs: 15 * 60 * 1000, // 15 Minuten, gleicher Deckel wie im pageAgent-Chat-Polling
+    // ANGEHOBEN von 15 auf 22 Minuten (siehe Chat-Verlauf, Lasse: "Strategie-Erstellung dauert
+    // jetzt über 10 Minuten"): der GEO-Prompt-Test läuft jetzt standardmäßig mit (siehe
+    // promptTestCheckbox weiter unten), nicht mehr nur auf ausdrücklichen Wunsch - das macht die
+    // längeren Laufzeiten zum Normalfall statt zur Ausnahme. BACKGROUND_TURN_TIMEOUT_MS im
+    // Backend (routes/contentStrategyAgent.ts) wurde parallel auf 20 Minuten angehoben - hier
+    // bewusst 2 Minuten MEHR als das Backend-Limit, damit bei einem echten Timeout die genaue
+    // Backend-Fehlermeldung (job.status === 'error') den Client erreicht, BEVOR der eigene,
+    // generische "Zeitüberschreitung"-Text in pollStatus() zuschlägt.
+    pollTimeoutMs: 22 * 60 * 1000,
   };
 
   var CONFIG = Object.assign({}, DEFAULT_CONFIG, window.CVZ_CONTENT_STRATEGY_CONFIG || {});
@@ -281,14 +291,18 @@
       var suggested = state.gscStatus.sites[0].site_url.replace(/^sc-domain:/, '').replace(/^https?:\/\//, '').replace(/\/$/, '');
       domainInput.value = suggested;
     }
-    var promptTestCheckbox = el('input', { type: 'checkbox', name: 'run_prompt_test', id: 'cvz-cs-prompt-test' });
+    // GEÄNDERT (siehe Chat-Verlauf, Lasse: "GEO-Prompt-Test soll standardmäßig mit rein"):
+    // vorher unchecked/Opt-in, jetzt per "checked"-Attribut vorausgewählt - der Test bleibt
+    // technisch abwählbar (echte, variable Kosten pro Lauf, siehe Backend-Kommentar bei
+    // toolAnalyzeGeoVisibility), ist aber jetzt der empfohlene Normalfall statt die Ausnahme.
+    var promptTestCheckbox = el('input', { type: 'checkbox', name: 'run_prompt_test', id: 'cvz-cs-prompt-test', checked: 'checked' });
 
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Thema / Ziel-Keyword', topicInput]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Eigene Domain', domainInput]));
     form.appendChild(
       el('label', { class: 'cvz-cs-checkbox-label' }, [
         promptTestCheckbox,
-        ' Echten GEO-Prompt-Test durchführen (bis zu 3 reale LLM-Anfragen, macht den Lauf spürbar langsamer)',
+        ' Echten GEO-Prompt-Test durchführen (3 reale LLM-Anfragen, je eine pro Journey-Phase - empfohlen, macht den Lauf aber spürbar langsamer)',
       ])
     );
 
@@ -333,7 +347,6 @@
       apiFetch('/api/content-strategy/status/' + turnId)
         .then(function (job) {
           if (job.status === 'processing') {
-            updateProcessingElapsed();
             state.pollHandle = setTimeout(tick, CONFIG.pollIntervalMs);
             return;
           }
@@ -358,22 +371,85 @@
     tick();
   }
 
-  function updateProcessingElapsed() {
-    var elapsedEl = state.root.querySelector('.cvz-cs-elapsed');
-    if (!elapsedEl) return;
-    var seconds = Math.round((Date.now() - state.pollStartedAt) / 1000);
-    elapsedEl.textContent = seconds + 's';
+  // ==================== FORTSCHRITTS-TEXTE (zeitbasiert statt fester Takt) ====================
+  // NEU (siehe Chat-Verlauf, Lasse: "Strategie-Erstellung dauert jetzt über 10 Minuten, Spinner-
+  // Nachrichten anpassen, gerne mit Humor - hier ein Beispiel aus der Aufbau-Session"): gleiches
+  // Muster wie CVZ_KICKOFF_MESSAGES in pageAgent.app.js (dortige Vorlage), aber mit eigenen,
+  // auf den Content-Strategie-Ablauf zugeschnittenen Texten/Schwellen - der GEO-Prompt-Test läuft
+  // jetzt standardmäßig mit (siehe promptTestCheckbox), >10 Minuten sind damit der Normalfall,
+  // nicht mehr die Ausnahme. Format: { at: Sekunden-Schwelle, text: Anzeigetext }, Liste MUSS
+  // nach "at" aufsteigend sortiert sein.
+  var CVZ_CS_PROGRESS_MESSAGES = [
+    { at: 8, text: 'Analyse startet - das dauert jetzt eine Weile, hol dir ruhig einen Kaffee' },
+    { at: 30, text: 'Suchvolumen und die häufigsten Nutzerfragen zum Thema werden ausgewertet' },
+    { at: 60, text: 'Ist-Zustand wird geprüft: wer rankt heute schon wofür' },
+    { at: 100, text: 'Wettbewerber-Seiten werden auseinandergenommen (Länge, Tabellen, FAQ-Blöcke)' },
+    { at: 150, text: 'Google AI Overview und Zitations-Chancen werden gecheckt' },
+    { at: 210, text: 'Kaffee schon leer? Gerade laufen echte Prompt-Tests gegen ein KI-Modell, das braucht ein paar Sekunden pro Anfrage' },
+    { at: 280, text: 'Content-Cluster wird gebaut: Conversion-Seite plus unterstützende Seiten' },
+    { at: 350, text: 'Themen werden auf die Journey-Phasen Exploration, Evaluation und Decision verteilt' },
+    { at: 430, text: 'Stärken, Schwächen, Wettbewerb und Chancen werden zur Executive Summary zusammengefasst' },
+    { at: 520, text: 'Fast fertig, letzter Feinschliff am Bericht' },
+    { at: 650, text: 'Läuft noch - mit echtem GEO-Prompt-Test dauert das schon mal 10+ Minuten, kein Grund zur Sorge' },
+    { at: 900, text: 'Braucht in diesem Fall spürbar länger als sonst, bitte noch etwas Geduld' },
+  ];
+
+  // Wählt die Nachricht, deren "at"-Schwelle zuletzt unterschritten wurde - vor der ersten
+  // Schwelle bleibt null (dann zeigt der Aufrufer den baseText).
+  function pickTimedMessage(messages, elapsedSec) {
+    var chosen = null;
+    for (var i = 0; i < messages.length; i++) {
+      if (elapsedSec >= messages[i].at) chosen = messages[i];
+      else break; // Liste ist aufsteigend sortiert, weitere Einträge liegen noch in der Zukunft
+    }
+    return chosen;
+  }
+
+  var progressTickTimer = null;
+  function stopProgressTicker() {
+    if (progressTickTimer) {
+      clearInterval(progressTickTimer);
+      progressTickTimer = null;
+    }
+  }
+
+  // Aktualisiert .cvz-cs-progress-text jede Sekunde direkt im DOM statt über einen Callback -
+  // stoppt sich selbst, sobald dieses Element nicht mehr existiert (Ergebnis oder Fehler wurden
+  // inzwischen gerendert), statt separat von jedem Aufrufer abgeräumt werden zu müssen.
+  function startProgressTicker(startedAt, baseText) {
+    stopProgressTicker();
+    function tick() {
+      var progressEl = state.root.querySelector('.cvz-cs-progress-text');
+      if (!progressEl) {
+        stopProgressTicker();
+        return;
+      }
+      var elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
+      var picked = pickTimedMessage(CVZ_CS_PROGRESS_MESSAGES, elapsedSec);
+      var text = picked ? picked.text + ' …' : baseText;
+      if (elapsedSec >= 20) text += ' (' + elapsedSec + 's)';
+      progressEl.textContent = text;
+    }
+    tick();
+    progressTickTimer = setInterval(tick, 1000);
   }
 
   function renderProcessing(topic, runPromptTest) {
     clear(state.root);
+    var startedAt = Date.now();
+    var baseText = 'Baue Content-Cluster für "' + topic + '" …';
     var box = el('div', { class: 'cvz-cs-processing' }, [
       el('div', { class: 'cvz-cs-spinner' }),
-      el('p', {}, ['Baue Content-Cluster für "' + topic + '" ... ' + (runPromptTest ? '(inkl. GEO-Prompt-Test, das dauert länger)' : '')]),
-      el('p', { class: 'cvz-cs-hint' }, ['Läuft seit ', el('span', { class: 'cvz-cs-elapsed' }, ['0s']), ' - kann bei mehreren Tool-Aufrufen 1-3 Minuten dauern.']),
+      el('p', { class: 'cvz-cs-progress-text' }, [baseText]),
+      el('p', { class: 'cvz-cs-hint' }, [
+        runPromptTest
+          ? 'Inkl. echtem GEO-Prompt-Test - komplette Läufe dauern aktuell meist 10-15 Minuten.'
+          : 'Ohne GEO-Prompt-Test - meist ein paar Minuten schneller als mit.',
+      ]),
     ]);
     state.root.appendChild(renderQuotaBanner());
     state.root.appendChild(box);
+    startProgressTicker(startedAt, baseText);
   }
 
   function renderError(message, body) {
