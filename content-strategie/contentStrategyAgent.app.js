@@ -18,10 +18,12 @@
 //
 // WICHTIGER HINWEIS ZUR LAUFZEIT: /generate liefert sofort (202) einen turn_id zurück und läuft
 // im Hintergrund weiter - ein kompletter Lauf (Themen-Analyse + Domain-Abgleich + GEO-Check,
-// standardmäßig MIT 3 echten LLM-Prompt-Tests, siehe promptTestCheckbox) dauert inzwischen
-// meist 10-15 Minuten, nicht mehr nur ein paar Sekunden (siehe CVZ_CS_PROGRESS_MESSAGES weiter
-// unten für die zeitbasierten Lade-Texte). Dieses Script pollt deshalb GET /status/:turn_id,
-// statt auf die Antwort von /generate zu warten.
+// IMMER MIT 3 echten LLM-Prompt-Tests, siehe Chat-Verlauf: die Checkbox dafür wurde entfernt,
+// der Test ist jetzt fester Bestandteil, nicht mehr abwählbar - ein Kill-Switch dafür existiert
+// nur noch serverseitig in routes/contentStrategyAgent.ts) dauert inzwischen meist 10-15
+// Minuten, nicht mehr nur ein paar Sekunden (siehe CVZ_CS_PROGRESS_MESSAGES weiter unten für
+// die zeitbasierten Lade-Texte). Dieses Script pollt deshalb GET /status/:turn_id, statt auf
+// die Antwort von /generate zu warten.
 //
 // NICHT ENTHALTEN (bewusst, siehe Chat-Verlauf): ein Kauf-Flow für PPU-Strategie-Pakete
 // (1er/5er/10er). Dieses Script zeigt nur die verbleibenden PPU-Credits an und ruft bei
@@ -291,20 +293,16 @@
       var suggested = state.gscStatus.sites[0].site_url.replace(/^sc-domain:/, '').replace(/^https?:\/\//, '').replace(/\/$/, '');
       domainInput.value = suggested;
     }
-    // GEÄNDERT (siehe Chat-Verlauf, Lasse: "GEO-Prompt-Test soll standardmäßig mit rein"):
-    // vorher unchecked/Opt-in, jetzt per "checked"-Attribut vorausgewählt - der Test bleibt
-    // technisch abwählbar (echte, variable Kosten pro Lauf, siehe Backend-Kommentar bei
-    // toolAnalyzeGeoVisibility), ist aber jetzt der empfohlene Normalfall statt die Ausnahme.
-    var promptTestCheckbox = el('input', { type: 'checkbox', name: 'run_prompt_test', id: 'cvz-cs-prompt-test', checked: 'checked' });
+    // ENTFERNT (siehe Chat-Verlauf, Lasse: "sollten wir die Checkbox entfernen und es
+    // standardmäßig machen, weil GEO ein wichtiger Bereich für User ist?" - bestätigt, inkl.
+    // Kostendaten: 17 Cent DataForSEO-Gesamtkosten für 3 Läufe an einem Tag, also kein
+    // Kostenfaktor): der GEO-Prompt-Test lief hier vorher über eine Checkbox (promptTestCheckbox),
+    // die ist jetzt komplett raus - der Test läuft für jeden Lauf mit, ohne Wahlmöglichkeit im
+    // Formular. Ein Kill-Switch für den Test existiert weiterhin, aber nur noch operativ
+    // serverseitig (ENV-Variable in routes/contentStrategyAgent.ts), nicht mehr als User-Option.
 
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Thema / Ziel-Keyword', topicInput]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Eigene Domain', domainInput]));
-    form.appendChild(
-      el('label', { class: 'cvz-cs-checkbox-label' }, [
-        promptTestCheckbox,
-        ' Echten GEO-Prompt-Test durchführen (3 reale LLM-Anfragen, je eine pro Journey-Phase - empfohlen, macht den Lauf aber spürbar langsamer)',
-      ])
-    );
 
     var canStart = !state.quota || state.quota.can_start_session;
     var submitBtn = el('button', { type: 'submit', class: 'cvz-cs-submit-btn' }, ['Content-Cluster erstellen']);
@@ -316,18 +314,21 @@
       var topic = topicInput.value.trim();
       var domain = domainInput.value.trim();
       if (!topic) return;
-      startGeneration(topic, domain || undefined, promptTestCheckbox.checked);
+      startGeneration(topic, domain || undefined);
     });
 
     return form;
   }
 
-  function startGeneration(topic, domain, runPromptTest) {
-    renderProcessing(topic, runPromptTest);
+  function startGeneration(topic, domain) {
+    renderProcessing(topic);
 
     apiFetch('/api/content-strategy/generate', {
       method: 'POST',
-      body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain, run_prompt_test: runPromptTest }),
+      // run_prompt_test ist jetzt immer true (siehe Kommentar bei renderForm) - das Feld bleibt
+      // im Request-Body erhalten, weil das Backend darauf weiterhin den echten, kostenpflichtigen
+      // Prompt-Test-Aufruf hart absichert (allowPromptTest), nicht auf einer Modell-Entscheidung.
+      body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain, run_prompt_test: true }),
     })
       .then(function (res) {
         pollStatus(res.turn_id);
@@ -376,7 +377,7 @@
   // Nachrichten anpassen, gerne mit Humor - hier ein Beispiel aus der Aufbau-Session"): gleiches
   // Muster wie CVZ_KICKOFF_MESSAGES in pageAgent.app.js (dortige Vorlage), aber mit eigenen,
   // auf den Content-Strategie-Ablauf zugeschnittenen Texten/Schwellen - der GEO-Prompt-Test läuft
-  // jetzt standardmäßig mit (siehe promptTestCheckbox), >10 Minuten sind damit der Normalfall,
+  // jetzt immer mit (Checkbox entfernt, siehe renderForm), >10 Minuten sind damit der Normalfall,
   // nicht mehr die Ausnahme. Format: { at: Sekunden-Schwelle, text: Anzeigetext }, Liste MUSS
   // nach "at" aufsteigend sortiert sein.
   var CVZ_CS_PROGRESS_MESSAGES = [
@@ -434,18 +435,18 @@
     progressTickTimer = setInterval(tick, 1000);
   }
 
-  function renderProcessing(topic, runPromptTest) {
+  function renderProcessing(topic) {
     clear(state.root);
     var startedAt = Date.now();
     var baseText = 'Baue Content-Cluster für "' + topic + '" …';
+    // GEÄNDERT (siehe Chat-Verlauf, Lasse: "Das verstehen User nicht" zur alten
+    // relativen Formulierung mit dem unsichtbaren Vergleichswert "ohne Prompt-Test") und
+    // vereinfacht (siehe Chat-Verlauf, Checkbox entfernt): nur noch EIN, absoluter Hinweistext,
+    // kein Vergleich mehr nötig, weil es nur noch den einen Fall (mit Prompt-Test) gibt.
     var box = el('div', { class: 'cvz-cs-processing' }, [
       el('div', { class: 'cvz-cs-spinner' }),
       el('p', { class: 'cvz-cs-progress-text' }, [baseText]),
-      el('p', { class: 'cvz-cs-hint' }, [
-        runPromptTest
-          ? 'Inkl. echtem GEO-Prompt-Test - komplette Läufe dauern aktuell meist 10-15 Minuten.'
-          : 'Ohne GEO-Prompt-Test - meist ein paar Minuten schneller als mit.',
-      ]),
+      el('p', { class: 'cvz-cs-hint' }, ['Inkl. echtem GEO-Prompt-Test – komplette Läufe dauern aktuell meist 10–15 Minuten.']),
     ]);
     state.root.appendChild(renderQuotaBanner());
     state.root.appendChild(box);
@@ -479,7 +480,7 @@
       el('p', {}, [
         isError
           ? 'Diese Strategie-Erstellung ist fehlgeschlagen' + (session.error_message ? ': ' + session.error_message : '') + '.'
-          : 'Diese Strategie wird noch erstellt - das kann bei aktiviertem GEO-Prompt-Test 10-15 Minuten dauern. Bitte in ein paar Minuten erneut auf diesen Link klicken.',
+          : 'Diese Strategie wird noch erstellt - das kann 10-15 Minuten dauern. Bitte in ein paar Minuten erneut auf diesen Link klicken.',
       ]),
     ]);
     state.root.appendChild(box);
