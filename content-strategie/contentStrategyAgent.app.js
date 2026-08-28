@@ -573,7 +573,7 @@
 
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
 
-    wrap.appendChild(renderReportHeader(result, session));
+    wrap.appendChild(renderReportHeader(result, session, sessionId));
     wrap.appendChild(renderReportSection(1, 'Ausgangslage', [renderProse(result.ausgangslage)]));
     wrap.appendChild(
       renderReportSection(2, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])])
@@ -615,14 +615,49 @@
     state.root.appendChild(wrap);
   }
 
-  function renderReportHeader(result, session) {
+  function renderReportHeader(result, session, sessionId) {
     var header = el('div', { class: 'cvz-cs-report-header' });
-    header.appendChild(el('p', { class: 'cvz-cs-report-eyebrow' }, ['Content-Strategie-Bericht']));
-    header.appendChild(el('h2', { class: 'cvz-cs-report-title' }, [result.seed_topic]));
+    var topRow = el('div', { class: 'cvz-cs-report-header-top' });
+    var titleBlock = el('div', {});
+    titleBlock.appendChild(el('p', { class: 'cvz-cs-report-eyebrow' }, ['Content-Strategie-Bericht']));
+    titleBlock.appendChild(el('h2', { class: 'cvz-cs-report-title' }, [result.seed_topic]));
     var dateSource = (session && session.created_at) ? new Date(session.created_at) : new Date();
     var dateStr = dateSource.toLocaleDateString('de-DE', { year: 'numeric', month: 'long', day: 'numeric' });
-    header.appendChild(el('p', { class: 'cvz-cs-report-meta' }, ['Erstellt am ' + dateStr]));
+    titleBlock.appendChild(el('p', { class: 'cvz-cs-report-meta' }, ['Erstellt am ' + dateStr]));
+    topRow.appendChild(titleBlock);
+    if (sessionId) topRow.appendChild(renderExportButton(sessionId));
+    header.appendChild(topRow);
     return header;
+  }
+
+  // NEU (siehe Chat-Verlauf, Lasse: "Export einbauen ... Pro/Enterprise White-Label, Pay-per-Use
+  // bleibt beim Convertlyze-PDF-Stil"). Welches Theme das PDF bekommt, entscheidet ausschließlich
+  // der Server anhand des license_type (siehe POST /:id/export in routes/contentStrategyAgent.ts)
+  // - hier keine eigene Tarif-Logik, nur "Button klicken, PDF laden".
+  function renderExportButton(sessionId) {
+    var button = el('button', { class: 'cvz-cs-retry-btn cvz-cs-export-btn', type: 'button' }, ['Als PDF exportieren']);
+    button.addEventListener('click', function () {
+      if (button.disabled) return;
+      var originalLabel = button.textContent;
+      button.disabled = true;
+      button.textContent = 'PDF wird erstellt …';
+      apiFetch('/api/content-strategy/' + sessionId + '/export', { method: 'POST' })
+        .then(function (data) {
+          // Signed URL (60s gültig, Content-Disposition: attachment serverseitig gesetzt, siehe
+          // routes/contentStrategyAgent.ts) - direktes Öffnen löst den Download aus, kein eigener
+          // a.download nötig (der ist bei cross-origin Links ohnehin unzuverlässig, siehe
+          // gleichlautender Kommentar in routes/pdfExport.js).
+          window.open(data.url, '_blank');
+        })
+        .catch(function (err) {
+          alert('PDF-Export fehlgeschlagen: ' + (err.message || 'Unbekannter Fehler') + '. Bitte erneut versuchen.');
+        })
+        .finally(function () {
+          button.disabled = false;
+          button.textContent = originalLabel;
+        });
+    });
+    return button;
   }
 
   function renderReportSection(number, title, children) {
@@ -937,7 +972,10 @@
     if (geo.top_portals && geo.top_portals.length > 0) {
       var list = el('ul', {});
       geo.top_portals.forEach(function (p) {
-        list.appendChild(el('li', {}, [p.domain + (p.mention_count ? ' (' + p.mention_count + 'x)' : '') + (p.note ? ' - ' + p.note : '')]));
+        // ai_search_volume ergänzt (siehe Chat-Verlauf, DEPLOYMENT-HINWEISE.md "PDF-Export"-Update):
+        // war vorher schon im Schema nutzbar, wurde im Frontend aber noch nirgends angezeigt.
+        var volumeText = typeof p.ai_search_volume === 'number' ? ', AI-Search-Volumen ca. ' + p.ai_search_volume : '';
+        list.appendChild(el('li', {}, [p.domain + (p.mention_count ? ' (' + p.mention_count + 'x' + volumeText + ')' : volumeText) + (p.note ? ' - ' + p.note : '')]));
       });
       box.appendChild(list);
     } else {
