@@ -915,6 +915,18 @@
   // kann") - eigener Abschnitt am Ende des Reports, lädt vorhandenen Verlauf beim Öffnen und
   // pollt wie die Report-Generierung selbst (siehe Begründung bei CONFIG.chatPollIntervalMs/
   // CONFIG.chatPollTimeoutMs, gleicher Reverse-Proxy-Grund wie beim Haupt-Lauf).
+  //
+  // Chat-Optik + Markdown-Rendering bewusst an das bestehende Chat-Fenster des Landingpage-
+  // Assistenten angelehnt (siehe Chat-Verlauf, Lasse: "kannst du dich beim Chat eher hieran
+  // orientieren?") - gleiche Bubble-Form, gleiches "marked"-basiertes Markdown-Rendering mit
+  // Tabellen-Karten-Fallback auf Mobilgeräten (cvzCsLabelTablesForCards()), nur mit eigenem
+  // "cvz-cs-"-Klassen-Namespace. WICHTIG: setzt voraus, dass "marked" (https://marked.js.org/)
+  // als globales Script auf der Webflow-Seite geladen ist - genau wie beim Landingpage-
+  // Assistenten (<script src="…/marked.min.js"></script> im Custom Code). Ist "marked" NICHT
+  // geladen, greift dieselbe defensive Ausweich-Logik wie dort: die Antwort wird als reiner
+  // Text statt als gerendertes Markdown angezeigt (kein Absturz, nur weniger schön) - genau der
+  // vorher gemeldete Bug ("# Überschrift" erschien wörtlich mit Raute statt gerendert), nur
+  // jetzt als bewusster Fallback statt als Dauerzustand.
 
   function stopChatPolling() {
     if (state.chat.pollHandle) {
@@ -923,24 +935,66 @@
     }
   }
 
+  // Kopiert die <thead>-Überschriften als data-label auf jede <td>-Zelle einer Markdown-Tabelle
+  // in einer Chat-Antwort. Das CSS blendet ab <=640px den Header aus und zeigt das Label über
+  // dem jeweiligen Wert - aus einer Zeile wird eine Karte. 1:1 dieselbe Technik wie
+  // cvzLabelTablesForCards() im Landingpage-Assistenten, nur mit "cvz-cs-"-Klassen.
+  function cvzCsLabelTablesForCards(container) {
+    var tables = container.querySelectorAll('table:not([data-cvz-cs-labeled])');
+    for (var t = 0; t < tables.length; t++) {
+      var table = tables[t];
+      var headCells = table.querySelectorAll('thead th');
+      if (!headCells.length) continue;
+      var labels = [];
+      for (var h = 0; h < headCells.length; h++) labels.push(headCells[h].textContent.trim());
+      var rows = table.querySelectorAll('tbody tr');
+      for (var r = 0; r < rows.length; r++) {
+        for (var c = 0; c < rows[r].children.length; c++) {
+          if (labels[c]) rows[r].children[c].setAttribute('data-label', labels[c]);
+        }
+      }
+      table.classList.add('cvz-cs-table-cards');
+      table.setAttribute('data-cvz-cs-labeled', '1');
+    }
+  }
+
   function renderChatMessageBubble(message) {
-    return el('div', { class: 'cvz-cs-chat-msg cvz-cs-chat-msg-' + message.role }, [
-      el('p', { class: 'cvz-cs-chat-msg-text' }, [message.content]),
-    ]);
+    var bubble = el('div', { class: 'cvz-cs-chat-msg cvz-cs-chat-msg-' + message.role });
+    // Nur Assistant-Antworten werden als Markdown gerendert (# Überschriften, Tabellen, Listen
+    // etc.) - User-Fragen bleiben bewusst reiner Text (kein Grund, eigene Eingaben als
+    // Markdown zu interpretieren, und textContent ist automatisch XSS-sicher).
+    if (message.role === 'assistant' && typeof marked !== 'undefined') {
+      bubble.innerHTML = marked.parse(message.content);
+      cvzCsLabelTablesForCards(bubble);
+    } else {
+      bubble.textContent = message.content;
+    }
+    return bubble;
   }
 
   // Baut NUR die Nachrichtenliste + den Zähler neu auf (nicht das ganze Formular drumherum) -
-  // wird bei jedem neuen Verlaufs-Stand aufgerufen (nach dem Laden UND nach jeder neuen Antwort),
-  // ohne das Eingabefeld/den Fokus zu verlieren.
+  // wird bei jedem neuen Verlaufs-Stand aufgerufen (nach dem Laden, während des Sendens für die
+  // optimistische Anzeige, UND nach jeder neuen Antwort), ohne das Eingabefeld/den Fokus zu
+  // verlieren.
   function refreshChatMessagesView() {
     var listEl = state.root.querySelector('.cvz-cs-chat-messages');
     var counterEl = state.root.querySelector('.cvz-cs-chat-counter');
     if (listEl) {
       clear(listEl);
-      if (state.chat.messages.length === 0) {
+      if (state.chat.messages.length === 0 && !state.chat.sending) {
         listEl.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Noch keine Fragen gestellt - frag zum Beispiel, warum eine bestimmte Seite empfohlen wurde.']));
       } else {
         state.chat.messages.forEach(function (m) { listEl.appendChild(renderChatMessageBubble(m)); });
+        // Optimistische Anzeige während eine Antwort läuft: eigene Frage sofort sichtbar (noch
+        // nicht im gespeicherten Verlauf - wird erst bei Erfolg persistiert, siehe
+        // pollChatStatus) + Ladeblase mit Spinner, statt dass der Chat bis zur fertigen Antwort
+        // einfach nichts tut.
+        if (state.chat.sending && state.chat._pendingUserMessage) {
+          listEl.appendChild(renderChatMessageBubble({ role: 'user', content: state.chat._pendingUserMessage }));
+          var loadingBubble = el('div', { class: 'cvz-cs-chat-msg cvz-cs-chat-msg-assistant cvz-cs-chat-msg-loading' });
+          loadingBubble.innerHTML = '<span class="cvz-cs-chat-spinner-inline"></span><span>Denkt nach ...</span>';
+          listEl.appendChild(loadingBubble);
+        }
         listEl.scrollTop = listEl.scrollHeight;
       }
     }
@@ -972,7 +1026,6 @@
 
   function pollChatStatus(turnId) {
     state.chat.pollStartedAt = Date.now();
-    var statusEl = state.root.querySelector('.cvz-cs-chat-status');
     function tick() {
       if (Date.now() - state.chat.pollStartedAt > CONFIG.chatPollTimeoutMs) {
         finishChatSending('Zeitüberschreitung - die Antwort läuft ungewöhnlich lange. Bitte gleich nochmal versuchen.');
@@ -999,7 +1052,6 @@
           finishChatSending('Antwort konnte nicht abgerufen werden: ' + err.message);
         });
     }
-    if (statusEl) statusEl.textContent = 'Antwort wird erstellt ...';
     tick();
   }
 
@@ -1025,7 +1077,8 @@
     if (sendBtn) sendBtn.setAttribute('disabled', 'disabled');
     if (inputEl) inputEl.setAttribute('disabled', 'disabled');
     var statusEl = state.root.querySelector('.cvz-cs-chat-status');
-    if (statusEl) statusEl.textContent = 'Frage wird gesendet ...';
+    if (statusEl) statusEl.textContent = '';
+    refreshChatMessagesView(); // zeigt sofort die eigene Frage + Ladeblase mit Spinner
 
     apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId) + '/chat', {
       method: 'POST',
@@ -1054,19 +1107,36 @@
       ])
     );
     section.appendChild(el('div', { class: 'cvz-cs-chat-messages' }, []));
-    section.appendChild(el('p', { class: 'cvz-cs-chat-status', 'aria-live': 'polite' }, ['']));
 
-    var inputEl = el('input', { type: 'text', class: 'cvz-cs-chat-input', placeholder: 'z.B. "Warum diese Seite und nicht X?"', maxlength: '2000' });
+    // Textarea statt einzeiligem Input (wie beim Landingpage-Assistenten) - Enter sendet,
+    // Shift+Enter fügt einen Zeilenumbruch ein, damit auch mehrzeilige Fragen bequem gehen.
+    var inputEl = el('textarea', {
+      class: 'cvz-cs-chat-input',
+      placeholder: 'z.B. "Warum diese Seite und nicht X?"',
+      maxlength: '2000',
+      rows: '1',
+    });
     var sendBtn = el('button', { type: 'submit', class: 'cvz-cs-chat-send-btn' }, ['Fragen']);
-    var form = el('form', { class: 'cvz-cs-chat-form' }, [inputEl, sendBtn]);
-    form.addEventListener('submit', function (event) {
-      event.preventDefault();
+    var inputRow = el('div', { class: 'cvz-cs-chat-input-row' }, [inputEl, sendBtn]);
+    var form = el('form', { class: 'cvz-cs-chat-form' }, [inputRow]);
+    function trySend() {
       var text = inputEl.value.trim();
-      if (!text) return;
+      if (!text || state.chat.sending) return;
       inputEl.value = '';
       sendChatMessage(sessionId, text);
+    }
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      trySend();
+    });
+    inputEl.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        trySend();
+      }
     });
     section.appendChild(form);
+    section.appendChild(el('p', { class: 'cvz-cs-chat-status', 'aria-live': 'polite' }, ['']));
 
     section.appendChild(
       el('p', { class: 'cvz-cs-chat-limit-notice cvz-cs-hint', style: 'display:none' }, [
