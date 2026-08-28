@@ -44,6 +44,10 @@
     apiBaseUrl: 'https://YOUR-API-DOMAIN.example', // z.B. die Railway-Domain der API, OHNE trailing slash
     containerId: 'cvz-content-strategy-agent',
     settingsUrl: '/member/einstellungen#integrationen', // echte Convertlyze-Einstellungen-Seite - der Anker setzt voraus, dass der neue "Integrationen"-Abschnitt dort die id="integrationen" bekommt (siehe contentStrategySettings.app.js)
+    // TODO: echten Pfad eintragen, falls die Landingpage-Assistent-Seite unter einer anderen
+    // URL liegt (gleiches Muster/gleicher Platzhalter wie CONFIG.NEW_LANDINGPAGE_URL in
+    // dashboard-v5.js bzw. CONFIG.chatPageUrl in page-projects-embed.html - bitte synchron halten).
+    landingpageAssistantUrl: '/member/landingpage-assistant',
     pollIntervalMs: 3000,
     pollTimeoutMs: 15 * 60 * 1000, // 15 Minuten, gleicher Deckel wie im pageAgent-Chat-Polling
   };
@@ -446,7 +450,15 @@
     children.push(el('div', { class: 'cvz-cs-conversion-card' }, conversionCardChildren));
 
     children.push(el('h5', {}, ['Unterstützende Seiten']));
-    var table = el('table', { class: 'cvz-cs-table' });
+    // FIX (siehe Chat-Verlauf, "Tables passen nicht"): ohne feste Spaltenbreiten
+    // hat der Browser die Breite jeder Spalte am Inhalt bemessen - bei der
+    // langen "Begründung & Content-Brief"-Spalte lief das auf sehr schmale,
+    // hoch gestauchte Nachbarspalten hinaus (Text wirkte wie einzeln
+    // gestapelt statt nebeneinander). cvz-cs-pages-table gibt jeder Spalte
+    // einen festen Prozentsatz (table-layout:fixed), der Wrapper mit
+    // overflow-x:auto faengt zusaetzlich ab, dass die Tabelle auf sehr
+    // schmalen Bildschirmen ueber den Rand hinaus haette wachsen muessen.
+    var table = el('table', { class: 'cvz-cs-table cvz-cs-pages-table' });
     var thead = el('thead', {}, [
       el('tr', {}, [
         el('th', {}, ['Thema']),
@@ -464,7 +476,7 @@
       tbody.appendChild(renderPageRow(sessionId, page, index));
     });
     table.appendChild(tbody);
-    children.push(table);
+    children.push(el('div', { class: 'cvz-cs-table-wrap' }, [table]));
 
     if (result.internal_links && result.internal_links.length > 0) {
       children.push(el('h5', {}, ['Interne Verlinkung']));
@@ -594,29 +606,23 @@
       );
     });
     table.appendChild(tbody);
-    box.appendChild(table);
+    box.appendChild(el('div', { class: 'cvz-cs-table-wrap' }, [table]));
     return box;
   }
 
-  // TODO (bewusst offen gelassen): Es gibt in diesem Repo noch keinen bekannten, direkten
-  // Ziel-Endpunkt/URL, um den Landingpage-Assistant mit einem vorausgefüllten Ziel-Keyword zu
-  // starten - der bestehende Wizard sammelt den Brief interaktiv (siehe /start-session in
-  // pageAgent.ts, erwartet page_project_id + brief-Felder). Statt hier eine URL zu raten,
-  // feuert der Button ein CustomEvent, das die Host-Seite (wo der Landingpage-Assistant bereits
-  // eingebunden ist) selbst behandeln kann, z.B. um den Wizard zu öffnen und das Keyword-Feld
-  // vorzubelegen.
+  // FIX (siehe Chat-Verlauf): Button feuerte bisher nur ein CustomEvent
+  // ('cvz:build-landingpage'), auf das nirgends im Projekt jemand hört - der
+  // Klick passierte optisch, aber es geschah schlicht nichts, was sich wie
+  // "nicht klickbar" anfühlt. Navigiert jetzt direkt zum Landingpage-
+  // Assistenten (?new=1, gleiches Muster wie CONFIG.NEW_LANDINGPAGE_URL in
+  // dashboard-v5.js). Das Ziel-Keyword wird als ?topic=... mitgegeben, falls
+  // der Assistent das später mal vorbelegt - aktuell (siehe TODO in
+  // pageAgent.app.js) liest cvzTryResume() nur ?new=1/?project=, ?topic= wird
+  // dort noch ignoriert, der Wizard startet also leer und der Nutzer trägt
+  // das Thema einmal selbst ein. Kein Grund, deswegen NICHTS zu verlinken.
   function buildLandingpageButton(topic) {
-    return el(
-      'button',
-      {
-        type: 'button',
-        class: 'cvz-cs-build-btn',
-        onclick: function () {
-          window.dispatchEvent(new CustomEvent('cvz:build-landingpage', { detail: { topic: topic } }));
-        },
-      },
-      ['Jetzt mit dem Landingpage-Tool bauen']
-    );
+    var href = CONFIG.landingpageAssistantUrl + '?new=1&topic=' + encodeURIComponent(topic);
+    return el('a', { class: 'cvz-cs-build-btn', href: href }, ['Jetzt mit dem Landingpage-Tool bauen']);
   }
 
   function renderGeoSection(geo) {
