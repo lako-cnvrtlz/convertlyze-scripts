@@ -366,12 +366,16 @@
   // Chat-Verlauf: Agenturen sollen die Strategie herunterladen/verändern können) ist ein
   // eigenständiges, noch offenes Vorhaben, das dieselben result-Felder (ausgangslage,
   // executive_summary, ...) wiederverwenden kann, sobald es angegangen wird.
-  function renderResult(sessionId, result, fundedBy) {
+  // session (4. Parameter, optional): nur gesetzt, wenn eine BEREITS GESPEICHERTE Strategie über
+  // loadExistingSession() angezeigt wird (liefert u.a. created_at fürs Berichts-Datum) - bei
+  // einem frisch generierten Ergebnis (Aufruf aus pollStatus()) bleibt das undefined, dann gilt
+  // wie bisher "heute" als Datum und fundedBy zeigt die Finanzierung dieses Laufs an.
+  function renderResult(sessionId, result, fundedBy, session) {
     clear(state.root);
 
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
 
-    wrap.appendChild(renderReportHeader(result));
+    wrap.appendChild(renderReportHeader(result, session));
     wrap.appendChild(renderReportSection(1, 'Ausgangslage', [renderProse(result.ausgangslage)]));
     wrap.appendChild(
       renderReportSection(2, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])])
@@ -380,8 +384,11 @@
     wrap.appendChild(renderReportSection(4, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
     wrap.appendChild(renderReportSection(5, 'GEO-Strategie', [renderGeoSection(result.geo_strategy)]));
 
+    var fundingText = fundedBy
+      ? 'Finanziert aus: ' + (fundedBy === 'ppu_strategy' ? 'Pay-per-Use-Credit' : 'Plan-Kontingent')
+      : 'Gespeicherte Strategie';
     var footer = el('div', { class: 'cvz-cs-footer' }, [
-      el('span', { class: 'cvz-cs-hint' }, ['Finanziert aus: ' + (fundedBy === 'ppu_strategy' ? 'Pay-per-Use-Credit' : 'Plan-Kontingent')]),
+      el('span', { class: 'cvz-cs-hint' }, [fundingText]),
       el('button', { type: 'button', class: 'cvz-cs-retry-btn', onclick: renderApp }, ['Neue Strategie erstellen']),
     ]);
     wrap.appendChild(footer);
@@ -390,11 +397,12 @@
     state.root.appendChild(wrap);
   }
 
-  function renderReportHeader(result) {
+  function renderReportHeader(result, session) {
     var header = el('div', { class: 'cvz-cs-report-header' });
     header.appendChild(el('p', { class: 'cvz-cs-report-eyebrow' }, ['Content-Strategie-Bericht']));
     header.appendChild(el('h2', { class: 'cvz-cs-report-title' }, [result.seed_topic]));
-    var dateStr = new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long', day: 'numeric' });
+    var dateSource = (session && session.created_at) ? new Date(session.created_at) : new Date();
+    var dateStr = dateSource.toLocaleDateString('de-DE', { year: 'numeric', month: 'long', day: 'numeric' });
     header.appendChild(el('p', { class: 'cvz-cs-report-meta' }, ['Erstellt am ' + dateStr]));
     return header;
   }
@@ -705,6 +713,10 @@
 
   // ==================== APP-LEBENSZYKLUS ====================
 
+  function getParam(key) {
+    return new URLSearchParams(window.location.search).get(key);
+  }
+
   function renderApp() {
     clear(state.root);
     var loading = el('p', { class: 'cvz-cs-hint' }, ['Lade Kontingent ...']);
@@ -721,6 +733,36 @@
       });
   }
 
+  // NEU (siehe Chat-Verlauf, Dashboard-Konsolidierung): das Dashboard verlinkt auf eine bereits
+  // gespeicherte Strategie per ?session_id=<uuid> - vorher konnte diese Seite ausschliesslich das
+  // Formular für eine NEUE Strategie zeigen, es gab keinen Weg, eine vergangene erneut
+  // anzuzeigen. Nutzt den bestehenden GET /:id-Endpunkt (liefert die komplette Session inkl.
+  // result), lädt Kontingent/GSC-Status genau wie renderApp() (renderQuotaBanner() greift in
+  // renderResult() darauf zu), dann direkt renderResult() statt des Formulars.
+  function loadExistingSession(sessionId) {
+    clear(state.root);
+    state.root.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Lade gespeicherte Strategie ...']));
+
+    Promise.all([loadQuota(), loadGscStatus()])
+      .then(function () {
+        return apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId));
+      })
+      .then(function (session) {
+        state.currentSessionId = session.id;
+        state.currentResult = session.result;
+        renderResult(session.id, session.result, null, session);
+      })
+      .catch(function (err) {
+        if (err.status === 403) {
+          renderError('Kein Zugriff auf diese Strategie.');
+        } else if (err.status === 404) {
+          renderError('Diese Strategie wurde nicht gefunden (evtl. gelöscht).');
+        } else {
+          renderError('Strategie konnte nicht geladen werden: ' + err.message);
+        }
+      });
+  }
+
   function init() {
     var root = document.getElementById(CONFIG.containerId);
     if (!root) {
@@ -731,8 +773,12 @@
     clear(root);
     root.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Lade ...']));
 
+    var requestedSessionId = getParam('session_id');
+
     resolveIdentity()
-      .then(renderApp)
+      .then(function () {
+        return requestedSessionId ? loadExistingSession(requestedSessionId) : renderApp();
+      })
       .catch(function (err) {
         if (err.code === 'not_logged_in') {
           clear(root);
