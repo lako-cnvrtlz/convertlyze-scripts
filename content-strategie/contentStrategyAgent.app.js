@@ -53,15 +53,16 @@
     // dashboard-v5.js bzw. CONFIG.chatPageUrl in page-projects-embed.html - bitte synchron halten).
     landingpageAssistantUrl: '/member/landingpage-assistant',
     pollIntervalMs: 3000,
-    // ANGEHOBEN von 15 auf 22 Minuten (siehe Chat-Verlauf, Lasse: "Strategie-Erstellung dauert
-    // jetzt über 10 Minuten"): der GEO-Prompt-Test läuft jetzt standardmäßig mit (siehe
-    // promptTestCheckbox weiter unten), nicht mehr nur auf ausdrücklichen Wunsch - das macht die
-    // längeren Laufzeiten zum Normalfall statt zur Ausnahme. BACKGROUND_TURN_TIMEOUT_MS im
-    // Backend (routes/contentStrategyAgent.ts) wurde parallel auf 20 Minuten angehoben - hier
-    // bewusst 2 Minuten MEHR als das Backend-Limit, damit bei einem echten Timeout die genaue
-    // Backend-Fehlermeldung (job.status === 'error') den Client erreicht, BEVOR der eigene,
-    // generische "Zeitüberschreitung"-Text in pollStatus() zuschlägt.
-    pollTimeoutMs: 22 * 60 * 1000,
+    // ANGEHOBEN von 15 auf 22, dann auf 32 Minuten (siehe Chat-Verlauf, Lasse: "Strategie-
+    // Erstellung dauert jetzt über 10 Minuten", später "Timeout wird knapp, so viel wie da
+    // passiert"): der GEO-Prompt-Test läuft standardmäßig mit, dazu inzwischen bis zu 3 weitere
+    // sequenzielle content_parsing-Calls für die Wettbewerber-Struktur-Analyse - siehe
+    // ausführliche Begründung bei BACKGROUND_TURN_TIMEOUT_MS in routes/contentStrategyAgent.ts,
+    // das parallel auf 30 Minuten angehoben wurde. Hier bewusst weiterhin 2 Minuten MEHR als das
+    // Backend-Limit, damit bei einem echten Timeout die genaue Backend-Fehlermeldung
+    // (job.status === 'error') den Client erreicht, BEVOR der eigene, generische
+    // "Zeitüberschreitung"-Text in pollStatus() zuschlägt.
+    pollTimeoutMs: 32 * 60 * 1000,
     // NEU (siehe Chat-Verlauf, Lasse: "KI-Agent, der Fragen des Users zu dem Report beantworten
     // kann") - eigenes, kürzeres Poll-Intervall/Timeout für den Report-Chat: eine Chat-Antwort
     // ist deutlich schneller als ein kompletter Report-Lauf (der echte GEO-Prompt-Test läuft im
