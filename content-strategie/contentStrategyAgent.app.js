@@ -75,6 +75,32 @@
 
   var CONFIG = Object.assign({}, DEFAULT_CONFIG, window.CVZ_CONTENT_STRATEGY_CONFIG || {});
 
+  // NEU (siehe Chat-Verlauf, Lasse: "im Chat UND im Bericht selbst - z.B. Executive Summary -
+  // wird noch mit ##/** markiert statt gerendert"): lädt "marked" (https://marked.js.org/)
+  // JETZT SELBST nach, statt sich wie bisher darauf zu verlassen, dass es manuell als
+  // <script>-Tag in Webflows Custom Code eingebunden wurde. Genau DAS war die eigentliche
+  // Fehlerquelle beim zuvor gemeldeten Chat-Markdown-Bug: der Code-Fix (marked.parse() in
+  // renderChatMessageBubble) war korrekt, griff aber nicht zuverlässig, weil das manuelle
+  // Einbinden der Bibliothek fehleranfällig ist (leicht vergessen, oder auf einer Seite
+  // vorhanden, auf einer anderen nicht). Idempotent: lädt nur einmal nach und nur, falls
+  // "marked" nicht schon da ist (z.B. weil der Landingpage-Assistent auf derselben Seite
+  // bereits läuft und es selbst einbindet - dann passiert hier nichts). Wird ganz am Anfang
+  // von init() angestoßen, lange bevor ein Bericht oder Chat tatsächlich gerendert wird -
+  // blockiert dabei nichts, jede Render-Stelle prüft weiterhin "typeof marked" selbst und
+  // fällt auf reinen Text zurück, falls das Nachladen (noch) nicht fertig ist oder fehlschlägt.
+  var MARKED_CDN_URL = 'https://cdn.jsdelivr.net/npm/marked/marked.min.js';
+  var markedLoadStarted = false;
+  function ensureMarkedLoaded() {
+    if (markedLoadStarted || typeof marked !== 'undefined') return;
+    markedLoadStarted = true;
+    var script = document.createElement('script');
+    script.src = MARKED_CDN_URL;
+    script.onerror = function () {
+      console.warn('cvz-content-strategy-agent: "marked" konnte nicht von ' + MARKED_CDN_URL + ' nachgeladen werden - Markdown in Bericht/Chat faellt auf reinen Text zurueck.');
+    };
+    document.head.appendChild(script);
+  }
+
   var PAGE_TYPE_LABELS = {
     conversion_landingpage: 'Conversion-Landingpage',
     comparison: 'Vergleichsseite',
@@ -607,16 +633,20 @@
     return section;
   }
 
-  // Fließtext-Felder (ausgangslage/executive_summary) sind einfache Strings aus dem
-  // Claude-Ergebnis - auf mögliche Absatz-Umbrüche (Leerzeile) prüfen, statt alles in einen
-  // einzigen <p> zu quetschen.
-  function renderProse(text) {
-    var container = el('div', { class: 'cvz-cs-prose' });
-    String(text || '')
-      .split(/\n\s*\n/)
-      .forEach(function (para) {
-        if (para.trim()) container.appendChild(el('p', {}, [para.trim()]));
-      });
+  // GEÄNDERT (siehe Chat-Verlauf, Lasse: "im Bericht wird noch mit ** markiert statt
+  // gerendert"): Fließtext-Felder (ausgangslage, executive_summary, citation_strategy_note,
+  // reasoning, roadmap.begruendung) laufen jetzt durch dieselbe Markdown-Rendering-Logik wie
+  // die Chat-Antworten (renderMarkdownInto, siehe dort) - Claude hält sich trotz Anweisung im
+  // System-Prompt (ANTI_SLOP_STYLE_GUIDE im Backend) nicht zuverlässig zu 100% davon ab,
+  // gelegentlich **fett**/## Überschriften in Fließtext einzustreuen (typisches LLM-Verhalten,
+  // lässt sich prompt-seitig nicht garantieren). Robuster, das beim Rendern abzufangen, als
+  // sich darauf zu verlassen, dass es nie passiert - bei reinem Text ohne Markdown-Syntax sieht
+  // das Ergebnis identisch aus wie vorher (marked.parse() macht aus einem Absatz ohne
+  // Markdown-Zeichen einfach ein <p> mit dem Text). extraClass optional, für Aufrufstellen mit
+  // eigener zusätzlicher CSS-Klasse (z.B. .cvz-cs-page-card-reasoning).
+  function renderProse(text, extraClass) {
+    var container = el('div', { class: 'cvz-cs-prose' + (extraClass ? ' ' + extraClass : '') });
+    renderMarkdownInto(container, text);
     return container;
   }
 
@@ -625,8 +655,16 @@
 
     var volumeText =
       result.conversion_page.estimated_volume != null ? 'ca. ' + result.conversion_page.estimated_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
+    // NEU (siehe Chat-Verlauf, Lasse: "Zielgruppen mit reinnehmen") - primary_audience als
+    // eigenes Badge neben "Conversion-Seite", analog zu den Page-Cards unten. Defensive
+    // Prüfung, weil ältere, bereits gespeicherte Sessions (vor diesem Update) das Feld noch
+    // nicht haben - dann einfach kein zusätzliches Badge, statt eines leeren/kaputten.
+    var conversionBadges = [el('span', { class: 'cvz-cs-badge cvz-cs-badge-conversion' }, ['Conversion-Seite'])];
+    if (result.conversion_page.primary_audience) {
+      conversionBadges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-audience' }, [result.conversion_page.primary_audience]));
+    }
     var conversionCardChildren = [
-      el('span', { class: 'cvz-cs-badge cvz-cs-badge-conversion' }, ['Conversion-Seite']),
+      el('div', { class: 'cvz-cs-page-card-badges' }, conversionBadges),
       el('h4', {}, [result.conversion_page.topic]),
       el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + result.conversion_page.keyword + ' · ' + volumeText]),
     ];
@@ -689,6 +727,12 @@
       el('span', { class: 'cvz-cs-badge' }, [pageTypeLabel(page.page_type)]),
       el('span', { class: 'cvz-cs-badge cvz-cs-badge-role-' + page.role }, [roleLabel(page.role)]),
     ];
+    // NEU (siehe Chat-Verlauf, Lasse: "Zielgruppen mit reinnehmen und Inhalten/Seiten
+    // zuordnen") - primary_audience als eigenes, dezentes Badge. Defensive Prüfung: ältere,
+    // bereits gespeicherte Sessions haben das Feld noch nicht, dann einfach kein Badge.
+    if (page.primary_audience) {
+      badges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-audience' }, [page.primary_audience]));
+    }
     if (page.commodity_risk) {
       badges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-commodity', title: page.commodity_reasoning || '' }, ['Commodity-Risiko']));
     }
@@ -706,7 +750,7 @@
       card.appendChild(el('p', { class: 'cvz-cs-page-card-type-explanation' }, [PAGE_TYPE_EXPLANATIONS[page.page_type]]));
     }
     if (page.reasoning) {
-      card.appendChild(el('p', { class: 'cvz-cs-page-card-reasoning' }, [page.reasoning]));
+      card.appendChild(renderProse(page.reasoning, 'cvz-cs-page-card-reasoning'));
     }
     if (page.content_brief && page.content_brief.length > 0) {
       card.appendChild(renderContentBrief(page.content_brief));
@@ -830,7 +874,7 @@
     // "was für Content hat Zitier-Chancen", nicht nur eine Portale-Liste) - dafür in einer
     // hervorgehobenen Box statt als weiterer Listenpunkt.
     if (geo.citation_strategy_note) {
-      box.appendChild(el('div', { class: 'cvz-cs-citation-note' }, [geo.citation_strategy_note]));
+      box.appendChild(renderProse(geo.citation_strategy_note, 'cvz-cs-citation-note'));
     }
 
     // Google AI Overview - konkret MIT Links, siehe Schema-Kommentar zu AiOverviewSchema.
@@ -948,7 +992,7 @@
         list.appendChild(
           el('li', { class: 'cvz-cs-roadmap-item' }, [
             el('p', { class: 'cvz-cs-roadmap-item-title' }, [item.titel]),
-            el('p', { class: 'cvz-cs-roadmap-item-reason' }, [item.begruendung]),
+            renderProse(item.begruendung, 'cvz-cs-roadmap-item-reason'),
           ])
         );
       });
@@ -1007,14 +1051,32 @@
     }
   }
 
+  // GEÄNDERT (siehe Chat-Verlauf, Lasse: "im Bericht selbst wird auch noch mit ** markiert") -
+  // geteilte Markdown-Logik mit renderProse() weiter oben, statt zwei eigenständigen
+  // marked.parse()-Aufrufen, die bei einer künftigen Änderung (z.B. am Tabellen-Karten-Fallback)
+  // sonst leicht auseinanderlaufen. Fällt auf reinen Text zurück, wenn "marked" (noch) nicht
+  // geladen ist - kein Absturz, siehe ensureMarkedLoaded() weiter oben für den eigentlichen Fix
+  // dieses Bugs (bisher musste "marked" manuell in Webflow eingebunden werden, das war die
+  // eigentliche Fehlerquelle).
+  function renderMarkdownInto(container, text) {
+    var str = String(text || '');
+    if (typeof marked !== 'undefined') {
+      container.innerHTML = marked.parse(str);
+      cvzCsLabelTablesForCards(container);
+    } else {
+      str.split(/\n\s*\n/).forEach(function (para) {
+        if (para.trim()) container.appendChild(el('p', {}, [para.trim()]));
+      });
+    }
+  }
+
   function renderChatMessageBubble(message) {
     var bubble = el('div', { class: 'cvz-cs-chat-msg cvz-cs-chat-msg-' + message.role });
     // Nur Assistant-Antworten werden als Markdown gerendert (# Überschriften, Tabellen, Listen
     // etc.) - User-Fragen bleiben bewusst reiner Text (kein Grund, eigene Eingaben als
     // Markdown zu interpretieren, und textContent ist automatisch XSS-sicher).
-    if (message.role === 'assistant' && typeof marked !== 'undefined') {
-      bubble.innerHTML = marked.parse(message.content);
-      cvzCsLabelTablesForCards(bubble);
+    if (message.role === 'assistant') {
+      renderMarkdownInto(bubble, message.content);
     } else {
       bubble.textContent = message.content;
     }
@@ -1258,6 +1320,7 @@
   }
 
   function init() {
+    ensureMarkedLoaded(); // so frueh wie moeglich anstossen, siehe Begruendung oben bei der Definition
     var root = document.getElementById(CONFIG.containerId);
     if (!root) {
       console.error('cvz-content-strategy-agent: Container #' + CONFIG.containerId + ' nicht gefunden.');
