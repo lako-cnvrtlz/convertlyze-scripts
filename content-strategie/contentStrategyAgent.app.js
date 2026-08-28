@@ -72,6 +72,37 @@
     existing: 'bereits vorhanden',
   };
 
+  // NEU (siehe Chat-Verlauf, "Phasen des Messy Middle ... um eine volle Abdeckung zu
+  // gewährleisten"): feste Reihenfolge für die Gruppierung der Unterstützenden-Seiten-Karten -
+  // Backend erzwingt per Zod-superRefine, dass mind. exploration + evaluation vorkommen,
+  // decision ist optional (siehe contentStrategyAgent.schemas.ts).
+  var MESSY_MIDDLE_PHASES = [
+    { value: 'exploration', label: 'Exploration', description: 'Schafft Bewusstsein und deckt offene Grundlagenfragen ab.' },
+    { value: 'evaluation', label: 'Evaluation', description: 'Hilft beim Vergleichen und Eingrenzen der Optionen.' },
+    { value: 'decision', label: 'Entscheidung', description: 'Unmittelbar vor der Kaufentscheidung.' },
+    // WHY 4. Eintrag "legacy": bereits gespeicherte Strategien von VOR diesem Update haben kein
+    // messy_middle_phase-Feld (undefined) - ohne diesen Auffangkorb würden ihre Seiten beim
+    // Ansehen einer alten Session (?session_id=...) kommentarlos aus "Unterstützende Seiten"
+    // verschwinden (byPhase[undefined] existiert zwar, wird aber nie gerendert). Lieber
+    // ehrlich als "ohne Phasen-Zuordnung" zeigen als eine Phase raten, die so nie eingeschätzt wurde.
+    { value: 'legacy', label: 'Weitere Seiten', description: 'Aus einer älteren Strategie-Version ohne Phasen-Zuordnung.' },
+  ];
+
+  // Gruppiert nach Phase, behält aber den ORIGINALEN Index in supporting_pages bei (nicht die
+  // Position innerhalb der Gruppe) - der Status-PATCH-Endpunkt (/pages/:index) und
+  // describeLink() referenzieren Seiten über diesen Original-Index, der beim Umsortieren nach
+  // Phase sonst durcheinandergeraten würde.
+  function groupPagesByPhase(pages) {
+    var byPhase = {};
+    MESSY_MIDDLE_PHASES.forEach(function (phase) { byPhase[phase.value] = []; });
+    pages.forEach(function (page, index) {
+      var phaseKey = byPhase.hasOwnProperty(page.messy_middle_phase) ? page.messy_middle_phase : 'legacy';
+      var bucket = byPhase[phaseKey];
+      bucket.push({ page: page, index: index });
+    });
+    return byPhase;
+  }
+
   var STATUS_OPTIONS = [
     { value: 'vorgeschlagen', label: 'Vorgeschlagen' },
     { value: 'geplant', label: 'Geplant' },
@@ -384,8 +415,13 @@
     wrap.appendChild(
       renderReportSection(2, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])])
     );
-    wrap.appendChild(renderReportSection(3, 'Content-Cluster-Strategie', buildClusterSectionChildren(sessionId, result)));
-    wrap.appendChild(renderReportSection(4, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
+    // REIHENFOLGE GEÄNDERT (siehe Chat-Verlauf, Lasse: "Ist-Zustand nach Executive Summary,
+    // dann ist [Content-Cluster-Strategie] quasi der Soll-Zustand"): Ist-Zustand kommt jetzt
+    // VOR der Content-Cluster-Strategie, die entsprechend als Soll-Zustand betitelt ist -
+    // liest sich jetzt als Ausgangslage → Summary → Ist → Soll → GEO statt Ist irgendwo
+    // nachgeschoben zwischen zwei Soll-Abschnitten.
+    wrap.appendChild(renderReportSection(3, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
+    wrap.appendChild(renderReportSection(4, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
     wrap.appendChild(renderReportSection(5, 'GEO-Strategie', [renderGeoSection(result.geo_strategy)]));
 
     var fundingText = fundedBy
@@ -450,33 +486,29 @@
     children.push(el('div', { class: 'cvz-cs-conversion-card' }, conversionCardChildren));
 
     children.push(el('h5', {}, ['Unterstützende Seiten']));
-    // FIX (siehe Chat-Verlauf, "Tables passen nicht"): ohne feste Spaltenbreiten
-    // hat der Browser die Breite jeder Spalte am Inhalt bemessen - bei der
-    // langen "Begründung & Content-Brief"-Spalte lief das auf sehr schmale,
-    // hoch gestauchte Nachbarspalten hinaus (Text wirkte wie einzeln
-    // gestapelt statt nebeneinander). cvz-cs-pages-table gibt jeder Spalte
-    // einen festen Prozentsatz (table-layout:fixed), der Wrapper mit
-    // overflow-x:auto faengt zusaetzlich ab, dass die Tabelle auf sehr
-    // schmalen Bildschirmen ueber den Rand hinaus haette wachsen muessen.
-    var table = el('table', { class: 'cvz-cs-table cvz-cs-pages-table' });
-    var thead = el('thead', {}, [
-      el('tr', {}, [
-        el('th', {}, ['Thema']),
-        el('th', {}, ['Typ']),
-        el('th', {}, ['Rolle']),
-        el('th', {}, ['Volumen']),
-        el('th', {}, ['Begründung & Content-Brief']),
-        el('th', {}, ['Status']),
-        el('th', {}, ['']),
-      ]),
-    ]);
-    table.appendChild(thead);
-    var tbody = el('tbody');
-    (result.supporting_pages || []).forEach(function (page, index) {
-      tbody.appendChild(renderPageRow(sessionId, page, index));
+    // FIX (siehe Chat-Verlauf, 2. Runde "Typ/Rolle/Volumen passt immer noch nicht"): eine
+    // Tabelle mit fest schmalen Typ-/Rolle-Spalten (Versuch 1) lässt lange Badge-Texte wie
+    // "THEMENABDECKUNG" trotzdem über die Zellgrenze hinaus überlappen, weil ein <span> nicht
+    // automatisch innerhalb der Zellbreite umbricht. Statt die Spalten ein zweites Mal enger/
+    // breiter zu justieren: komplett von einer starren Tabelle auf eine Karten-Liste
+    // umgestellt - jede Seite ist jetzt eine eigene Karte, Badges stehen in einer
+    // flex-wrap-Zeile und brechen bei Bedarf einfach in die nächste Zeile um, statt sich zu
+    // überlappen. Passt außerdem besser zum "durchgehender Bericht statt Tabellen-Widget"-Stil
+    // (siehe frühere Chat-Runde). NEU zusätzlich: Karten sind nach messy_middle_phase
+    // gruppiert (siehe MESSY_MIDDLE_PHASES), damit die Journey-Abdeckung auf einen Blick
+    // sichtbar ist - "um eine volle Abdeckung zu gewährleisten" (Lasse).
+    var pagesByPhase = groupPagesByPhase(result.supporting_pages || []);
+    MESSY_MIDDLE_PHASES.forEach(function (phase) {
+      var pagesInPhase = pagesByPhase[phase.value];
+      if (!pagesInPhase || pagesInPhase.length === 0) return;
+      var group = el('div', { class: 'cvz-cs-phase-group' });
+      group.appendChild(el('h6', { class: 'cvz-cs-phase-title' }, [phase.label]));
+      group.appendChild(el('p', { class: 'cvz-cs-phase-desc' }, [phase.description]));
+      pagesInPhase.forEach(function (entry) {
+        group.appendChild(renderPageCard(sessionId, entry.page, entry.index));
+      });
+      children.push(group);
     });
-    table.appendChild(tbody);
-    children.push(el('div', { class: 'cvz-cs-table-wrap' }, [table]));
 
     if (result.internal_links && result.internal_links.length > 0) {
       children.push(el('h5', {}, ['Interne Verlinkung']));
@@ -496,7 +528,36 @@
     return fromLabel + ' → ' + toLabel + (link.anchor_text_idea ? ' ("' + link.anchor_text_idea + '")' : '');
   }
 
-  function renderPageRow(sessionId, page, index) {
+  // FIX (siehe Chat-Verlauf, ersetzt das frühere renderPageRow()/<tr>): eine Karte statt einer
+  // starren Tabellenzeile - Badges stehen in einer flex-wrap-Zeile (siehe .cvz-cs-page-card-
+  // badges) und brechen bei Bedarf um, statt sich bei schmalen Spalten zu überlappen.
+  function renderPageCard(sessionId, page, index) {
+    var card = el('div', { class: 'cvz-cs-page-card' });
+
+    var badges = [
+      el('span', { class: 'cvz-cs-badge' }, [pageTypeLabel(page.page_type)]),
+      el('span', { class: 'cvz-cs-badge cvz-cs-badge-role-' + page.role }, [roleLabel(page.role)]),
+    ];
+    if (page.commodity_risk) {
+      badges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-commodity', title: page.commodity_reasoning || '' }, ['Commodity-Risiko']));
+    }
+    card.appendChild(el('div', { class: 'cvz-cs-page-card-badges' }, badges));
+
+    card.appendChild(el('h4', { class: 'cvz-cs-page-card-topic' }, [page.topic]));
+
+    var volumeText = page.estimated_volume != null ? 'ca. ' + page.estimated_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
+    card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + page.keyword + ' · ' + volumeText]));
+
+    if (page.reasoning) {
+      card.appendChild(el('p', { class: 'cvz-cs-page-card-reasoning' }, [page.reasoning]));
+    }
+    if (page.content_brief && page.content_brief.length > 0) {
+      card.appendChild(renderContentBrief(page.content_brief));
+    }
+    if (page.commodity_risk && page.commodity_reasoning) {
+      card.appendChild(el('p', { class: 'cvz-cs-commodity-note' }, ['Commodity-Hinweis: ' + page.commodity_reasoning]));
+    }
+
     var statusSelect = el('select', { class: 'cvz-cs-status-select' });
     STATUS_OPTIONS.forEach(function (opt) {
       var optionEl = el('option', { value: opt.value }, [opt.label]);
@@ -521,34 +582,13 @@
         });
     });
 
-    var actionCell = page.page_type === 'conversion_landingpage' ? buildLandingpageButton(page.topic) : el('span', { class: 'cvz-cs-hint' }, ['-']);
-
-    var volumeCell = page.estimated_volume != null ? page.estimated_volume + '/Mon.' : '-';
-
-    var typeBadges = [el('span', { class: 'cvz-cs-badge' }, [pageTypeLabel(page.page_type)])];
-    if (page.commodity_risk) {
-      typeBadges.push(
-        el('span', { class: 'cvz-cs-badge cvz-cs-badge-commodity', title: page.commodity_reasoning || '' }, ['Commodity-Risiko'])
-      );
+    var footer = el('div', { class: 'cvz-cs-page-card-footer' }, [statusSelect]);
+    if (page.page_type === 'conversion_landingpage') {
+      footer.appendChild(buildLandingpageButton(page.topic));
     }
+    card.appendChild(footer);
 
-    var reasoningCellChildren = [el('p', {}, [page.reasoning || ''])];
-    if (page.content_brief && page.content_brief.length > 0) {
-      reasoningCellChildren.push(renderContentBrief(page.content_brief));
-    }
-    if (page.commodity_risk && page.commodity_reasoning) {
-      reasoningCellChildren.push(el('p', { class: 'cvz-cs-commodity-note' }, ['Commodity-Hinweis: ' + page.commodity_reasoning]));
-    }
-
-    return el('tr', {}, [
-      el('td', {}, [page.topic]),
-      el('td', {}, typeBadges),
-      el('td', {}, [el('span', { class: 'cvz-cs-badge cvz-cs-badge-role-' + page.role }, [roleLabel(page.role)])]),
-      el('td', {}, [volumeCell]),
-      el('td', { class: 'cvz-cs-reasoning' }, reasoningCellChildren),
-      el('td', {}, [statusSelect]),
-      el('td', {}, [actionCell]),
-    ]);
+    return card;
   }
 
   // NEU (siehe Chat-Verlauf, Strategie-Tiefe v2): Content-Brief als Stichpunkt-Liste statt
