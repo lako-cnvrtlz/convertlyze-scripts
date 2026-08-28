@@ -85,6 +85,19 @@
     review: 'Test/Review',
     integration: 'Integration',
     topic_coverage: 'Themenabdeckung',
+    // NEU (siehe Chat-Verlauf, Lasse: "auch Typen wie Pillar Pages vorschlagen, wenn sinnvoll,
+    // und erklären") - Klammerzusatz direkt im Badge-Label, weil "Pillar-Page" für sich allein
+    // ein SEO-Fachbegriff ist, den nicht jeder Convertlyze-User kennt (gleicher Gedanke wie
+    // schon beim GEO-Prompt-Test-Hinweistext: Begriffe erklären statt vorauszusetzen).
+    pillar_page: 'Pillar-Page (Themen-Hub)',
+  };
+
+  // Kurze, für Nicht-SEO-Experten verständliche Definition - wird in renderPageCard IMMER
+  // sichtbar unter dem Badge angezeigt (nicht nur als Hover-Tooltip), wenn der Typ erklärungs-
+  // bedürftig ist. Ergänzt page.reasoning (das WARUM für dieses konkrete Thema), diese Zeile
+  // ist das WAS/generelle Konzept.
+  var PAGE_TYPE_EXPLANATIONS = {
+    pillar_page: 'Eine Pillar-Page ist eine breite Übersichtsseite zu einem Kern-Thema, die mehrere verwandte Unterseiten bündelt und zu ihnen verlinkt - baut Themenautorität auf und dient als zentrale Anlaufstelle im Cluster.',
   };
 
   var ROLE_LABELS = {
@@ -682,6 +695,12 @@
     var volumeText = page.estimated_volume != null ? 'ca. ' + page.estimated_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
     card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + page.keyword + ' · ' + volumeText]));
 
+    // NEU (siehe Chat-Verlauf, Pillar-Pages erklären): generelle Typ-Erklärung VOR der
+    // themenspezifischen Begründung, falls für diesen page_type vorhanden - "was ist das"
+    // zuerst, dann "warum hier".
+    if (PAGE_TYPE_EXPLANATIONS[page.page_type]) {
+      card.appendChild(el('p', { class: 'cvz-cs-page-card-type-explanation' }, [PAGE_TYPE_EXPLANATIONS[page.page_type]]));
+    }
     if (page.reasoning) {
       card.appendChild(el('p', { class: 'cvz-cs-page-card-reasoning' }, [page.reasoning]));
     }
