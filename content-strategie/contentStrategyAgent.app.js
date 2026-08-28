@@ -463,6 +463,30 @@
     state.root.appendChild(box);
   }
 
+  // NEU (siehe Chat-Verlauf, Lasse: Content-Strategie-Sessions bekommen einen Status wie
+  // Analysen/Aufbau-Sessions): eine Session kann jetzt existieren, OHNE dass result schon
+  // gefüllt ist (status='in_progress', während der Agent noch läuft, oder status='error' nach
+  // einem gescheiterten Lauf) - der Dashboard-Tab verlinkt bei solchen Zeilen zwar nicht mehr
+  // hierher (siehe dashboard-v5.js, nur status='done'-Zeilen sind dort klickbar), aber ein
+  // alter/direkter Link mit ?session_id=... auf eine noch laufende oder fehlgeschlagene Session
+  // sollte trotzdem nicht mit einem rohen JS-Fehler enden (renderResult() würde auf result=null
+  // sofort crashen), sondern einen verständlichen Hinweis zeigen.
+  function renderPendingSession(session) {
+    clear(state.root);
+    var isError = session.status === 'error';
+    var box = el('div', { class: isError ? 'cvz-cs-error' : 'cvz-cs-processing' }, [
+      isError ? null : el('div', { class: 'cvz-cs-spinner' }),
+      el('p', {}, [
+        isError
+          ? 'Diese Strategie-Erstellung ist fehlgeschlagen' + (session.error_message ? ': ' + session.error_message : '') + '.'
+          : 'Diese Strategie wird noch erstellt - das kann bei aktiviertem GEO-Prompt-Test 10-15 Minuten dauern. Bitte in ein paar Minuten erneut auf diesen Link klicken.',
+      ]),
+    ]);
+    state.root.appendChild(box);
+    var retryBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn', onclick: renderApp }, [isError ? 'Neue Strategie erstellen' : 'Zurück zum Formular']);
+    state.root.appendChild(retryBtn);
+  }
+
   function pageTypeLabel(type) {
     return PAGE_TYPE_LABELS[type] || type;
   }
@@ -870,6 +894,10 @@
         return apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId));
       })
       .then(function (session) {
+        if (!session.result) {
+          renderPendingSession(session);
+          return;
+        }
         state.currentSessionId = session.id;
         state.currentResult = session.result;
         renderResult(session.id, session.result, null, session);
