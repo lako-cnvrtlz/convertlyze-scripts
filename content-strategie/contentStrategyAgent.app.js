@@ -62,6 +62,15 @@
     // Backend-Fehlermeldung (job.status === 'error') den Client erreicht, BEVOR der eigene,
     // generische "Zeitüberschreitung"-Text in pollStatus() zuschlägt.
     pollTimeoutMs: 22 * 60 * 1000,
+    // NEU (siehe Chat-Verlauf, Lasse: "KI-Agent, der Fragen des Users zu dem Report beantworten
+    // kann") - eigenes, kürzeres Poll-Intervall/Timeout für den Report-Chat: eine Chat-Antwort
+    // ist deutlich schneller als ein kompletter Report-Lauf (der echte GEO-Prompt-Test läuft im
+    // Chat serverseitig nie mit, siehe CHAT_TOOLS in routes/contentStrategyAgent.ts). 2 Minuten
+    // Timeout, bewusst mit Puffer ÜBER CHAT_TURN_TIMEOUT_MS (90s im Backend) - gleicher Grund wie
+    // bei pollTimeoutMs oben: die echte Backend-Fehlermeldung soll ankommen, bevor der eigene
+    // generische Timeout-Text feuert.
+    chatPollIntervalMs: 1500,
+    chatPollTimeoutMs: 2 * 60 * 1000,
   };
 
   var CONFIG = Object.assign({}, DEFAULT_CONFIG, window.CVZ_CONTENT_STRATEGY_CONFIG || {});
@@ -133,6 +142,19 @@
     pollStartedAt: null,
     currentSessionId: null,
     currentResult: null,
+    // NEU (siehe Chat-Verlauf, Report-Chat): eigener, klar abgegrenzter Unter-Zustand statt
+    // einzelner Top-Level-Felder - macht renderChatSection() unabhängig davon, ob der Report
+    // gerade frisch generiert wurde oder über loadExistingSession() geladen wird.
+    chat: {
+      sessionId: null,
+      messages: [], // [{role: 'user'|'assistant', content: string}]
+      messagesUsed: 0,
+      messagesLimit: 20,
+      pollHandle: null,
+      pollStartedAt: null,
+      sending: false,
+      _pendingUserMessage: null, // während des Pollens zwischengespeichert, siehe sendChatMessage/pollChatStatus
+    },
   };
 
   // ==================== API-HELFER ====================
@@ -533,6 +555,17 @@
       el('button', { type: 'button', class: 'cvz-cs-retry-btn', onclick: renderApp }, ['Neue Strategie erstellen']),
     ]);
     wrap.appendChild(footer);
+    // GEÄNDERT (siehe Chat-Verlauf, Lasse: "nur derjenige, der die Struktur erstellt hat, sollte
+    // chatten können, damit Nachrichten nicht mehrfach verbraucht werden") - der Chat ist jetzt
+    // NUR für den Ersteller sichtbar, anders als der Report selbst (der bleibt teamweit
+    // einsehbar). Ohne `session` (frisch generiertes Ergebnis direkt aus pollStatus()) ist der
+    // aktuelle User IMMER der Ersteller - man kann keine fremde Generierung live mitverfolgen,
+    // das gibt es in diesem Produkt nicht. MIT `session` (loadExistingSession, z.B. über den
+    // teamweiten Dashboard-Tab geöffnet) wird explizit gegen session.user_id geprüft - das
+    // Backend setzt dieselbe Einschränkung ohnehin hart durch (403), hier geht es nur darum,
+    // Team-Mitgliedern gar nicht erst ein Eingabefeld zu zeigen, das für sie sowieso fehlschlägt.
+    var isCreator = !session || session.user_id === state.userId;
+    if (sessionId && isCreator) wrap.appendChild(renderChatSection(sessionId));
 
     state.root.appendChild(renderQuotaBanner());
     state.root.appendChild(wrap);
@@ -856,6 +889,178 @@
       box.appendChild(ptList);
     }
     return box;
+  }
+
+  // ==================== REPORT-CHAT ====================
+  // NEU (siehe Chat-Verlauf, Lasse: "KI-Agent, der Fragen des Users zu dem Report beantworten
+  // kann") - eigener Abschnitt am Ende des Reports, lädt vorhandenen Verlauf beim Öffnen und
+  // pollt wie die Report-Generierung selbst (siehe Begründung bei CONFIG.chatPollIntervalMs/
+  // CONFIG.chatPollTimeoutMs, gleicher Reverse-Proxy-Grund wie beim Haupt-Lauf).
+
+  function stopChatPolling() {
+    if (state.chat.pollHandle) {
+      clearTimeout(state.chat.pollHandle);
+      state.chat.pollHandle = null;
+    }
+  }
+
+  function renderChatMessageBubble(message) {
+    return el('div', { class: 'cvz-cs-chat-msg cvz-cs-chat-msg-' + message.role }, [
+      el('p', { class: 'cvz-cs-chat-msg-text' }, [message.content]),
+    ]);
+  }
+
+  // Baut NUR die Nachrichtenliste + den Zähler neu auf (nicht das ganze Formular drumherum) -
+  // wird bei jedem neuen Verlaufs-Stand aufgerufen (nach dem Laden UND nach jeder neuen Antwort),
+  // ohne das Eingabefeld/den Fokus zu verlieren.
+  function refreshChatMessagesView() {
+    var listEl = state.root.querySelector('.cvz-cs-chat-messages');
+    var counterEl = state.root.querySelector('.cvz-cs-chat-counter');
+    if (listEl) {
+      clear(listEl);
+      if (state.chat.messages.length === 0) {
+        listEl.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Noch keine Fragen gestellt - frag zum Beispiel, warum eine bestimmte Seite empfohlen wurde.']));
+      } else {
+        state.chat.messages.forEach(function (m) { listEl.appendChild(renderChatMessageBubble(m)); });
+        listEl.scrollTop = listEl.scrollHeight;
+      }
+    }
+    if (counterEl) {
+      counterEl.textContent = state.chat.messagesUsed + ' / ' + state.chat.messagesLimit + ' Fragen gestellt';
+    }
+    var limitReached = state.chat.messagesUsed >= state.chat.messagesLimit;
+    var formEl = state.root.querySelector('.cvz-cs-chat-form');
+    var limitNoticeEl = state.root.querySelector('.cvz-cs-chat-limit-notice');
+    if (formEl) formEl.style.display = limitReached ? 'none' : '';
+    if (limitNoticeEl) limitNoticeEl.style.display = limitReached ? '' : 'none';
+  }
+
+  function loadChatHistory(sessionId) {
+    return apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId) + '/chat')
+      .then(function (data) {
+        state.chat.sessionId = sessionId;
+        state.chat.messages = data.messages || [];
+        state.chat.messagesUsed = data.messages_used || 0;
+        state.chat.messagesLimit = data.messages_limit || state.chat.messagesLimit;
+        refreshChatMessagesView();
+      })
+      .catch(function (err) {
+        // Nicht fatal für den Rest des Reports - der Report selbst bleibt lesbar, nur der
+        // Chat-Verlauf fehlt dann eben (z.B. bei einem kurzen API-Hänger beim Laden).
+        console.warn('Chat-Verlauf konnte nicht geladen werden:', err.message);
+      });
+  }
+
+  function pollChatStatus(turnId) {
+    state.chat.pollStartedAt = Date.now();
+    var statusEl = state.root.querySelector('.cvz-cs-chat-status');
+    function tick() {
+      if (Date.now() - state.chat.pollStartedAt > CONFIG.chatPollTimeoutMs) {
+        finishChatSending('Zeitüberschreitung - die Antwort läuft ungewöhnlich lange. Bitte gleich nochmal versuchen.');
+        return;
+      }
+      apiFetch('/api/content-strategy/chat/status/' + turnId)
+        .then(function (job) {
+          if (job.status === 'processing') {
+            state.chat.pollHandle = setTimeout(tick, CONFIG.chatPollIntervalMs);
+            return;
+          }
+          if (job.status === 'error') {
+            finishChatSending('Antwort fehlgeschlagen: ' + job.error);
+            return;
+          }
+          // job.status === 'done'
+          state.chat.messages.push({ role: 'user', content: state.chat._pendingUserMessage });
+          state.chat.messages.push({ role: 'assistant', content: job.reply });
+          state.chat.messagesUsed = job.messages_used;
+          state.chat.messagesLimit = job.messages_limit;
+          finishChatSending(null);
+        })
+        .catch(function (err) {
+          finishChatSending('Antwort konnte nicht abgerufen werden: ' + err.message);
+        });
+    }
+    if (statusEl) statusEl.textContent = 'Antwort wird erstellt ...';
+    tick();
+  }
+
+  function finishChatSending(errorMessage) {
+    stopChatPolling();
+    state.chat.sending = false;
+    state.chat._pendingUserMessage = null;
+    var statusEl = state.root.querySelector('.cvz-cs-chat-status');
+    if (statusEl) statusEl.textContent = errorMessage || '';
+    var sendBtn = state.root.querySelector('.cvz-cs-chat-send-btn');
+    var inputEl = state.root.querySelector('.cvz-cs-chat-input');
+    if (sendBtn) sendBtn.removeAttribute('disabled');
+    if (inputEl) inputEl.removeAttribute('disabled');
+    refreshChatMessagesView();
+  }
+
+  function sendChatMessage(sessionId, text) {
+    if (state.chat.sending) return; // Doppel-Klick-Schutz
+    state.chat.sending = true;
+    state.chat._pendingUserMessage = text;
+    var sendBtn = state.root.querySelector('.cvz-cs-chat-send-btn');
+    var inputEl = state.root.querySelector('.cvz-cs-chat-input');
+    if (sendBtn) sendBtn.setAttribute('disabled', 'disabled');
+    if (inputEl) inputEl.setAttribute('disabled', 'disabled');
+    var statusEl = state.root.querySelector('.cvz-cs-chat-status');
+    if (statusEl) statusEl.textContent = 'Frage wird gesendet ...';
+
+    apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId) + '/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message: text }),
+    })
+      .then(function (res) {
+        pollChatStatus(res.turn_id);
+      })
+      .catch(function (err) {
+        var msg = 'Frage konnte nicht gesendet werden: ' + err.message;
+        if (err.status === 402 && err.body) {
+          state.chat.messagesUsed = err.body.messages_used;
+          state.chat.messagesLimit = err.body.messages_limit;
+          msg = 'Frage-Kontingent für diesen Report erreicht (' + err.body.messages_used + '/' + err.body.messages_limit + ').';
+        }
+        finishChatSending(msg);
+      });
+  }
+
+  function renderChatSection(sessionId) {
+    var section = el('div', { class: 'cvz-cs-chat' });
+    section.appendChild(el('h4', { class: 'cvz-cs-chat-title' }, ['Fragen zum Report']));
+    section.appendChild(
+      el('p', { class: 'cvz-cs-hint' }, [
+        'Der Agent kennt diesen Report und kann bei Bedarf auch neue Daten live nachschlagen (kein erneuter GEO-Prompt-Test).',
+      ])
+    );
+    section.appendChild(el('div', { class: 'cvz-cs-chat-messages' }, []));
+    section.appendChild(el('p', { class: 'cvz-cs-chat-status', 'aria-live': 'polite' }, ['']));
+
+    var inputEl = el('input', { type: 'text', class: 'cvz-cs-chat-input', placeholder: 'z.B. "Warum diese Seite und nicht X?"', maxlength: '2000' });
+    var sendBtn = el('button', { type: 'submit', class: 'cvz-cs-chat-send-btn' }, ['Fragen']);
+    var form = el('form', { class: 'cvz-cs-chat-form' }, [inputEl, sendBtn]);
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      var text = inputEl.value.trim();
+      if (!text) return;
+      inputEl.value = '';
+      sendChatMessage(sessionId, text);
+    });
+    section.appendChild(form);
+
+    section.appendChild(
+      el('p', { class: 'cvz-cs-chat-limit-notice cvz-cs-hint', style: 'display:none' }, [
+        'Frage-Kontingent für diesen Report erreicht - für weitere Fragen bitte eine neue Strategie erstellen.',
+      ])
+    );
+    section.appendChild(el('p', { class: 'cvz-cs-chat-counter cvz-cs-hint' }, ['']));
+
+    // Verlauf erst NACH dem Einhängen ins DOM laden - refreshChatMessagesView() braucht die
+    // .cvz-cs-chat-messages/-counter-Elemente bereits im state.root.
+    loadChatHistory(sessionId);
+
+    return section;
   }
 
   // ==================== APP-LEBENSZYKLUS ====================
