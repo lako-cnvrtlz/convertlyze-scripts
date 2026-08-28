@@ -1,0 +1,218 @@
+/* contentStrategyWhiteLabel.style.css
+ * Widget für Logo-/Akzentfarben-Einstellungen des White-Label-PDF-Exports (Content-Strategie).
+ * Gleiches Dark-Theme-Farbschema wie contentStrategySettings.style.css (#0d1117/#1a2133/#4fd1c5),
+ * aber eigener Klassen-Präfix "cvly-wl-" und eigener Wurzel-Container #cvly-white-label, damit
+ * dieses Widget neben den anderen Einstellungen-Widgets (Plan, Integrationen) auf derselben Seite
+ * laufen kann, ohne Klassennamen-Kollisionen.
+ */
+
+#cvly-white-label {
+  --wl-bg:        #0d1117;
+  --wl-card:      #1a2133;
+  --wl-border:    #2a3550;
+  --wl-text:      #e8edf5;
+  --wl-muted:     #7a8ba8;
+  --wl-teal:      #4fd1c5;
+  --wl-teal-dk:   #38b2a8;
+  --wl-orange:    #fbbf24;
+  --wl-orange-bg: #1f1a0e;
+  --wl-orange-bdr:#4a3a10;
+  --radius:       14px;
+  --radius-sm:    10px;
+  font-family: inherit;
+  color: var(--wl-text);
+}
+
+#cvly-white-label .cvly-wl-card {
+  background: var(--wl-card);
+  border: 1px solid var(--wl-border);
+  border-radius: var(--radius);
+  padding: 28px 32px;
+  margin-bottom: 16px;
+}
+@media (max-width: 480px) {
+  #cvly-white-label .cvly-wl-card { padding: 20px 16px; }
+}
+
+#cvly-white-label .cvly-wl-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+#cvly-white-label .cvly-wl-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--wl-text);
+  margin: 0;
+}
+
+#cvly-white-label .cvly-wl-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 600;
+}
+#cvly-white-label .cvly-wl-badge-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+#cvly-white-label .cvly-wl-badge.active { background: rgba(79,209,197,0.12); color: #4fd1c5; border: 1px solid rgba(79,209,197,0.25); }
+#cvly-white-label .cvly-wl-badge.active .cvly-wl-badge-dot { background: #4fd1c5; }
+#cvly-white-label .cvly-wl-badge.pending { background: var(--wl-orange-bg); color: #fbbf24; border: 1px solid var(--wl-orange-bdr); }
+#cvly-white-label .cvly-wl-badge.pending .cvly-wl-badge-dot { background: var(--wl-orange); }
+
+#cvly-white-label .cvly-wl-meta {
+  font-size: 13px;
+  color: var(--wl-muted);
+  margin: 0 0 20px;
+  line-height: 1.6;
+}
+
+#cvly-white-label .cvly-wl-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+#cvly-white-label .cvly-wl-divider {
+  height: 1px;
+  background: var(--wl-border);
+  margin: 24px 0;
+}
+
+/* Logo-Vorschau */
+#cvly-white-label .cvly-wl-logo-preview {
+  width: 88px;
+  height: 88px;
+  border-radius: var(--radius-sm);
+  background: #161b27;
+  border: 1px solid var(--wl-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+#cvly-white-label .cvly-wl-logo-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+#cvly-white-label .cvly-wl-logo-placeholder {
+  color: var(--wl-muted);
+  display: flex;
+}
+#cvly-white-label .cvly-wl-logo-placeholder svg { width: 30px; height: 30px; }
+
+#cvly-white-label .cvly-wl-logo-controls {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+#cvly-white-label .cvly-wl-hint {
+  font-size: 12px;
+  color: var(--wl-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+#cvly-white-label .cvly-wl-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wl-text);
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* Farbauswahl */
+#cvly-white-label .cvly-wl-color-picker {
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 1px solid var(--wl-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#cvly-white-label .cvly-wl-color-picker::-webkit-color-swatch-wrapper { padding: 4px; }
+#cvly-white-label .cvly-wl-color-picker::-webkit-color-swatch { border: none; border-radius: 6px; }
+
+#cvly-white-label .cvly-wl-color-controls {
+  flex: 1;
+  min-width: 220px;
+}
+#cvly-white-label .cvly-wl-color-input-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+#cvly-white-label .cvly-wl-color-text {
+  flex: 1;
+  min-width: 120px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--wl-border);
+  background: #161b27;
+  color: var(--wl-text);
+  font-size: 14px;
+  font-family: monospace;
+}
+#cvly-white-label .cvly-wl-color-text:focus { outline: none; border-color: var(--wl-teal); }
+
+#cvly-white-label .cvly-wl-action-row {
+  margin-top: 4px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+#cvly-white-label .cvly-wl-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
+  border: 1px solid var(--wl-border);
+  background: #252d3d;
+  color: var(--wl-text);
+}
+#cvly-white-label .cvly-wl-action-btn:hover { background: #2e3850; border-color: #3a4a6a; }
+#cvly-white-label .cvly-wl-action-btn:disabled { opacity: 0.7; cursor: default; }
+#cvly-white-label .cvly-wl-action-btn.primary { background: var(--wl-teal); border-color: var(--wl-teal); color: #0d1117; font-weight: 600; }
+#cvly-white-label .cvly-wl-action-btn.primary:hover { background: var(--wl-teal-dk); border-color: var(--wl-teal-dk); }
+#cvly-white-label .cvly-wl-action-btn.upgrade { background: rgba(79,209,197,0.12); border-color: rgba(79,209,197,0.3); color: #4fd1c5; }
+#cvly-white-label .cvly-wl-action-btn.upgrade:hover { background: rgba(79,209,197,0.2); border-color: rgba(79,209,197,0.5); }
+
+/* Skeleton */
+@keyframes cvly-wl-shimmer { 0% { background-position: -600px 0; } 100% { background-position: 600px 0; } }
+#cvly-white-label .cvly-wl-skeleton-line {
+  background: linear-gradient(90deg, #1a2133 25%, #252d3d 50%, #1a2133 75%);
+  background-size: 600px 100%;
+  animation: cvly-wl-shimmer 1.4s infinite;
+  border-radius: 6px;
+  height: 16px;
+  margin-bottom: 8px;
+}
+#cvly-white-label .cvly-wl-skeleton-line.lg { height: 24px; }
+#cvly-white-label .cvly-wl-skeleton-line.sm { height: 12px; }
