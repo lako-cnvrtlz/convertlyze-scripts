@@ -313,15 +313,20 @@
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       var result = await window.supabase
         .from('users')
-        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, ppu_aufbau_credits, reserved_ppu_aufbau_credits, ppu_strategy_credits, reserved_ppu_strategy_credits, page_agent_sessions_used_current_period, page_agent_sessions_period_start')
+        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, ppu_aufbau_credits, reserved_ppu_aufbau_credits, ppu_strategy_credits, reserved_ppu_strategy_credits, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start')
         .eq('memberstack_id', memberstackId)
         .single();
- 
+
       if (result.data) {
         if (result.data.owner_user_id) {
           var ownerResult = await window.supabase
             .from('users')
-            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price, page_agent_sessions_used_current_period, page_agent_sessions_period_start')
+            // ERGÄNZT (siehe Chat-Verlauf, Content-Strategie-Stat-Karten): fehlte bisher hier,
+            // obwohl page_agent_sessions_used_current_period/_period_start (das exakte Aufbau-
+            // Pendant) schon immer mitgeholt wurde - ohne diese beiden Felder waeren die neuen
+            // Karten 8/9 fuer Team-Members (billing laeuft ueber bu, siehe WHY-Kommentar oben)
+            // immer leer geblieben.
+            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start')
             .eq('id', result.data.owner_user_id)
             .single();
           if (ownerResult.data) result.data._billingUser = ownerResult.data;
@@ -639,6 +644,11 @@
         'padding:18px 20px;margin-bottom:10px;transition:border-color .15s ease;}' +
       '.cvz-p-row:last-child{margin-bottom:0;}' +
       '.cvz-p-row:hover{border-color:var(--cvz-teal);}' +
+      // NEU: nicht-klickbare Zeilen (Content-Strategie noch in Bearbeitung oder fehlgeschlagen,
+      // siehe renderStrategyPage) - gleiches Karten-Layout, aber ohne Pointer-Cursor/Hover-Effekt,
+      // damit nicht suggeriert wird, dass ein Klick etwas oeffnet.
+      '.cvz-p-row-disabled{cursor:default;}' +
+      '.cvz-p-row-disabled:hover{border-color:var(--cvz-row-border);}' +
       '.cvz-p-name{font-weight:600;font-size:15px;color:var(--cvz-text);margin-bottom:4px;}' +
       '.cvz-p-meta{font-size:13px;color:var(--cvz-muted);}' +
       '.cvz-p-badge{font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;' +
@@ -705,10 +715,12 @@
     injectDashboardStyle();
  
     root.innerHTML =
-      // "Zuletzt aktiv" startet unsichtbar (display:none) - wird von
-      // loadRecentActivity() eingeblendet, sobald geladen wird / Daten da sind.
-      // So flackert beim ersten Rendern keine leere Section auf.
-      '<div id="cvz-ract-wrap" style="display:none"></div>' +
+      // GEÄNDERT (siehe Chat-Verlauf, Lasse: "der Bereich [Kontingent-Karten + Buttons] sollte
+      // über 'Zuletzt aktiv' angesiedelt werden, statt darunter"): Kontingent-Übersicht (jetzt
+      // mit eigener Headline "Übersicht") + Aktions-Buttons stehen jetzt VOR "Zuletzt aktiv",
+      // nicht mehr danach - "Zuletzt aktiv" (cvz-ract-wrap) ist entsprechend weiter unten in
+      // dieser Kette verschoben, keine eigene Logik-Änderung an der Activity-Section selbst.
+      '<h2 class="cvz-d-title">Übersicht</h2>' +
       '<div class="cvz-d-stats">' +
         statCardHtml({ wrapperId: 'cvz-d-c1', iconKey: 'barChart', label: 'Analysen diesen Monat',        valueId: 'cvz-d-c1-value', subId: 'cvz-d-c1-sub', withBar: true, barFillId: 'cvz-d-c1-bar' }) +
         statCardHtml({ wrapperId: 'cvz-d-c2', iconKey: 'check',    label: 'Verbleibende Analysen',         valueId: 'cvz-d-c2-value', subId: 'cvz-d-c2-sub', withBar: false }) +
@@ -717,12 +729,31 @@
         statCardHtml({ wrapperId: 'cvz-d-c5', iconKey: 'check',    label: 'Verbleibende Aufbau-Sessions',  valueId: 'cvz-d-c5-value', subId: 'cvz-d-c5-sub', withBar: false, hidden: true }) +
         statCardHtml({ wrapperId: 'cvz-d-c6', iconKey: 'cart',     label: 'Pay-per-Use Analysen',          valueId: 'cvz-d-c6-value', subId: 'cvz-d-c6-sub', withBar: false, hidden: true }) +
         statCardHtml({ wrapperId: 'cvz-d-c7', iconKey: 'cart',     label: 'Pay-per-Use Aufbau-Sessions',   valueId: 'cvz-d-c7-value', subId: 'cvz-d-c7-sub', withBar: false, hidden: true }) +
+        // NEU (siehe Chat-Verlauf, Lasse: "Bei den Informationen sollten wir auch Strategie mit
+        // reinnehmen") - exakt dasselbe Drei-Karten-Muster wie Aufbau (4/5/7): Verbrauch diesen
+        // Monat mit Balken, Verbleibend, Pay-per-Use. Alle drei starten hidden, showEl() in
+        // renderStatCards() blendet sie nur ein, wenn der Plan ueberhaupt ein Content-Strategie-
+        // Kontingent oder PPU-Guthaben hat (gleiche Logik wie showAufbauCards/Karte 6-7).
+        statCardHtml({ wrapperId: 'cvz-d-c8', iconKey: 'strategy', label: 'Content-Strategien diesen Monat', valueId: 'cvz-d-c8-value', subId: 'cvz-d-c8-sub', withBar: true, barFillId: 'cvz-d-c8-bar', hidden: true }) +
+        statCardHtml({ wrapperId: 'cvz-d-c9', iconKey: 'check',    label: 'Verbleibende Content-Strategien', valueId: 'cvz-d-c9-value', subId: 'cvz-d-c9-sub', withBar: false, hidden: true }) +
+        statCardHtml({ wrapperId: 'cvz-d-c10', iconKey: 'cart',    label: 'Pay-per-Use Content-Strategien', valueId: 'cvz-d-c10-value', subId: 'cvz-d-c10-sub', withBar: false, hidden: true }) +
       '</div>' +
       '<div class="cvz-d-actions">' +
         '<a id="cvz-d-btn-new-analysis" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">NEUE ANALYSE</a>' +
         '<a id="cvz-d-btn-new-page" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">LANDINGPAGE AUFBAUEN</a>' +
-        '<a id="cvz-d-btn-change-plan" class="cvz-d-btn cvz-d-btn-outline" href="/preise">Plan ändern</a>' +
+        // GEÄNDERT (siehe Chat-Verlauf, Lasse: "Plan ändern kann raus, dafür Content-Strategie
+        // erstellen rein") - "Plan ändern" (Link auf /preise) ist damit nicht mehr direkt aus
+        // dem Dashboard erreichbar. Gleiche Sichtbarkeits-Logik wie die anderen beiden CTA-
+        // Buttons: immer sichtbar, unabhaengig von hasStrategyAccess - Zugriffs-/Kontingent-
+        // Pruefung passiert auf der Zielseite selbst (siehe fehlendes Kontingent -> 402 in
+        // routes/contentStrategyAgent.ts), nicht durch Verstecken des Einstiegspunkts.
+        '<a id="cvz-d-btn-new-strategy" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.CONTENT_STRATEGY_PAGE_URL + '">CONTENT-STRATEGIE ERSTELLEN</a>' +
       '</div>' +
+      // "Zuletzt aktiv" startet unsichtbar (display:none) - wird von loadRecentActivity()
+      // eingeblendet, sobald geladen wird / Daten da sind. So flackert beim ersten Rendern keine
+      // leere Section auf. Jetzt NACH Kontingent-Karten+Buttons statt davor (siehe Kommentar bei
+      // "Übersicht"-Headline oben).
+      '<div id="cvz-ract-wrap" style="display:none"></div>' +
       // -- NEU: Tab-Leiste -----------------------------------------------------
       // Startet unsichtbar - applyTabVisibility() (in initDashboard, sobald die
       // Zugriffsrechte bekannt sind) blendet nur die Buttons ein, auf die der
@@ -860,7 +891,7 @@
  
   // -- UI: Stat-Karten befuellen -------------------------------------------------
  
-  function renderStatCards(user, sessionsLimit) {
+  function renderStatCards(user, sessionsLimit, contentStrategyLimit) {
     var bu           = user._billingUser || user;
     var reserved     = Math.max(0, Math.round(Number(bu.reserved_credits || 0)));
     var used         = Math.round(Number(bu.credits_used_current_period || 0));
@@ -873,6 +904,11 @@
     var ppuAufbauCredits   = Math.round(Number(user.ppu_aufbau_credits || 0));
     var ppuAufbauReserved  = Math.round(Number(user.reserved_ppu_aufbau_credits || 0));
     var ppuAufbauAvailable = Math.max(ppuAufbauCredits - ppuAufbauReserved, 0);
+    // Strategie-PPU liegt genau wie ppu_aufbau_credits auf der eigenen users-Zeile des Members,
+    // nicht auf bu/billingUser - siehe Kommentar bei Karte 10 weiter unten.
+    var ppuStrategyCredits   = Math.round(Number(user.ppu_strategy_credits || 0));
+    var ppuStrategyReserved  = Math.round(Number(user.reserved_ppu_strategy_credits || 0));
+    var ppuStrategyAvailable = Math.max(ppuStrategyCredits - ppuStrategyReserved, 0);
  
     var analysesLeft = bu.credits_remaining != null
       ? Math.max(0, Math.round(Number(bu.credits_remaining)) - reserved)
@@ -985,6 +1021,50 @@
     setText('cvz-d-c7-value', ppuAufbauAvailable);
     setText('cvz-d-c7-sub', ppuAufbauLabelText);
     showEl(document.getElementById('cvz-d-c7'), ppuAufbauCredits > 0, 'flex');
+
+    // Karte 8+9: Content-Strategien (nur wenn Plan ueberhaupt Kontingent hat) - exakt dasselbe
+    // Muster wie Karte 4+5 (Aufbau-Sessions), nur fuer content_strategy_sessions_* statt
+    // page_agent_sessions_*. Eigene Periode (content_strategy_sessions_period_start), nicht die
+    // Analysen-Credits-Periode - siehe migrations/content_strategy_quota.sql.
+    var strategyUsed     = Math.round(Number(bu.content_strategy_sessions_used_current_period || 0));
+    var strategyLimitNum = Math.round(Number(contentStrategyLimit || 0));
+    var strategyLeft     = Math.max(strategyLimitNum - strategyUsed, 0);
+    var strategyPercent  = strategyLimitNum ? (strategyUsed / strategyLimitNum) * 100 : 0;
+    var showStrategyCards = strategyLimitNum > 0;
+
+    setText('cvz-d-c8-value', strategyUsed + '/' + strategyLimitNum + ' Content-Strategien');
+    setText('cvz-d-c8-sub', Math.round(strategyPercent) + '% des Kontingents genutzt');
+    var bar8 = document.getElementById('cvz-d-c8-bar');
+    if (bar8) bar8.style.width = Math.min(strategyPercent, 100) + '%';
+    showEl(document.getElementById('cvz-d-c8'), showStrategyCards, 'flex');
+
+    var strategyRenewalSub = '';
+    if (isFreePlan) {
+      strategyRenewalSub = strategyLeft > 0 ? '1 kostenlose Content-Strategie verfügbar' : 'Kostenlose Content-Strategie bereits genutzt';
+    } else if (bu.content_strategy_sessions_period_start) {
+      var strategyRenewalDate = new Date(bu.content_strategy_sessions_period_start);
+      strategyRenewalDate.setMonth(strategyRenewalDate.getMonth() + 1);
+      strategyRenewalSub = 'Erneuert sich am ' + strategyRenewalDate.toLocaleDateString('de-DE');
+    } else {
+      strategyRenewalSub = '-';
+    }
+    setText('cvz-d-c9-value', strategyLeft);
+    setText('cvz-d-c9-sub', strategyRenewalSub);
+    showEl(document.getElementById('cvz-d-c9'), showStrategyCards, 'flex');
+
+    // Karte 10: Pay-per-Use Content-Strategien (nur wenn vorhanden) - exakt dasselbe Muster wie
+    // Karte 6/7, nur fuer ppu_strategy_credits statt ppu_credits/ppu_aufbau_credits.
+    var ppuStrategyLabelText = ppuStrategyCredits === 0
+      ? 'Keine Pay-per-Use Content-Strategien'
+      : ppuStrategyReserved > 0 && ppuStrategyAvailable === 0
+        ? 'Strategie wird gerade erstellt...'
+        : ppuStrategyReserved > 0
+          ? ppuStrategyAvailable + ' verfügbar (' + ppuStrategyReserved + ' in Bearbeitung)'
+          : ppuStrategyCredits + ' Pay-per-Use Content-Strategie' + (ppuStrategyCredits > 1 ? 'n' : '') + ' verfügbar';
+    setText('cvz-d-c10-value', ppuStrategyAvailable);
+    setText('cvz-d-c10-sub', ppuStrategyLabelText);
+    showEl(document.getElementById('cvz-d-c10'), ppuStrategyCredits > 0, 'flex');
+
     // User-Kopfbereich (weiterhin Webflow-Elemente, unveraendert)
     setUserHeader(user);
   }
@@ -1264,9 +1344,17 @@
 
   // -- UI: Tab "Content-Strategien" ---------------------------------------------
   // Gleiches Karten-Layout wie das bisherige page-projects-embed.html
-  // (cvz-p-*-Klassen, siehe injectDashboardStyle), aber ohne Status-Badge -
-  // Strategie-Sessions haben keinen Lebenszyklus-Status wie Aufbau-Projekte,
-  // nur Thema/Domain/Datum.
+  // (cvz-p-*-Klassen, siehe injectDashboardStyle). GEÄNDERT (siehe Chat-Verlauf, Lasse:
+  // "Content-Strategie-Sessions sollen im Dashboard genauso wie Analysen/Aufbau-Sessions
+  // angelegt werden, sobald sie in Bearbeitung sind, Status soll sich auf 'Strategie erstellt'
+  // ändern"): Strategie-Sessions haben jetzt genau wie Aufbau-Projekte einen Lebenszyklus-Status
+  // (siehe STRATEGY_STATUS_MAP unten) statt immer nur "Ansehen" zu zeigen.
+
+  var STRATEGY_STATUS_MAP = {
+    in_progress: { text: 'In Bearbeitung',     color: '#f59e0b' },
+    done:        { text: 'Strategie erstellt', color: '#4fd1c5' },
+    error:       { text: 'Fehler',             color: '#ef4444' },
+  };
 
   function strategySessionUrl(sessionId) {
     return CONFIG.CONTENT_STRATEGY_PAGE_URL + '?session_id=' + encodeURIComponent(sessionId);
@@ -1295,20 +1383,29 @@
     var items = state.strategySessions.slice(start, start + CONFIG.PAGE_SIZE);
     el.innerHTML = '';
     items.forEach(function (s) {
+      // Fallback auf 'done' fuer den (nach der Migration eigentlich nicht mehr vorkommenden)
+      // Fall, dass status aus irgendeinem Grund fehlt - sicherer Default ist "klickbar/fertig"
+      // statt eine echte, laengst abgeschlossene Strategie faelschlich als haengengeblieben zu
+      // zeigen.
+      var status = s.status || 'done';
+      var statusInfo = STRATEGY_STATUS_MAP[status] || { text: status, color: '#8b98a5' };
+      var isClickable = status === 'done';
       var row = document.createElement('div');
-      row.className = 'cvz-p-row';
+      row.className = 'cvz-p-row' + (isClickable ? '' : ' cvz-p-row-disabled');
       row.innerHTML =
         '<div>' +
           '<div class="cvz-p-name"></div>' +
           '<div class="cvz-p-meta"></div>' +
         '</div>' +
-        '<span class="cvz-p-badge"></span>';
+        '<span class="cvz-p-badge" style="color:' + statusInfo.color + ';"></span>';
       row.querySelector('.cvz-p-name').textContent = s.seed_topic || 'Unbenanntes Thema';
       row.querySelector('.cvz-p-meta').textContent = (s.domain ? s.domain + ' · ' : '') + 'Zuletzt aktualisiert: ' + formatRelativeTime(s.updated_at);
-      row.querySelector('.cvz-p-badge').textContent = 'Ansehen';
-      row.addEventListener('click', function () {
-        window.open(strategySessionUrl(s.id), '_blank', 'noopener');
-      });
+      row.querySelector('.cvz-p-badge').textContent = statusInfo.text;
+      if (isClickable) {
+        row.addEventListener('click', function () {
+          window.open(strategySessionUrl(s.id), '_blank', 'noopener');
+        });
+      }
       el.appendChild(row);
     });
     updateGenericPaginationInfo('cvz-s-pagination', 'cvz-s-pageinfo', 'cvz-s-prev', 'cvz-s-next', state.strategyPage, state.strategyTotalPages);
@@ -2014,7 +2111,7 @@
 
       applyTabVisibility();
 
-      renderStatCards(currentUser, sessionsLimit);
+      renderStatCards(currentUser, sessionsLimit, contentStrategyLimit);
 
       await loadAndRenderAnalyses(false);
       // "Zuletzt aktiv" erst NACH loadAndRenderAnalyses(), weil
