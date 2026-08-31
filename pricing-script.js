@@ -11,26 +11,20 @@
       'prc_pay-per-use-aufbau-1--ad1fj0jrg',
       'prc_pay-per-use-aufbau-5--mq1hg07on',
       'prc_pay-per-use-aufbau-10--7g1dk0atm',
-      // NEU (siehe Chat-Verlauf): Strategie-PPU-Preise ergaenzt, analog zu Aufbau.
-      // Echte Memberstack-Price-IDs (dieselben, die auch in
-      // memberstack-plan-update' PPU_PRICE_MAP eingetragen sind).
       'prc_strategie-1--kpn10a65',
       'prc_strategie-5--05mj0j7r',
       'prc_strategie-10--1jn30a61',
     ],
     priceIds: {
-      'starter':     { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
-      'pro':         { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
-      'enterprise':  { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' },
-      'pay-per-use': { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      },
-      'analyse-5':   { monthly: 'prc_pay-per-use-5-analysen--el1dg0ay4', annual: 'prc_pay-per-use-5-analysen--el1dg0ay4' },
-      'analyse-10':  { monthly: 'prc_pay-per-use-10-analysen-131g30jzh', annual: 'prc_pay-per-use-10-analysen-131g30jzh' },
-      'aufbau-1':    { monthly: 'prc_pay-per-use-aufbau-1--ad1fj0jrg',   annual: 'prc_pay-per-use-aufbau-1--ad1fj0jrg'   },
-      'aufbau-5':    { monthly: 'prc_pay-per-use-aufbau-5--mq1hg07on',   annual: 'prc_pay-per-use-aufbau-5--mq1hg07on'   },
-      'aufbau-10':   { monthly: 'prc_pay-per-use-aufbau-10--7g1dk0atm',  annual: 'prc_pay-per-use-aufbau-10--7g1dk0atm'  },
-      // NEU: Strategie-Pakete, gleiche Struktur wie Aufbau (Einmalkauf, daher
-      // monthly === annual - der "billing"-URL-Parameter ist fuer PPU-Pakete
-      // ohnehin irrelevant, siehe Kommentar bei aufbau-1 oben).
+      'starter':      { monthly: 'prc_starter-monthly-udf40q28',   annual: 'prc_starter-yearly-uu680b3d'   },
+      'pro':          { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
+      'enterprise':   { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' },
+      'pay-per-use':  { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      },
+      'analyse-5':    { monthly: 'prc_pay-per-use-5-analysen--el1dg0ay4', annual: 'prc_pay-per-use-5-analysen--el1dg0ay4' },
+      'analyse-10':   { monthly: 'prc_pay-per-use-10-analysen-131g30jzh', annual: 'prc_pay-per-use-10-analysen-131g30jzh' },
+      'aufbau-1':     { monthly: 'prc_pay-per-use-aufbau-1--ad1fj0jrg',   annual: 'prc_pay-per-use-aufbau-1--ad1fj0jrg'   },
+      'aufbau-5':     { monthly: 'prc_pay-per-use-aufbau-5--mq1hg07on',   annual: 'prc_pay-per-use-aufbau-5--mq1hg07on'   },
+      'aufbau-10':    { monthly: 'prc_pay-per-use-aufbau-10--7g1dk0atm',  annual: 'prc_pay-per-use-aufbau-10--7g1dk0atm'  },
       'strategie-1':  { monthly: 'prc_strategie-1--kpn10a65',  annual: 'prc_strategie-1--kpn10a65'  },
       'strategie-5':  { monthly: 'prc_strategie-5--05mj0j7r',  annual: 'prc_strategie-5--05mj0j7r'  },
       'strategie-10': { monthly: 'prc_strategie-10--1jn30a61', annual: 'prc_strategie-10--1jn30a61' },
@@ -51,6 +45,15 @@
   }
   function depsReady() {
     return !!window.$memberstackDom && !!window.supabase?.createClient;
+  }
+  // NEU: Cookie-Utilities, um den Plan-Wunsch zu lesen, den das Register-Script
+  // vor dem Signup/Login als 'cvz_plan'/'cvz_billing' gesetzt hat.
+  function getCookie(name) {
+    var match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+    return match ? match[1] : null;
+  }
+  function clearCookie(name) {
+    document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
   }
   // ── Data layer ───────────────────────────────────────────────────────────────
   async function fetchCurrentPriceId(memberstackId) {
@@ -73,6 +76,33 @@
     });
     var data = await res.json();
     return data?.url || null;
+  }
+  // NEU: gleicher pending_checkouts-Fallback wie im Register-Script, falls das
+  // 'cvz_plan'-Cookie mal fehlt (z.B. Login-Code in anderem Browser eingegeben).
+  async function fetchPendingCheckout(email) {
+    if (!email) return null;
+    try {
+      var res = await fetch(
+        CONFIG.supabaseUrl + '/rest/v1/pending_checkouts?email=eq.' + encodeURIComponent(email) + '&limit=1',
+        { headers: { 'apikey': CONFIG.supabaseAnonKey, 'Authorization': 'Bearer ' + CONFIG.supabaseAnonKey } }
+      );
+      var data = await res.json();
+      return data?.[0] || null;
+    } catch (e) {
+      console.warn('[CVZ] fetchPendingCheckout error:', e);
+      return null;
+    }
+  }
+  async function deletePendingCheckout(email) {
+    if (!email) return;
+    try {
+      await fetch(
+        CONFIG.supabaseUrl + '/rest/v1/pending_checkouts?email=eq.' + encodeURIComponent(email),
+        { method: 'DELETE', headers: { 'apikey': CONFIG.supabaseAnonKey, 'Authorization': 'Bearer ' + CONFIG.supabaseAnonKey } }
+      );
+    } catch (e) {
+      console.warn('[CVZ] deletePendingCheckout error:', e);
+    }
   }
   // ── UI: Pricing Toggle ───────────────────────────────────────────────────────
   function initPricingToggle() {
@@ -198,13 +228,8 @@
     setBtnLoading(btn);
     try {
       var currentPriceId = await fetchCurrentPriceId(memberstackId);
-      // BUGFIX: CONFIG.ppuPriceId (Singular) existierte nicht - isPPU war dadurch
-      // immer false. Jetzt Pruefung gegen das tatsaechliche Array ppuPriceIds,
-      // plus Unterscheidung Analyse- vs. Aufbau- vs. Strategie-PPU fuer den
-      // Erfolgs-Redirect.
       var isPPU          = CONFIG.ppuPriceIds.indexOf(priceId) !== -1;
       var isAufbauPPU    = isPPU && priceId.indexOf('aufbau') !== -1;
-      // NEU: Strategie-PPU-Erkennung analog zu Aufbau.
       var isStrategiePPU = isPPU && priceId.indexOf('strategie') !== -1;
       // PPU kann immer direkt gekauft werden - kein Portal noetig
       if (currentPriceId && !isPPU) {
@@ -223,9 +248,6 @@
       resetBtn(btn);
       var successPath = '/member/danke';
       if (isAufbauPPU)         successPath = '/member/landingpage-assistant';
-      // TODO (siehe Chat-Verlauf): Ziel-URL bestätigen/ersetzen - vermutlich die
-      // Seite, auf der contentStrategyAgent.app.js/contentStrategySettings.app.js
-      // eingebunden sind. Ich kenne die tatsächliche Slug nicht.
       else if (isStrategiePPU) successPath = '/member/content-strategie';
       else if (isPPU)          successPath = '/analyse/formular';
       window.$memberstackDom.purchasePlansWithCheckout({
@@ -239,6 +261,51 @@
         title: 'Verbindungsfehler',
         text:  'Es konnte keine Verbindung zum Server hergestellt werden. Bitte prüfe deine Internetverbindung.',
       });
+    }
+  }
+  // NEU: löst den Checkout automatisch aus, wenn vor dem Signup/Login schon ein
+  // Plan gewählt wurde (Cookie 'cvz_plan'/'cvz_billing', gesetzt vom Register-
+  // Script). Damit muss auf der Willkommens-Seite niemand die Preis-Karte noch
+  // einmal anklicken. Bei einem bestehenden Abo (Starter/Pro/Enterprise) wird
+  // NICHT automatisch das Billing-Portal geöffnet - da bleibt der manuelle
+  // Klick nötig, das soll niemanden ungefragt dorthin schicken.
+  async function autoResumeCheckout(memberstackId) {
+    if (!memberstackId) return;
+    var plan       = getCookie('cvz_plan');
+    var billing    = getCookie('cvz_billing') || 'monthly';
+    var fromCookie = !!plan;
+    if (!plan) {
+      try {
+        var member = await window.$memberstackDom.getCurrentMember();
+        var email  = member?.data?.auth?.email || member?.data?.email;
+        var pending = await fetchPendingCheckout(email);
+        if (pending) {
+          plan    = pending.plan;
+          billing = pending.billing || 'monthly';
+          await deletePendingCheckout(email);
+        }
+      } catch (e) {
+        console.warn('[CVZ] autoResumeCheckout fallback error:', e);
+      }
+    }
+    if (fromCookie) { clearCookie('cvz_plan'); clearCookie('cvz_billing'); }
+    if (!plan) return;
+    var billingKey = billing === 'annual' ? 'annual' : 'monthly';
+    var priceId    = CONFIG.priceIds[plan]?.[billingKey];
+    if (!priceId) {
+      console.warn('[CVZ] autoResumeCheckout: unbekannter Plan-Key', plan);
+      return;
+    }
+    var isPPU          = CONFIG.ppuPriceIds.indexOf(priceId) !== -1;
+    var currentPriceId = await fetchCurrentPriceId(memberstackId);
+    if (currentPriceId && !isPPU) return;
+    try {
+      await window.$memberstackDom.purchasePlansWithCheckout({
+        priceId:    priceId,
+        successUrl: window.location.origin + '/member/danke',
+      });
+    } catch (e) {
+      console.error('[CVZ] autoResumeCheckout Checkout error:', e);
     }
   }
   async function initPlanButtons() {
@@ -265,6 +332,7 @@
         await handlePlanClick(btn, memberstackId, priceId);
       });
     });
+    return memberstackId; // NEU: fuer autoResumeCheckout weiterreichen
   }
   // ── Init ─────────────────────────────────────────────────────────────────────
   function init() {
@@ -274,6 +342,9 @@
         // Supabase-Client initialisieren sobald SDK bereit ist
         sb = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey);
         return initPlanButtons();
+      })
+      .then(function (memberstackId) {
+        return autoResumeCheckout(memberstackId); // NEU
       })
       .catch(function (err) { console.warn('[CVZ] Init failed:', err); });
   }
