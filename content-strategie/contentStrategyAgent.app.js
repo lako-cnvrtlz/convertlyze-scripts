@@ -510,7 +510,7 @@
     var box = el('div', { class: 'cvz-cs-processing' }, [
       el('div', { class: 'cvz-cs-spinner' }),
       el('p', { class: 'cvz-cs-progress-text' }, [baseText]),
-      el('p', { class: 'cvz-cs-hint' }, ['Inkl. echtem GEO-Prompt-Test – komplette Läufe dauern aktuell meist 10–15 Minuten.']),
+      el('p', { class: 'cvz-cs-hint' }, ['Lehn dich gerne einen Augenblick zurück. Die Entwicklung der Strategie dauert aktuell ca. 15 Minuten.']),
     ]);
     state.root.appendChild(renderQuotaBanner());
     state.root.appendChild(box);
