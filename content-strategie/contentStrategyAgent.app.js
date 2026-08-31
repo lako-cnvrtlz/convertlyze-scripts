@@ -443,18 +443,20 @@
   // nicht mehr die Ausnahme. Format: { at: Sekunden-Schwelle, text: Anzeigetext }, Liste MUSS
   // nach "at" aufsteigend sortiert sein.
   var CVZ_CS_PROGRESS_MESSAGES = [
-    { at: 8, text: 'Analyse startet - das dauert jetzt eine Weile, hol dir ruhig einen Kaffee' },
+    { at: 8, text: 'Analyse startet, das dauert jetzt eine Weile, hol dir ruhig einen Kaffee' },
     { at: 30, text: 'Suchvolumen und die häufigsten Nutzerfragen zum Thema werden ausgewertet' },
     { at: 60, text: 'Ist-Zustand wird geprüft: wer rankt heute schon wofür' },
     { at: 100, text: 'Wettbewerber-Seiten werden auseinandergenommen (Länge, Tabellen, FAQ-Blöcke)' },
     { at: 150, text: 'Google AI Overview und Zitations-Chancen werden gecheckt' },
-    { at: 210, text: 'Kaffee schon leer? Gerade laufen echte Prompt-Tests gegen ein KI-Modell, das braucht ein paar Sekunden pro Anfrage' },
-    { at: 280, text: 'Content-Cluster wird gebaut: Conversion-Seite plus unterstützende Seiten' },
-    { at: 350, text: 'Themen werden auf die Journey-Phasen Exploration, Evaluation und Decision verteilt' },
-    { at: 430, text: 'Stärken, Schwächen, Wettbewerb und Chancen werden zur Executive Summary zusammengefasst' },
-    { at: 520, text: 'Fast fertig, letzter Feinschliff am Bericht' },
-    { at: 650, text: 'Läuft noch - mit echtem GEO-Prompt-Test dauert das schon mal 10+ Minuten, kein Grund zur Sorge' },
-    { at: 900, text: 'Braucht in diesem Fall spürbar länger als sonst, bitte noch etwas Geduld' },
+    { at: 220, text: 'Prompt-Tests laufen gegen ein KI-Modell, das braucht ein paar Sekunden pro Anfrage' },
+    { at: 300, text: 'Content-Cluster wird gebaut: Conversion-Seite plus unterstützende Seiten' },
+    { at: 380, text: 'Themen werden auf die Journey-Phasen Exploration, Evaluation und Decision verteilt' },
+    { at: 460, text: 'Stärken, Schwächen, Wettbewerb und Chancen werden zur Executive Summary zusammengefasst' },
+    { at: 560, text: 'Kaffee schon leer? Wir sind noch beim Feinschliff am Bericht' },
+    { at: 680, text: 'Läuft noch, bei 15 bis 20 Minuten Gesamtdauer sind wir genau im Soll' },
+    { at: 800, text: 'Die Prompt-Tests brauchen heute etwas länger als sonst, kein Grund zur Sorge' },
+    { at: 950, text: 'Fast geschafft, wir polieren gerade die letzten Details' },
+    { at: 1100, text: 'Letzte Meter. Wenn dein Kaffee jetzt auch leer ist, wart\'s ab, gleich ist Land in Sicht' },
   ];
 
   // Wählt die Nachricht, deren "at"-Schwelle zuletzt unterschritten wurde - vor der ersten
