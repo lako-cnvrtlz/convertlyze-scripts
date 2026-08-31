@@ -10,8 +10,6 @@
       'pro':          { monthly: 'prc_pro-monthly-9q502rg',        annual: 'prc_pro-yearly-l4c0gnw'        },
       'enterprise':   { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' },
       'pay-per-use':  { monthly: 'prc_pay-per-use-14750y0n',       annual: 'prc_pay-per-use-14750y0n'      },
-      // NEU: synchron zu pricing-script.js ergaenzt (waren hier bisher nicht
-      // eingetragen - siehe Chat-Verlauf zum urspruenglichen Willkommen-Bug).
       'analyse-5':    { monthly: 'prc_pay-per-use-5-analysen--el1dg0ay4', annual: 'prc_pay-per-use-5-analysen--el1dg0ay4' },
       'analyse-10':   { monthly: 'prc_pay-per-use-10-analysen-131g30jzh', annual: 'prc_pay-per-use-10-analysen-131g30jzh' },
       'aufbau-1':     { monthly: 'prc_pay-per-use-aufbau-1--ad1fj0jrg',   annual: 'prc_pay-per-use-aufbau-1--ad1fj0jrg'   },
@@ -69,7 +67,7 @@
   async function savePendingCheckout(email) {
     if (!urlPlan || !email) return;
     try {
-      // NEU: ?on_conflict=email ergaenzt - ohne diesen Parameter weiss PostgREST
+      // ?on_conflict=email ist Pflicht - ohne diesen Parameter weiss PostgREST
       // trotz 'Prefer: resolution=merge-duplicates' nicht, anhand welcher Spalte
       // es ein Duplikat erkennen soll, und wirft bei einem zweiten Versuch mit
       // derselben E-Mail einen 409-Konflikt statt eines Upserts.
@@ -157,6 +155,7 @@
   async function handleAfterSignup() {
     if (checkoutStarted) return;
     checkoutStarted = true;
+    console.log('[CVZ] Mitglied erkannt, starte Checkout-Weiterleitung ...');
     var resolved = await resolvePlan();
     clearPlanCookies();
     if (!resolved) {
@@ -179,6 +178,40 @@
       window.location.href = '/member/dashboard';
     }
   }
+  // ── Erkennung "Signup abgeschlossen" ─────────────────────────────────────────
+  // WICHTIG: Es gibt KEIN Browser-Event "memberstack:auth:signup" - das wurde
+  // im echten memberstack.js-Bundle geprüft (kein einziges CustomEvent mit
+  // "memberstack:"-Präfix). Ein Listener darauf hätte nie ausgelöst. Memberstack
+  // stellt stattdessen die öffentliche Methode $memberstackDom.onAuthChange()
+  // bereit, die bei Login/Signup mit dem Member-Objekt aufgerufen wird.
+  // Zur Absicherung (falls onAuthChange in dieser Bundle-Version aus irgendeinem
+  // Grund nicht sauber feuert) läuft zusätzlich ein kurzes Polling auf
+  // getCurrentMember() – schadet nicht, weil handleAfterSignup() durch
+  // checkoutStarted ohnehin nur einmal wirklich etwas tut.
+  function startMemberWatch() {
+    if (window.$memberstackDom && typeof window.$memberstackDom.onAuthChange === 'function') {
+      window.$memberstackDom.onAuthChange(function (member) {
+        if (member) handleAfterSignup();
+      });
+    } else {
+      console.warn('[CVZ] $memberstackDom.onAuthChange nicht gefunden - nur Polling-Fallback aktiv');
+    }
+    var pollAttempts = 0;
+    var pollTimer = setInterval(function () {
+      pollAttempts++;
+      if (checkoutStarted || pollAttempts >= 20) { // max. 20 x 500ms = 10 Sekunden
+        clearInterval(pollTimer);
+        return;
+      }
+      if (!window.$memberstackDom) return;
+      window.$memberstackDom.getCurrentMember().then(function (res) {
+        if (res && res.data) {
+          clearInterval(pollTimer);
+          handleAfterSignup();
+        }
+      }).catch(function () {});
+    }, 500);
+  }
   // ── Init ─────────────────────────────────────────────────────────────────────
   function init() {
     prefillEmail();
@@ -200,7 +233,7 @@
         });
       }
     }
-    window.addEventListener('memberstack:auth:signup', handleAfterSignup);
+    startMemberWatch();
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
