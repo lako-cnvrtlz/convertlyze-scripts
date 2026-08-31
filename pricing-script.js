@@ -313,7 +313,7 @@
     var member        = await window.$memberstackDom.getCurrentMember();
     var memberstackId = member?.data?.id || null;
     // Handler immer anhaengen, unabhaengig vom Login-Status
-    document.querySelectorAll('a[href*="/register?plan="]').forEach(function (btn) {
+    document.querySelectorAll('a[href*="https://www.convertlyze.com/register?plan="]').forEach(function (btn) {
       btn.dataset.originalText = btn.textContent;
       btn.addEventListener('click', async function (e) {
         e.preventDefault();
