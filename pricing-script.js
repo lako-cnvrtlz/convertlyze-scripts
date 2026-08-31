@@ -310,14 +310,21 @@
     }
   }
   async function initPlanButtons() {
-    // Member-Status ermitteln - null wenn nicht eingeloggt
-    var member        = await window.$memberstackDom.getCurrentMember();
-    var memberstackId = member?.data?.id || null;
     // Handler immer anhaengen, unabhaengig vom Login-Status
-    document.querySelectorAll('a[href*="https://www.convertlyze.com/register?plan="]').forEach(function (btn) {
+    document.querySelectorAll('a[href*="/register?plan="]').forEach(function (btn) {
       btn.dataset.originalText = btn.textContent;
       btn.addEventListener('click', async function (e) {
         e.preventDefault();
+        // WICHTIG: Member-Status wird JETZT, beim Klick, frisch abgefragt -
+        // nicht mehr einmalig beim Laden der Seite zwischengespeichert. Grund:
+        // Memberstack braucht nach dem Initialisieren des SDKs kurz, um die
+        // Session aus Cookie/localStorage wiederherzustellen. Ein einmaliger
+        // Check direkt beim Seitenaufruf konnte faelschlich "nicht eingeloggt"
+        // liefern, obwohl der Nutzer es war - und dieser falsche Wert blieb
+        // dann fuer die komplette Seitenansicht bestehen. Das erklaerte das
+        // Verhalten "mal klappt's, mal lande ich auf /register".
+        var member        = await window.$memberstackDom.getCurrentMember();
+        var memberstackId = member?.data?.id || null;
         // Nicht eingeloggt → normaler Redirect auf Register
         if (!memberstackId) {
           window.location.href = btn.href;
@@ -333,7 +340,13 @@
         await handlePlanClick(btn, memberstackId, priceId);
       });
     });
-    return memberstackId; // NEU: fuer autoResumeCheckout weiterreichen
+    // Fuer autoResumeCheckout (laeuft direkt nach dem Laden, nicht bei Klick)
+    // weiterhin einmal den aktuellen Member liefern - dort ist die Verzoegerung
+    // durch den vorherigen retry(depsReady, ...)-Schritt meist schon aufgeholt,
+    // und selbst falls nicht, ist die einzige Folge, dass autoResumeCheckout
+    // ohne Wirkung bleibt (kein falscher Redirect wie beim Button-Klick oben).
+    var member = await window.$memberstackDom.getCurrentMember();
+    return member?.data?.id || null;
   }
   // ── Init ─────────────────────────────────────────────────────────────────────
   function init() {
