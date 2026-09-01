@@ -846,48 +846,58 @@
   // NEU: Ist-Zustand-Abschnitt (welche Seiten ranken schon für welche Keywords). Zeigt explizit
   // die Datenquelle (current_state.note) an, damit eine Schätzung nie wie ein Fakt wirkt (siehe
   // Chat-Verlauf/Schema-Kommentar zu CurrentStateSchema).
-  function renderCurrentStateSection(currentState) {
-    var box = el('div', { class: 'cvz-cs-current-state' });
-    if (!currentState) return box;
-
-    box.appendChild(el('p', { class: 'cvz-cs-hint' }, [currentState.note || '']));
-
-    if (!currentState.rows || currentState.rows.length === 0) {
-      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine bestehenden Rankings gefunden.']));
-      return box;
-    }
-
-    var isEstimate = currentState.source !== 'google_search_console';
-    var table = el('table', { class: 'cvz-cs-table cvz-cs-current-state-table' });
-    table.appendChild(
-      el('thead', {}, [
-        el('tr', {}, [
-          el('th', {}, ['Seite']),
-          el('th', {}, ['Keyword']),
-          el('th', {}, ['Ø Position']),
-          el('th', {}, ['CTR']),
-          el('th', {}, ['Impressionen']),
-          el('th', {}, ['Klicks']),
-        ]),
+  function renderCurrentStateTable(rows, isEstimate) {
+  var table = el('table', { class: 'cvz-cs-table cvz-cs-current-state-table' });
+  table.appendChild(
+    el('thead', {}, [
+      el('tr', {}, [
+        el('th', {}, ['Seite']),
+        el('th', {}, ['Keyword']),
+        el('th', {}, ['Ø Position']),
+        el('th', {}, ['CTR']),
+        el('th', {}, ['Impressionen']),
+        el('th', {}, ['Klicks']),
+      ]),
+    ])
+  );
+  var tbody = el('tbody');
+  rows.forEach(function (row) {
+    tbody.appendChild(
+      el('tr', {}, [
+        el('td', {}, [row.page_url]),
+        el('td', {}, [row.query]),
+        el('td', {}, [row.avg_position != null ? row.avg_position.toFixed(1) : '-']),
+        el('td', {}, [row.ctr != null ? (row.ctr * 100).toFixed(1) + '%' : (isEstimate ? 'k.A.' : '-')]),
+        el('td', {}, [row.impressions != null ? String(row.impressions) : (isEstimate ? 'k.A.' : '-')]),
+        el('td', {}, [row.clicks != null ? String(row.clicks) : (isEstimate ? 'k.A.' : '-')]),
       ])
     );
-    var tbody = el('tbody');
-    currentState.rows.forEach(function (row) {
-      tbody.appendChild(
-        el('tr', {}, [
-          el('td', {}, [row.page_url]),
-          el('td', {}, [row.query]),
-          el('td', {}, [row.avg_position != null ? row.avg_position.toFixed(1) : '-']),
-          el('td', {}, [row.ctr != null ? (row.ctr * 100).toFixed(1) + '%' : (isEstimate ? 'k.A.' : '-')]),
-          el('td', {}, [row.impressions != null ? String(row.impressions) : (isEstimate ? 'k.A.' : '-')]),
-          el('td', {}, [row.clicks != null ? String(row.clicks) : (isEstimate ? 'k.A.' : '-')]),
-        ])
-      );
-    });
-    table.appendChild(tbody);
-    box.appendChild(el('div', { class: 'cvz-cs-table-wrap' }, [table]));
+  });
+  table.appendChild(tbody);
+  return el('div', { class: 'cvz-cs-table-wrap' }, [table]);
+}
+function renderCurrentStateSection(currentState) {
+  var box = el('div', { class: 'cvz-cs-current-state' });
+  if (!currentState) return box;
+  box.appendChild(el('p', { class: 'cvz-cs-hint' }, [currentState.note || '']));
+  if (!currentState.rows || currentState.rows.length === 0) {
+    box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine bestehenden Rankings gefunden.']));
     return box;
   }
+  var isEstimate = currentState.source !== 'google_search_console';
+  var topicRows = currentState.rows.filter(function (r) { return r.relevance !== 'general'; });
+  var generalRows = currentState.rows.filter(function (r) { return r.relevance === 'general'; });
+  if (topicRows.length > 0) {
+    box.appendChild(renderCurrentStateTable(topicRows, isEstimate));
+  } else {
+    box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Noch keine eigene Sichtbarkeit zu diesem Thema gefunden.']));
+  }
+  if (generalRows.length > 0) {
+    box.appendChild(el('h5', { class: 'cvz-cs-current-state-general-title' }, ['Weitere starke Keywords der Domain (unabhängig vom Thema)']));
+    box.appendChild(renderCurrentStateTable(generalRows, isEstimate));
+  }
+  return box;
+}
 
   // FIX (siehe Chat-Verlauf): Button feuerte bisher nur ein CustomEvent
   // ('cvz:build-landingpage'), auf das nirgends im Projekt jemand hört - der
