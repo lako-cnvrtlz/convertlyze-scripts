@@ -364,10 +364,10 @@
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Eigene Domain', domainInput]));
     form.appendChild(
       el('label', { class: 'cvz-cs-label' }, [
-        'Gegen welchen KI-Assistenten testen?',
+        'Welchen KI-Assistenten möchtest du für die Prompt-Tests nutzen?',
         llmTypeSelect,
         el('span', { class: 'cvz-cs-hint' }, [
-          'Wir wählen innerhalb dieser Familie automatisch ein günstiges, websuche-fähiges Modell aus.',
+          'Wir wählen innerhalb dieser Familie automatisch ein schnelles, websuche-fähiges Modell aus.',
         ]),
       ])
     );
