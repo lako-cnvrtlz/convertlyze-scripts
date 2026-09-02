@@ -37,10 +37,8 @@
 // hier prüft nur noch den Status (GET /api/integrations/google/status) und zeigt bei fehlender
 // Verbindung einen Hinweis mit Link zu CONFIG.settingsUrl, statt selbst einen Connect-Button
 // anzubieten.
-
 (function () {
   'use strict';
-
   // ==================== KONFIGURATION ====================
   // Vor dem Einbetten anpassen (oder per window.CVZ_CONTENT_STRATEGY_CONFIG vor dem Laden
   // dieses Scripts überschreiben).
@@ -73,9 +71,7 @@
     chatPollIntervalMs: 1500,
     chatPollTimeoutMs: 2 * 60 * 1000,
   };
-
   var CONFIG = Object.assign({}, DEFAULT_CONFIG, window.CVZ_CONTENT_STRATEGY_CONFIG || {});
-
   // NEU (siehe Chat-Verlauf, Lasse: "im Chat UND im Bericht selbst - z.B. Executive Summary -
   // wird noch mit ##/** markiert statt gerendert"): lädt "marked" (https://marked.js.org/)
   // JETZT SELBST nach, statt sich wie bisher darauf zu verlassen, dass es manuell als
@@ -101,7 +97,6 @@
     };
     document.head.appendChild(script);
   }
-
   var PAGE_TYPE_LABELS = {
     conversion_landingpage: 'Conversion-Landingpage',
     comparison: 'Vergleichsseite',
@@ -118,7 +113,6 @@
     // schon beim GEO-Prompt-Test-Hinweistext: Begriffe erklären statt vorauszusetzen).
     pillar_page: 'Pillar-Page (Themen-Hub)',
   };
-
   // Kurze, für Nicht-SEO-Experten verständliche Definition - wird in renderPageCard IMMER
   // sichtbar unter dem Badge angezeigt (nicht nur als Hover-Tooltip), wenn der Typ erklärungs-
   // bedürftig ist. Ergänzt page.reasoning (das WARUM für dieses konkrete Thema), diese Zeile
@@ -126,13 +120,11 @@
   var PAGE_TYPE_EXPLANATIONS = {
     pillar_page: 'Eine Pillar-Page ist eine breite Übersichtsseite zu einem Kern-Thema, die mehrere verwandte Unterseiten bündelt und zu ihnen verlinkt - baut Themenautorität auf und dient als zentrale Anlaufstelle im Cluster.',
   };
-
   var ROLE_LABELS = {
     coverage: 'Trust/Themenabdeckung',
     citation: 'Rank- & Zitier-Ziel',
     existing: 'bereits vorhanden',
   };
-
   // NEU (siehe Chat-Verlauf, "Phasen des Messy Middle ... um eine volle Abdeckung zu
   // gewährleisten"): feste Reihenfolge für die Gruppierung der Unterstützenden-Seiten-Karten -
   // Backend erzwingt per Zod-superRefine, dass mind. exploration + evaluation vorkommen,
@@ -148,7 +140,6 @@
     // ehrlich als "ohne Phasen-Zuordnung" zeigen als eine Phase raten, die so nie eingeschätzt wurde.
     { value: 'legacy', label: 'Weitere Seiten', description: 'Aus einer älteren Strategie-Version ohne Phasen-Zuordnung.' },
   ];
-
   // Gruppiert nach Phase, behält aber den ORIGINALEN Index in supporting_pages bei (nicht die
   // Position innerhalb der Gruppe) - der Status-PATCH-Endpunkt (/pages/:index) und
   // describeLink() referenzieren Seiten über diesen Original-Index, der beim Umsortieren nach
@@ -163,14 +154,12 @@
     });
     return byPhase;
   }
-
   var STATUS_OPTIONS = [
     { value: 'vorgeschlagen', label: 'Vorgeschlagen' },
     { value: 'geplant', label: 'Geplant' },
     { value: 'in_arbeit', label: 'In Arbeit' },
     { value: 'live', label: 'Live' },
   ];
-
   // ==================== STATE ====================
   var state = {
     root: null,
@@ -196,9 +185,7 @@
       _pendingUserMessage: null, // während des Pollens zwischengespeichert, siehe sendChatMessage/pollChatStatus
     },
   };
-
   // ==================== API-HELFER ====================
-
   function apiFetch(path, options) {
     options = options || {};
     var headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
@@ -215,7 +202,6 @@
       });
     });
   }
-
   // ==================== MEMBERSTACK-IDENTITÄT ====================
   // Erwartet, dass das Memberstack-DOM-Package (window.$memberstackDom) auf der Host-Seite
   // bereits geladen/initialisiert ist - genau wie beim bestehenden Landingpage-Assistant-Embed.
@@ -239,7 +225,6 @@
       }, interval);
     });
   }
-
   function resolveIdentity() {
     return waitForMemberstack(5000)
       .then(function (memberstackDom) {
@@ -265,16 +250,13 @@
         return me.user_id;
       });
   }
-
   // ==================== KONTINGENT & GSC-STATUS ====================
-
   function loadQuota() {
     return apiFetch('/api/content-strategy/quota?user_id=' + encodeURIComponent(state.userId)).then(function (quota) {
       state.quota = quota;
       return quota;
     });
   }
-
   function loadGscStatus() {
     return apiFetch('/api/integrations/google/status')
       .then(function (status) {
@@ -289,9 +271,7 @@
         return state.gscStatus;
       });
   }
-
   // ==================== RENDERING ====================
-
   function el(tag, attrs, children) {
     var node = document.createElement(tag);
     attrs = attrs || {};
@@ -306,16 +286,13 @@
     });
     return node;
   }
-
   function clear(node) {
     while (node.firstChild) node.removeChild(node.firstChild);
   }
-
   function renderQuotaBanner() {
     var q = state.quota;
     var gsc = state.gscStatus;
     var banner = el('div', { class: 'cvz-cs-banner' });
-
     if (q) {
       var quotaText = q.sessions_remaining + ' von ' + q.sessions_limit + ' Strategie-Sessions in diesem Zeitraum übrig';
       if (q.ppu_strategy_credits_available > 0) {
@@ -328,7 +305,6 @@
         );
       }
     }
-
     // Verbinden/Trennen passiert in den Einstellungen (contentStrategySettings.app.js) - hier
     // nur noch ein Status-Hinweis mit Link dorthin, siehe Produktentscheidung im Datei-Kopf.
     var gscBadge;
@@ -342,13 +318,10 @@
       ]);
     }
     banner.appendChild(gscBadge);
-
     return banner;
   }
-
   function renderForm() {
     var form = el('form', { class: 'cvz-cs-form' });
-
     var topicInput = el('input', { type: 'text', name: 'topic', placeholder: 'z.B. "Landingpage Software für B2B"', required: 'required' });
     var domainInput = el('input', { type: 'text', name: 'domain', placeholder: 'z.B. convertlyze.com (optional, für Abdeckungs-Check)' });
     if (state.gscStatus && state.gscStatus.connected && state.gscStatus.sites.length === 1) {
@@ -362,15 +335,12 @@
     // die ist jetzt komplett raus - der Test läuft für jeden Lauf mit, ohne Wahlmöglichkeit im
     // Formular. Ein Kill-Switch für den Test existiert weiterhin, aber nur noch operativ
     // serverseitig (ENV-Variable in routes/contentStrategyAgent.ts), nicht mehr als User-Option.
-
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Thema / Ziel-Keyword', topicInput]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Eigene Domain', domainInput]));
-
     var canStart = !state.quota || state.quota.can_start_session;
     var submitBtn = el('button', { type: 'submit', class: 'cvz-cs-submit-btn' }, ['Content-Cluster erstellen']);
     if (!canStart) submitBtn.setAttribute('disabled', 'disabled');
     form.appendChild(submitBtn);
-
     form.addEventListener('submit', function (event) {
       event.preventDefault();
       var topic = topicInput.value.trim();
@@ -378,13 +348,10 @@
       if (!topic) return;
       startGeneration(topic, domain || undefined);
     });
-
     return form;
   }
-
   function startGeneration(topic, domain) {
     renderProcessing(topic);
-
     apiFetch('/api/content-strategy/generate', {
       method: 'POST',
       // run_prompt_test ist jetzt immer true (siehe Kommentar bei renderForm) - das Feld bleibt
@@ -399,7 +366,6 @@
         renderError('Start fehlgeschlagen: ' + err.message, err.body);
       });
   }
-
   function pollStatus(turnId) {
     state.pollStartedAt = Date.now();
     function tick() {
@@ -433,7 +399,6 @@
     }
     tick();
   }
-
   // ==================== FORTSCHRITTS-TEXTE (zeitbasiert statt fester Takt) ====================
   // NEU (siehe Chat-Verlauf, Lasse: "Strategie-Erstellung dauert jetzt über 10 Minuten, Spinner-
   // Nachrichten anpassen, gerne mit Humor - hier ein Beispiel aus der Aufbau-Session"): gleiches
@@ -458,7 +423,6 @@
     { at: 950, text: 'Fast geschafft, wir polieren gerade die letzten Details' },
     { at: 1100, text: 'Letzte Meter. Wenn dein Kaffee jetzt auch leer ist, wart\'s ab, gleich ist Land in Sicht' },
   ];
-
   // Wählt die Nachricht, deren "at"-Schwelle zuletzt unterschritten wurde - vor der ersten
   // Schwelle bleibt null (dann zeigt der Aufrufer den baseText).
   function pickTimedMessage(messages, elapsedSec) {
@@ -469,7 +433,6 @@
     }
     return chosen;
   }
-
   var progressTickTimer = null;
   function stopProgressTicker() {
     if (progressTickTimer) {
@@ -477,7 +440,6 @@
       progressTickTimer = null;
     }
   }
-
   // Aktualisiert .cvz-cs-progress-text jede Sekunde direkt im DOM statt über einen Callback -
   // stoppt sich selbst, sobald dieses Element nicht mehr existiert (Ergebnis oder Fehler wurden
   // inzwischen gerendert), statt separat von jedem Aufrufer abgeräumt werden zu müssen.
@@ -498,7 +460,6 @@
     tick();
     progressTickTimer = setInterval(tick, 1000);
   }
-
   function renderProcessing(topic) {
     clear(state.root);
     var startedAt = Date.now();
@@ -516,7 +477,6 @@
     state.root.appendChild(box);
     startProgressTicker(startedAt, baseText);
   }
-
   function renderError(message, body) {
     clear(state.root);
     var box = el('div', { class: 'cvz-cs-error' }, [el('p', {}, [message])]);
@@ -527,7 +487,6 @@
     box.appendChild(retryBtn);
     state.root.appendChild(box);
   }
-
   // NEU (siehe Chat-Verlauf, Lasse: Content-Strategie-Sessions bekommen einen Status wie
   // Analysen/Aufbau-Sessions): eine Session kann jetzt existieren, OHNE dass result schon
   // gefüllt ist (status='in_progress', während der Agent noch läuft, oder status='error' nach
@@ -551,14 +510,12 @@
     var retryBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn', onclick: renderApp }, [isError ? 'Neue Strategie erstellen' : 'Zurück zum Formular']);
     state.root.appendChild(retryBtn);
   }
-
   function pageTypeLabel(type) {
     return PAGE_TYPE_LABELS[type] || type;
   }
   function roleLabel(role) {
     return ROLE_LABELS[role] || role;
   }
-
   // NEU (siehe Chat-Verlauf, "richtiger Bericht"): das Ergebnis wird jetzt als durchgehender,
   // nummerierter Bericht gerendert (Ausgangslage → Executive Summary → Content-Cluster-Strategie
   // → Ist-Zustand → GEO-Strategie) statt als lose Abfolge von Widget-Blöcken. Bewusst weiter im
@@ -572,9 +529,7 @@
   // wie bisher "heute" als Datum und fundedBy zeigt die Finanzierung dieses Laufs an.
   function renderResult(sessionId, result, fundedBy, session) {
     clear(state.root);
-
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
-
     wrap.appendChild(renderReportHeader(result, session, sessionId));
     wrap.appendChild(renderReportSection(1, 'Ausgangslage', [renderProse(result.ausgangslage)]));
     wrap.appendChild(
@@ -592,7 +547,6 @@
     // machen, nur mit weniger Inhalt") - letzter inhaltlicher Abschnitt, priorisierte
     // Verdichtung der wichtigsten Punkte aus dem gesamten Report, keine neue Analyse.
     wrap.appendChild(renderReportSection(6, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]));
-
     var fundingText = fundedBy
       ? 'Finanziert aus: ' + (fundedBy === 'ppu_strategy' ? 'Pay-per-Use-Credit' : 'Plan-Kontingent')
       : 'Gespeicherte Strategie';
@@ -612,11 +566,9 @@
     // Team-Mitgliedern gar nicht erst ein Eingabefeld zu zeigen, das für sie sowieso fehlschlägt.
     var isCreator = !session || session.user_id === state.userId;
     if (sessionId && isCreator) wrap.appendChild(renderChatSection(sessionId));
-
     state.root.appendChild(renderQuotaBanner());
     state.root.appendChild(wrap);
   }
-
   function renderReportHeader(result, session, sessionId) {
     var header = el('div', { class: 'cvz-cs-report-header' });
     var topRow = el('div', { class: 'cvz-cs-report-header-top' });
@@ -631,7 +583,6 @@
     header.appendChild(topRow);
     return header;
   }
-
   // NEU (siehe Chat-Verlauf, Lasse: "Export einbauen ... Pro/Enterprise White-Label, Pay-per-Use
   // bleibt beim Convertlyze-PDF-Stil"). Welches Theme das PDF bekommt, entscheidet ausschließlich
   // der Server anhand des license_type (siehe POST /:id/export in routes/contentStrategyAgent.ts)
@@ -661,7 +612,6 @@
     });
     return button;
   }
-
   function renderReportSection(number, title, children) {
     var section = el('section', { class: 'cvz-cs-report-section' });
     section.appendChild(el('h3', { class: 'cvz-cs-report-section-title' }, [number + '. ' + title]));
@@ -670,7 +620,6 @@
     });
     return section;
   }
-
   // GEÄNDERT (siehe Chat-Verlauf, Lasse: "im Bericht wird noch mit ** markiert statt
   // gerendert"): Fließtext-Felder (ausgangslage, executive_summary, citation_strategy_note,
   // reasoning, roadmap.begruendung) laufen jetzt durch dieselbe Markdown-Rendering-Logik wie
@@ -687,10 +636,8 @@
     renderMarkdownInto(container, text);
     return container;
   }
-
   function buildClusterSectionChildren(sessionId, result) {
     var children = [];
-
     var volumeText =
       result.conversion_page.estimated_volume != null ? 'ca. ' + result.conversion_page.estimated_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
     // NEU (siehe Chat-Verlauf, Lasse: "Zielgruppen mit reinnehmen") - primary_audience als
@@ -711,7 +658,6 @@
     }
     conversionCardChildren.push(buildLandingpageButton(result.conversion_page.topic));
     children.push(el('div', { class: 'cvz-cs-conversion-card' }, conversionCardChildren));
-
     children.push(el('h5', {}, ['Unterstützende Seiten']));
     // FIX (siehe Chat-Verlauf, 2. Runde "Typ/Rolle/Volumen passt immer noch nicht"): eine
     // Tabelle mit fest schmalen Typ-/Rolle-Spalten (Versuch 1) lässt lange Badge-Texte wie
@@ -736,7 +682,6 @@
       });
       children.push(group);
     });
-
     if (result.internal_links && result.internal_links.length > 0) {
       children.push(el('h5', {}, ['Interne Verlinkung']));
       var linkList = el('ul', { class: 'cvz-cs-link-list' });
@@ -745,22 +690,18 @@
       });
       children.push(linkList);
     }
-
     return children;
   }
-
   function describeLink(link, result) {
     var fromLabel = link.from_index === -1 ? result.conversion_page.topic : (result.supporting_pages[link.from_index] || {}).topic || ('#' + link.from_index);
     var toLabel = link.to_index === -1 ? result.conversion_page.topic : (result.supporting_pages[link.to_index] || {}).topic || ('#' + link.to_index);
     return fromLabel + ' → ' + toLabel + (link.anchor_text_idea ? ' ("' + link.anchor_text_idea + '")' : '');
   }
-
   // FIX (siehe Chat-Verlauf, ersetzt das frühere renderPageRow()/<tr>): eine Karte statt einer
   // starren Tabellenzeile - Badges stehen in einer flex-wrap-Zeile (siehe .cvz-cs-page-card-
   // badges) und brechen bei Bedarf um, statt sich bei schmalen Spalten zu überlappen.
   function renderPageCard(sessionId, page, index) {
     var card = el('div', { class: 'cvz-cs-page-card' });
-
     var badges = [
       el('span', { class: 'cvz-cs-badge' }, [pageTypeLabel(page.page_type)]),
       el('span', { class: 'cvz-cs-badge cvz-cs-badge-role-' + page.role }, [roleLabel(page.role)]),
@@ -775,12 +716,9 @@
       badges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-commodity', title: page.commodity_reasoning || '' }, ['Commodity-Risiko']));
     }
     card.appendChild(el('div', { class: 'cvz-cs-page-card-badges' }, badges));
-
     card.appendChild(el('h4', { class: 'cvz-cs-page-card-topic' }, [page.topic]));
-
     var volumeText = page.estimated_volume != null ? 'ca. ' + page.estimated_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
     card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + page.keyword + ' · ' + volumeText]));
-
     // NEU (siehe Chat-Verlauf, Pillar-Pages erklären): generelle Typ-Erklärung VOR der
     // themenspezifischen Begründung, falls für diesen page_type vorhanden - "was ist das"
     // zuerst, dann "warum hier".
@@ -796,7 +734,6 @@
     if (page.commodity_risk && page.commodity_reasoning) {
       card.appendChild(el('p', { class: 'cvz-cs-commodity-note' }, ['Commodity-Hinweis: ' + page.commodity_reasoning]));
     }
-
     var statusSelect = el('select', { class: 'cvz-cs-status-select' });
     STATUS_OPTIONS.forEach(function (opt) {
       var optionEl = el('option', { value: opt.value }, [opt.label]);
@@ -820,16 +757,13 @@
           alert('Status konnte nicht gespeichert werden: ' + err.message);
         });
     });
-
     var footer = el('div', { class: 'cvz-cs-page-card-footer' }, [statusSelect]);
     if (page.page_type === 'conversion_landingpage') {
       footer.appendChild(buildLandingpageButton(page.topic));
     }
     card.appendChild(footer);
-
     return card;
   }
-
   // NEU (siehe Chat-Verlauf, Strategie-Tiefe v2): Content-Brief als Stichpunkt-Liste statt
   // Fließtext - direkt für die conversion_page-Karte UND jede supporting_page-Zeile nutzbar.
   function renderContentBrief(brief) {
@@ -842,7 +776,6 @@
     box.appendChild(list);
     return box;
   }
-
   // NEU: Ist-Zustand-Abschnitt (welche Seiten ranken schon für welche Keywords). Zeigt explizit
   // die Datenquelle (current_state.note) an, damit eine Schätzung nie wie ein Fakt wirkt (siehe
   // Chat-Verlauf/Schema-Kommentar zu CurrentStateSchema).
@@ -898,7 +831,6 @@ function renderCurrentStateSection(currentState) {
   }
   return box;
 }
-
   // FIX (siehe Chat-Verlauf): Button feuerte bisher nur ein CustomEvent
   // ('cvz:build-landingpage'), auf das nirgends im Projekt jemand hört - der
   // Klick passierte optisch, aber es geschah schlicht nichts, was sich wie
@@ -913,18 +845,15 @@ function renderCurrentStateSection(currentState) {
     var href = CONFIG.landingpageAssistantUrl + '?new=1&topic=' + encodeURIComponent(topic);
     return el('a', { class: 'cvz-cs-build-btn', href: href }, ['Jetzt mit dem Landingpage-Tool bauen']);
   }
-
   function renderGeoSection(geo) {
     if (!geo) return el('div');
     var box = el('div', { class: 'cvz-cs-geo' });
-
     // Zitier-Strategie-Hinweis ZUERST (siehe Chat-Verlauf: das ist die eigentliche Antwort auf
     // "was für Content hat Zitier-Chancen", nicht nur eine Portale-Liste) - dafür in einer
     // hervorgehobenen Box statt als weiterer Listenpunkt.
     if (geo.citation_strategy_note) {
       box.appendChild(renderProse(geo.citation_strategy_note, 'cvz-cs-citation-note'));
     }
-
     // Google AI Overview - konkret MIT Links, siehe Schema-Kommentar zu AiOverviewSchema.
     var aio = geo.ai_overview;
     if (aio) {
@@ -951,7 +880,6 @@ function renderCurrentStateSection(currentState) {
       }
       box.appendChild(aioBox);
     }
-
     // Top-SEO-Ergebnisse zum Abgleich
     if (geo.top_serp_results && geo.top_serp_results.length > 0) {
       box.appendChild(el('h5', {}, ['Top-SEO-Ergebnisse (organisch)']));
@@ -963,7 +891,6 @@ function renderCurrentStateSection(currentState) {
       });
       box.appendChild(serpList);
     }
-
     // Wettbewerber-Content-Struktur
     if (geo.competitor_content_notes && geo.competitor_content_notes.length > 0) {
       box.appendChild(el('h5', {}, ['Was Wettbewerber-Seiten konkret enthalten']));
@@ -975,7 +902,6 @@ function renderCurrentStateSection(currentState) {
       });
       box.appendChild(compList);
     }
-
     // Bestehende Portale-Liste (DataForSEO llm_mentions, ChatGPT-Aggregat) - bewusst erhalten,
     // aber jetzt als ein Baustein unter mehreren statt der einzige GEO-Inhalt (siehe Chat-Verlauf).
     box.appendChild(
@@ -993,14 +919,22 @@ function renderCurrentStateSection(currentState) {
     } else {
       box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine zitierten Portale gefunden oder Daten nicht verfügbar.']));
     }
-
     if (geo.prompt_tests && geo.prompt_tests.length > 0) {
       box.appendChild(el('h5', {}, ['Prompt-Test-Ergebnisse']));
       var ptList = el('ul', {});
       geo.prompt_tests.forEach(function (r) {
+        // FIX (siehe Chat-Verlauf, Lasse: "zitierte Domains ist immer leer, im Zweifel sollte
+        // dort zumindest 'keine zitierten Domains gefunden' statt einer leeren Fläche stehen"):
+        // vorher stand hier bei leerem cited_domains-Array einfach nichts hinter dem
+        // Doppelpunkt (.join(', ') von [] ergibt ''), das sah wie ein Darstellungsfehler aus,
+        // nicht wie ein echtes, wenn auch mögliches Ergebnis ("dieser Prompt-Test hat keine
+        // Quellen zitiert"). Gilt unabhängig vom aktuellen Backend-Bug (siehe
+        // services/contentStrategyGeo.ts) - auch nach dessen Fix wird es legitime Fälle ganz
+        // ohne Zitate geben.
+        var citedText = r.cited_domains && r.cited_domains.length > 0 ? r.cited_domains.join(', ') : 'keine zitierten Domains gefunden';
         ptList.appendChild(
           el('li', {}, [
-            '"' + r.prompt + '": eigene Domain zitiert: ' + (r.own_domain_cited ? 'ja' : 'nein') + ' · zitierte Domains: ' + (r.cited_domains || []).join(', '),
+            '"' + r.prompt + '": eigene Domain zitiert: ' + (r.own_domain_cited ? 'ja' : 'nein') + ' · zitierte Domains: ' + citedText,
           ])
         );
       });
@@ -1008,7 +942,6 @@ function renderCurrentStateSection(currentState) {
     }
     return box;
   }
-
   // NEU (siehe Chat-Verlauf, Lasse: "Empfohlene Roadmap ... so wie wir es in der Analyse machen,
   // nur mit weniger Inhalt") - gleiche 4 Aufwand/Impact-Buckets wie im Analyse-Tool
   // (roadmap_matrix), hier bewusst nur mit einem kurzen Titel + einem Begründungssatz pro
@@ -1020,11 +953,9 @@ function renderCurrentStateSection(currentState) {
     { key: 'als_naechstes', label: 'Als Nächstes', badgeClass: 'cvz-cs-badge-roadmap-next' },
     { key: 'spaeter', label: 'Später', badgeClass: 'cvz-cs-badge-roadmap-later' },
   ];
-
   function renderRoadmapSection(roadmap) {
     var box = el('div', { class: 'cvz-cs-roadmap' });
     if (!roadmap) return box;
-
     // Leere Buckets sind laut Schema erlaubt (z.B. "spaeter" bei einem kleinen Cluster) - werden
     // hier einfach übersprungen statt als leere Gruppe angezeigt zu werden.
     var hasAnyItem = ROADMAP_BUCKETS.some(function (b) { return roadmap[b.key] && roadmap[b.key].length > 0; });
@@ -1032,7 +963,6 @@ function renderCurrentStateSection(currentState) {
       box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine priorisierten Punkte für diesen Cluster.']));
       return box;
     }
-
     ROADMAP_BUCKETS.forEach(function (bucket) {
       var items = roadmap[bucket.key];
       if (!items || items.length === 0) return;
@@ -1050,10 +980,8 @@ function renderCurrentStateSection(currentState) {
       group.appendChild(list);
       box.appendChild(group);
     });
-
     return box;
   }
-
   // ==================== REPORT-CHAT ====================
   // NEU (siehe Chat-Verlauf, Lasse: "KI-Agent, der Fragen des Users zu dem Report beantworten
   // kann") - eigener Abschnitt am Ende des Reports, lädt vorhandenen Verlauf beim Öffnen und
@@ -1071,14 +999,12 @@ function renderCurrentStateSection(currentState) {
   // Text statt als gerendertes Markdown angezeigt (kein Absturz, nur weniger schön) - genau der
   // vorher gemeldete Bug ("# Überschrift" erschien wörtlich mit Raute statt gerendert), nur
   // jetzt als bewusster Fallback statt als Dauerzustand.
-
   function stopChatPolling() {
     if (state.chat.pollHandle) {
       clearTimeout(state.chat.pollHandle);
       state.chat.pollHandle = null;
     }
   }
-
   // Kopiert die <thead>-Überschriften als data-label auf jede <td>-Zelle einer Markdown-Tabelle
   // in einer Chat-Antwort. Das CSS blendet ab <=640px den Header aus und zeigt das Label über
   // dem jeweiligen Wert - aus einer Zeile wird eine Karte. 1:1 dieselbe Technik wie
@@ -1101,7 +1027,6 @@ function renderCurrentStateSection(currentState) {
       table.setAttribute('data-cvz-cs-labeled', '1');
     }
   }
-
   // GEÄNDERT (siehe Chat-Verlauf, Lasse: "im Bericht selbst wird auch noch mit ** markiert") -
   // geteilte Markdown-Logik mit renderProse() weiter oben, statt zwei eigenständigen
   // marked.parse()-Aufrufen, die bei einer künftigen Änderung (z.B. am Tabellen-Karten-Fallback)
@@ -1120,7 +1045,6 @@ function renderCurrentStateSection(currentState) {
       });
     }
   }
-
   function renderChatMessageBubble(message) {
     var bubble = el('div', { class: 'cvz-cs-chat-msg cvz-cs-chat-msg-' + message.role });
     // Nur Assistant-Antworten werden als Markdown gerendert (# Überschriften, Tabellen, Listen
@@ -1133,7 +1057,6 @@ function renderCurrentStateSection(currentState) {
     }
     return bubble;
   }
-
   // Baut NUR die Nachrichtenliste + den Zähler neu auf (nicht das ganze Formular drumherum) -
   // wird bei jedem neuen Verlaufs-Stand aufgerufen (nach dem Laden, während des Sendens für die
   // optimistische Anzeige, UND nach jeder neuen Antwort), ohne das Eingabefeld/den Fokus zu
@@ -1169,7 +1092,6 @@ function renderCurrentStateSection(currentState) {
     if (formEl) formEl.style.display = limitReached ? 'none' : '';
     if (limitNoticeEl) limitNoticeEl.style.display = limitReached ? '' : 'none';
   }
-
   function loadChatHistory(sessionId) {
     return apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId) + '/chat')
       .then(function (data) {
@@ -1185,7 +1107,6 @@ function renderCurrentStateSection(currentState) {
         console.warn('Chat-Verlauf konnte nicht geladen werden:', err.message);
       });
   }
-
   function pollChatStatus(turnId) {
     state.chat.pollStartedAt = Date.now();
     function tick() {
@@ -1216,7 +1137,6 @@ function renderCurrentStateSection(currentState) {
     }
     tick();
   }
-
   function finishChatSending(errorMessage) {
     stopChatPolling();
     state.chat.sending = false;
@@ -1229,7 +1149,6 @@ function renderCurrentStateSection(currentState) {
     if (inputEl) inputEl.removeAttribute('disabled');
     refreshChatMessagesView();
   }
-
   function sendChatMessage(sessionId, text) {
     if (state.chat.sending) return; // Doppel-Klick-Schutz
     state.chat.sending = true;
@@ -1241,7 +1160,6 @@ function renderCurrentStateSection(currentState) {
     var statusEl = state.root.querySelector('.cvz-cs-chat-status');
     if (statusEl) statusEl.textContent = '';
     refreshChatMessagesView(); // zeigt sofort die eigene Frage + Ladeblase mit Spinner
-
     apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId) + '/chat', {
       method: 'POST',
       body: JSON.stringify({ message: text }),
@@ -1259,7 +1177,6 @@ function renderCurrentStateSection(currentState) {
         finishChatSending(msg);
       });
   }
-
   function renderChatSection(sessionId) {
     var section = el('div', { class: 'cvz-cs-chat' });
     section.appendChild(el('h4', { class: 'cvz-cs-chat-title' }, ['Fragen zum Report']));
@@ -1269,7 +1186,6 @@ function renderCurrentStateSection(currentState) {
       ])
     );
     section.appendChild(el('div', { class: 'cvz-cs-chat-messages' }, []));
-
     // Textarea statt einzeiligem Input (wie beim Landingpage-Assistenten) - Enter sendet,
     // Shift+Enter fügt einen Zeilenumbruch ein, damit auch mehrzeilige Fragen bequem gehen.
     var inputEl = el('textarea', {
@@ -1299,32 +1215,25 @@ function renderCurrentStateSection(currentState) {
     });
     section.appendChild(form);
     section.appendChild(el('p', { class: 'cvz-cs-chat-status', 'aria-live': 'polite' }, ['']));
-
     section.appendChild(
       el('p', { class: 'cvz-cs-chat-limit-notice cvz-cs-hint', style: 'display:none' }, [
         'Frage-Kontingent für diesen Report erreicht - für weitere Fragen bitte eine neue Strategie erstellen.',
       ])
     );
     section.appendChild(el('p', { class: 'cvz-cs-chat-counter cvz-cs-hint' }, ['']));
-
     // Verlauf erst NACH dem Einhängen ins DOM laden - refreshChatMessagesView() braucht die
     // .cvz-cs-chat-messages/-counter-Elemente bereits im state.root.
     loadChatHistory(sessionId);
-
     return section;
   }
-
   // ==================== APP-LEBENSZYKLUS ====================
-
   function getParam(key) {
     return new URLSearchParams(window.location.search).get(key);
   }
-
   function renderApp() {
     clear(state.root);
     var loading = el('p', { class: 'cvz-cs-hint' }, ['Lade Kontingent ...']);
     state.root.appendChild(loading);
-
     Promise.all([loadQuota(), loadGscStatus()])
       .then(function () {
         clear(state.root);
@@ -1335,7 +1244,6 @@ function renderCurrentStateSection(currentState) {
         renderError('Konnte nicht geladen werden: ' + err.message);
       });
   }
-
   // NEU (siehe Chat-Verlauf, Dashboard-Konsolidierung): das Dashboard verlinkt auf eine bereits
   // gespeicherte Strategie per ?session_id=<uuid> - vorher konnte diese Seite ausschliesslich das
   // Formular für eine NEUE Strategie zeigen, es gab keinen Weg, eine vergangene erneut
@@ -1345,7 +1253,6 @@ function renderCurrentStateSection(currentState) {
   function loadExistingSession(sessionId) {
     clear(state.root);
     state.root.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Lade gespeicherte Strategie ...']));
-
     Promise.all([loadQuota(), loadGscStatus()])
       .then(function () {
         return apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId));
@@ -1369,7 +1276,6 @@ function renderCurrentStateSection(currentState) {
         }
       });
   }
-
   function init() {
     ensureMarkedLoaded(); // so frueh wie moeglich anstossen, siehe Begruendung oben bei der Definition
     var root = document.getElementById(CONFIG.containerId);
@@ -1380,9 +1286,7 @@ function renderCurrentStateSection(currentState) {
     state.root = root;
     clear(root);
     root.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Lade ...']));
-
     var requestedSessionId = getParam('session_id');
-
     resolveIdentity()
       .then(function () {
         return requestedSessionId ? loadExistingSession(requestedSessionId) : renderApp();
@@ -1397,7 +1301,6 @@ function renderCurrentStateSection(currentState) {
         root.appendChild(el('p', { class: 'cvz-cs-error' }, ['Fehler beim Laden: ' + err.message]));
       });
   }
-
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
