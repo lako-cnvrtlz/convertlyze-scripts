@@ -419,6 +419,18 @@
       }),
     })
       .then(function (res) {
+        // NEU (siehe Chat-Verlauf, Lasse: "beim Aktualisieren öffnet sich das leere Formular
+        // statt die laufende/fertige Strategie zu laden"): session_id sofort in die URL
+        // schreiben, sobald sie vom Server kommt - history.replaceState statt pushState, damit
+        // kein zusätzlicher Browser-Verlauf-Eintrag entsteht (ein Klick auf "Zurück" soll nicht
+        // mitten im Polling wieder auf das leere Formular springen). Ein Reload/erneutes Öffnen
+        // trifft dadurch auf init()/getParam('session_id') und läuft automatisch über
+        // loadExistingSession() statt renderApp() - unabhängig davon, ob die Strategie zu dem
+        // Zeitpunkt noch läuft oder schon fertig ist (loadExistingSession behandelt beide Fälle,
+        // siehe dort).
+        var url = new URL(window.location.href);
+        url.searchParams.set('session_id', res.session_id);
+        window.history.replaceState(null, '', url.toString());
         pollSession(res.session_id);
       })
       .catch(function (err) {
@@ -432,29 +444,43 @@
   // korrekt, auch wenn zwischen Start und Abruf ein Backend-Deployment oder ein Instanz-Wechsel
   // liegt, weil es keine zweite, flüchtige Wahrheitsquelle mehr gibt - "fertig" bedeutet
   // ausschließlich status === 'done' in der DB-Zeile.
+  //
+  // BUGFIX (siehe Chat-Verlauf, Lasse: "Zeitüberschreitung, obwohl die Daten wieder da sind"):
+  // die vorherige Fassung prüfte CONFIG.pollTimeoutMs, BEVOR sie überhaupt den echten Status
+  // abgefragt hat - wurde das Handy/der Tab lange pausiert (z.B. Bildschirm aus, App in den
+  // Hintergrund), lässt das Betriebssystem JS-Timer schlicht nicht mehr feuern; beim
+  // Fortsetzen ist die reale, mit Date.now() gemessene Zeit dann oft weit über
+  // pollTimeoutMs, obwohl die Session im Hintergrund längst fertig geworden ist. Das Skript
+  // zeigte in diesem Fall sofort den Timeout-Fehler, OHNE noch einmal nachzufragen, ob die
+  // Strategie inzwischen fertig ist - exakt das ursprünglich gemeldete Symptom, nur beim
+  // CLIENT-seitigen Timeout statt (wie zuvor) beim serverseitigen turn_id-Verlust. Fix: JEDE
+  // Runde fragt zuerst den echten Status ab; die Zeitgrenze wird erst NACH der Antwort geprüft
+  // und nur dann als Fehler gewertet, wenn die Session laut Server tatsächlich noch
+  // 'in_progress' ist. Ein 'done'/'error' aus der Antwort gewinnt dadurch immer gegen eine
+  // zwischenzeitlich abgelaufene Uhr.
   function pollSession(sessionId) {
     state.pollStartedAt = Date.now();
     function tick() {
-      if (Date.now() - state.pollStartedAt > CONFIG.pollTimeoutMs) {
-        renderError('Zeitüberschreitung: Die Generierung läuft im Hintergrund ungewöhnlich lange. Bitte später erneut prüfen oder Support kontaktieren.');
-        return;
-      }
       apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId))
         .then(function (session) {
-          if (session.status === 'in_progress') {
-            state.pollHandle = setTimeout(tick, CONFIG.pollIntervalMs);
-            return;
-          }
           if (session.status === 'error') {
             renderError('Generierung fehlgeschlagen' + (session.error_message ? ': ' + session.error_message : '.'));
             return;
           }
-          // status === 'done'
-          state.currentSessionId = session.id;
-          state.currentResult = session.result;
-          loadQuota().then(function () {
-            renderResult(session.id, session.result, session.funding_source, session);
-          });
+          if (session.status === 'done') {
+            state.currentSessionId = session.id;
+            state.currentResult = session.result;
+            loadQuota().then(function () {
+              renderResult(session.id, session.result, session.funding_source, session);
+            });
+            return;
+          }
+          // status === 'in_progress': Zeitgrenze erst HIER prüfen, siehe Bugfix-Begründung oben.
+          if (Date.now() - state.pollStartedAt > CONFIG.pollTimeoutMs) {
+            renderError('Zeitüberschreitung: Die Generierung läuft im Hintergrund ungewöhnlich lange. Bitte später erneut prüfen oder Support kontaktieren.');
+            return;
+          }
+          state.pollHandle = setTimeout(tick, CONFIG.pollIntervalMs);
         })
         .catch(function (err) {
           renderError('Status konnte nicht geprüft werden: ' + err.message);
