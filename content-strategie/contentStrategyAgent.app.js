@@ -320,6 +320,24 @@
     banner.appendChild(gscBadge);
     return banner;
   }
+  // NEU (siehe Chat-Verlauf, Lasse: "können wir im Formular ein Modell frei wählen lassen?" ->
+  // kuratierte Anbieter-Auswahl statt freiem model_name, siehe Begründung in
+  // services/contentStrategyGeo.ts): die vier von DataForSEO unterstützten LLM-Familien mit
+  // sprechendem deutschen Label statt technischem llm_type-Wert. Server wählt innerhalb der
+  // gewählten Familie weiterhin automatisch ein günstiges, websuche-fähiges Modell - kein
+  // model_name hier, bewusst (Kosten-Deckel/Footgun-Begründung siehe Backend-Kommentar).
+  var GEO_LLM_TYPE_OPTIONS = [
+    { value: 'chat_gpt', label: 'ChatGPT (OpenAI)' },
+    { value: 'gemini', label: 'Google Gemini' },
+    { value: 'perplexity', label: 'Perplexity' },
+    { value: 'claude', label: 'Claude (Anthropic)' },
+  ];
+  // Auch für die Ergebnis-Anzeige (renderGeoSection) genutzt, damit dort derselbe sprechende Name
+  // steht statt des rohen llm_type-Werts.
+  var GEO_LLM_TYPE_LABELS = GEO_LLM_TYPE_OPTIONS.reduce(function (acc, o) {
+    acc[o.value] = o.label;
+    return acc;
+  }, {});
   function renderForm() {
     var form = el('form', { class: 'cvz-cs-form' });
     var topicInput = el('input', { type: 'text', name: 'topic', placeholder: 'z.B. "Landingpage Software für B2B"', required: 'required' });
@@ -328,6 +346,13 @@
       var suggested = state.gscStatus.sites[0].site_url.replace(/^sc-domain:/, '').replace(/^https?:\/\//, '').replace(/\/$/, '');
       domainInput.value = suggested;
     }
+    var llmTypeSelect = el(
+      'select',
+      { name: 'geo_test_llm_type' },
+      GEO_LLM_TYPE_OPTIONS.map(function (o) {
+        return el('option', { value: o.value }, [o.label]);
+      })
+    );
     // ENTFERNT (siehe Chat-Verlauf, Lasse: "sollten wir die Checkbox entfernen und es
     // standardmäßig machen, weil GEO ein wichtiger Bereich für User ist?" - bestätigt, inkl.
     // Kostendaten: 17 Cent DataForSEO-Gesamtkosten für 3 Läufe an einem Tag, also kein
@@ -337,6 +362,15 @@
     // serverseitig (ENV-Variable in routes/contentStrategyAgent.ts), nicht mehr als User-Option.
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Thema / Ziel-Keyword', topicInput]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Eigene Domain', domainInput]));
+    form.appendChild(
+      el('label', { class: 'cvz-cs-label' }, [
+        'Gegen welchen KI-Assistenten testen?',
+        llmTypeSelect,
+        el('span', { class: 'cvz-cs-hint' }, [
+          'Wir wählen innerhalb dieser Familie automatisch ein günstiges, websuche-fähiges Modell aus.',
+        ]),
+      ])
+    );
     var canStart = !state.quota || state.quota.can_start_session;
     var submitBtn = el('button', { type: 'submit', class: 'cvz-cs-submit-btn' }, ['Content-Cluster erstellen']);
     if (!canStart) submitBtn.setAttribute('disabled', 'disabled');
@@ -346,18 +380,27 @@
       var topic = topicInput.value.trim();
       var domain = domainInput.value.trim();
       if (!topic) return;
-      startGeneration(topic, domain || undefined);
+      startGeneration(topic, domain || undefined, llmTypeSelect.value);
     });
     return form;
   }
-  function startGeneration(topic, domain) {
+  function startGeneration(topic, domain, geoTestLlmType) {
     renderProcessing(topic);
     apiFetch('/api/content-strategy/generate', {
       method: 'POST',
       // run_prompt_test ist jetzt immer true (siehe Kommentar bei renderForm) - das Feld bleibt
       // im Request-Body erhalten, weil das Backend darauf weiterhin den echten, kostenpflichtigen
       // Prompt-Test-Aufruf hart absichert (allowPromptTest), nicht auf einer Modell-Entscheidung.
-      body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain, run_prompt_test: true }),
+      // geo_test_llm_type ist NEU (siehe Kommentar bei GEO_LLM_TYPE_OPTIONS oben) - das Backend
+      // validiert diesen Wert ohnehin serverseitig gegen die vier echten llm_type-Werte
+      // (normalizeGeoLlmType), ein manipulierter/unbekannter Wert hier ist also unkritisch.
+      body: JSON.stringify({
+        user_id: state.userId,
+        topic: topic,
+        domain: domain,
+        run_prompt_test: true,
+        geo_test_llm_type: geoTestLlmType,
+      }),
     })
       .then(function (res) {
         pollStatus(res.turn_id);
@@ -932,9 +975,21 @@ function renderCurrentStateSection(currentState) {
         // services/contentStrategyGeo.ts) - auch nach dessen Fix wird es legitime Fälle ganz
         // ohne Zitate geben.
         var citedText = r.cited_domains && r.cited_domains.length > 0 ? r.cited_domains.join(', ') : 'keine zitierten Domains gefunden';
+        // NEU (siehe Chat-Verlauf, Lasse: "wir sollten bei den Prompts immer das Modell mit
+        // angeben, das getestet wurde"): model_name ist ein neues Feld (siehe
+        // services/contentStrategyGeo.ts) - ältere, bereits gespeicherte Sessions in Supabase
+        // haben es noch nicht, deshalb der Fallback-Text statt einer leeren Klammer.
+        // GEÄNDERT (siehe Chat-Verlauf, Anbieter-Auswahl im Formular): llm_type war bisher IMMER
+        // "chat_gpt" und wurde deshalb in der Anzeige nie gebraucht - jetzt kann es je nach
+        // Formular-Auswahl "gemini"/"perplexity"/"claude" sein, also sprechendes Label (siehe
+        // GEO_LLM_TYPE_LABELS oben) statt des rohen Werts zeigen. Fallback auf den rohen Wert,
+        // falls DataForSEO künftig einen fünften llm_type einführt, den GEO_LLM_TYPE_LABELS noch
+        // nicht kennt.
+        var providerLabel = r.llm_type ? GEO_LLM_TYPE_LABELS[r.llm_type] || r.llm_type : null;
+        var modelText = r.model_name ? ' [' + (providerLabel ? providerLabel + ', Modell: ' : 'Modell: ') + r.model_name + ']' : providerLabel ? ' [' + providerLabel + ']' : '';
         ptList.appendChild(
           el('li', {}, [
-            '"' + r.prompt + '": eigene Domain zitiert: ' + (r.own_domain_cited ? 'ja' : 'nein') + ' · zitierte Domains: ' + citedText,
+            '"' + r.prompt + '"' + modelText + ': eigene Domain zitiert: ' + (r.own_domain_cited ? 'ja' : 'nein') + ' · zitierte Domains: ' + citedText,
           ])
         );
       });
