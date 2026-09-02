@@ -12,18 +12,31 @@
 //   - GET  /api/content-strategy/me                    -> { user_id }
 //   - GET  /api/content-strategy/quota?user_id=...      -> Kontingent-Vorschau
 //   - GET  /api/integrations/google/status              -> { connected, sites: [{site_url, connected_at}] }
-//   - POST /api/content-strategy/generate {user_id, topic, domain?}  -> 202 { turn_id, status, ... }
-//   - GET  /api/content-strategy/status/:turn_id         -> { status: 'processing'|'done'|'error', ... }
+//   - POST /api/content-strategy/generate {user_id, topic, domain?}  -> 202 { session_id, status, ... }
+//   - GET  /api/content-strategy/:id                    -> vollständige Session inkl. status/result
 //   - PATCH /api/content-strategy/:id/pages/:index {status} -> { success, result }
 //
-// WICHTIGER HINWEIS ZUR LAUFZEIT: /generate liefert sofort (202) einen turn_id zurück und läuft
-// im Hintergrund weiter - ein kompletter Lauf (Themen-Analyse + Domain-Abgleich + GEO-Check,
-// IMMER MIT 3 echten LLM-Prompt-Tests, siehe Chat-Verlauf: die Checkbox dafür wurde entfernt,
-// der Test ist jetzt fester Bestandteil, nicht mehr abwählbar - ein Kill-Switch dafür existiert
-// nur noch serverseitig in routes/contentStrategyAgent.ts) dauert inzwischen meist 10-15
-// Minuten, nicht mehr nur ein paar Sekunden (siehe CVZ_CS_PROGRESS_MESSAGES weiter unten für
-// die zeitbasierten Lade-Texte). Dieses Script pollt deshalb GET /status/:turn_id, statt auf
-// die Antwort von /generate zu warten.
+// WICHTIGER HINWEIS ZUR LAUFZEIT: /generate liefert sofort (202) eine session_id zurück und
+// läuft im Hintergrund weiter - ein kompletter Lauf (Themen-Analyse + Domain-Abgleich +
+// GEO-Check, IMMER MIT 3 echten LLM-Prompt-Tests, siehe Chat-Verlauf: die Checkbox dafür wurde
+// entfernt, der Test ist jetzt fester Bestandteil, nicht mehr abwählbar - ein Kill-Switch dafür
+// existiert nur noch serverseitig in routes/contentStrategyAgent.ts) dauert inzwischen meist
+// 10-15 Minuten, nicht mehr nur ein paar Sekunden (siehe CVZ_CS_PROGRESS_MESSAGES weiter unten
+// für die zeitbasierten Lade-Texte). Dieses Script pollt deshalb GET /:id, statt auf die
+// Antwort von /generate zu warten.
+//
+// GEÄNDERT (siehe Chat-Verlauf, Lasse: "Fehlermeldung nach Handy schließen/wieder öffnen, obwohl
+// die Strategie fertig war"): früher pollte dieses Script einen eigenen In-Memory-turn_id-Job
+// (GET /status/:turn_id im Backend). Diese Map hatte eine feste TTL von 30 Minuten UND war
+// reiner Prozessspeicher - schloss man das Handy während eines langen Laufs und öffnete die
+// Seite erst nach dessen Fertigstellung wieder, war der Job auf der (ggf. anderen) antwortenden
+// Backend-Instanz oft nicht mehr auffindbar, obwohl die Strategie in der Datenbank längst fertig
+// war. Der komplette turn_id-Mechanismus für /generate ist deshalb entfernt: pollSession() weiter
+// unten pollt jetzt ausschließlich GET /:id gegen die DB-Zeile selbst - dieselbe Route, die auch
+// ein direkter Session-Link (?session_id=...) und das Dashboard nutzen. Der Report-Chat behält
+// bewusst weiterhin sein eigenes turn_id-Polling (siehe pollChatStatus), das Zeitfenster dort ist
+// mit CHAT_TURN_TIMEOUT_MS von nur 90 Sekunden im Backend verschwindend klein im Vergleich zu den
+// 30 Minuten beim Hauptlauf.
 //
 // NICHT ENTHALTEN (bewusst, siehe Chat-Verlauf): ein Kauf-Flow für PPU-Strategie-Pakete
 // (1er/5er/10er). Dieses Script zeigt nur die verbleibenden PPU-Credits an und ruft bei
@@ -58,8 +71,8 @@
     // ausführliche Begründung bei BACKGROUND_TURN_TIMEOUT_MS in routes/contentStrategyAgent.ts,
     // das parallel auf 30 Minuten angehoben wurde. Hier bewusst weiterhin 2 Minuten MEHR als das
     // Backend-Limit, damit bei einem echten Timeout die genaue Backend-Fehlermeldung
-    // (job.status === 'error') den Client erreicht, BEVOR der eigene, generische
-    // "Zeitüberschreitung"-Text in pollStatus() zuschlägt.
+    // (session.status === 'error') den Client erreicht, BEVOR der eigene, generische
+    // "Zeitüberschreitung"-Text in pollSession() zuschlägt.
     pollTimeoutMs: 32 * 60 * 1000,
     // NEU (siehe Chat-Verlauf, Lasse: "KI-Agent, der Fragen des Users zu dem Report beantworten
     // kann") - eigenes, kürzeres Poll-Intervall/Timeout für den Report-Chat: eine Chat-Antwort
@@ -67,7 +80,8 @@
     // Chat serverseitig nie mit, siehe CHAT_TOOLS in routes/contentStrategyAgent.ts). 2 Minuten
     // Timeout, bewusst mit Puffer ÜBER CHAT_TURN_TIMEOUT_MS (90s im Backend) - gleicher Grund wie
     // bei pollTimeoutMs oben: die echte Backend-Fehlermeldung soll ankommen, bevor der eigene
-    // generische Timeout-Text feuert.
+    // generische Timeout-Text feuert. Der Chat pollt bewusst weiterhin gegen seinen eigenen
+    // turn_id-Endpunkt (GET /chat/status/:turn_id), siehe Begründung im Datei-Kopf.
     chatPollIntervalMs: 1500,
     chatPollTimeoutMs: 2 * 60 * 1000,
   };
@@ -384,6 +398,8 @@
     });
     return form;
   }
+  // GEÄNDERT (siehe Datei-Kopf-Kommentar zum session-basierten Polling-Umbau): pollt nach dem
+  // Start jetzt direkt über die zurückgegebene session_id statt über einen turn_id-Job.
   function startGeneration(topic, domain, geoTestLlmType) {
     renderProcessing(topic);
     apiFetch('/api/content-strategy/generate', {
@@ -403,40 +419,44 @@
       }),
     })
       .then(function (res) {
-        pollStatus(res.turn_id);
+        pollSession(res.session_id);
       })
       .catch(function (err) {
         renderError('Start fehlgeschlagen: ' + err.message, err.body);
       });
   }
-  function pollStatus(turnId) {
+  // ERSETZT die frühere pollStatus()-Funktion (siehe Datei-Kopf-Kommentar): statt einen
+  // flüchtigen In-Memory-Job über GET /status/:turn_id abzufragen, pollt diese Funktion jetzt
+  // direkt gegen die Datenbank-Zeile per GET /:id - denselben Endpunkt, den auch das Dashboard
+  // und ein direkter Session-Link (loadExistingSession) nutzen. Funktioniert dadurch unverändert
+  // korrekt, auch wenn zwischen Start und Abruf ein Backend-Deployment oder ein Instanz-Wechsel
+  // liegt, weil es keine zweite, flüchtige Wahrheitsquelle mehr gibt - "fertig" bedeutet
+  // ausschließlich status === 'done' in der DB-Zeile.
+  function pollSession(sessionId) {
     state.pollStartedAt = Date.now();
     function tick() {
       if (Date.now() - state.pollStartedAt > CONFIG.pollTimeoutMs) {
         renderError('Zeitüberschreitung: Die Generierung läuft im Hintergrund ungewöhnlich lange. Bitte später erneut prüfen oder Support kontaktieren.');
         return;
       }
-      apiFetch('/api/content-strategy/status/' + turnId)
-        .then(function (job) {
-          if (job.status === 'processing') {
+      apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId))
+        .then(function (session) {
+          if (session.status === 'in_progress') {
             state.pollHandle = setTimeout(tick, CONFIG.pollIntervalMs);
             return;
           }
-          if (job.status === 'error') {
-            renderError('Generierung fehlgeschlagen: ' + job.error);
+          if (session.status === 'error') {
+            renderError('Generierung fehlgeschlagen' + (session.error_message ? ': ' + session.error_message : '.'));
             return;
           }
-          state.currentSessionId = job.session_id;
-          state.currentResult = job.result;
+          // status === 'done'
+          state.currentSessionId = session.id;
+          state.currentResult = session.result;
           loadQuota().then(function () {
-            renderResult(job.session_id, job.result, job.funded_by);
+            renderResult(session.id, session.result, session.funding_source, session);
           });
         })
         .catch(function (err) {
-          if (err.status === 404 && err.body && err.body.code === 'turn_lost') {
-            renderError('Die Verarbeitung wurde unterbrochen (z.B. Server-Neustart) oder ist abgelaufen. Bitte erneut starten.');
-            return;
-          }
           renderError('Status konnte nicht geprüft werden: ' + err.message);
         });
     }
@@ -533,11 +553,11 @@
   // NEU (siehe Chat-Verlauf, Lasse: Content-Strategie-Sessions bekommen einen Status wie
   // Analysen/Aufbau-Sessions): eine Session kann jetzt existieren, OHNE dass result schon
   // gefüllt ist (status='in_progress', während der Agent noch läuft, oder status='error' nach
-  // einem gescheiterten Lauf) - der Dashboard-Tab verlinkt bei solchen Zeilen zwar nicht mehr
-  // hierher (siehe dashboard-v5.js, nur status='done'-Zeilen sind dort klickbar), aber ein
-  // alter/direkter Link mit ?session_id=... auf eine noch laufende oder fehlgeschlagene Session
-  // sollte trotzdem nicht mit einem rohen JS-Fehler enden (renderResult() würde auf result=null
-  // sofort crashen), sondern einen verständlichen Hinweis zeigen.
+  // einem gescheiterten Lauf). Wird nach dem session-basierten Polling-Umbau NUR NOCH für den
+  // Fehlerfall aufgerufen (siehe loadExistingSession weiter unten) - ein noch laufender Link
+  // wird stattdessen aktiv über pollSession() weiterverfolgt, statt hier nur eine statische
+  // "bitte später erneut klicken"-Meldung zu zeigen. Der isError-Zweig bleibt trotzdem als
+  // eigenständige, verständliche Fehleransicht bestehen.
   function renderPendingSession(session) {
     clear(state.root);
     var isError = session.status === 'error';
@@ -568,8 +588,10 @@
   // executive_summary, ...) wiederverwenden kann, sobald es angegangen wird.
   // session (4. Parameter, optional): nur gesetzt, wenn eine BEREITS GESPEICHERTE Strategie über
   // loadExistingSession() angezeigt wird (liefert u.a. created_at fürs Berichts-Datum) - bei
-  // einem frisch generierten Ergebnis (Aufruf aus pollStatus()) bleibt das undefined, dann gilt
-  // wie bisher "heute" als Datum und fundedBy zeigt die Finanzierung dieses Laufs an.
+  // einem frisch generierten Ergebnis (Aufruf aus pollSession()) ist das jetzt ebenfalls gesetzt
+  // (siehe pollSession, die die komplette Session-Zeile ohnehin schon vorliegen hat), bleibt hier
+  // aber als optionaler Parameter bestehen, damit renderReportHeader ohne session weiterhin ein
+  // sinnvolles "heute"-Datum anzeigt.
   function renderResult(sessionId, result, fundedBy, session) {
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
@@ -601,12 +623,12 @@
     // GEÄNDERT (siehe Chat-Verlauf, Lasse: "nur derjenige, der die Struktur erstellt hat, sollte
     // chatten können, damit Nachrichten nicht mehrfach verbraucht werden") - der Chat ist jetzt
     // NUR für den Ersteller sichtbar, anders als der Report selbst (der bleibt teamweit
-    // einsehbar). Ohne `session` (frisch generiertes Ergebnis direkt aus pollStatus()) ist der
-    // aktuelle User IMMER der Ersteller - man kann keine fremde Generierung live mitverfolgen,
-    // das gibt es in diesem Produkt nicht. MIT `session` (loadExistingSession, z.B. über den
-    // teamweiten Dashboard-Tab geöffnet) wird explizit gegen session.user_id geprüft - das
-    // Backend setzt dieselbe Einschränkung ohnehin hart durch (403), hier geht es nur darum,
-    // Team-Mitgliedern gar nicht erst ein Eingabefeld zu zeigen, das für sie sowieso fehlschlägt.
+    // einsehbar). Ohne `session` ist der aktuelle User IMMER der Ersteller - man kann keine
+    // fremde Generierung live mitverfolgen, das gibt es in diesem Produkt nicht. MIT `session`
+    // (loadExistingSession, z.B. über den teamweiten Dashboard-Tab geöffnet) wird explizit gegen
+    // session.user_id geprüft - das Backend setzt dieselbe Einschränkung ohnehin hart durch
+    // (403), hier geht es nur darum, Team-Mitgliedern gar nicht erst ein Eingabefeld zu zeigen,
+    // das für sie sowieso fehlschlägt.
     var isCreator = !session || session.user_id === state.userId;
     if (sessionId && isCreator) wrap.appendChild(renderChatSection(sessionId));
     state.root.appendChild(renderQuotaBanner());
@@ -1040,8 +1062,9 @@ function renderCurrentStateSection(currentState) {
   // ==================== REPORT-CHAT ====================
   // NEU (siehe Chat-Verlauf, Lasse: "KI-Agent, der Fragen des Users zu dem Report beantworten
   // kann") - eigener Abschnitt am Ende des Reports, lädt vorhandenen Verlauf beim Öffnen und
-  // pollt wie die Report-Generierung selbst (siehe Begründung bei CONFIG.chatPollIntervalMs/
-  // CONFIG.chatPollTimeoutMs, gleicher Reverse-Proxy-Grund wie beim Haupt-Lauf).
+  // pollt wie die Report-Generierung selbst pollte, ABER weiterhin über den eigenen
+  // turn_id-Endpunkt (siehe Datei-Kopf-Kommentar, warum der Chat NICHT auf das
+  // session-basierte Polling umgestellt wurde).
   //
   // Chat-Optik + Markdown-Rendering bewusst an das bestehende Chat-Fenster des Landingpage-
   // Assistenten angelehnt (siehe Chat-Verlauf, Lasse: "kannst du dich beim Chat eher hieran
@@ -1162,6 +1185,11 @@ function renderCurrentStateSection(currentState) {
         console.warn('Chat-Verlauf konnte nicht geladen werden:', err.message);
       });
   }
+  // Bewusst UNVERÄNDERT gegenüber der vorherigen Fassung (siehe Datei-Kopf-Kommentar): der
+  // Report-Chat behält sein eigenes, kurzlebiges turn_id-Polling gegen
+  // GET /chat/status/:turn_id im Backend - CHAT_TURN_TIMEOUT_MS liegt dort bei nur 90 Sekunden,
+  // das Zeitfenster für einen verlorenen In-Memory-Job ist damit im Vergleich zum Hauptlauf
+  // verschwindend klein und bislang nie als Problem gemeldet worden.
   function pollChatStatus(turnId) {
     state.chat.pollStartedAt = Date.now();
     function tick() {
@@ -1305,6 +1333,13 @@ function renderCurrentStateSection(currentState) {
   // anzuzeigen. Nutzt den bestehenden GET /:id-Endpunkt (liefert die komplette Session inkl.
   // result), lädt Kontingent/GSC-Status genau wie renderApp() (renderQuotaBanner() greift in
   // renderResult() darauf zu), dann direkt renderResult() statt des Formulars.
+  //
+  // GEÄNDERT (siehe Datei-Kopf-Kommentar zum session-basierten Polling-Umbau): eine noch
+  // laufende Session (status='in_progress') zeigt jetzt NICHT mehr nur eine statische
+  // "bitte später erneut klicken"-Meldung (renderPendingSession), sondern wird aktiv über
+  // pollSession() weiterverfolgt - der User muss den Link nicht mehr manuell neu aufrufen, um
+  // das fertige Ergebnis zu sehen. renderPendingSession bleibt bestehen, wird aber nur noch für
+  // den Fehlerfall (status='error') gebraucht.
   function loadExistingSession(sessionId) {
     clear(state.root);
     state.root.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Lade gespeicherte Strategie ...']));
@@ -1313,8 +1348,13 @@ function renderCurrentStateSection(currentState) {
         return apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId));
       })
       .then(function (session) {
-        if (!session.result) {
+        if (session.status === 'error') {
           renderPendingSession(session);
+          return;
+        }
+        if (session.status === 'in_progress' || !session.result) {
+          renderProcessing(session.seed_topic);
+          pollSession(session.id);
           return;
         }
         state.currentSessionId = session.id;
