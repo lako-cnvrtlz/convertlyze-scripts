@@ -153,31 +153,11 @@
   }
   // ── Actions ──────────────────────────────────────────────────────────────────
   async function handleAfterSignup() {
-    if (checkoutStarted) return;
-    checkoutStarted = true;
-    console.log('[CVZ] Mitglied erkannt, starte Checkout-Weiterleitung ...');
-    var resolved = await resolvePlan();
-    clearPlanCookies();
-    if (!resolved) {
-      window.location.href = '/willkommen';
-      return;
-    }
-    var billingKey = resolved.billing === 'annual' ? 'annual' : 'monthly';
-    var priceId    = CONFIG.priceIds[resolved.plan]?.[billingKey];
-    if (!priceId) {
-      window.location.href = '/willkommen';
-      return;
-    }
-    try {
-      await window.$memberstackDom.purchasePlansWithCheckout({
-        priceId:    priceId,
-        successUrl: window.location.origin + '/member/danke',
-      });
-    } catch (e) {
-      console.error('[CVZ] Checkout error:', e);
-      window.location.href = '/member/dashboard';
-    }
-  }
+  if (checkoutStarted) return;
+  checkoutStarted = true;
+  // Cookie bleibt gesetzt – site-wide Script auf der Zielseite übernimmt den Checkout
+  console.log('[CVZ] Signup erkannt – Checkout wird auf Zielseite gestartet');
+}
   // ── Erkennung "Signup abgeschlossen" ─────────────────────────────────────────
   // WICHTIG: Es gibt KEIN Browser-Event "memberstack:auth:signup" - das wurde
   // im echten memberstack.js-Bundle geprüft (kein einziges CustomEvent mit
