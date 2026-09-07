@@ -116,20 +116,20 @@
  * "Zuletzt aktiv" wieder nur Analysen, mit einem console.warn pro fehlgeschlagenem
  * RPC-Call ("function ... does not exist").
  */
- 
+
 // -- Sofort verstecken wenn Plan im sessionStorage --------------------------
 (function () {
   if (sessionStorage.getItem('selected_plan')) {
     document.documentElement.style.visibility = 'hidden';
   }
 })();
- 
+
 // ==================== DASHBOARD LOGIK ====================
 (function () {
   'use strict';
- 
+
   // -- Config -----------------------------------------------------------------
- 
+
   var CONFIG = {
     // WHY: PDF_SERVICE_URL und PDF_SECRET wurden aus dem Frontend entfernt.
     // generate-pdf-report Edge Function fuegt das Secret serverseitig hinzu.
@@ -166,9 +166,9 @@
       enterprise: { monthly: 'prc_enterprise-monthly-ftd0gbp', annual: 'prc_enterprise-yearly-zv6022j' },
     },
   };
- 
+
   // -- State ------------------------------------------------------------------
- 
+
   var state = {
     analysesData:    [],
     currentPage:     1,
@@ -201,13 +201,13 @@
     aufbauTotalPages:   1,
     aufbauLoaded:       false, // lazy - erst beim ersten Oeffnen des Tabs geladen
   };
- 
+
   // -- Utilities --------------------------------------------------------------
- 
+
   function sleep(ms) {
     return new Promise(function (r) { setTimeout(r, ms); });
   }
- 
+
   // WHY escapeHtml: User-Daten (URLs, Keywords) nie direkt als innerHTML setzen.
   // XSS-Schutz - alle User-Inhalte werden durch diese Funktion gefiltert.
   function escapeHtml(str) {
@@ -219,25 +219,25 @@
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
   }
- 
+
   function truncate(str, max) {
     if (!str) return '-';
     return str.length > max ? str.substring(0, max - 3) + '...' : str;
   }
- 
+
   function setText(id, value) {
     var el = document.getElementById(id);
     if (el) { el.classList.remove('cvz-d-skel'); el.textContent = (value != null) ? value : ''; }
   }
- 
+
   function showEl(el, show, displayValue) {
     if (el) el.style.display = show ? (displayValue || '') : 'none';
   }
- 
+
   function getParam(key) {
     return new URLSearchParams(window.location.search).get(key);
   }
- 
+
   // WHY eigene relative Zeitfunktion (kein Datepicker/Library): Der Bedarf ist
   // simpel genug (Minuten/Stunden/Tage), eine kleine Library nur dafuer waere
   // unnoetig Overhead fuer ein Webflow-Embed-Script.
@@ -254,20 +254,20 @@
     if (diffD < 7) return 'vor ' + diffD + ' Tagen';
     return new Date(dateStr).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
- 
+
   // -- Cookie helpers -----------------------------------------------------------
- 
+
   function getCookie(name) {
     var match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
     return match ? decodeURIComponent(match[2]) : null;
   }
- 
+
   function deleteCookie(name) {
     document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;SameSite=Lax';
   }
- 
+
   // -- Deps -----------------------------------------------------------------
- 
+
   async function waitForDependencies() {
     for (var i = 0; i < 100; i++) {
       if (
@@ -279,9 +279,9 @@
     console.warn('[CVZ] Timeout: Supabase oder Memberstack nicht geladen.');
     return false;
   }
- 
+
   // -- Data layer -------------------------------------------------------------
- 
+
   // WHY _billingUser: Bei Team-Members laeuft Billing ueber den Owner.
   // Plan-Felder muessen vom Owner geholt werden, nicht vom Member selbst.
   function checkPdfAccess(user) {
@@ -294,12 +294,12 @@
     if (status === 'canceling' && bu.license_expires_at && new Date(bu.license_expires_at) > new Date()) return true;
     return false;
   }
- 
+
   function canAccessPdf(analysis) {
     var source = (analysis.analysis_source || '').toLowerCase();
     return CONFIG.PDF_ACCESS_SOURCES.indexOf(source) !== -1 || state.hasPdfAccess;
   }
- 
+
   function getInitials(name) {
     if (!name || typeof name !== 'string') return '';
     var parts = name.trim().split(/\s+/);
@@ -307,7 +307,7 @@
     if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
     return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
   }
- 
+
   async function fetchUser(memberstackId, maxAttempts) {
     maxAttempts = maxAttempts || 1;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -316,7 +316,6 @@
         .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, ppu_aufbau_credits, reserved_ppu_aufbau_credits, ppu_strategy_credits, reserved_ppu_strategy_credits, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start')
         .eq('memberstack_id', memberstackId)
         .single();
-
       if (result.data) {
         if (result.data.owner_user_id) {
           var ownerResult = await window.supabase
@@ -338,7 +337,7 @@
     }
     return null;
   }
- 
+
   // Monatliches Aufbau-Session-Kontingent des Plans laden.
   // Das Limit liegt bewusst NICHT denormalisiert auf users (wie credits_limit),
   // sondern wird live aus plans.page_agent_sessions_limit gelesen.
@@ -362,7 +361,6 @@
     var row = result.data && result.data[0];
     return row ? Math.round(Number(row.page_agent_sessions_limit || 0)) : 0;
   }
-
   // Analog zu fetchPlanSessionsLimit, nur fuer das Content-Strategie-Kontingent
   // (plans.content_strategy_sessions_limit, siehe migrations/content_strategy_plan_limit.sql).
   // Gleicher limit(1)-Workaround wegen doppelter plans-Zeilen pro Plan-Name.
@@ -380,7 +378,6 @@
     var row = result.data && result.data[0];
     return row ? Math.round(Number(row.content_strategy_sessions_limit || 0)) : 0;
   }
-
   async function fetchAnalysesForMember(memberstackId) {
     if (!memberstackId) return [];
     var result = await window.supabase.rpc('get_analyses_for_member', { p_memberstack_id: memberstackId });
@@ -390,7 +387,7 @@
     }
     return result.data || [];
   }
- 
+
   // Letzte Aufbau-Projekte fuer "Zuletzt aktiv". Laeuft ueber eine SECURITY
   // DEFINER RPC (nicht .from('page_projects').select(...)), weil das Frontend
   // per Memberstack + Anon-Key arbeitet, nicht per echtem Supabase Auth -
@@ -409,7 +406,7 @@
     }
     return result.data || [];
   }
- 
+
   // Letzte KI-Agent-Sessions fuer "Zuletzt aktiv" - gleiches RLS-Problem wie
   // bei fetchRecentPageProjects, gleiche Loesung ueber eine RPC. Die RPC
   // joint analyses direkt in SQL und liefert landing_page_url/keyword als
@@ -429,13 +426,11 @@
     }
     return result.data || [];
   }
-
   // -- Content-Strategie-Sessions & Aufbau-Projekte (Node/Railway-API) ---------
   // Beide Calls laufen NICHT ueber Supabase, sondern direkt gegen die
   // convertlyze-agent-api (dieselbe API wie contentStrategyAgent.app.js und
   // das bisherige page-projects-embed.html) - Auth per echtem Memberstack-JWT
   // (state.memberToken), nicht per Supabase-Anon-Key.
-
   // Volle Liste (bis zu 200, server-seitig gedeckelt), team-weit sichtbar
   // (Backend nutzt getTeamUserIds - siehe GET /api/content-strategy/sessions).
   // Wird sowohl fuer den Strategien-Tab als auch fuer "Zuletzt aktiv"
@@ -454,7 +449,6 @@
       return null;
     }
   }
-
   // 1:1 aus page-projects-embed.html uebernommen (dort SICHERHEITS-FIX:
   // echtes JWT statt roher Member-ID). NUR fuer den eingeloggten User selbst
   // (user_id-Query-Param), analog zur bisherigen Einschraenkung dort - die
@@ -473,7 +467,6 @@
       return null;
     }
   }
-
   async function triggerCreditResetIfPaid(user) {
     try {
       var bu = user._billingUser || user;
@@ -487,32 +480,32 @@
       return false;
     }
   }
- 
+
   // -- Purchase Success Modal -------------------------------------------------
- 
+
   function showPurchaseSuccessModal(licenseType) {
     var planName = licenseType || 'deinen neuen Plan';
- 
+
     var overlay = document.createElement('div');
     overlay.id = 'cvz-purchase-modal';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
- 
+
     var box = document.createElement('div');
-    box.style.cssText = 'background:#161b22;border:1px solid #30363d;border-radius:12px;padding:40px;max-width:480px;width:90%;text-align:center;font-family:Geist,sans-serif;position:relative';
- 
+    box.style.cssText = 'background:#161b22;border:1px solid #30363d;border-radius:0;padding:40px;max-width:480px;width:90%;text-align:center;font-family:Geist,sans-serif;position:relative';
+
     var xBtn = document.createElement('button');
     xBtn.textContent = '✕';
     xBtn.style.cssText = 'position:absolute;top:12px;right:16px;background:none;border:none;color:#8b98a5;font-size:16px;cursor:pointer;line-height:1;padding:0';
     xBtn.onclick = function () { overlay.remove(); };
- 
+
     var emoji = document.createElement('div');
     emoji.textContent = '🎉';
     emoji.style.cssText = 'font-size:48px;margin-bottom:16px';
- 
+
     var h = document.createElement('h2');
     h.textContent = 'Willkommen an Bord!';
     h.style.cssText = 'margin:0 0 12px;font-size:22px;color:#4fd1c5;font-weight:700';
- 
+
     var p1 = document.createElement('p');
     p1.style.cssText = 'margin:0 0 8px;color:#8b98a5;font-size:15px';
     var strong = document.createElement('strong');
@@ -521,29 +514,29 @@
     p1.appendChild(document.createTextNode('Du hast erfolgreich den '));
     p1.appendChild(strong);
     p1.appendChild(document.createTextNode(' gebucht.'));
- 
+
     var p2 = document.createElement('p');
     p2.textContent = 'Dein Konto ist jetzt aktiv – analysiere deine erste Landingpage.';
     p2.style.cssText = 'margin:0 0 28px;color:#8b98a5;font-size:14px';
- 
+
     var ctaBtn = document.createElement('button');
     ctaBtn.textContent = 'Erste Analyse starten';
-    ctaBtn.style.cssText = 'background:#4fd1c5;color:#0d1117;border:none;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:600;cursor:pointer;width:100%';
+    ctaBtn.style.cssText = 'background:#4fd1c5;color:#0d1117;border:none;border-radius:0;padding:12px 28px;font-size:15px;font-weight:600;cursor:pointer;width:100%';
     ctaBtn.onclick = function () {
       overlay.remove();
       window.location.href = CONFIG.NEW_ANALYSIS_URL;
     };
- 
+
     box.append(xBtn, emoji, h, p1, p2, ctaBtn);
     overlay.appendChild(box);
     overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
     document.body.appendChild(overlay);
   }
- 
+
   // -- UI: Style injection ------------------------------------------------------
- 
+
   var STYLE_ID = 'cvz-dash-style';
- 
+
   function injectDashboardStyle() {
     if (document.getElementById(STYLE_ID)) return;
     var s = document.createElement('style');
@@ -558,25 +551,25 @@
         'font-family:Geist,ui-sans-serif,-apple-system,BlinkMacSystemFont,sans-serif;width:100%;box-sizing:border-box;' +
       '}' +
       '#cvz-dashboard-app *{box-sizing:border-box;}' +
-      '.cvz-d-skel{border-radius:6px;color:transparent!important;background:linear-gradient(90deg,#1a2133 25%,#252d3d 50%,#1a2133 75%);' +
+      '.cvz-d-skel{border-radius:0;color:transparent!important;background:linear-gradient(90deg,#1a2133 25%,#252d3d 50%,#1a2133 75%);' +
         'background-size:400px 100%;animation:cvz-shimmer 1.4s infinite;display:inline-block;min-width:70px;}' +
       '.cvz-d-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin-bottom:28px;}' +
-      '.cvz-d-card{background:var(--cvz-card);border:1px solid var(--cvz-border);border-radius:14px;padding:28px 24px;' +
+      '.cvz-d-card{background:var(--cvz-card);border:1px solid var(--cvz-border);border-radius:0;padding:28px 24px;' +
         'display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;}' +
-      '.cvz-d-icon{width:44px;height:44px;border-radius:12px;background:var(--cvz-teal-dim);display:flex;align-items:center;justify-content:center;margin-bottom:4px;}' +
+      '.cvz-d-icon{width:44px;height:44px;border-radius:0;background:var(--cvz-teal-dim);display:flex;align-items:center;justify-content:center;margin-bottom:4px;}' +
       '.cvz-d-label{font-size:13px;color:var(--cvz-muted);font-weight:500;}' +
       '.cvz-d-value{font-size:26px;font-weight:700;color:var(--cvz-text);line-height:1.2;}' +
       '.cvz-d-sub{font-size:13px;color:var(--cvz-muted);}' +
-      '.cvz-d-bar-track{width:100%;height:6px;border-radius:999px;background:var(--cvz-border);margin-top:6px;overflow:hidden;}' +
-      '.cvz-d-bar-fill{height:100%;background:var(--cvz-teal);border-radius:999px;width:0%;transition:width .3s ease;}' +
+      '.cvz-d-bar-track{width:100%;height:6px;border-radius:0;background:var(--cvz-border);margin-top:6px;overflow:hidden;}' +
+      '.cvz-d-bar-fill{height:100%;background:var(--cvz-teal);border-radius:0;width:0%;transition:width .3s ease;}' +
       '.cvz-d-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:16px;margin-bottom:36px;}' +
-      '.cvz-d-btn{font-family:inherit;font-size:15px;font-weight:600;padding:14px 28px;border-radius:999px;cursor:pointer;' +
-        'text-decoration:none;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;}' +
+      '.cvz-d-btn{font-family:inherit;font-size:15px;font-weight:600;padding:14px 28px;border-radius:0;cursor:pointer;' +
+        'text-decoration:none;display:inline-flex;align-items:center;justify-content:center;text-align:center;border:1px solid transparent;}' +
       '.cvz-d-btn-primary{background:var(--cvz-teal);color:var(--cvz-bg);}' +
       '.cvz-d-btn-outline{background:transparent;color:var(--cvz-teal);border-color:var(--cvz-teal);' +
-        'text-transform:uppercase;letter-spacing:.03em;font-size:13px;}' +
+        'font-size:13px;}' +
       '.cvz-d-title{font-size:22px;font-weight:700;color:var(--cvz-text);margin:0 0 16px;}' +
-      '.cvz-a-card{background:var(--cvz-card);border:1px solid var(--cvz-border);border-radius:14px;overflow:hidden;}' +
+      '.cvz-a-card{background:var(--cvz-card);border:1px solid var(--cvz-border);border-radius:0;overflow:hidden;}' +
       '.cvz-a-header{display:grid;grid-template-columns:minmax(160px,1.6fr) minmax(110px,1fr) 120px 90px 56px 56px 56px 70px;' +
         'gap:8px;padding:14px 20px;background:#10141b;text-transform:uppercase;letter-spacing:.06em;font-size:11px;' +
         'font-weight:600;color:var(--cvz-muted);}' +
@@ -591,25 +584,25 @@
       '.cvz-a-url{color:var(--cvz-teal);font-size:14px;word-break:break-word;}' +
       '.cvz-a-keyword{color:#c9d1d9;font-size:14px;word-break:break-word;}' +
       '.cvz-a-date{color:var(--cvz-muted);font-size:14px;}' +
-      '.cvz-a-badge{display:inline-flex;padding:6px 14px;border-radius:999px;font-size:12px;font-weight:600;}' +
+      '.cvz-a-badge{display:inline-flex;padding:6px 14px;border-radius:0;font-size:12px;font-weight:600;}' +
       '.cvz-a-actions{display:contents;}' +
-      '.cvz-a-icon-btn{width:36px;height:36px;border-radius:999px;background:#21262d;border:none;display:flex;' +
+      '.cvz-a-icon-btn{width:36px;height:36px;border-radius:0;background:#21262d;border:none;display:flex;' +
         'align-items:center;justify-content:center;cursor:pointer;color:#e8edf5;text-decoration:none;}' +
       '.cvz-a-icon-btn.cvz-a-disabled{opacity:.35;cursor:not-allowed;}' +
       '.cvz-a-icon-btn.cvz-a-loading-btn svg{animation:cvz-spin 1s linear infinite;}' +
       '.cvz-a-score-cell{display:flex;align-items:center;justify-content:center;}' +
       '.cvz-a-pagination{display:none;align-items:center;justify-content:center;gap:12px;margin-top:20px;}' +
       '.cvz-a-pagebtn{background:var(--cvz-card);border:1px solid var(--cvz-border);color:var(--cvz-muted);' +
-        'font-family:inherit;font-size:.85rem;font-weight:600;padding:8px 18px;border-radius:999px;cursor:pointer;}' +
+        'font-family:inherit;font-size:.85rem;font-weight:600;padding:8px 18px;border-radius:0;cursor:pointer;}' +
       '.cvz-a-pagebtn:disabled{opacity:.4;cursor:not-allowed;}' +
       '.cvz-a-pagebtn.cvz-a-pagebtn-accent:not(:disabled){color:var(--cvz-teal);border-color:var(--cvz-teal);}' +
       '.cvz-a-pageinfo{background:var(--cvz-card);border:1px solid var(--cvz-border);color:var(--cvz-text);' +
-        'font-size:.85rem;font-weight:600;padding:8px 18px;border-radius:999px;}' +
+        'font-size:.85rem;font-weight:600;padding:8px 18px;border-radius:0;}' +
       '.cvz-click-hint{' +
         'position:fixed;z-index:10000;max-width:220px;' +
         'background:var(--cvz-card);border:1px solid var(--cvz-border);color:var(--cvz-text);' +
         'font-family:Geist,sans-serif;font-size:12px;line-height:1.4;' +
-        'padding:8px 12px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.4);' +
+        'padding:8px 12px;border-radius:0;box-shadow:0 4px 16px rgba(0,0,0,0.4);' +
         'pointer-events:none;opacity:0;transform:translateY(4px);' +
         'transition:opacity .15s ease,transform .15s ease;' +
       '}' +
@@ -617,10 +610,10 @@
       // -- NEU: "Zuletzt aktiv" -------------------------------------------------
       '.cvz-ract-list{display:flex;flex-direction:column;gap:8px;margin-bottom:32px;}' +
       '.cvz-ract-item{display:flex;align-items:center;gap:14px;background:var(--cvz-card);' +
-        'border:1px solid var(--cvz-border);border-radius:12px;padding:12px 16px;' +
+        'border:1px solid var(--cvz-border);border-radius:0;padding:12px 16px;' +
         'text-decoration:none;transition:border-color .15s ease,background .15s ease;}' +
       '.cvz-ract-item:hover{border-color:var(--cvz-teal);background:rgba(79,209,197,0.04);}' +
-      '.cvz-ract-icon{width:36px;height:36px;border-radius:10px;background:var(--cvz-teal-dim);' +
+      '.cvz-ract-icon{width:36px;height:36px;border-radius:0;background:var(--cvz-teal-dim);' +
         'display:flex;align-items:center;justify-content:center;flex-shrink:0;}' +
       '.cvz-ract-main{flex:1;min-width:0;}' +
       '.cvz-ract-type{font-size:12px;font-weight:600;color:var(--cvz-teal);text-transform:uppercase;letter-spacing:.03em;}' +
@@ -638,9 +631,9 @@
       '.cvz-tab-panel{width:100%;}' +
       // -- NEU: Content-Strategien-/Aufbau-Tab (aus page-projects-embed.html
       // uebernommen, cvz-p-Praefix beibehalten fuer identisches Aussehen) ------
-      '.cvz-p-card{background:var(--cvz-card);border:1px solid var(--cvz-border);border-radius:14px;padding:16px;}' +
+      '.cvz-p-card{background:var(--cvz-card);border:1px solid var(--cvz-border);border-radius:0;padding:16px;}' +
       '.cvz-p-row{display:flex;justify-content:space-between;align-items:center;cursor:pointer;' +
-        'background:var(--cvz-bg);border:1px solid var(--cvz-row-border);border-radius:12px;' +
+        'background:var(--cvz-bg);border:1px solid var(--cvz-row-border);border-radius:0;' +
         'padding:18px 20px;margin-bottom:10px;transition:border-color .15s ease;}' +
       '.cvz-p-row:last-child{margin-bottom:0;}' +
       '.cvz-p-row:hover{border-color:var(--cvz-teal);}' +
@@ -651,23 +644,23 @@
       '.cvz-p-row-disabled:hover{border-color:var(--cvz-row-border);}' +
       '.cvz-p-name{font-weight:600;font-size:15px;color:var(--cvz-text);margin-bottom:4px;}' +
       '.cvz-p-meta{font-size:13px;color:var(--cvz-muted);}' +
-      '.cvz-p-badge{font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;' +
+      '.cvz-p-badge{font-size:11px;font-weight:600;padding:4px 10px;border-radius:0;' +
         'text-transform:uppercase;letter-spacing:.03em;background:var(--cvz-teal-dim);color:var(--cvz-teal);white-space:nowrap;}' +
       '.cvz-p-new-btn{display:inline-block;margin-top:6px;background:var(--cvz-teal);color:var(--cvz-bg);' +
-        'font-weight:600;padding:12px 24px;border-radius:10px;text-decoration:none;}' +
+        'font-weight:600;padding:12px 24px;border-radius:0;text-decoration:none;}' +
       '.cvz-p-empty{text-align:center;padding:60px 20px;color:var(--cvz-muted);}' +
       '.cvz-p-error{text-align:center;padding:60px 20px;color:#f87171;}' +
       '.cvz-p-error .cvz-p-error-sub{font-size:14px;color:var(--cvz-muted);margin-top:8px;}' +
       '.cvz-p-pagination{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:20px;}' +
       '.cvz-p-pagebtn{background:var(--cvz-card);border:1px solid var(--cvz-border);color:var(--cvz-muted);' +
-        'font-family:inherit;font-size:.85rem;font-weight:600;padding:8px 18px;border-radius:999px;cursor:pointer;}' +
+        'font-family:inherit;font-size:.85rem;font-weight:600;padding:8px 18px;border-radius:0;cursor:pointer;}' +
       '.cvz-p-pagebtn:disabled{opacity:.4;cursor:not-allowed;}' +
       '.cvz-p-pagebtn.cvz-p-pagebtn-accent:not(:disabled){color:var(--cvz-teal);border-color:var(--cvz-teal);}' +
       '.cvz-p-pageinfo{background:var(--cvz-card);border:1px solid var(--cvz-border);color:var(--cvz-text);' +
-        'font-size:.85rem;font-weight:600;padding:8px 18px;border-radius:999px;}' +
+        'font-size:.85rem;font-weight:600;padding:8px 18px;border-radius:0;}' +
       '.cvz-p-skeleton-row{display:flex;justify-content:space-between;align-items:center;' +
-        'background:var(--cvz-bg);border:1px solid var(--cvz-row-border);border-radius:12px;padding:18px 20px;margin-bottom:10px;}' +
-      '.cvz-p-skeleton-block{border-radius:6px;background:linear-gradient(90deg,#1a2133 25%,#252d3d 50%,#1a2133 75%);' +
+        'background:var(--cvz-bg);border:1px solid var(--cvz-row-border);border-radius:0;padding:18px 20px;margin-bottom:10px;}' +
+      '.cvz-p-skeleton-block{border-radius:0;background:linear-gradient(90deg,#1a2133 25%,#252d3d 50%,#1a2133 75%);' +
         'background-size:400px 100%;animation:cvz-shimmer 1.4s infinite;}' +
       '@media (max-width:768px){' +
         '.cvz-a-header{display:none;}' +
@@ -681,9 +674,9 @@
       '}';
     document.head.appendChild(s);
   }
- 
+
   // -- UI: Shell (Stat-Karten + Buttons + Analysen-Card) -------------------------
- 
+
   var ICONS = {
     download:  '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v13m0 0l-4-4m4 4l4-4" stroke="#e8edf5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="#e8edf5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     eye:       '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5C6.5 4.5 2.15 8 0.75 12c1.4 4 5.75 7.5 11.25 7.5s9.85-3.5 11.25-7.5C21.85 8 17.5 4.5 12 4.5z" fill="#e8edf5"/><circle cx="12" cy="12" r="3.2" fill="#252d3d"/></svg>',
@@ -695,7 +688,7 @@
     aufbau:    '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="1.5" stroke="#4fd1c5" stroke-width="2"/><path d="M3.5 9.5h17" stroke="#4fd1c5" stroke-width="2"/><path d="M8 9.5V20" stroke="#4fd1c5" stroke-width="2"/></svg>',
     strategy:  '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19V9.5l8-5 8 5V19" stroke="#4fd1c5" stroke-width="2" stroke-linejoin="round"/><path d="M9 19v-6h6v6" stroke="#4fd1c5" stroke-width="2" stroke-linejoin="round"/><path d="M4 12h16" stroke="#4fd1c5" stroke-width="2"/></svg>',
   };
- 
+
   function statCardHtml(opts) {
     // opts: { wrapperId, iconKey, label, valueId, subId, withBar, barFillId, hidden }
     return (
@@ -710,10 +703,10 @@
       '</div>'
     );
   }
- 
+
   function buildDashboardShell(root) {
     injectDashboardStyle();
- 
+
     root.innerHTML =
       // GEÄNDERT (siehe Chat-Verlauf, Lasse: "der Bereich [Kontingent-Karten + Buttons] sollte
       // über 'Zuletzt aktiv' angesiedelt werden, statt darunter"): Kontingent-Übersicht (jetzt
@@ -739,15 +732,15 @@
         statCardHtml({ wrapperId: 'cvz-d-c10', iconKey: 'cart',    label: 'Pay-per-Use Content-Strategien', valueId: 'cvz-d-c10-value', subId: 'cvz-d-c10-sub', withBar: false, hidden: true }) +
       '</div>' +
       '<div class="cvz-d-actions">' +
-        '<a id="cvz-d-btn-new-analysis" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">NEUE ANALYSE</a>' +
-        '<a id="cvz-d-btn-new-page" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">LANDINGPAGE AUFBAUEN</a>' +
+        '<a id="cvz-d-btn-new-analysis" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">Neue Analyse</a>' +
+        '<a id="cvz-d-btn-new-page" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">Landingpage aufbauen</a>' +
         // GEÄNDERT (siehe Chat-Verlauf, Lasse: "Plan ändern kann raus, dafür Content-Strategie
         // erstellen rein") - "Plan ändern" (Link auf /preise) ist damit nicht mehr direkt aus
         // dem Dashboard erreichbar. Gleiche Sichtbarkeits-Logik wie die anderen beiden CTA-
         // Buttons: immer sichtbar, unabhaengig von hasStrategyAccess - Zugriffs-/Kontingent-
         // Pruefung passiert auf der Zielseite selbst (siehe fehlendes Kontingent -> 402 in
         // routes/contentStrategyAgent.ts), nicht durch Verstecken des Einstiegspunkts.
-        '<a id="cvz-d-btn-new-strategy" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.CONTENT_STRATEGY_PAGE_URL + '">CONTENT-STRATEGIE ERSTELLEN</a>' +
+        '<a id="cvz-d-btn-new-strategy" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.CONTENT_STRATEGY_PAGE_URL + '">Content-Strategie erstellen</a>' +
       '</div>' +
       // "Zuletzt aktiv" startet unsichtbar (display:none) - wird von loadRecentActivity()
       // eingeblendet, sobald geladen wird / Daten da sind. So flackert beim ersten Rendern keine
@@ -764,7 +757,6 @@
         '<button type="button" class="cvz-tab-btn" id="cvz-tab-btn-strategien" data-tab="strategien" style="display:none">Content-Strategien</button>' +
         '<button type="button" class="cvz-tab-btn" id="cvz-tab-btn-aufbau" data-tab="aufbau" style="display:none">Aufbau-Sessions</button>' +
       '</div>' +
-
       '<div id="cvz-tab-panel-analysen" class="cvz-tab-panel">' +
         '<h2 class="cvz-d-title" id="cvz-analysen-title">Meine Analysen</h2>' +
         '<div class="cvz-a-card">' +
@@ -781,7 +773,6 @@
           '<button id="cvz-a-next" class="cvz-a-pagebtn cvz-a-pagebtn-accent" type="button">Nächste Seite</button>' +
         '</div>' +
       '</div>' +
-
       // Content-Strategien-Panel - startet versteckt, wird erst per
       // applyTabVisibility() gezeigt (nur bei hasStrategyAccess).
       '<div id="cvz-tab-panel-strategien" class="cvz-tab-panel" style="display:none">' +
@@ -795,7 +786,6 @@
           '<button id="cvz-s-next" class="cvz-p-pagebtn cvz-p-pagebtn-accent" type="button">Nächste Seite</button>' +
         '</div>' +
       '</div>' +
-
       // Aufbau-Sessions-Panel - ersetzt das bisherige eigenstaendige
       // page-projects-embed.html (siehe Auslieferungshinweise: dieses Embed
       // kann in Webflow entfernt werden, sobald dieser Tab live ist).
@@ -810,43 +800,34 @@
           '<button id="cvz-p-next" class="cvz-p-pagebtn cvz-p-pagebtn-accent" type="button">Nächste Seite</button>' +
         '</div>' +
       '</div>';
-
     state.container = document.getElementById('cvz-a-body');
-
     document.getElementById('cvz-a-prev').addEventListener('click', function () {
       if (state.currentPage > 1) renderAnalysesPage(state.currentPage - 1);
     });
     document.getElementById('cvz-a-next').addEventListener('click', function () {
       if (state.currentPage < state.totalPages) renderAnalysesPage(state.currentPage + 1);
     });
-
     document.getElementById('cvz-s-prev').addEventListener('click', function () {
       if (state.strategyPage > 1) renderStrategyPage(state.strategyPage - 1);
     });
     document.getElementById('cvz-s-next').addEventListener('click', function () {
       if (state.strategyPage < state.strategyTotalPages) renderStrategyPage(state.strategyPage + 1);
     });
-
     document.getElementById('cvz-p-prev').addEventListener('click', function () {
       if (state.aufbauPage > 1) renderAufbauPage(state.aufbauPage - 1);
     });
     document.getElementById('cvz-p-next').addEventListener('click', function () {
       if (state.aufbauPage < state.aufbauTotalPages) renderAufbauPage(state.aufbauPage + 1);
     });
-
     Array.prototype.forEach.call(document.querySelectorAll('.cvz-tab-btn'), function (btn) {
       btn.addEventListener('click', function () { switchTab(btn.getAttribute('data-tab')); });
     });
-
     showAnalysesLoading();
   }
-
   // -- UI: Tab-Umschaltung ------------------------------------------------------
-
   function switchTab(tabName) {
     if (state.activeTab === tabName) return;
     state.activeTab = tabName;
-
     Array.prototype.forEach.call(document.querySelectorAll('.cvz-tab-btn'), function (btn) {
       var isActive = btn.getAttribute('data-tab') === tabName;
       btn.classList.toggle('cvz-tab-active', isActive);
@@ -855,7 +836,6 @@
       var panel = document.getElementById('cvz-tab-panel-' + name);
       if (panel) panel.style.display = (name === tabName) ? '' : 'none';
     });
-
     // Aufbau-Tab laedt lazy (erst beim ersten Oeffnen) - siehe WHY-Kommentar
     // bei fetchPageProjects/state.aufbauLoaded weiter oben. Strategien-Tab
     // braucht das nicht: state.strategySessions ist schon eager geladen
@@ -863,7 +843,6 @@
     // ueber den bereits vorhandenen Array.
     if (tabName === 'aufbau' && !state.aufbauLoaded) loadAndRenderAufbauProjects();
   }
-
   // Blendet nur die Tabs/Panels ein, auf die der User Zugriff hat, und zeigt
   // die Tab-Leiste selbst nur, wenn dadurch ueberhaupt mehr als ein Tab
   // uebrig bleibt (Ein-Tab-Fall = exakt das bisherige Aussehen ohne Tabs).
@@ -873,24 +852,21 @@
     var btnAufbau     = document.getElementById('cvz-tab-btn-aufbau');
     showEl(btnStrategien, state.hasStrategyAccess, 'inline-flex');
     showEl(btnAufbau,     state.hasAufbauAccess,   'inline-flex');
-
     var visibleCount = 1 + (state.hasStrategyAccess ? 1 : 0) + (state.hasAufbauAccess ? 1 : 0);
     var showTabs = visibleCount > 1;
     showEl(tabsBar, showTabs, 'flex');
-
     // Panel-eigene Ueberschrift nur zeigen, wenn KEINE Tab-Leiste da ist -
     // sonst sagt der aktive Tab-Button bereits "Analysen"/"Content-
     // Strategien"/"Aufbau-Sessions", eine zusaetzliche H2 waere redundant.
     showEl(document.getElementById('cvz-analysen-title'),   !showTabs, 'block');
     showEl(document.getElementById('cvz-strategien-title'), !showTabs, 'block');
     showEl(document.getElementById('cvz-aufbau-title'),     !showTabs, 'block');
-
     if (!state.hasStrategyAccess && state.activeTab === 'strategien') switchTab('analysen');
     if (!state.hasAufbauAccess && state.activeTab === 'aufbau') switchTab('analysen');
   }
- 
+
   // -- UI: Stat-Karten befuellen -------------------------------------------------
- 
+
   function renderStatCards(user, sessionsLimit, contentStrategyLimit) {
     var bu           = user._billingUser || user;
     var reserved     = Math.max(0, Math.round(Number(bu.reserved_credits || 0)));
@@ -909,19 +885,19 @@
     var ppuStrategyCredits   = Math.round(Number(user.ppu_strategy_credits || 0));
     var ppuStrategyReserved  = Math.round(Number(user.reserved_ppu_strategy_credits || 0));
     var ppuStrategyAvailable = Math.max(ppuStrategyCredits - ppuStrategyReserved, 0);
- 
+
     var analysesLeft = bu.credits_remaining != null
       ? Math.max(0, Math.round(Number(bu.credits_remaining)) - reserved)
       : Math.max(0, limit - used - reserved);
- 
+
     // Chat-Kontingent wird weiterhin berechnet (falls an anderer Stelle noch gebraucht),
     // aber aktuell in keiner Karte angezeigt - siehe Hinweis im Dateikopf.
     var chatUsed  = Math.round(Number(user.chat_messages_used_current_period || 0));
     var chatLimit = Math.round(Number(user.chat_messages_limit || 0));
     void chatUsed; void chatLimit;
- 
+
     var percentRaw = limit ? ((used + reserved) / limit) * 100 : 0;
- 
+
     // Karte 1: Analysen diesen Monat
     var usedDisplay = reserved > 0
       ? (used + '/' + limit + ' Analysen (' + reserved + ' in Bearbeitung)')
@@ -930,13 +906,13 @@
     setText('cvz-d-c1-sub', Math.round(percentRaw) + '% des Limits genutzt');
     var bar1 = document.getElementById('cvz-d-c1-bar');
     if (bar1) bar1.style.width = Math.min(percentRaw, 100) + '%';
- 
+
     // Plan-Flags
     var isPaid      = CONFIG.PAID_PLANS.indexOf(bu.license_type) !== -1;
     var isPayPerUse = bu.license_type === 'Pay-per-Use';
     var isFreePlan  = bu.license_type === 'Free';
     var isBetaPlan  = bu.license_type === 'Beta';
- 
+
     // Karte 2: Verbleibende Analysen (Wert + Renewal/Status als ein Satz)
     var renewalSub = '';
     if (isPaid) {
@@ -958,7 +934,7 @@
     }
     setText('cvz-d-c2-value', analysesLeft);
     setText('cvz-d-c2-sub', renewalSub);
- 
+
     // Karte 3: Aktiver Plan
     var planName = bu.license_type || '-';
     if (planName.length > 0 && !isPayPerUse) planName = planName.charAt(0).toUpperCase() + planName.slice(1);
@@ -967,7 +943,7 @@
     setText('cvz-d-c3-sub', limit
       ? (isPaid ? limit + ' Analysen pro Monat' : isPayPerUse ? '1 Analyse, kein Abo' : limit + ' Analyse(n)')
       : '');
- 
+
     // Karte 4+5: Aufbau-Sessions (nur wenn Plan ueberhaupt Kontingent hat), im gleichen
     // Zwei-Karten-Muster wie die Analysen (Verbrauch diesen Monat + Verbleibend).
     // WHY eigenes Reset-Datum: Aufbau-Sessions laufen auf einer eigenen Periode
@@ -977,13 +953,13 @@
     var sessionsLeft     = Math.max(sessionsLimitNum - sessionsUsed, 0);
     var sessionsPercent  = sessionsLimitNum ? (sessionsUsed / sessionsLimitNum) * 100 : 0;
     var showAufbauCards  = sessionsLimitNum > 0;
- 
+
     setText('cvz-d-c4-value', sessionsUsed + '/' + sessionsLimitNum + ' Aufbau-Sessions');
     setText('cvz-d-c4-sub', Math.round(sessionsPercent) + '% des Kontingents genutzt');
     var bar4 = document.getElementById('cvz-d-c4-bar');
     if (bar4) bar4.style.width = Math.min(sessionsPercent, 100) + '%';
     showEl(document.getElementById('cvz-d-c4'), showAufbauCards, 'flex');
- 
+
     var aufbauRenewalSub = '';
     if (isFreePlan) {
       aufbauRenewalSub = sessionsLeft > 0 ? '1 kostenlose Aufbau-Session verfügbar' : 'Kostenlose Aufbau-Session bereits genutzt';
@@ -997,7 +973,7 @@
     setText('cvz-d-c5-value', sessionsLeft);
     setText('cvz-d-c5-sub', aufbauRenewalSub);
     showEl(document.getElementById('cvz-d-c5'), showAufbauCards, 'flex');
- 
+
     // Karte 6: Pay-per-Use (nur wenn vorhanden)
     var ppuLabelText = ppuCredits === 0
       ? 'Keine Pay-per-Use Analysen'
@@ -1021,7 +997,6 @@
     setText('cvz-d-c7-value', ppuAufbauAvailable);
     setText('cvz-d-c7-sub', ppuAufbauLabelText);
     showEl(document.getElementById('cvz-d-c7'), ppuAufbauCredits > 0, 'flex');
-
     // Karte 8+9: Content-Strategien (nur wenn Plan ueberhaupt Kontingent hat) - exakt dasselbe
     // Muster wie Karte 4+5 (Aufbau-Sessions), nur fuer content_strategy_sessions_* statt
     // page_agent_sessions_*. Eigene Periode (content_strategy_sessions_period_start), nicht die
@@ -1031,13 +1006,11 @@
     var strategyLeft     = Math.max(strategyLimitNum - strategyUsed, 0);
     var strategyPercent  = strategyLimitNum ? (strategyUsed / strategyLimitNum) * 100 : 0;
     var showStrategyCards = strategyLimitNum > 0;
-
     setText('cvz-d-c8-value', strategyUsed + '/' + strategyLimitNum + ' Content-Strategien');
     setText('cvz-d-c8-sub', Math.round(strategyPercent) + '% des Kontingents genutzt');
     var bar8 = document.getElementById('cvz-d-c8-bar');
     if (bar8) bar8.style.width = Math.min(strategyPercent, 100) + '%';
     showEl(document.getElementById('cvz-d-c8'), showStrategyCards, 'flex');
-
     var strategyRenewalSub = '';
     if (isFreePlan) {
       strategyRenewalSub = strategyLeft > 0 ? '1 kostenlose Content-Strategie verfügbar' : 'Kostenlose Content-Strategie bereits genutzt';
@@ -1051,7 +1024,6 @@
     setText('cvz-d-c9-value', strategyLeft);
     setText('cvz-d-c9-sub', strategyRenewalSub);
     showEl(document.getElementById('cvz-d-c9'), showStrategyCards, 'flex');
-
     // Karte 10: Pay-per-Use Content-Strategien (nur wenn vorhanden) - exakt dasselbe Muster wie
     // Karte 6/7, nur fuer ppu_strategy_credits statt ppu_credits/ppu_aufbau_credits.
     var ppuStrategyLabelText = ppuStrategyCredits === 0
@@ -1064,24 +1036,23 @@
     setText('cvz-d-c10-value', ppuStrategyAvailable);
     setText('cvz-d-c10-sub', ppuStrategyLabelText);
     showEl(document.getElementById('cvz-d-c10'), ppuStrategyCredits > 0, 'flex');
-
     // User-Kopfbereich (weiterhin Webflow-Elemente, unveraendert)
     setUserHeader(user);
   }
- 
+
   function setUserHeader(user) {
     var nameEl  = document.querySelector('[data-user="name"]');
     var emailEl = document.querySelector('[data-user="email"]');
     if (nameEl)  nameEl.textContent  = user.full_name || 'Unbekannt';
     if (emailEl) emailEl.textContent = user.email     || '';
- 
+
     var avatarEl = document.querySelector('[data-user="avatar"]');
     if (avatarEl) {
       avatarEl.textContent = getInitials(user.full_name || '');
       avatarEl.style.cssText += ';display:flex;align-items:center;justify-content:center';
     }
   }
- 
+
   // -- UI: Klick-Hinweis (Ersatz/Ergaenzung fuer Hover) -----------------------
   // WHY: title-Tooltips loesen nur bei Hover aus - auf Touch-Geraeten (kein
   // Hover) und offenbar teils auch auf Desktop (siehe die pointer-events-
@@ -1092,30 +1063,30 @@
   // schliesst sie wieder.
   var CVZ_CLICK_HINT_ID = 'cvz-click-hint';
   var cvzClickHintTimer = null;
- 
+
   function hideClickHint() {
     if (cvzClickHintTimer) { clearTimeout(cvzClickHintTimer); cvzClickHintTimer = null; }
     var existing = document.getElementById(CVZ_CLICK_HINT_ID);
     if (existing) existing.remove();
     document.removeEventListener('click', handleDocClickForHint, true);
   }
- 
+
   function handleDocClickForHint(e) {
     var hint = document.getElementById(CVZ_CLICK_HINT_ID);
     if (hint && !hint.contains(e.target)) hideClickHint();
   }
- 
+
   function showClickHint(anchorEl, text) {
     if (!text) return;
     hideClickHint();
- 
+
     var hint = document.createElement('div');
     hint.id = CVZ_CLICK_HINT_ID;
     hint.className = 'cvz-click-hint';
     hint.setAttribute('role', 'status');
     hint.textContent = text;
     document.body.appendChild(hint);
- 
+
     var rect     = anchorEl.getBoundingClientRect();
     var hintRect = hint.getBoundingClientRect();
     var top  = rect.top - hintRect.height - 8;
@@ -1124,24 +1095,24 @@
     left = Math.max(8, Math.min(left, window.innerWidth - hintRect.width - 8));
     hint.style.top  = top + 'px';
     hint.style.left = left + 'px';
- 
+
     requestAnimationFrame(function () { hint.classList.add('cvz-click-hint-visible'); });
- 
+
     cvzClickHintTimer = setTimeout(hideClickHint, 3000);
     // WHY setTimeout(...,0): verhindert, dass der Klick, der showClickHint
     // ausgeloest hat, den Listener sofort wieder selbst feuert.
     setTimeout(function () { document.addEventListener('click', handleDocClickForHint, true); }, 0);
   }
- 
+
   // -- UI: Analysen-Tabelle -------------------------------------------------------
- 
+
   var STATUS_STYLES = {
     completed:  { text: 'Abgeschlossen',  color: '#4fd1c5', bg: 'rgba(79,209,197,0.15)' },
     processing: { text: 'In Bearbeitung', color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
     error:      { text: 'Fehler',         color: '#ef4444', bg: 'rgba(239,68,68,0.15)'  },
     failed:     { text: 'Fehler',         color: '#ef4444', bg: 'rgba(239,68,68,0.15)'  },
   };
- 
+
   // 8-10 = gruen, 6-7.9 = tuerkis, 4-5.9 = orange, 0-3.9 = rot
   function getScoreColor(score) {
     if (score >= 8) return '#059669';
@@ -1149,7 +1120,7 @@
     if (score >= 4) return '#f59e0b';
     return '#ef4444';
   }
- 
+
   function createScoreBadge(score) {
     var hasScore = typeof score === 'number' && !isNaN(score);
     var badge = document.createElement('div');
@@ -1158,29 +1129,29 @@
       badge.textContent = score.toFixed(1);
       badge.style.cssText =
         'display:inline-flex;align-items:center;justify-content:center;' +
-        'min-width:44px;padding:8px 14px;border-radius:9999px;' +
+        'min-width:44px;padding:8px 14px;border-radius:0;' +
         'font-weight:700;font-size:13px;line-height:1;' +
         'background:' + color + ';color:#0d1117;';
     } else {
       badge.textContent = '-';
       badge.style.cssText =
         'display:inline-flex;align-items:center;justify-content:center;' +
-        'min-width:44px;padding:8px 14px;border-radius:9999px;' +
+        'min-width:44px;padding:8px 14px;border-radius:0;' +
         'font-weight:700;font-size:13px;line-height:1;' +
         'background:#252d3d;color:#7a8ba8;';
     }
     return badge;
   }
- 
+
   function createAnalysisRow(analysis) {
     var isCompleted = analysis.status === 'completed';
     var canDownload = isCompleted && canAccessPdf(analysis);
- 
+
     // Ist der eingeloggte User der Ersteller dieser Analyse?
     // KI-Agent ist NUR fuer den Ersteller (Backend erzwingt das ohnehin via
     // verifyAnalysisOwnership -> 403 NOT_ANALYSIS_OWNER). Hier nur UX: Button sperren.
     var isCreator = !!state.supabaseUserId && analysis.user_id === state.supabaseUserId;
- 
+
     var statusInfo = STATUS_STYLES[analysis.status] || STATUS_STYLES.completed;
     var formattedDate = '-';
     try {
@@ -1188,23 +1159,23 @@
         day: '2-digit', month: '2-digit', year: 'numeric'
       });
     } catch (e) {}
- 
+
     var row = document.createElement('div');
     row.className = 'cvz-a-row';
     row.setAttribute('data-analysis-id', analysis.id);
- 
+
     // URL
     var urlCell = document.createElement('div');
     urlCell.className = 'cvz-a-url';
     urlCell.textContent = truncate(analysis.landing_page_url, 90);
     row.appendChild(urlCell);
- 
+
     // Keyword
     var kwCell = document.createElement('div');
     kwCell.className = 'cvz-a-keyword';
     kwCell.textContent = truncate(analysis.keyword, 50);
     row.appendChild(kwCell);
- 
+
     // Status
     var statusCell = document.createElement('div');
     var badge = document.createElement('span');
@@ -1214,18 +1185,18 @@
     badge.style.color      = statusInfo.color;
     statusCell.appendChild(badge);
     row.appendChild(statusCell);
- 
+
     // Datum
     var dateCell = document.createElement('div');
     dateCell.className = 'cvz-a-date';
     dateCell.textContent = formattedDate;
     row.appendChild(dateCell);
- 
+
     // Aktionen (Ansicht / KI-Agent / Report) - display:contents auf Desktop,
     // flex-Reihe auf Mobile (siehe CSS)
     var actionsCell = document.createElement('div');
     actionsCell.className = 'cvz-a-actions';
- 
+
     var viewBtn = document.createElement('a');
     viewBtn.className = 'cvz-a-icon-btn' + (isCompleted ? '' : ' cvz-a-disabled');
     viewBtn.innerHTML = ICONS.eye;
@@ -1258,7 +1229,7 @@
       });
     }
     actionsCell.appendChild(viewBtn);
- 
+
     var agentEnabled = isCompleted && isCreator;
     var agentBtn = document.createElement('a');
     agentBtn.className = 'cvz-a-icon-btn' + (agentEnabled ? '' : ' cvz-a-disabled');
@@ -1284,7 +1255,7 @@
       });
     }
     actionsCell.appendChild(agentBtn);
- 
+
     var isFreeAnalysis = (analysis.analysis_source || '').toLowerCase() === 'free';
     var downloadTitle = !isCompleted
       ? 'Analyse muss abgeschlossen sein'
@@ -1308,19 +1279,19 @@
       dlBtn.addEventListener('click', function () { showClickHint(dlBtn, downloadTitle); });
     }
     actionsCell.appendChild(dlBtn);
- 
+
     row.appendChild(actionsCell);
- 
+
     // Score
     var scoreCell = document.createElement('div');
     scoreCell.className = 'cvz-a-score-cell';
     var scoreVal = parseFloat(analysis.overall_score_weighted);
     scoreCell.appendChild(createScoreBadge(scoreVal));
     row.appendChild(scoreCell);
- 
+
     return row;
   }
- 
+
   function renderAnalysesPage(page) {
     state.currentPage = page;
     state.container.innerHTML = '';
@@ -1328,7 +1299,7 @@
     items.forEach(function (item) { state.container.appendChild(createAnalysisRow(item)); });
     updatePaginationInfo();
   }
- 
+
   function updatePaginationInfo() {
     var paginationEl = document.getElementById('cvz-a-pagination');
     var info    = document.getElementById('cvz-a-pageinfo');
@@ -1341,7 +1312,6 @@
     prevBtn.disabled = state.currentPage <= 1;
     nextBtn.disabled = state.currentPage >= state.totalPages;
   }
-
   // -- UI: Tab "Content-Strategien" ---------------------------------------------
   // Gleiches Karten-Layout wie das bisherige page-projects-embed.html
   // (cvz-p-*-Klassen, siehe injectDashboardStyle). GEÄNDERT (siehe Chat-Verlauf, Lasse:
@@ -1349,24 +1319,20 @@
   // angelegt werden, sobald sie in Bearbeitung sind, Status soll sich auf 'Strategie erstellt'
   // ändern"): Strategie-Sessions haben jetzt genau wie Aufbau-Projekte einen Lebenszyklus-Status
   // (siehe STRATEGY_STATUS_MAP unten) statt immer nur "Ansehen" zu zeigen.
-
   var STRATEGY_STATUS_MAP = {
     in_progress: { text: 'In Bearbeitung',     color: '#f59e0b' },
     done:        { text: 'Strategie erstellt', color: '#4fd1c5' },
     error:       { text: 'Fehler',             color: '#ef4444' },
   };
-
   function strategySessionUrl(sessionId) {
     return CONFIG.CONTENT_STRATEGY_PAGE_URL + '?session_id=' + encodeURIComponent(sessionId);
   }
-
   function renderStrategyEmpty(el) {
     el.innerHTML =
       '<div class="cvz-p-empty">' +
         '<p style="margin:0;">Noch keine Content-Strategie erstellt.</p>' +
       '</div>';
   }
-
   function renderStrategyError(el) {
     el.innerHTML =
       '<div class="cvz-p-error">' +
@@ -1374,7 +1340,6 @@
         '<p class="cvz-p-error-sub">Bitte lade die Seite neu oder versuche es später erneut.</p>' +
       '</div>';
   }
-
   function renderStrategyPage(page) {
     state.strategyPage = page;
     var el = document.getElementById('cvz-s-body');
@@ -1410,7 +1375,6 @@
     });
     updateGenericPaginationInfo('cvz-s-pagination', 'cvz-s-pageinfo', 'cvz-s-prev', 'cvz-s-next', state.strategyPage, state.strategyTotalPages);
   }
-
   // Rendert den Strategien-Tab aus dem bereits geladenen state.strategySessions
   // (eager geladen in loadRecentActivity/initDashboard - kein Extra-Fetch hier).
   function renderStrategyTabFromCache() {
@@ -1421,7 +1385,6 @@
     state.strategyTotalPages = Math.max(1, Math.ceil(state.strategySessions.length / CONFIG.PAGE_SIZE));
     renderStrategyPage(1);
   }
-
   // -- UI: Tab "Aufbau-Sessions" --------------------------------------------------
   // Fast 1:1 aus page-projects-embed.html uebernommen (Status-Badge inkl.
   // STATUS_MAP, Klick oeffnet den Landingpage-Assistenten mit ?project=<id>).
@@ -1430,25 +1393,22 @@
   // nutzt bereits die leichte RPC get_recent_page_projects, nicht diese volle
   // Liste) - ein Fetch gegen die Node-API nur, wenn der User den Tab wirklich
   // oeffnet.
-
   var AUFBAU_STATUS_MAP = {
     in_progress:     { text: 'In Bearbeitung',    color: '#f59e0b' },
     structure_ready: { text: 'Struktur erstellt', color: '#4fd1c5' },
     done:            { text: 'Fertig',            color: '#059669' },
   };
-
   function renderAufbauSkeleton(el) {
     var rows = '';
     for (var i = 0; i < 3; i++) {
       rows +=
         '<div class="cvz-p-skeleton-row">' +
           '<div class="cvz-p-skeleton-block" style="width:180px;height:16px;"></div>' +
-          '<div class="cvz-p-skeleton-block" style="width:80px;height:22px;border-radius:999px;"></div>' +
+          '<div class="cvz-p-skeleton-block" style="width:80px;height:22px;border-radius:0;"></div>' +
         '</div>';
     }
     el.innerHTML = rows;
   }
-
   function renderAufbauEmpty(el) {
     el.innerHTML =
       '<div class="cvz-p-empty">' +
@@ -1456,7 +1416,6 @@
         '<a class="cvz-p-new-btn" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">Erste Landingpage starten</a>' +
       '</div>';
   }
-
   function renderAufbauError(el) {
     el.innerHTML =
       '<div class="cvz-p-error">' +
@@ -1464,7 +1423,6 @@
         '<p class="cvz-p-error-sub">Bitte lade die Seite neu oder versuche es später erneut.</p>' +
       '</div>';
   }
-
   function renderAufbauPage(page) {
     state.aufbauPage = page;
     var el = document.getElementById('cvz-p-body');
@@ -1497,7 +1455,6 @@
     el.appendChild(newBtn);
     updateGenericPaginationInfo('cvz-p-pagination', 'cvz-p-pageinfo', 'cvz-p-prev', 'cvz-p-next', state.aufbauPage, state.aufbauTotalPages);
   }
-
   // Laedt die volle Aufbau-Projekte-Liste ueber die Node-API (nicht die
   // RPC-Vorschau) - wird nur beim ersten Oeffnen des Tabs aufgerufen
   // (state.aufbauLoaded), siehe switchTab().
@@ -1517,7 +1474,6 @@
     }
     renderAufbauPage(1);
   }
-
   // Gemeinsame Pagination-Anzeige fuer Strategien- und Aufbau-Tab (gleiches
   // Muster wie updatePaginationInfo() fuer die Analysen-Tabelle, nur
   // parametrisiert statt fest verdrahtet auf die cvz-a-*-IDs).
@@ -1533,19 +1489,18 @@
     prevBtn.disabled = currentPage <= 1;
     nextBtn.disabled = currentPage >= totalPages;
   }
-
   // -- UI: "Zuletzt aktiv" ----------------------------------------------------
   // Kombiniert drei Aktivitaets-Quellen (Analyse, Aufbau-Projekt, KI-Agent-Chat)
   // zu einer einzigen, nach Zeitstempel sortierten Liste. Jede build...-Funktion
   // wandelt die rohen DB-Zeilen einer Quelle in ein einheitliches Item-Format um:
   // { type, iconKey, title, context, timestamp, href }
- 
+
   // Bestaetigtes URL-Muster fuer ein bestehendes Aufbau-Projekt: Parameter
   // heisst 'project' (nicht 'project_id'), Wert ist die page_projects.id.
   function buildAufbauProjectUrl(projectId) {
     return '/member/landingpage-assistant?project=' + encodeURIComponent(projectId);
   }
- 
+
   // state.analysesData ist bereits geladen (siehe loadAndRenderAnalyses) - hier
   // kein weiterer Netzwerk-Call noetig, nur sortieren und die ersten `limit` nehmen.
   function buildAnalyseActivityItems(limit) {
@@ -1563,7 +1518,7 @@
       };
     });
   }
- 
+
   function buildAufbauActivityItems(projects) {
     return projects.map(function (p) {
       return {
@@ -1576,7 +1531,7 @@
       };
     });
   }
- 
+
   function buildAgentActivityItems(sessions) {
     return sessions.map(function (s) {
       // WHY flach statt s.analyses.keyword: get_recent_agent_sessions liefert
@@ -1593,7 +1548,7 @@
       };
     });
   }
- 
+
   // NEU: Content-Strategie-Sessions als 4. Quelle fuer "Zuletzt aktiv" -
   // state.strategySessions ist zu diesem Zeitpunkt schon geladen (siehe
   // loadRecentActivity), kein weiterer Fetch noetig.
@@ -1612,7 +1567,6 @@
       };
     });
   }
-
   // WHY Array-von-Arrays statt fixer Parameter: mit der 4. Quelle
   // (Content-Strategie) waere eine feste Parameterliste (a, b, c, d, limit)
   // unuebersichtlich geworden - itemGroups laesst sich beliebig erweitern,
@@ -1622,18 +1576,18 @@
     all.sort(function (a, b) { return new Date(b.timestamp) - new Date(a.timestamp); });
     return all.slice(0, limit);
   }
- 
+
   function renderRecentActivity(items) {
     var wrap = document.getElementById('cvz-ract-wrap');
     if (!wrap) return;
- 
+
     // Leer -> Section komplett ausblenden statt eine leere Box zu zeigen.
     if (!items.length) {
       wrap.style.display = 'none';
       wrap.innerHTML = '';
       return;
     }
- 
+
     wrap.style.display = '';
     var html = '<h2 class="cvz-d-title" style="margin-bottom:12px;">Zuletzt aktiv</h2><div class="cvz-ract-list">';
     items.forEach(function (item) {
@@ -1650,7 +1604,7 @@
     html += '</div>';
     wrap.innerHTML = html;
   }
- 
+
   // Orchestriert das Laden der "Zuletzt aktiv"-Section: Skeleton anzeigen,
   // Aufbau-Projekte + KI-Agent-Sessions parallel laden (Analysen sind schon da),
   // zusammenfuehren, rendern.
@@ -1666,24 +1620,21 @@
           '<div class="cvz-ract-item cvz-ract-skel"></div>' +
         '</div>';
     }
- 
+
     // Content-Strategie-Sessions nur laden, wenn der User ueberhaupt Zugriff
     // hat (state.hasStrategyAccess wird in initDashboard VOR diesem Aufruf
     // gesetzt) - sonst waere es ein Fetch gegen die Node-API ins Leere.
     var strategyPromise = state.hasStrategyAccess && state.memberToken
       ? fetchContentStrategySessions(state.memberToken)
       : Promise.resolve([]);
-
     var results = await Promise.all([
       fetchRecentPageProjects(userId, CONFIG.RECENT_ACTIVITY_LIMIT),
       fetchRecentAgentSessions(userId, CONFIG.RECENT_ACTIVITY_LIMIT),
       strategyPromise,
     ]);
-
     var aufbauItems  = buildAufbauActivityItems(results[0]);
     var agentItems   = buildAgentActivityItems(results[1]);
     var analyseItems = buildAnalyseActivityItems(CONFIG.RECENT_ACTIVITY_LIMIT);
-
     // state.strategySessions wird hier einmalig befuellt - der Strategien-Tab
     // (renderStrategyTabFromCache) paginiert spaeter ueber genau diesen Array,
     // ohne selbst nochmal zu fetchen (siehe WHY-Kommentar bei
@@ -1695,18 +1646,16 @@
     state.strategyLoadFailed = state.hasStrategyAccess && results[2] === null;
     state.strategySessions   = results[2] || [];
     var strategyItems = state.hasStrategyAccess ? buildStrategyActivityItems(CONFIG.RECENT_ACTIVITY_LIMIT) : [];
-
     var merged = mergeActivityItems([analyseItems, aufbauItems, agentItems, strategyItems], CONFIG.RECENT_ACTIVITY_LIMIT);
     renderRecentActivity(merged);
-
     // Strategien-Tab kann jetzt (falls sichtbar) direkt aus dem Cache rendern -
     // renderStrategyTabFromCache() ist ein No-Op, solange der Tab noch nicht
     // im DOM sichtbar ist (Panel-Wechsel per switchTab() zeigt es dann einfach an).
     if (state.hasStrategyAccess) renderStrategyTabFromCache();
   }
- 
+
   // -- UI: Loading / Empty / Error States -----------------------------------------
- 
+
   var CVZ_SPINNER_SVG =
     '<svg xmlns="http://www.w3.org/2000/svg" width="52" height="52" viewBox="0 0 100 100" fill="none">' +
       '<defs><style>' +
@@ -1725,7 +1674,7 @@
         '<path d="M 74 31 A 30 30 0 1 0 74 69" stroke="#7ee8e0" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.35"/>' +
       '</g>' +
     '</svg>';
- 
+
   var CVZ_DOTS_LOADER =
     '<div id="cvz-dots-loader" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;">' +
       '<svg xmlns="http://www.w3.org/2000/svg" width="52" height="16" viewBox="0 0 80 20" fill="none">' +
@@ -1744,13 +1693,13 @@
         '</g>' +
       '</svg>' +
     '</div>';
- 
+
   function showAnalysesLoading() {
     if (!state.container) return;
     state.container.innerHTML =
       '<div class="cvz-a-loading">' + CVZ_SPINNER_SVG + '<p>Lade Dashboard...</p></div>';
   }
- 
+
   function showNoUserMessage() {
     if (!state.container) return;
     state.container.innerHTML =
@@ -1759,7 +1708,7 @@
         '<p class="cvz-a-error-sub">Bitte melde dich erneut an oder kontaktiere den Support.</p>' +
       '</div>';
   }
- 
+
   function showEmptyState() {
     if (!state.container) return;
     state.container.innerHTML =
@@ -1768,13 +1717,13 @@
         '<p style="margin:0;font-size:14px;">Starte deine erste Analyse!</p>' +
       '</div>';
   }
- 
+
   function showDotsLoader() {
     if (!state.container || document.getElementById('cvz-dots-loader')) return;
     Array.prototype.forEach.call(state.container.querySelectorAll('.cvz-a-row'), function (r) { r.style.opacity = '0.4'; });
     state.container.insertAdjacentHTML('afterbegin', CVZ_DOTS_LOADER);
   }
- 
+
   function hideDotsLoader() {
     var loader = document.getElementById('cvz-dots-loader');
     if (loader) loader.remove();
@@ -1782,41 +1731,41 @@
       Array.prototype.forEach.call(state.container.querySelectorAll('.cvz-a-row'), function (r) { r.style.opacity = ''; });
     }
   }
- 
+
   // -- Data load & render -----------------------------------------------------
- 
+
   async function loadAndRenderAnalyses(keepPage) {
     if (!state.container || !state.memberstackId) { showEmptyState(); return; }
     if (keepPage) showDotsLoader();
- 
+
     var data           = await fetchAnalysesForMember(state.memberstackId);
     state.analysesData = data || [];
     state.totalPages   = Math.max(1, Math.ceil(state.analysesData.length / CONFIG.PAGE_SIZE));
- 
+
     hideDotsLoader();
- 
+
     if (!state.analysesData.length) { showEmptyState(); updatePaginationInfo(); return; }
     state.currentPage = keepPage ? Math.min(state.currentPage, state.totalPages) : 1;
     renderAnalysesPage(state.currentPage);
   }
- 
+
   // -- PDF download -----------------------------------------------------------
- 
+
   async function triggerBlobDownload(url, fileName) {
     var res = await fetch(url);
- 
+
     if (!res.ok) {
       var errText = await res.text();
       throw new Error('Download fehlgeschlagen (' + res.status + '): ' + errText.slice(0, 200));
     }
- 
+
     // Storage liefert bei Fehlern JSON statt PDF - abfangen bevor es als .pdf landet
     var contentType = res.headers.get('content-type') || '';
     if (contentType.indexOf('application/json') !== -1) {
       var body = await res.text();
       throw new Error('Unerwartete Antwort: ' + body.slice(0, 200));
     }
- 
+
     var blob    = await res.blob();
     var blobUrl = URL.createObjectURL(blob);
     var a = document.createElement('a');
@@ -1827,16 +1776,16 @@
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 5000);
   }
- 
+
   async function handleReportDownload(btn, analysisId) {
     if (!state.supabaseUserId) return;
     var analysis = state.analysesData.find(function (a) { return a.id === analysisId; });
     if (!analysis || !canAccessPdf(analysis)) return;
- 
+
     var isAgency = (state.licenseType || '').toLowerCase() === 'agency';
     btn.classList.add('cvz-a-loading-btn');
     btn.title = 'Wird generiert...';
- 
+
     try {
       var domain = 'report', datetime = '';
       try {
@@ -1844,10 +1793,10 @@
         var d    = new Date(analysis.created_at);
         datetime = '-' + d.toISOString().slice(0, 10) + '-' + d.toISOString().slice(11, 16).replace(':', '-');
       } catch (e) {}
- 
+
       var ext      = isAgency ? 'docx' : 'pdf';
       var fileName = 'convertlyze-' + domain + datetime + '.' + ext;
- 
+
       var response = await fetch(
         CONFIG.generateReportUrl,
         {
@@ -1869,13 +1818,13 @@
         err.code = errBody.code;
         throw err;
       }
- 
+
       var downloadUrl = (await response.json()).downloadUrl;
- 
+
       await triggerBlobDownload(downloadUrl, fileName);
       btn.classList.remove('cvz-a-loading-btn');
       btn.title = 'Report herunterladen';
- 
+
     } catch (err) {
       console.error('[CVZ] Report-Download Fehler:', err);
       btn.classList.remove('cvz-a-loading-btn');
@@ -1888,20 +1837,20 @@
       setTimeout(function () { btn.style.backgroundColor = ''; }, 2500);
     }
   }
- 
+
   // -- Realtime + Polling -----------------------------------------------------
- 
+
   // WHY Polling als Fallback: Supabase Realtime kann bei Verbindungsproblemen
   // ausfallen. Polling alle 10s stellt sicher dass Status-Updates ankommen.
   function hasProcessingAnalyses() {
     return state.analysesData.some(function (a) { return a.status === 'processing'; });
   }
- 
+
   async function silentRefresh() {
     if (!state.memberstackId) return;
     var freshData = await fetchAnalysesForMember(state.memberstackId);
     if (!freshData) return;
- 
+
     var changed = false;
     freshData.forEach(function (fresh) {
       var idx = state.analysesData.findIndex(function (a) { return a.id === fresh.id; });
@@ -1911,15 +1860,15 @@
         return;
       }
       if (state.analysesData[idx].status === fresh.status) return;
- 
+
       state.analysesData[idx] = fresh;
       changed = true;
- 
+
       var row = state.container
         ? state.container.querySelector('[data-analysis-id="' + fresh.id + '"]')
         : null;
       if (!row) return;
- 
+
       var badge   = row.querySelector('.cvz-a-badge');
       var newInfo = STATUS_STYLES[fresh.status] || STATUS_STYLES.completed;
       if (badge) {
@@ -1933,24 +1882,24 @@
         row.parentNode.replaceChild(newRow, row);
       }
     });
- 
+
     if (changed) {
       state.totalPages = Math.max(1, Math.ceil(state.analysesData.length / CONFIG.PAGE_SIZE));
       updatePaginationInfo();
     }
     if (!hasProcessingAnalyses()) stopPolling();
   }
- 
+
   function startPolling() {
     stopPolling();
     if (!hasProcessingAnalyses()) return;
     state.pollingTimer = setInterval(silentRefresh, CONFIG.POLL_INTERVAL_MS);
   }
- 
+
   function stopPolling() {
     if (state.pollingTimer) { clearInterval(state.pollingTimer); state.pollingTimer = null; }
   }
- 
+
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
       stopPolling();
@@ -1958,7 +1907,7 @@
       silentRefresh().then(startPolling);
     }
   });
- 
+
   function subscribeToAnalysisChanges(userId) {
     try {
       if (!window.supabase || !window.supabase.channel) return;
@@ -1977,21 +1926,21 @@
       console.warn('[CVZ] Realtime-Subscription fehlgeschlagen:', e);
     }
   }
- 
+
   // -- Init -------------------------------------------------------------------
- 
+
   async function initDashboard() {
     try {
       var ready = await waitForDependencies();
       if (!ready) return;
- 
+
       var appRoot = document.getElementById('cvz-dashboard-app');
       if (!appRoot) {
         console.error('[CVZ] #cvz-dashboard-app nicht im DOM gefunden - Webflow-Container fehlt.');
         return;
       }
       buildDashboardShell(appRoot);
- 
+
       var memberstackId = null;
       try {
         var member    = await window.$memberstackDom.getCurrentMember();
@@ -2007,15 +1956,13 @@
       } catch (e) {
         console.error('[CVZ] Memberstack Fehler:', e);
       }
-
       if (!memberstackId) {
         showNoUserMessage();
         document.body.classList.add('content-loaded');
         return;
       }
-
       state.memberstackId = memberstackId;
- 
+
       // Checkout aus sessionStorage (Preis-Auswahl vor Login/Registrierung):
       // Wenn ein Plan gewaehlt wurde, wird der Stripe-Checkout hier sofort ausgeloest,
       // bevor der Rest des Dashboards ueberhaupt sichtbar wird.
@@ -2024,7 +1971,7 @@
       var checkoutPriceId = (savedPlan && CONFIG.CHECKOUT_PRICE_IDS[savedPlan]) ? CONFIG.CHECKOUT_PRICE_IDS[savedPlan][savedBilling] : null;
       sessionStorage.removeItem('selected_plan');
       sessionStorage.removeItem('selected_billing');
- 
+
       if (checkoutPriceId) {
         window.$memberstackDom.purchasePlansWithCheckout({
           priceId:    checkoutPriceId,
@@ -2032,30 +1979,30 @@
         }).catch(function () { document.documentElement.style.visibility = 'visible'; });
         return;
       }
- 
+
       document.documentElement.style.visibility = 'visible';
- 
+
       // -- Purchase Success Modal --------------------------------------------
       var isPurchaseSuccess = getParam('purchase') === 'success';
       if (isPurchaseSuccess) {
         window.history.replaceState({}, document.title, window.location.pathname);
       }
- 
+
       var currentUser = await fetchUser(memberstackId, 1) || await fetchUser(memberstackId, 5);
       if (!currentUser) {
         showNoUserMessage();
         document.body.classList.add('content-loaded');
         return;
       }
- 
+
       state.supabaseUserId = currentUser.id;
       state.licenseType    = (currentUser._billingUser || currentUser).license_type || '';
       state.hasPdfAccess   = checkPdfAccess(currentUser);
- 
+
       if (isPurchaseSuccess) {
         showPurchaseSuccessModal(state.licenseType);
       }
- 
+
       // Team-Invite annehmen (Cookie wird nach wie vor unterstuetzt, auch wenn
       // das Team-Modal selbst jetzt auf der Einstellungen-Seite lebt)
       var pendingInvite = getCookie('cvz_invite');
@@ -2078,16 +2025,15 @@
           console.error('[CVZ] Team-Invite Fehler:', e);
         }
       }
- 
+
       // Credit-Reset
       if (await triggerCreditResetIfPaid(currentUser)) {
         currentUser = await fetchUser(memberstackId, 1) || currentUser;
       }
- 
+
       // Aufbau-Sessions-Kontingent des Plans laden
       var sessionsLimit        = await fetchPlanSessionsLimit(state.licenseType);
       var contentStrategyLimit = await fetchPlanContentStrategyLimit(state.licenseType);
-
       // -- Zugriffsrechte fuer die Tabs ---------------------------------------
       // WICHTIG (bitte vor dem Live-Schalten prüfen): content_strategy_sessions_limit
       // wurde per Migration (content_strategy_plan_limit.sql) initial fuer JEDEN
@@ -2101,18 +2047,14 @@
       // explizit, weil es jetzt direkt die Tab-Sichtbarkeit steuert.
       var ppuStrategyCredits = Math.round(Number(currentUser.ppu_strategy_credits || 0));
       state.hasStrategyAccess = contentStrategyLimit > 0 || ppuStrategyCredits > 0;
-
       // Gleiches Muster wie die bestehenden Aufbau-Stat-Karten (showAufbauCards
       // in renderStatCards) - Free-Plan hat hier laut bestehendem Code z.B. 1
       // kostenlose Aufbau-Session, daher limit-basiert statt hart auf
       // Plan-Namen geprueft.
       var ppuAufbauCredits = Math.round(Number(currentUser.ppu_aufbau_credits || 0));
       state.hasAufbauAccess = sessionsLimit > 0 || ppuAufbauCredits > 0;
-
       applyTabVisibility();
-
       renderStatCards(currentUser, sessionsLimit, contentStrategyLimit);
-
       await loadAndRenderAnalyses(false);
       // "Zuletzt aktiv" erst NACH loadAndRenderAnalyses(), weil
       // buildAnalyseActivityItems() auf state.analysesData zugreift.
@@ -2121,19 +2063,19 @@
       await loadRecentActivity(currentUser.id);
       subscribeToAnalysisChanges(currentUser.id);
       startPolling();
- 
+
       document.body.classList.add('content-loaded');
- 
+
     } catch (err) {
       console.error('[CVZ] Dashboard-Fehler:', err);
       document.body.classList.add('content-loaded');
     }
   }
- 
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initDashboard);
   } else {
     initDashboard();
   }
- 
+
 })();
