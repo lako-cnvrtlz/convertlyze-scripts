@@ -352,11 +352,19 @@
     acc[o.value] = o.label;
     return acc;
   }, {});
-  function renderForm() {
+  // GEÄNDERT (siehe Chat-Verlauf, Themen-Validierung): optionaler prefill-Parameter, damit ein
+  // "Zurück zum Formular" von der neuen Validierungs-Ansicht aus (siehe
+  // renderTopicValidationResult weiter unten) die zuletzt eingegebenen Werte nicht verwirft.
+  // renderApp() ruft weiterhin renderForm() ohne Argument auf - prefill ist dann einfach {}.
+  function renderForm(prefill) {
+    prefill = prefill || {};
     var form = el('form', { class: 'cvz-cs-form' });
     var topicInput = el('input', { type: 'text', name: 'topic', placeholder: 'z.B. "Landingpage Software für B2B"', required: 'required' });
+    if (prefill.topic) topicInput.value = prefill.topic;
     var domainInput = el('input', { type: 'text', name: 'domain', placeholder: 'z.B. convertlyze.com (optional, für Abdeckungs-Check)' });
-    if (state.gscStatus && state.gscStatus.connected && state.gscStatus.sites.length === 1) {
+    if (prefill.domain) {
+      domainInput.value = prefill.domain;
+    } else if (state.gscStatus && state.gscStatus.connected && state.gscStatus.sites.length === 1) {
       var suggested = state.gscStatus.sites[0].site_url.replace(/^sc-domain:/, '').replace(/^https?:\/\//, '').replace(/\/$/, '');
       domainInput.value = suggested;
     }
@@ -394,13 +402,155 @@
       var topic = topicInput.value.trim();
       var domain = domainInput.value.trim();
       if (!topic) return;
-      startGeneration(topic, domain || undefined, llmTypeSelect.value);
+      // GEÄNDERT (siehe Chat-Verlauf, Themen-Validierung, "Kunde entscheidet vor dem Lauf"):
+      // ruft nicht mehr direkt startGeneration() auf, sondern prüft zuerst, ob "topic"
+      // tatsächlich das beste Kern-Keyword ist (siehe startTopicValidation weiter unten).
+      // startGeneration() wird jetzt erst aufgerufen, NACHDEM der Kunde das Ergebnis der Prüfung
+      // bestätigt hat.
+      startTopicValidation(topic, domain || undefined, llmTypeSelect.value);
     });
     return form;
   }
+  // NEU (siehe Chat-Verlauf, Themen-Validierung, "Kunde entscheidet vor dem Lauf"): erster
+  // Schritt des jetzt zweistufigen Flows. Ruft POST /validate-topic auf (synchron, kein
+  // Polling - deutlich kürzer als die eigentliche Cluster-Generierung) und zeigt danach
+  // renderTopicValidationResult() zur Bestätigung, bevor überhaupt ein Kontingent-Slot
+  // verbraucht wird.
+  var INTENT_FIT_LABELS = {
+    besser: 'Besserer Fit',
+    gleichwertig: 'Gleichwertiger Fit',
+    schlechter: 'Schwächerer Fit',
+    zu_breit: 'Zu breit für das Angebot',
+  };
+  var TOPIC_RECOMMENDATION_LABELS = {
+    thema_beibehalten: 'Empfehlung: ursprüngliches Thema beibehalten',
+    thema_wechseln: 'Empfehlung: zu einer Alternative wechseln',
+    thema_erweitern: 'Empfehlung: Thema erweitern statt wechseln',
+  };
+  function renderValidating(topic) {
+    clear(state.root);
+    var box = el('div', { class: 'cvz-cs-processing' }, [
+      el('div', { class: 'cvz-cs-spinner' }),
+      el('p', { class: 'cvz-cs-progress-text' }, ['Prüfe, ob "' + topic + '" das richtige Kern-Thema ist …']),
+      el('p', { class: 'cvz-cs-hint' }, ['Das dauert normalerweise unter einer Minute, deutlich kürzer als die eigentliche Strategie-Erstellung.']),
+    ]);
+    state.root.appendChild(renderQuotaBanner());
+    state.root.appendChild(box);
+  }
+  // Eigener, kurzer Timeout fürs Fetch selbst (AbortController) - die Validierung ist synchron,
+  // ein hängender Request soll die Seite nicht unbegrenzt im Ladezustand lassen. Etwas über dem
+  // 60-Sekunden-Timeout, das die Route selbst serverseitig setzt (withTimeout(...), siehe
+  // routes/contentStrategyAgent.ts, POST /validate-topic), aus demselben Grund wie
+  // CONFIG.pollTimeoutMs bei pollSession: die echte Backend-Fehlermeldung soll ankommen, bevor
+  // der eigene generische Text feuert.
+  function startTopicValidation(topic, domain, geoTestLlmType) {
+    renderValidating(topic);
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function () {
+      controller.abort();
+    }, 70 * 1000);
+    apiFetch('/api/content-strategy/validate-topic', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain }),
+      signal: controller.signal,
+    })
+      .then(function (result) {
+        clearTimeout(timeoutId);
+        renderTopicValidationResult(result, domain, geoTestLlmType, topic);
+      })
+      .catch(function (err) {
+        clearTimeout(timeoutId);
+        var message =
+          err.name === 'AbortError'
+            ? 'Zeitüberschreitung bei der Themen-Prüfung. Bitte erneut versuchen.'
+            : 'Themen-Prüfung fehlgeschlagen: ' + err.message;
+        renderError(message);
+      });
+  }
+  // result: Antwort von POST /validate-topic ({ validation_id, seed_topic, seed_search_volume,
+  // alternatives_checked, empfehlung, empfohlenes_thema, reasoning }). Zeigt das Original-Thema
+  // und alle geprüften Alternativen als auswählbare Optionen, dazu ein freies Textfeld für eine
+  // eigene Formulierung - der Kunde entscheidet, welches Thema tatsächlich gebaut wird, die
+  // Empfehlung ist nur vorausgewählt, nie erzwungen.
+  function renderTopicValidationResult(result, domain, geoTestLlmType, originalTopic) {
+    clear(state.root);
+    var wrap = el('div', { class: 'cvz-cs-topic-check' });
+    wrap.appendChild(el('h3', {}, ['Bevor wir loslegen: ist "' + result.seed_topic + '" das richtige Thema?']));
+    var seedVolText = result.seed_search_volume != null ? 'ca. ' + result.seed_search_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
+
+    var optionsList = el('div', { class: 'cvz-cs-topic-options' });
+    var chosenInput = el('input', { type: 'hidden', name: 'chosen_topic' });
+    chosenInput.value = result.empfehlung === 'thema_wechseln' ? result.empfohlenes_thema : result.seed_topic;
+
+    var freeTextInput = el('input', { type: 'text', class: 'cvz-cs-topic-free-input' });
+    freeTextInput.value = chosenInput.value;
+    freeTextInput.addEventListener('input', function () {
+      chosenInput.value = freeTextInput.value;
+    });
+
+    function makeOption(topicValue, labelText, isRecommended, extraNote) {
+      var radioId = 'cvz-cs-topic-opt-' + Math.random().toString(36).slice(2);
+      var radio = el('input', { type: 'radio', name: 'cvz_cs_topic_choice', id: radioId });
+      radio.checked = topicValue === chosenInput.value;
+      radio.addEventListener('change', function () {
+        chosenInput.value = topicValue;
+        freeTextInput.value = topicValue;
+      });
+      var labelChildren = [radio, ' ' + labelText];
+      if (isRecommended) labelChildren.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-recommended' }, ['Empfohlen']));
+      var optionBox = el('div', { class: 'cvz-cs-topic-option' }, [el('label', { for: radioId }, labelChildren)]);
+      if (extraNote) optionBox.appendChild(el('p', { class: 'cvz-cs-hint' }, [extraNote]));
+      return optionBox;
+    }
+
+    optionsList.appendChild(
+      makeOption(result.seed_topic, '"' + result.seed_topic + '" (Original, ' + seedVolText + ')', result.empfehlung === 'thema_beibehalten')
+    );
+    (result.alternatives_checked || []).forEach(function (alt) {
+      var volText = alt.search_volume != null ? 'ca. ' + alt.search_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
+      var badge = INTENT_FIT_LABELS[alt.intent_fit] || alt.intent_fit;
+      optionsList.appendChild(
+        makeOption(
+          alt.topic,
+          '"' + alt.topic + '" (' + volText + ', ' + badge + ')',
+          result.empfohlenes_thema === alt.topic && result.empfehlung !== 'thema_beibehalten',
+          alt.reasoning
+        )
+      );
+    });
+    wrap.appendChild(optionsList);
+
+    wrap.appendChild(
+      el('div', { class: 'cvz-cs-topic-recommendation-box' }, [
+        el('p', {}, [(TOPIC_RECOMMENDATION_LABELS[result.empfehlung] || result.empfehlung) + '.']),
+        el('p', { class: 'cvz-cs-hint' }, [result.reasoning]),
+      ])
+    );
+
+    wrap.appendChild(el('label', { class: 'cvz-cs-label' }, ['Oder eigene Formulierung für den Cluster:', freeTextInput]));
+
+    var confirmBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Content-Cluster erstellen']);
+    confirmBtn.addEventListener('click', function () {
+      var finalTopic = freeTextInput.value.trim() || chosenInput.value;
+      startGeneration(finalTopic, domain, geoTestLlmType, result.validation_id);
+    });
+    var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Zurück, Thema/Domain ändern']);
+    backBtn.addEventListener('click', function () {
+      clear(state.root);
+      state.root.appendChild(renderQuotaBanner());
+      state.root.appendChild(renderForm({ topic: originalTopic, domain: domain }));
+    });
+    wrap.appendChild(el('div', { class: 'cvz-cs-topic-check-actions' }, [backBtn, confirmBtn]));
+
+    state.root.appendChild(renderQuotaBanner());
+    state.root.appendChild(wrap);
+  }
   // GEÄNDERT (siehe Datei-Kopf-Kommentar zum session-basierten Polling-Umbau): pollt nach dem
   // Start jetzt direkt über die zurückgegebene session_id statt über einen turn_id-Job.
-  function startGeneration(topic, domain, geoTestLlmType) {
+  // GEÄNDERT (siehe Chat-Verlauf, Themen-Validierung): neuer 4. Parameter validationId, jetzt
+  // PFLICHT im Request-Body (siehe POST /generate im Backend - lehnt ohne validation_id mit 400
+  // ab, siehe routes/contentStrategyAgent.ts).
+  function startGeneration(topic, domain, geoTestLlmType, validationId) {
     renderProcessing(topic);
     apiFetch('/api/content-strategy/generate', {
       method: 'POST',
@@ -416,6 +566,7 @@
         domain: domain,
         run_prompt_test: true,
         geo_test_llm_type: geoTestLlmType,
+        validation_id: validationId,
       }),
     })
       .then(function (res) {
@@ -618,26 +769,69 @@
   // (siehe pollSession, die die komplette Session-Zeile ohnehin schon vorliegen hat), bleibt hier
   // aber als optionaler Parameter bestehen, damit renderReportHeader ohne session weiterhin ein
   // sinnvolles "heute"-Datum anzeigt.
+  // NEU (siehe Chat-Verlauf, Themen-Validierung): zeigt im fertigen Bericht nachträglich
+  // nachvollziehbar, welches Thema geprüft wurde, welche Alternativen zur Wahl standen und
+  // welches Thema der Kunde am Ende tatsächlich gewählt hat. result.topic_validation.seed_topic
+  // ist das ursprünglich GEPRÜFTE Thema, finalSeedTopic (= result.seed_topic, oberste Ebene) ist
+  // das Thema, um das der Cluster tatsächlich gebaut wurde - beides kann auseinanderfallen, wenn
+  // der Kunde eine Alternative oder eine eigene Formulierung gewählt hat.
+  function renderTopicValidationSection(topicValidation, finalSeedTopic) {
+    var box = el('div', { class: 'cvz-cs-topic-validation' });
+    if (!topicValidation) {
+      box.appendChild(
+        el('p', { class: 'cvz-cs-hint' }, ['Keine Themen-Prüfung für diese Strategie vorhanden (älterer Lauf, vor diesem Feature erstellt).'])
+      );
+      return box;
+    }
+    var seedVolText =
+      topicValidation.seed_search_volume != null ? 'ca. ' + topicValidation.seed_search_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
+    box.appendChild(el('p', {}, ['Geprüftes Ausgangsthema: "' + topicValidation.seed_topic + '" (' + seedVolText + ')']));
+    if (topicValidation.alternatives_checked && topicValidation.alternatives_checked.length > 0) {
+      var list = el('ul', { class: 'cvz-cs-topic-alt-list' });
+      topicValidation.alternatives_checked.forEach(function (a) {
+        var volText = a.search_volume != null ? 'ca. ' + a.search_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
+        list.appendChild(
+          el('li', {}, [
+            el('span', { class: 'cvz-cs-badge cvz-cs-badge-intent-' + a.intent_fit }, [INTENT_FIT_LABELS[a.intent_fit] || a.intent_fit]),
+            ' "' + a.topic + '" (' + volText + '): ' + a.reasoning,
+          ])
+        );
+      });
+      box.appendChild(list);
+    }
+    box.appendChild(
+      el('p', { class: 'cvz-cs-topic-recommendation' }, [
+        (TOPIC_RECOMMENDATION_LABELS[topicValidation.empfehlung] || topicValidation.empfehlung) + '. ' + topicValidation.reasoning,
+      ])
+    );
+    if (finalSeedTopic && finalSeedTopic !== topicValidation.seed_topic) {
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für diesen Cluster tatsächlich gewähltes Thema: "' + finalSeedTopic + '"']));
+    }
+    return box;
+  }
   function renderResult(sessionId, result, fundedBy, session) {
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
     wrap.appendChild(renderReportHeader(result, session, sessionId));
-    wrap.appendChild(renderReportSection(1, 'Ausgangslage', [renderProse(result.ausgangslage)]));
+    // NEU (siehe Chat-Verlauf, Themen-Validierung) - neuer Abschnitt 1, alle bisherigen
+    // Abschnitte rutschen entsprechend von 1-6 auf 2-7.
+    wrap.appendChild(renderReportSection(1, 'Themen-Check', [renderTopicValidationSection(result.topic_validation, result.seed_topic)]));
+    wrap.appendChild(renderReportSection(2, 'Ausgangslage', [renderProse(result.ausgangslage)]));
     wrap.appendChild(
-      renderReportSection(2, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])])
+      renderReportSection(3, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])])
     );
     // REIHENFOLGE GEÄNDERT (siehe Chat-Verlauf, Lasse: "Ist-Zustand nach Executive Summary,
     // dann ist [Content-Cluster-Strategie] quasi der Soll-Zustand"): Ist-Zustand kommt jetzt
     // VOR der Content-Cluster-Strategie, die entsprechend als Soll-Zustand betitelt ist -
-    // liest sich jetzt als Ausgangslage → Summary → Ist → Soll → GEO statt Ist irgendwo
-    // nachgeschoben zwischen zwei Soll-Abschnitten.
-    wrap.appendChild(renderReportSection(3, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
-    wrap.appendChild(renderReportSection(4, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
-    wrap.appendChild(renderReportSection(5, 'GEO-Strategie', [renderGeoSection(result.geo_strategy)]));
+    // liest sich jetzt als Themen-Check → Ausgangslage → Summary → Ist → Soll → GEO statt Ist
+    // irgendwo nachgeschoben zwischen zwei Soll-Abschnitten.
+    wrap.appendChild(renderReportSection(4, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
+    wrap.appendChild(renderReportSection(5, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
+    wrap.appendChild(renderReportSection(6, 'GEO-Strategie', [renderGeoSection(result.geo_strategy)]));
     // NEU (siehe Chat-Verlauf, Lasse: "Empfohlene Roadmap ... so wie wir es in der Analyse
     // machen, nur mit weniger Inhalt") - letzter inhaltlicher Abschnitt, priorisierte
     // Verdichtung der wichtigsten Punkte aus dem gesamten Report, keine neue Analyse.
-    wrap.appendChild(renderReportSection(6, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]));
+    wrap.appendChild(renderReportSection(7, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]));
     var fundingText = fundedBy
       ? 'Finanziert aus: ' + (fundedBy === 'ppu_strategy' ? 'Pay-per-Use-Credit' : 'Plan-Kontingent')
       : 'Gespeicherte Strategie';
