@@ -5,7 +5,13 @@
   // KONFIGURATION
   // =========================================================================
   var CONFIG = {
-    apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
+    apiBaseUrl: 'https://<railway-service>.up.railway.app',
+    // Separate Supabase Edge Function fürs Topic-Slot-Pay-per-Use, NICHT
+    // Teil des Railway-Backends. Annahme (nicht bestätigt, Code nie
+    // gesehen): quantity = wie viele Slots ZUSÄTZLICH gekauft werden
+    // sollen, nicht die neue Gesamtmenge. Falls falsch, muss submitBuyTopicSlot
+    // unten die aktuelle purchased-Menge dazuzählen.
+    stripeCheckoutUrl: 'https://<euer-supabase-projekt>.supabase.co/functions/v1/stripe-topic-slot-checkout',
     // Kein apiKey mehr (siehe Chat-Verlauf): das Script liegt jetzt in
     // einem öffentlichen GitHub-Repo, ein hier eingebetteter Key wäre kein
     // Geheimnis mehr gewesen. Auth läuft ausschließlich über
@@ -21,7 +27,7 @@
     // WICHTIG: Selbst bei false liefert GET /topics/{id} aktuell KEINE
     // competitors/gsc_rows und KEIN visibility_status pro Prompt, siehe
     // loadTopicDetail weiter unten.
-    useMockData: false,  // TODO: umgestellt für den echten Test
+    useMockData: false,  // TODO: für den echten Test
   };
 
   // =========================================================================
@@ -240,6 +246,9 @@
     showCreateForm: false,   // ob das "Neues Thema anlegen"-Formular gerade offen ist
     isCreating:     false,
     createError:    null,
+    limitReached:   false,  // true, wenn der letzte Anlege-Versuch am Plan-Limit (403) gescheitert ist
+    isBuyingSlot:   false,
+    topicUsage:     null,   // { current_count, limit, can_create }, siehe loadTopicUsage
   };
 
   // =========================================================================
@@ -289,6 +298,7 @@
     try {
       await loadProjects();
       await loadTopics();
+      await loadTopicUsage();
     } catch (e) {
       console.error('[CVZ Visibility] Daten konnten nicht geladen werden:', e);
       showErrorMessage('Deine Daten konnten nicht geladen werden. Bitte lade die Seite neu.');
@@ -372,6 +382,18 @@
     }
     var data = await apiFetch('/topics');
     state.allTopics = data.topics || [];
+  }
+
+  async function loadTopicUsage() {
+    if (CONFIG.useMockData) {
+      // Mock-Limit bewusst höher als die Anzahl der Mock-Topics gesetzt,
+      // damit die Standard-Demo weiterhin normal anlegen kann. Zum Testen
+      // des "Limit erreicht"-Zustands hier den Wert auf state.allTopics.length setzen.
+      state.topicUsage = { current_count: state.allTopics.length, limit: 5, can_create: state.allTopics.length < 5 };
+      return;
+    }
+    var data = await apiFetch('/account/topic-status');
+    state.topicUsage = data;
   }
 
   async function loadTopicDetail(topicId) {
@@ -545,12 +567,18 @@
     if (createToggle) {
       state.showCreateForm = !state.showCreateForm;
       state.createError = null;
+      state.limitReached = false;
       render();
       return;
     }
     var createSubmit = event.target.closest('[data-cvz-create-submit]');
     if (createSubmit) {
       submitCreateForm();
+      return;
+    }
+    var buySlot = event.target.closest('[data-cvz-buy-slot]');
+    if (buySlot) {
+      submitBuyTopicSlot();
       return;
     }
     var logo = event.target.closest('[data-cvz-source-url]');
@@ -764,6 +792,15 @@
       state.allTopics.push(newTopic);
       state.activeProjectId = project.id;
 
+      // Nutzungsstand lokal nachziehen, damit das Formular beim nächsten
+      // Öffnen sofort den richtigen Zustand zeigt, ohne erst neu laden zu
+      // müssen (bei useMockData:false wäre ein Refetch zwar korrekter,
+      // aber unnötig, current_count hat sich ja genau um 1 erhöht).
+      if (state.topicUsage) {
+        state.topicUsage.current_count += 1;
+        state.topicUsage.can_create = state.topicUsage.current_count < state.topicUsage.limit;
+      }
+
       state.isCreating = false;
       state.showCreateForm = false;
       openTopicDetail(newTopic.id); // Detailansicht zeigt "collecting", bis der Hintergrundlauf fertig ist, das ist erwartetes Verhalten
@@ -774,12 +811,56 @@
         // check_topic_limit() im Backend wirft genau das bei erreichtem
         // Plan-Limit, e.message enthält dank des apiFetch-Fixes jetzt den
         // echten Backend-Text (inkl. aktuellem Stand, z.B. "3/3").
-        state.createError = e.message + ' Weitere Topic-Slots über Pay-per-Use hinzukaufen.';
+        state.createError = e.message;
+        state.limitReached = true;
       } else {
         state.createError = 'Anlegen fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler');
+        state.limitReached = false;
       }
       render();
     }
+  }
+
+  async function submitBuyTopicSlot() {
+    state.isBuyingSlot = true;
+    render();
+
+    try {
+      var response = await fetch(CONFIG.stripeCheckoutUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memberstack_token: state.memberToken, quantity: 1 }),
+      });
+      var data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || data.detail || ('Checkout fehlgeschlagen (' + response.status + ')'));
+      }
+
+      if (data.mode === 'checkout_created' && data.checkout_url) {
+        window.location.href = data.checkout_url; // Erstkauf: zu Stripe weiterleiten
+        return;
+      }
+      if (data.mode === 'quantity_updated') {
+        // Nachkauf: sofort bestätigt, kein Redirect nötig. Limit-Fehler
+        // zurücksetzen UND topicUsage neu laden (nicht nur lokal
+        // hochzählen, der neue Grenzwert kommt ja vom Server/Stripe, den
+        // kennen wir hier nicht sicher), damit die Vorab-Sperre im
+        // Formular sofort wieder aufgehoben ist.
+        state.limitReached = false;
+        state.createError = 'Slot gekauft (jetzt ' + data.new_quantity + ' insgesamt).';
+        try {
+          await loadTopicUsage();
+        } catch (e) {
+          console.error('[CVZ Visibility] Nutzungsstand konnte nach Kauf nicht neu geladen werden:', e);
+        }
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Slot-Kauf fehlgeschlagen:', e);
+      state.createError = 'Slot-Kauf fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler');
+    }
+
+    state.isBuyingSlot = false;
+    render();
   }
 
   function renderCreateTopicForm() {
@@ -797,6 +878,32 @@
 
     var form = document.createElement('div');
     form.className = 'cvz-create-form-fields';
+
+    // NEU: Wenn wir schon VOR jedem Anlege-Versuch wissen, dass kein Platz
+    // mehr ist (state.topicUsage von loadTopicUsage), zeigen wir gar nicht
+    // erst die Eingabefelder, sondern direkt Meldung + Kauf-Button. Der
+    // Nutzer kann so gar nicht erst auf "Anlegen" klicken, um dann einen
+    // Fehler zu bekommen, das war der Wunsch.
+    var limitReachedUpfront = state.topicUsage && !state.topicUsage.can_create && !state.limitReached;
+    if (limitReachedUpfront) {
+      var upfrontMsg = document.createElement('p');
+      upfrontMsg.className = 'cvz-create-error';
+      upfrontMsg.textContent =
+        'Euer Plan-Limit ist erreicht (' + state.topicUsage.current_count + '/' + state.topicUsage.limit + '). ' +
+        'Weiteres Topic-Slot nötig, um ein neues Thema anzulegen.';
+      form.appendChild(upfrontMsg);
+
+      var upfrontBuyBtn = document.createElement('button');
+      upfrontBuyBtn.type = 'button';
+      upfrontBuyBtn.className = 'cvz-create-buy-btn';
+      upfrontBuyBtn.setAttribute('data-cvz-buy-slot', '');
+      upfrontBuyBtn.disabled = state.isBuyingSlot;
+      upfrontBuyBtn.textContent = state.isBuyingSlot ? 'Wird bearbeitet \u2026' : '+ 1 Topic-Slot kaufen';
+      form.appendChild(upfrontBuyBtn);
+
+      wrap.appendChild(form);
+      return wrap;
+    }
 
     var domainInput = document.createElement('input');
     domainInput.type = 'text';
@@ -826,6 +933,16 @@
       err.className = 'cvz-create-error';
       err.textContent = state.createError;
       form.appendChild(err);
+
+      if (state.limitReached) {
+        var buyBtn = document.createElement('button');
+        buyBtn.type = 'button';
+        buyBtn.className = 'cvz-create-buy-btn';
+        buyBtn.setAttribute('data-cvz-buy-slot', '');
+        buyBtn.disabled = state.isBuyingSlot;
+        buyBtn.textContent = state.isBuyingSlot ? 'Wird bearbeitet \u2026' : '+ 1 Topic-Slot kaufen';
+        form.appendChild(buyBtn);
+      }
     }
 
     wrap.appendChild(form);
@@ -1619,6 +1736,11 @@
       '}' +
       '.cvz-create-submit-btn:disabled { opacity: 0.6; cursor: default; }' +
       '.cvz-create-error { width: 100%; font-size: 13px; color: var(--cvz-red); margin: 6px 0 0; }' +
+      '.cvz-create-buy-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 14px; padding: 8px 16px; margin-top: 8px;' +
+        'background: none; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-create-buy-btn:disabled { opacity: 0.6; cursor: default; }' +
 
       '.cvz-back-btn {' +
         'font-family: "Geist", sans-serif; font-size: 13px; color: var(--cvz-text-muted);' +
