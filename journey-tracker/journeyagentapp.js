@@ -5,7 +5,7 @@
   // KONFIGURATION
   // =========================================================================
   var CONFIG = {
-    apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
+    apiBaseUrl: 'https://<railway-service>.up.railway.app',
     // Separate Supabase Edge Function fürs Topic-Slot-Pay-per-Use, NICHT
     // Teil des Railway-Backends. Annahme (nicht bestätigt, Code nie
     // gesehen): quantity = wie viele Slots ZUSÄTZLICH gekauft werden
@@ -39,10 +39,10 @@
   ];
 
   var MOCK_TOPICS = [
-    { id: 'topic-1', project_id: 'proj-1', name: 'Landingpage-Optimierung', seed_keyword: 'landingpage optimierung', status: 'active', opportunities_count: 4 },
-    { id: 'topic-2', project_id: 'proj-1', name: 'CRO Beratung', seed_keyword: 'cro beratung', status: 'active', opportunities_count: 1 },
-    { id: 'topic-3', project_id: 'proj-1', name: 'Conversion Funnel', seed_keyword: 'conversion funnel b2b', status: 'collecting', opportunities_count: 0 },
-    { id: 'topic-4', project_id: 'proj-2', name: 'SaaS Onboarding', seed_keyword: 'saas onboarding optimierung', status: 'error', opportunities_count: 0 },
+    { id: 'topic-1', project_id: 'proj-1', name: 'Landingpage-Optimierung', seed_keyword: 'landingpage optimierung', status: 'active', opportunities_count: 4, created_at: '2026-08-20T09:00:00Z' },
+    { id: 'topic-2', project_id: 'proj-1', name: 'CRO Beratung', seed_keyword: 'cro beratung', status: 'active', opportunities_count: 1, created_at: '2026-08-25T14:30:00Z' },
+    { id: 'topic-3', project_id: 'proj-1', name: 'Conversion Funnel', seed_keyword: 'conversion funnel b2b', status: 'collecting', opportunities_count: 0, created_at: new Date(Date.now() - 15000).toISOString() },
+    { id: 'topic-4', project_id: 'proj-2', name: 'SaaS Onboarding', seed_keyword: 'saas onboarding optimierung', status: 'error', opportunities_count: 0, created_at: '2026-09-01T11:00:00Z' },
   ];
 
   // =========================================================================
@@ -249,6 +249,7 @@
     limitReached:   false,  // true, wenn der letzte Anlege-Versuch am Plan-Limit (403) gescheitert ist
     isBuyingSlot:   false,
     topicUsage:     null,   // { current_count, limit, can_create }, siehe loadTopicUsage
+    pollTimer:      null,   // siehe maybeStartPolling
   };
 
   // =========================================================================
@@ -304,6 +305,8 @@
       showErrorMessage('Deine Daten konnten nicht geladen werden. Bitte lade die Seite neu.');
       return;
     }
+
+    maybeStartPolling();
 
     injectStyles();
 
@@ -394,6 +397,46 @@
     }
     var data = await apiFetch('/account/topic-status');
     state.topicUsage = data;
+  }
+
+  // Läuft irgendein Thema noch (status='collecting'), alle paar Sekunden
+  // GET /topics neu abfragen, bis alle fertig sind, statt den Nutzer manuell
+  // neu laden zu lassen. Bewusst nur bei useMockData:false, im Mock-Modus
+  // bleibt 'collecting' sowieso für immer stehen, das Pollen wäre sinnlos.
+  function maybeStartPolling() {
+    if (CONFIG.useMockData || state.pollTimer) return;
+
+    var hasCollecting = state.allTopics.some(function (t) { return t.status === 'collecting'; });
+    if (!hasCollecting) return;
+
+    state.pollTimer = setInterval(async function () {
+      try {
+        await loadTopics();
+        // Falls die gerade geöffnete Detail-Ansicht genau das Thema ist,
+        // das inzwischen fertig ist: Cache verwerfen und neu laden, damit
+        // aus "collecting"-Platzhalter echte Daten werden, ohne dass der
+        // Nutzer den Tab wechseln oder neu laden muss.
+        if (state.activeView === 'topic-detail' && state.activeTopicId) {
+          var current = getTopicById(state.activeTopicId);
+          if (current && current.status !== 'collecting' && state.topicDetailCache[state.activeTopicId]) {
+            var cachedTopic = state.topicDetailCache[state.activeTopicId].topic;
+            if (cachedTopic && cachedTopic.status === 'collecting') {
+              delete state.topicDetailCache[state.activeTopicId];
+              await openTopicDetail(state.activeTopicId, false);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[CVZ Visibility] Polling fehlgeschlagen:', e);
+      }
+
+      var stillCollecting = state.allTopics.some(function (t) { return t.status === 'collecting'; });
+      if (!stillCollecting) {
+        clearInterval(state.pollTimer);
+        state.pollTimer = null;
+      }
+      render();
+    }, 5000);
   }
 
   async function loadTopicDetail(topicId) {
@@ -742,13 +785,21 @@
   }
 
   async function submitCreateForm() {
-    var domainInput = document.getElementById('cvz-create-domain');
+    var domainSelect = document.getElementById('cvz-create-domain-select');
+    var newDomainInput = document.getElementById('cvz-create-domain-new');
     var topicInput = document.getElementById('cvz-create-topic');
-    var domain = (domainInput.value || '').trim();
     var topicText = (topicInput.value || '').trim();
 
-    if (!domain || !topicText) {
-      state.createError = 'Bitte Domain und Thema ausf\u00fcllen.';
+    // Entweder eine bestehende Domain per Picklist gewählt (Wert = project_id),
+    // oder "+ Neue Domain" mit Freitext daneben.
+    var selectedValue = domainSelect.value;
+    var isNewDomain = selectedValue === '__new__';
+    var newDomainText = (newDomainInput.value || '').trim();
+
+    if ((isNewDomain && !newDomainText) || !topicText) {
+      state.createError = isNewDomain
+        ? 'Bitte neue Domain und Thema ausf\u00fcllen.'
+        : 'Bitte Thema ausf\u00fcllen.';
       render();
       return;
     }
@@ -758,22 +809,28 @@
     render();
 
     try {
-      // Existiert schon ein Projekt mit dieser Domain? Dann wiederverwenden
-      // statt eines Duplikats, das Backend hat dafür keinen eigenen
-      // Dedup-Schutz (siehe create_project in run_topic.py).
-      var project = state.projects.filter(function (p) { return p.domain.toLowerCase() === domain.toLowerCase(); })[0];
-
-      if (!project) {
+      var project;
+      if (isNewDomain) {
+        // Freitext-Fall: nur hier überhaupt ein neues Projekt anlegen, bei
+        // Auswahl aus der Picklist existiert es per Definition schon.
         if (CONFIG.useMockData) {
-          project = { id: 'proj-' + Date.now(), name: domain, domain: domain };
+          project = { id: 'proj-' + Date.now(), name: newDomainText, domain: newDomainText };
         } else {
           var projectData = await apiFetch('/projects', {
             method: 'POST',
-            body: { name: domain, domain: domain, language_code: 'de', location_name: 'Germany' },
+            body: { name: newDomainText, domain: newDomainText, language_code: 'de', location_name: 'Germany' },
           });
-          project = { id: projectData.project_id, name: domain, domain: domain };
+          project = { id: projectData.project_id, name: newDomainText, domain: newDomainText };
         }
         state.projects.push(project);
+      } else {
+        project = getProjectById(selectedValue);
+        if (!project) {
+          state.isCreating = false;
+          state.createError = 'Ausgewählte Domain nicht gefunden, bitte Seite neu laden.';
+          render();
+          return;
+        }
       }
 
       var newTopic;
@@ -803,6 +860,7 @@
 
       state.isCreating = false;
       state.showCreateForm = false;
+      maybeStartPolling(); // neues Thema ist 'collecting', Live-Nachladen anstoßen
       openTopicDetail(newTopic.id); // Detailansicht zeigt "collecting", bis der Hintergrundlauf fertig ist, das ist erwartetes Verhalten
     } catch (e) {
       console.error('[CVZ Visibility] Anlegen fehlgeschlagen:', e);
@@ -905,11 +963,38 @@
       return wrap;
     }
 
-    var domainInput = document.createElement('input');
-    domainInput.type = 'text';
-    domainInput.id = 'cvz-create-domain';
-    domainInput.className = 'cvz-create-input';
-    domainInput.placeholder = 'Domain (z.B. kunde-c.de)';
+    var domainSelect = document.createElement('select');
+    domainSelect.id = 'cvz-create-domain-select';
+    domainSelect.className = 'cvz-create-input';
+
+    state.projects.forEach(function (project) {
+      var option = document.createElement('option');
+      option.value = project.id;
+      option.textContent = project.domain;
+      if (project.id === state.activeProjectId) option.selected = true;
+      domainSelect.appendChild(option);
+    });
+
+    var newOption = document.createElement('option');
+    newOption.value = '__new__';
+    newOption.textContent = '+ Neue Domain';
+    // Wenn's noch gar keine Domain gibt (allererstes Projekt überhaupt),
+    // ist "+ Neue Domain" automatisch die einzig sinnvolle Vorauswahl.
+    if (state.projects.length === 0) newOption.selected = true;
+    domainSelect.appendChild(newOption);
+
+    var newDomainInput = document.createElement('input');
+    newDomainInput.type = 'text';
+    newDomainInput.id = 'cvz-create-domain-new';
+    newDomainInput.className = 'cvz-create-input';
+    newDomainInput.placeholder = 'Neue Domain (z.B. kunde-c.de)';
+    // Nur sichtbar, wenn "+ Neue Domain" ausgewählt ist, siehe Listener unten.
+    newDomainInput.style.display = (domainSelect.value === '__new__') ? '' : 'none';
+
+    domainSelect.addEventListener('change', function () {
+      newDomainInput.style.display = (domainSelect.value === '__new__') ? '' : 'none';
+      if (domainSelect.value === '__new__') newDomainInput.focus();
+    });
 
     var topicInput = document.createElement('input');
     topicInput.type = 'text';
@@ -924,7 +1009,8 @@
     submitBtn.disabled = state.isCreating;
     submitBtn.textContent = state.isCreating ? 'Wird angelegt \u2026' : 'Anlegen';
 
-    form.appendChild(domainInput);
+    form.appendChild(domainSelect);
+    form.appendChild(newDomainInput);
     form.appendChild(topicInput);
     form.appendChild(submitBtn);
 
@@ -955,9 +1041,22 @@
   function renderOverview() {
     var wrap = document.createElement('div');
     wrap.appendChild(renderProjectPicker());
+    var usageBadge = renderTopicUsageBadge();
+    if (usageBadge) wrap.appendChild(usageBadge);
     wrap.appendChild(renderCreateTopicForm());
     wrap.appendChild(renderDomainDashboard(getProjectById(state.activeProjectId)));
     return wrap;
+  }
+
+  function renderTopicUsageBadge() {
+    if (!state.topicUsage) return null;
+    var available = Math.max(0, state.topicUsage.limit - state.topicUsage.current_count);
+    var badge = document.createElement('p');
+    badge.className = 'cvz-topic-usage-badge';
+    badge.textContent =
+      'Team-weit: ' + state.topicUsage.current_count + ' von ' + state.topicUsage.limit +
+      ' Themen genutzt \u00b7 ' + available + ' verf\u00fcgbar';
+    return badge;
   }
 
   // NUR MOCK: aggregiert MOCK_TOPIC_DETAIL über alle Themen einer Domain.
@@ -1140,7 +1239,7 @@
 
     var table = document.createElement('table');
     table.className = 'cvz-table cvz-table-clickable';
-    table.innerHTML = '<thead><tr><th>Thema</th><th>Status</th><th>Opportunities</th></tr></thead>';
+    table.innerHTML = '<thead><tr><th>Thema</th><th>Status</th><th>Gestartet</th><th>Opportunities</th></tr></thead>';
     var tbody = document.createElement('tbody');
     topics.forEach(function (topic) {
       var status = STATUS_LABELS[topic.status] || { label: topic.status, className: '' };
@@ -1148,7 +1247,10 @@
       tr.setAttribute('data-cvz-topic-id', topic.id);
       tr.innerHTML =
         '<td>' + escapeHtml(topic.name) + '</td>' +
-        '<td><span class="cvz-status-badge ' + status.className + '">' + status.label + '</span></td>' +
+        '<td><span class="cvz-status-badge ' + status.className + '">' + status.label + '</span>' +
+          (topic.status === 'collecting' ? '<span class="cvz-status-hint">Erster Durchlauf l\u00e4uft, kann bis zu 60 Sek. dauern</span>' : '') +
+        '</td>' +
+        '<td>' + formatRelativeTime(topic.created_at) + '</td>' +
         '<td>' + (topic.opportunities_count === null ? '\u2013' : escapeHtml(topic.opportunities_count)) + '</td>';
       tbody.appendChild(tr);
     });
@@ -1671,6 +1773,19 @@
     return section;
   }
 
+  function formatRelativeTime(isoString) {
+    if (!isoString) return '\u2013';
+    var diffSeconds = Math.round((Date.now() - new Date(isoString).getTime()) / 1000);
+    if (diffSeconds < 5) return 'gerade eben';
+    if (diffSeconds < 60) return 'vor ' + diffSeconds + ' Sek.';
+    var diffMinutes = Math.round(diffSeconds / 60);
+    if (diffMinutes < 60) return 'vor ' + diffMinutes + ' Min.';
+    var diffHours = Math.round(diffMinutes / 60);
+    if (diffHours < 24) return 'vor ' + diffHours + ' Std.';
+    var diffDays = Math.round(diffHours / 24);
+    return 'vor ' + diffDays + ' Tag' + (diffDays === 1 ? '' : 'en');
+  }
+
   function escapeHtml(str) {
     var div = document.createElement('div');
     div.textContent = str == null ? '' : String(str);
@@ -1719,6 +1834,8 @@
       '.cvz-picker-item-title { font-size: 14px; color: var(--cvz-text); }' +
       '.cvz-picker-item-sub { font-size: 12px; color: var(--cvz-text-muted); }' +
       '.cvz-picker-empty { padding: 12px; font-size: 13px; color: var(--cvz-text-muted); }' +
+
+      '.cvz-topic-usage-badge { font-size: 13px; color: var(--cvz-text-muted); margin: 0 0 16px; }' +
 
       '.cvz-create-form { margin-bottom: 16px; }' +
       '.cvz-create-toggle-btn {' +
@@ -1779,6 +1896,7 @@
       '.cvz-timeline-week-label { font-size: 11px; color: var(--cvz-text-muted); white-space: nowrap; }' +
 
       '.cvz-status-badge { font-size: 12px; padding: 3px 8px; border: 1px solid; }' +
+      '.cvz-status-hint { display: block; font-size: 11px; color: var(--cvz-text-muted); margin-top: 4px; }' +
       '.cvz-status-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
       '.cvz-status-collecting { color: var(--cvz-amber); border-color: var(--cvz-amber); }' +
       '.cvz-status-error { color: var(--cvz-red); border-color: var(--cvz-red); }' +
