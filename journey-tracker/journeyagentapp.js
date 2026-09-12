@@ -5,7 +5,7 @@
   // KONFIGURATION
   // =========================================================================
   var CONFIG = {
-    apiBaseUrl: 'https://visibility-tracker.up.railway.app',
+    apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
     // Kein apiKey mehr (siehe Chat-Verlauf): das Script liegt jetzt in
     // einem öffentlichen GitHub-Repo, ein hier eingebetteter Key wäre kein
     // Geheimnis mehr gewesen. Auth läuft ausschließlich über
