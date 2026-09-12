@@ -11,7 +11,7 @@
     // gesehen): quantity = wie viele Slots ZUSÄTZLICH gekauft werden
     // sollen, nicht die neue Gesamtmenge. Falls falsch, muss submitBuyTopicSlot
     // unten die aktuelle purchased-Menge dazuzählen.
-    stripeCheckoutUrl: 'https://<euer-supabase-projekt>.supabase.co/functions/v1/stripe-topic-slot-checkout',
+    stripeCheckoutUrl: 'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/stripe-topic-slot-checkout',
     // Kein apiKey mehr (siehe Chat-Verlauf): das Script liegt jetzt in
     // einem öffentlichen GitHub-Repo, ein hier eingebetteter Key wäre kein
     // Geheimnis mehr gewesen. Auth läuft ausschließlich über
