@@ -168,6 +168,37 @@
         { id: 'p17', phase: 'decision', prompt_text: 'CRO Beratung buchen, worauf achten?', source: 'stable_core', visibility_status: 'yellow' },
       ],
     },
+    // NEU: Demo-Einträge für 'collecting'/'error', damit die Vorschau die
+    // neuen Banner in renderTopicDetailView überhaupt zeigen kann. Nur
+    // Keywords vorhanden (typisch für den frühen Stand eines echten Laufs),
+    // alles andere bewusst leer, um genau den Zustand nachzustellen, der
+    // den Hinweis-Banner nötig gemacht hat.
+    'topic-3': {
+      topic: { id: 'topic-3', name: 'Conversion Funnel', status: 'collecting' },
+      opportunities: [],
+      content_ideas: [],
+      positioning_insight: null,
+      source_profiles: [],
+      search_queries: [
+        { keyword: 'conversion funnel b2b', search_volume: 70, source: 'keyword' },
+      ],
+      competitors: [],
+      gsc_rows: [],
+      prompts: [],
+    },
+    'topic-4': {
+      topic: { id: 'topic-4', name: 'SaaS Onboarding', status: 'error' },
+      opportunities: [],
+      content_ideas: [],
+      positioning_insight: null,
+      source_profiles: [],
+      search_queries: [
+        { keyword: 'saas onboarding optimierung', search_volume: 40, source: 'keyword' },
+      ],
+      competitors: [],
+      gsc_rows: [],
+      prompts: [],
+    },
   };
 
   // =========================================================================
@@ -888,10 +919,12 @@
 
   async function retryTopic(topicId) {
     if (CONFIG.useMockData) {
-      // Mock-Fall: einfach lokal auf 'active' setzen, es gibt kein echtes
-      // Backend, das hier etwas neu berechnen könnte.
+      // Mock-Fall: sowohl die Listen- als auch die Detail-Cache-Kopie
+      // aktualisieren, das sind im Mock zwei getrennte Objekte (echtes
+      // Backend hätte natürlich nur eine Quelle der Wahrheit).
       var mockTopic = getTopicById(topicId);
       if (mockTopic) mockTopic.status = 'active';
+      if (state.topicDetailCache[topicId]) state.topicDetailCache[topicId].topic.status = 'active';
       render();
       return;
     }
@@ -1335,6 +1368,32 @@
     }
 
     wrap.appendChild(renderSummaryCard(detail.topic));
+
+    if (detail.topic.status === 'collecting') {
+      var loadingBanner = document.createElement('div');
+      loadingBanner.className = 'cvz-card cvz-collecting-banner';
+      loadingBanner.innerHTML =
+        '<p class="cvz-collecting-banner-text">' +
+          '\u23f3 Erster Datenlauf l\u00e4uft noch, kann bis zu 60 Sekunden dauern. ' +
+          'Was unten als leer angezeigt wird, ist noch nicht "fertig und leer", sondern "noch nicht dran". ' +
+          'Diese Seite aktualisiert sich automatisch, sobald der Lauf fertig ist.' +
+        '</p>';
+      wrap.appendChild(loadingBanner);
+    } else if (detail.topic.status === 'error') {
+      var errorBanner = document.createElement('div');
+      errorBanner.className = 'cvz-card cvz-collecting-banner cvz-error-banner';
+      errorBanner.innerHTML =
+        '<p class="cvz-collecting-banner-text">' +
+          '\u26a0\ufe0f Der Datenlauf f\u00fcr dieses Thema ist fehlgeschlagen. Bereits gesammelte Daten unten ' +
+          'k\u00f6nnen unvollst\u00e4ndig sein.' +
+        '</p>' +
+        '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + detail.topic.id + '"' +
+          (state.retryingTopicId === detail.topic.id ? ' disabled' : '') + '>' +
+          (state.retryingTopicId === detail.topic.id ? 'Wird erneut versucht \u2026' : 'Erneut versuchen') +
+        '</button>';
+      wrap.appendChild(errorBanner);
+    }
+
     wrap.appendChild(renderTabNav(TOPIC_TABS, state.activeSubTab));
 
     var tabContent = document.createElement('div');
@@ -1879,6 +1938,13 @@
       '.cvz-picker-empty { padding: 12px; font-size: 13px; color: var(--cvz-text-muted); }' +
 
       '.cvz-topic-usage-badge { font-size: 13px; color: var(--cvz-text-muted); margin: 0 0 16px; }' +
+
+      '.cvz-collecting-banner {' +
+        'border-left: 3px solid var(--cvz-teal); padding: 12px 16px; margin: 0 0 16px; display: flex;' +
+        'align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;' +
+      '}' +
+      '.cvz-collecting-banner-text { font-size: 13px; color: var(--cvz-text); margin: 0; flex: 1 1 320px; }' +
+      '.cvz-error-banner { border-left-color: var(--cvz-red); }' +
 
       '.cvz-create-form { margin-bottom: 16px; }' +
       '.cvz-create-toggle-btn {' +
