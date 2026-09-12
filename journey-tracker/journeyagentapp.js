@@ -5,7 +5,7 @@
   // KONFIGURATION
   // =========================================================================
   var CONFIG = {
-    apiBaseUrl: 'https://<railway-service>.up.railway.app',
+    apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
     // Separate Supabase Edge Function fürs Topic-Slot-Pay-per-Use, NICHT
     // Teil des Railway-Backends. Annahme (nicht bestätigt, Code nie
     // gesehen): quantity = wie viele Slots ZUSÄTZLICH gekauft werden
