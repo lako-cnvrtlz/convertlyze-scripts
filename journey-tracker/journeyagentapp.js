@@ -5,13 +5,13 @@
   // KONFIGURATION
   // =========================================================================
   var CONFIG = {
-    apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
+    apiBaseUrl: 'https://<railway-service>.up.railway.app',
     // Separate Supabase Edge Function fürs Topic-Slot-Pay-per-Use, NICHT
     // Teil des Railway-Backends. Annahme (nicht bestätigt, Code nie
     // gesehen): quantity = wie viele Slots ZUSÄTZLICH gekauft werden
     // sollen, nicht die neue Gesamtmenge. Falls falsch, muss submitBuyTopicSlot
     // unten die aktuelle purchased-Menge dazuzählen.
-    stripeCheckoutUrl: 'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/stripe-topic-slot-checkout',
+    stripeCheckoutUrl: 'https://<euer-supabase-projekt>.supabase.co/functions/v1/stripe-topic-slot-checkout',
     // Kein apiKey mehr (siehe Chat-Verlauf): das Script liegt jetzt in
     // einem öffentlichen GitHub-Repo, ein hier eingebetteter Key wäre kein
     // Geheimnis mehr gewesen. Auth läuft ausschließlich über
@@ -250,6 +250,7 @@
     isBuyingSlot:   false,
     topicUsage:     null,   // { current_count, limit, can_create }, siehe loadTopicUsage
     pollTimer:      null,   // siehe maybeStartPolling
+    retryingTopicId: null,  // Topic-ID, für die gerade ein Retry läuft, siehe retryTopic
   };
 
   // =========================================================================
@@ -650,6 +651,12 @@
       backToOverview();
       return;
     }
+    var retryBtn = event.target.closest('[data-cvz-retry-topic]');
+    if (retryBtn) {
+      retryTopic(retryBtn.getAttribute('data-cvz-retry-topic'));
+      return; // WICHTIG: vor der Zeilen-Navigation prüfen, der Button sitzt
+              // innerhalb einer Zeile, die selbst auch data-cvz-topic-id trägt.
+    }
     var topicCard = event.target.closest('[data-cvz-topic-id]');
     if (topicCard) {
       openTopicDetail(topicCard.getAttribute('data-cvz-topic-id'));
@@ -877,6 +884,36 @@
       }
       render();
     }
+  }
+
+  async function retryTopic(topicId) {
+    if (CONFIG.useMockData) {
+      // Mock-Fall: einfach lokal auf 'active' setzen, es gibt kein echtes
+      // Backend, das hier etwas neu berechnen könnte.
+      var mockTopic = getTopicById(topicId);
+      if (mockTopic) mockTopic.status = 'active';
+      render();
+      return;
+    }
+
+    state.retryingTopicId = topicId;
+    render();
+
+    try {
+      await apiFetch('/topics/' + topicId + '/retry', { method: 'POST' });
+      await loadTopics(); // Status ist jetzt 'collecting', Tabelle soll das sofort zeigen
+      maybeStartPolling();
+    } catch (e) {
+      console.error('[CVZ Visibility] Retry fehlgeschlagen f\u00fcr Topic ' + topicId + ':', e);
+      // Bewusst KEIN showErrorMessage() hier, das würde die komplette App
+      // überschreiben, nur weil ein einzelner Retry-Klick fehlschlug. Status
+      // bleibt serverseitig 'error' (falls die PATCH-Query nicht durchkam)
+      // oder 'collecting' (falls sie durchkam, aber der Rest scheiterte),
+      // ein erneuter Klick ist in beiden Fällen sicher möglich.
+    }
+
+    state.retryingTopicId = null;
+    render();
   }
 
   async function submitBuyTopicSlot() {
@@ -1249,6 +1286,12 @@
         '<td>' + escapeHtml(topic.name) + '</td>' +
         '<td><span class="cvz-status-badge ' + status.className + '">' + status.label + '</span>' +
           (topic.status === 'collecting' ? '<span class="cvz-status-hint">Erster Durchlauf l\u00e4uft, kann bis zu 60 Sek. dauern</span>' : '') +
+          (topic.status === 'error' ? (
+            '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + topic.id + '"' +
+              (state.retryingTopicId === topic.id ? ' disabled' : '') + '>' +
+              (state.retryingTopicId === topic.id ? 'Wird erneut versucht \u2026' : 'Erneut versuchen') +
+            '</button>'
+          ) : '') +
         '</td>' +
         '<td>' + formatRelativeTime(topic.created_at) + '</td>' +
         '<td>' + (topic.opportunities_count === null ? '\u2013' : escapeHtml(topic.opportunities_count)) + '</td>';
@@ -1897,6 +1940,11 @@
 
       '.cvz-status-badge { font-size: 12px; padding: 3px 8px; border: 1px solid; }' +
       '.cvz-status-hint { display: block; font-size: 11px; color: var(--cvz-text-muted); margin-top: 4px; }' +
+      '.cvz-retry-btn {' +
+        'display: block; margin-top: 4px; font-family: "Geist", sans-serif; font-size: 11px; padding: 2px 8px;' +
+        'background: none; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-retry-btn:disabled { opacity: 0.6; cursor: default; }' +
       '.cvz-status-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
       '.cvz-status-collecting { color: var(--cvz-amber); border-color: var(--cvz-amber); }' +
       '.cvz-status-error { color: var(--cvz-red); border-color: var(--cvz-red); }' +
