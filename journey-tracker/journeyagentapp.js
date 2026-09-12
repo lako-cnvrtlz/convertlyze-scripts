@@ -5,13 +5,14 @@
   // KONFIGURATION
   // =========================================================================
   var CONFIG = {
-    apiBaseUrl: 'https://visibility-tracker.up.railway.app',
-    apiKey:     'Bu3zqMr4Xf0m7LV2YJIendG8pUthTjviHWZEcAbF',
-    // Auth läuft über state.memberToken (echtes Memberstack-JWT), siehe
-    // apiFetch weiter unten. Der Server verifiziert es gegen die echte
-    // Memberstack-API (POST /members/verify-token, siehe
-    // memberstack_auth.py) und liest die Member-ID selbst aus der
-    // verifizierten Antwort.
+    apiBaseUrl: 'https://<railway-service>.up.railway.app',
+    // Kein apiKey mehr (siehe Chat-Verlauf): das Script liegt jetzt in
+    // einem öffentlichen GitHub-Repo, ein hier eingebetteter Key wäre kein
+    // Geheimnis mehr gewesen. Auth läuft ausschließlich über
+    // state.memberToken (echtes Memberstack-JWT), siehe apiFetch weiter
+    // unten. Der Server verifiziert es gegen die echte Memberstack-API
+    // (POST /members/verify-token, siehe memberstack_auth.py) und liest
+    // die Member-ID selbst aus der verifizierten Antwort.
 
     // Solange das Backend nicht end-to-end getestet ist, arbeiten wir hier
     // bewusst gegen Mock-Daten. Umschalten auf false, sobald ihr gemeinsam
@@ -20,7 +21,7 @@
     // WICHTIG: Selbst bei false liefert GET /topics/{id} aktuell KEINE
     // competitors/gsc_rows und KEIN visibility_status pro Prompt, siehe
     // loadTopicDetail weiter unten.
-    useMockData: true,
+    useMockData: false,  // TODO: umgestellt für den echten Test
   };
 
   // =========================================================================
@@ -322,7 +323,6 @@
     var headers = Object.assign(
       {
         'Content-Type': 'application/json',
-        'X-Api-Key': CONFIG.apiKey,
         'Authorization': 'Bearer ' + state.memberToken,
       },
       options.headers || {}
