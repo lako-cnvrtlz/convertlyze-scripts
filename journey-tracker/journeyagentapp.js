@@ -5,8 +5,8 @@
   // KONFIGURATION
   // =========================================================================
   var CONFIG = {
-    apiBaseUrl: 'https://<railway-service>.up.railway.app',
-    apiKey:     '<VISIBILITY_TRACKER_API_KEY>',
+    apiBaseUrl: 'https://visibility-tracker.up.railway.app',
+    apiKey:     'Bu3zqMr4Xf0m7LV2YJIendG8pUthTjviHWZEcAbF',
     // Auth läuft über state.memberToken (echtes Memberstack-JWT), siehe
     // apiFetch weiter unten. Der Server verifiziert es gegen die echte
     // Memberstack-API (POST /members/verify-token, siehe
