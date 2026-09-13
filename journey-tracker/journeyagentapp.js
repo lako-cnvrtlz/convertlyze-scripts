@@ -106,10 +106,10 @@
         { query: 'landingpage optimierung checkliste', clicks: 12, impressions: 190, ctr: 0.063, position: 6.4 },
       ],
       search_queries: [
-        { keyword: 'landingpage optimierung', search_volume: 260, source: 'keyword' },
-        { keyword: 'landingpage optimierung tools', search_volume: 340, source: 'gsc' },
-        { keyword: 'landingpage optimierung checkliste', search_volume: 190, source: 'gsc' },
-        { keyword: 'landingpage optimierung agentur', search_volume: 210, source: 'gsc' },
+        { keyword: 'landingpage optimierung', search_volume: 260, source: 'seed_keyword' },
+        { keyword: 'landingpage optimierung tools', search_volume: 340, source: 'gsc_near_miss' },
+        { keyword: 'landingpage optimierung checkliste', search_volume: 190, source: 'gsc_near_miss' },
+        { keyword: 'landingpage optimierung agentur', search_volume: 210, source: 'gsc_near_miss' },
         // Demonstriert den Positionierungs-Hinweis: höheres Suchvolumen bei
         // einem thematisch verwandten, aber anders formulierten Begriff.
         { keyword: 'conversion rate optimierung', search_volume: 480, source: 'related_keywords' },
@@ -124,22 +124,22 @@
         factor: 1.8,
       },
       prompts: [
-        { id: 'p1', phase: 'exploration', prompt_text: 'Was ist Landingpage-Optimierung?', source: 'stable_core', visibility_status: 'green' },
-        { id: 'p2', phase: 'exploration', prompt_text: 'Warum konvertiert meine Landingpage nicht?', source: 'stable_core', visibility_status: 'red' },
-        { id: 'p3', phase: 'exploration', prompt_text: 'Wie finde ich heraus, wo meine Landingpage schwächelt?', source: 'discovery', visibility_status: 'yellow' },
-        { id: 'p4', phase: 'exploration', prompt_text: 'Landingpage-Optimierung Checkliste', source: 'stable_core', visibility_status: 'red' },
-        { id: 'p5', phase: 'evaluation', prompt_text: 'Beste Tools für Landingpage-Optimierung im B2B-Bereich', source: 'stable_core', visibility_status: 'red' },
-        { id: 'p6', phase: 'evaluation', prompt_text: 'Was kostet eine professionelle Landingpage-Optimierung?', source: 'stable_core', visibility_status: 'yellow' },
-        { id: 'p7', phase: 'evaluation', prompt_text: 'Lohnt sich ein CRO-Tool oder reicht Google Analytics?', source: 'discovery', visibility_status: 'red' },
-        { id: 'p8', phase: 'evaluation', prompt_text: 'Landingpage-Optimierung: Agentur vs. Inhouse', source: 'stable_core', visibility_status: 'red' },
-        { id: 'p9', phase: 'comparison', prompt_text: 'Convertlyze vs. VWO für Landingpage-Optimierung', source: 'stable_core', visibility_status: 'red' },
-        { id: 'p10', phase: 'comparison', prompt_text: 'Landingpage-Optimierung Software im Vergleich', source: 'stable_core', visibility_status: 'red' },
-        { id: 'p11', phase: 'comparison', prompt_text: 'Unterschied zwischen A/B-Testing und CRO-Beratung', source: 'discovery', visibility_status: 'yellow' },
-        { id: 'p12', phase: 'comparison', prompt_text: 'Welche Landingpage-Analyse-Tools sind DACH-kalibriert?', source: 'stable_core', visibility_status: 'green' },
-        { id: 'p13', phase: 'decision', prompt_text: 'Landingpage-Optimierung für B2B SaaS beauftragen', source: 'stable_core', visibility_status: 'red' },
-        { id: 'p14', phase: 'decision', prompt_text: 'Wie starte ich eine Landingpage-Analyse?', source: 'stable_core', visibility_status: 'yellow' },
-        { id: 'p15', phase: 'decision', prompt_text: 'Landingpage-Optimierung ohne Agentur-Vertrag', source: 'discovery', visibility_status: 'red' },
-        { id: 'p16', phase: 'decision', prompt_text: 'Kostenlose Landingpage-Analyse testen', source: 'stable_core', visibility_status: 'yellow' },
+        { id: 'p1', phase: 'exploration', prompt_text: 'Was ist Landingpage-Optimierung?', prompt_type: 'stable_core', visibility_status: 'green' },
+        { id: 'p2', phase: 'exploration', prompt_text: 'Warum konvertiert meine Landingpage nicht?', prompt_type: 'stable_core', visibility_status: 'red' },
+        { id: 'p3', phase: 'exploration', prompt_text: 'Wie finde ich heraus, wo meine Landingpage schwächelt?', prompt_type: 'discovery', visibility_status: 'yellow' },
+        { id: 'p4', phase: 'exploration', prompt_text: 'Landingpage-Optimierung Checkliste', prompt_type: 'stable_core', visibility_status: 'red' },
+        { id: 'p5', phase: 'evaluation', prompt_text: 'Beste Tools für Landingpage-Optimierung im B2B-Bereich', prompt_type: 'stable_core', visibility_status: 'red' },
+        { id: 'p6', phase: 'evaluation', prompt_text: 'Was kostet eine professionelle Landingpage-Optimierung?', prompt_type: 'stable_core', visibility_status: 'yellow' },
+        { id: 'p7', phase: 'evaluation', prompt_text: 'Lohnt sich ein CRO-Tool oder reicht Google Analytics?', prompt_type: 'discovery', visibility_status: 'red' },
+        { id: 'p8', phase: 'evaluation', prompt_text: 'Landingpage-Optimierung: Agentur vs. Inhouse', prompt_type: 'stable_core', visibility_status: 'red' },
+        { id: 'p9', phase: 'comparison', prompt_text: 'Convertlyze vs. VWO für Landingpage-Optimierung', prompt_type: 'stable_core', visibility_status: 'red' },
+        { id: 'p10', phase: 'comparison', prompt_text: 'Landingpage-Optimierung Software im Vergleich', prompt_type: 'stable_core', visibility_status: 'red' },
+        { id: 'p11', phase: 'comparison', prompt_text: 'Unterschied zwischen A/B-Testing und CRO-Beratung', prompt_type: 'discovery', visibility_status: 'yellow' },
+        { id: 'p12', phase: 'comparison', prompt_text: 'Welche Landingpage-Analyse-Tools sind DACH-kalibriert?', prompt_type: 'stable_core', visibility_status: 'green' },
+        { id: 'p13', phase: 'decision', prompt_text: 'Landingpage-Optimierung für B2B SaaS beauftragen', prompt_type: 'stable_core', visibility_status: 'red' },
+        { id: 'p14', phase: 'decision', prompt_text: 'Wie starte ich eine Landingpage-Analyse?', prompt_type: 'stable_core', visibility_status: 'yellow' },
+        { id: 'p15', phase: 'decision', prompt_text: 'Landingpage-Optimierung ohne Agentur-Vertrag', prompt_type: 'discovery', visibility_status: 'red' },
+        { id: 'p16', phase: 'decision', prompt_text: 'Kostenlose Landingpage-Analyse testen', prompt_type: 'stable_core', visibility_status: 'yellow' },
       ],
     },
     'topic-2': {
@@ -161,11 +161,11 @@
         { query: 'cro beratung agentur', clicks: 5, impressions: 120, ctr: 0.042, position: 9.1 },
       ],
       search_queries: [
-        { keyword: 'cro beratung', search_volume: 90, source: 'keyword' },
-        { keyword: 'cro beratung agentur', search_volume: 120, source: 'gsc' },
+        { keyword: 'cro beratung', search_volume: 90, source: 'seed_keyword' },
+        { keyword: 'cro beratung agentur', search_volume: 120, source: 'gsc_near_miss' },
       ],
       prompts: [
-        { id: 'p17', phase: 'decision', prompt_text: 'CRO Beratung buchen, worauf achten?', source: 'stable_core', visibility_status: 'yellow' },
+        { id: 'p17', phase: 'decision', prompt_text: 'CRO Beratung buchen, worauf achten?', prompt_type: 'stable_core', visibility_status: 'yellow' },
       ],
     },
     // NEU: Demo-Einträge für 'collecting'/'error', damit die Vorschau die
@@ -180,7 +180,7 @@
       positioning_insight: null,
       source_profiles: [],
       search_queries: [
-        { keyword: 'conversion funnel b2b', search_volume: 70, source: 'keyword' },
+        { keyword: 'conversion funnel b2b', search_volume: 70, source: 'seed_keyword' },
       ],
       competitors: [],
       gsc_rows: [],
@@ -193,7 +193,7 @@
       positioning_insight: null,
       source_profiles: [],
       search_queries: [
-        { keyword: 'saas onboarding optimierung', search_volume: 40, source: 'keyword' },
+        { keyword: 'saas onboarding optimierung', search_volume: 40, source: 'seed_keyword' },
       ],
       competitors: [],
       gsc_rows: [],
@@ -234,26 +234,27 @@
   // (main.py, _get_competitor_citation_trend), berechnet aus ECHTER
   // ai_runs/ai_sources-Historie, kein erfundener Wert wie beim
   // Sichtbarkeits-Trend oben. Hier nur als Mock, damit die UI unabhängig
-  // vom Backend-Fortschritt gebaut werden kann.
+  // vom Backend-Fortschritt gebaut werden kann. Jetzt (13.09.2026) mit
+  // by_model/prompts angereichert, analog zum echten Backend.
   var MOCK_CITATION_TREND = {
     'topic-1': [
       { week: '2026-07-13', domains: [
-        { domain: 'vwo.com', citations: 2, url: 'https://vwo.com/blog/cro-tools/' },
-        { domain: 'hubspot.de', citations: 1, url: 'https://hubspot.de/blog/landingpage-optimierung' },
+        { domain: 'vwo.com', citations: 2, url: 'https://vwo.com/blog/cro-tools/', by_model: { chat_gpt: 1, gemini: 1 }, prompts: ['Beste Tools für Landingpage-Optimierung im B2B-Bereich'] },
+        { domain: 'hubspot.de', citations: 1, url: 'https://hubspot.de/blog/landingpage-optimierung', by_model: { chat_gpt: 1 }, prompts: ['Was ist Landingpage-Optimierung?'] },
       ] },
       { week: '2026-07-20', domains: [
-        { domain: 'vwo.com', citations: 2, url: 'https://vwo.com/blog/cro-tools/' },
-        { domain: 'hubspot.de', citations: 1, url: 'https://hubspot.de/blog/landingpage-optimierung' },
-        { domain: 'konversion.digital', citations: 1, url: 'https://konversion.digital/ratgeber/' },
+        { domain: 'vwo.com', citations: 2, url: 'https://vwo.com/blog/cro-tools/', by_model: { chat_gpt: 2 }, prompts: ['Beste Tools für Landingpage-Optimierung im B2B-Bereich'] },
+        { domain: 'hubspot.de', citations: 1, url: 'https://hubspot.de/blog/landingpage-optimierung', by_model: { gemini: 1 }, prompts: ['Was ist Landingpage-Optimierung?'] },
+        { domain: 'konversion.digital', citations: 1, url: 'https://konversion.digital/ratgeber/', by_model: { chat_gpt: 1 }, prompts: ['Warum konvertiert meine Landingpage nicht?'] },
       ] },
       { week: '2026-07-27', domains: [
-        { domain: 'vwo.com', citations: 3, url: 'https://vwo.com/blog/cro-tools/' },
-        { domain: 'konversion.digital', citations: 1, url: 'https://konversion.digital/ratgeber/' },
+        { domain: 'vwo.com', citations: 3, url: 'https://vwo.com/blog/cro-tools/', by_model: { chat_gpt: 2, gemini: 1 }, prompts: ['Beste Tools für Landingpage-Optimierung im B2B-Bereich', 'Convertlyze vs. VWO für Landingpage-Optimierung'] },
+        { domain: 'konversion.digital', citations: 1, url: 'https://konversion.digital/ratgeber/', by_model: { chat_gpt: 1 }, prompts: ['Warum konvertiert meine Landingpage nicht?'] },
       ] },
       { week: '2026-08-03', domains: [
-        { domain: 'vwo.com', citations: 2, url: 'https://vwo.com/blog/cro-tools/' },
-        { domain: 'hubspot.de', citations: 2, url: 'https://hubspot.de/blog/landingpage-optimierung' },
-        { domain: 'diemarkenmacher.ch', citations: 1, url: 'https://diemarkenmacher.ch/insights/' },
+        { domain: 'vwo.com', citations: 2, url: 'https://vwo.com/blog/cro-tools/', by_model: { gemini: 2 }, prompts: ['Beste Tools für Landingpage-Optimierung im B2B-Bereich'] },
+        { domain: 'hubspot.de', citations: 2, url: 'https://hubspot.de/blog/landingpage-optimierung', by_model: { chat_gpt: 1, gemini: 1 }, prompts: ['Was ist Landingpage-Optimierung?'] },
+        { domain: 'diemarkenmacher.ch', citations: 1, url: 'https://diemarkenmacher.ch/insights/', by_model: { chat_gpt: 1 }, prompts: ['Landingpage-Optimierung: Agentur vs. Inhouse'] },
       ] },
     ],
   };
@@ -486,7 +487,11 @@
       competitors: [],
       gsc_rows: [],
       prompts: (data.prompts || []).map(function (p) {
-        return Object.assign({ visibility_status: null }, p);
+        // GEÄNDERT (13.09.2026): Backend liefert die Phase als
+        // "messymiddle_phase", renderPromptsByPhase gruppiert aber nach
+        // "phase". Ohne dieses Mapping war der Prompts-Tab immer leer,
+        // obwohl die Prompts im Backend längst vorhanden waren.
+        return Object.assign({ visibility_status: null }, p, { phase: p.messymiddle_phase || null });
       }),
     };
   }
@@ -593,12 +598,26 @@
     red:    'Nicht vorhanden',
   };
 
+  // GEÄNDERT (13.09.2026): Die alten Keys 'gsc'/'keyword' existierten in
+  // den echten Backend-Daten nie (die echten source-Werte sind
+  // seed_keyword/related_keywords/keyword_ideas/keyword_suggestions/paa/
+  // gsc_near_miss), deshalb zeigte die Keywords-Tabelle vorher überall
+  // rohe technische Bezeichner statt Labels. Außerdem auf Wunsch
+  // umgangssprachlicher benannt: "Primäres Keyword" statt "seed_keyword",
+  // "Keyword-Idee" statt "related_keywords".
   var KEYWORD_SOURCE_LABELS = {
-    gsc:     'Google Search Console',
-    keyword: 'Keyword-Recherche',
-    paa:     'People Also Ask',
-    context: 'Kontext',
-    manual:  'Manuell',
+    seed_keyword:         'Primäres Keyword',
+    related_keywords:     'Keyword-Idee',
+    keyword_ideas:        'Keyword-Idee',
+    keyword_suggestions:  'Keyword-Idee',
+    paa:                  'Häufig gefragt',
+    gsc_near_miss:        'Google Search Console',
+  };
+
+  // NEU (13.09.2026): für die Modell-Aufschlüsselung im Wettbewerber-Tab.
+  var MODEL_LABELS = {
+    chat_gpt: 'ChatGPT',
+    gemini:   'Gemini',
   };
 
   var TOPIC_TABS = [
@@ -1232,7 +1251,7 @@
 
     switch (state.activeSubTab) {
       case 'wettbewerber':
-        tabContent.appendChild(renderCompetitorTable(data.competitors));
+        tabContent.appendChild(renderDomainCompetitorTable(data.competitors));
         tabContent.appendChild(renderSourceProfilesSection(data.sourceProfiles));
         break;
       case 'keywords':
@@ -1410,8 +1429,14 @@
 
     switch (state.activeSubTab) {
       case 'wettbewerber':
-        tabContent.appendChild(renderCompetitorCitationTimeline(state.citationTrendCache[state.activeTopicId], state.isLoadingCitationTrend));
-        tabContent.appendChild(renderCompetitorTable(detail.competitors));
+        var weeksData = state.citationTrendCache[state.activeTopicId];
+        tabContent.appendChild(renderCompetitorCitationTimeline(weeksData, state.isLoadingCitationTrend));
+        // GEÄNDERT (13.09.2026): vorher renderCompetitorTable(detail.competitors)
+        // (detail.competitors ist bei useMockData:false immer [], siehe
+        // loadTopicDetail, deshalb war hier faktisch immer nur die reine
+        // Logo-Wand oben zu sehen). Jetzt: echte Tabelle aus den bereits
+        // geladenen Zitations-Wochen, mit Modell- und Prompt-Aufschlüsselung.
+        tabContent.appendChild(renderTopicCompetitorTable(aggregateCompetitorDomains(weeksData)));
         tabContent.appendChild(renderSourceProfilesSection(detail.source_profiles));
         break;
       case 'keywords':
@@ -1656,7 +1681,10 @@
     return section;
   }
 
-  function renderCompetitorTable(competitors) {
+  // Für die Mock-only Domain-Übersicht (aggregiert über detail.competitors,
+  // das nur im Mock-Datensatz existiert). Für die echte Topic-Detailansicht
+  // siehe renderTopicCompetitorTable weiter unten.
+  function renderDomainCompetitorTable(competitors) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
@@ -1685,6 +1713,77 @@
         '<td>' + escapeHtml(comp.citations) + '</td>' +
         '<td>' + escapeHtml(phaseLabels) + '</td>';
       tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    section.appendChild(table);
+    return section;
+  }
+
+  // NEU (13.09.2026): aggregiert die von /competitor-citations gelieferten
+  // Wochen (jede mit ihrer eigenen by_model/prompts-Aufschlüsselung pro
+  // Domain) zu EINER Domain-Tabelle über den ganzen geladenen Zeitraum.
+  function aggregateCompetitorDomains(weeks) {
+    if (!weeks || weeks.length === 0) return [];
+    var byDomain = {};
+    weeks.forEach(function (week) {
+      (week.domains || []).forEach(function (d) {
+        if (!byDomain[d.domain]) {
+          byDomain[d.domain] = { domain: d.domain, citations: 0, by_model: {}, prompts: {} };
+        }
+        var entry = byDomain[d.domain];
+        entry.citations += d.citations;
+        Object.keys(d.by_model || {}).forEach(function (model) {
+          entry.by_model[model] = (entry.by_model[model] || 0) + d.by_model[model];
+        });
+        (d.prompts || []).forEach(function (p) { entry.prompts[p] = true; });
+      });
+    });
+    return Object.keys(byDomain).map(function (domain) {
+      var e = byDomain[domain];
+      return { domain: e.domain, citations: e.citations, by_model: e.by_model, prompts: Object.keys(e.prompts) };
+    }).sort(function (a, b) { return b.citations - a.citations; });
+  }
+
+  // NEU (13.09.2026): ersetzt in der echten Topic-Detailansicht die reine
+  // Logo-Wand durch eine Tabelle mit Modell-Aufschlüsselung (ChatGPT vs.
+  // Gemini) und den zugehörigen Prompts pro Domain.
+  function renderTopicCompetitorTable(competitors) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Wettbewerber-Zitationen nach Modell und Prompt';
+    section.appendChild(heading);
+
+    if (!competitors || competitors.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine Wettbewerber-Zitationsdaten verfügbar.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    var table = document.createElement('table');
+    table.className = 'cvz-table';
+    table.innerHTML =
+      '<thead><tr><th>Domain</th><th>Zitationen gesamt</th><th>' +
+        escapeHtml(MODEL_LABELS.chat_gpt) + '</th><th>' + escapeHtml(MODEL_LABELS.gemini) +
+      '</th><th>Prompts</th></tr></thead>';
+    var tbody = document.createElement('tbody');
+    competitors.forEach(function (comp) {
+      var byModel = comp.by_model || {};
+      var promptList = comp.prompts || [];
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + escapeHtml(comp.domain) + '</td>' +
+        '<td>' + escapeHtml(comp.citations) + '</td>' +
+        '<td>' + escapeHtml(byModel.chat_gpt || 0) + '</td>' +
+        '<td>' + escapeHtml(byModel.gemini || 0) + '</td>' +
+        '<td title="' + escapeHtml(promptList.join(' | ')) + '">' +
+          promptList.length + ' Prompt' + (promptList.length === 1 ? '' : 's') +
+        '</td>';
+      tbody.appendChild(tr);
     });
     table.appendChild(tbody);
     section.appendChild(table);
@@ -1837,7 +1936,11 @@
           '<span class="cvz-dot ' + dotClass + '" title="' + escapeHtml(statusLabel) + '"></span>' +
           '<span class="cvz-prompt-text">' + escapeHtml(prompt.prompt_text) + '</span>' +
           '<span class="cvz-prompt-source">' +
-            (prompt.source === 'stable_core' ? 'Stable Core' : 'Discovery') +
+            // GEÄNDERT (13.09.2026): war prompt.source (Herkunft, z.B.
+            // "manual"), gemeint war aber prompt.prompt_type
+            // (stable_core/discovery). Vorher stand hier bei JEDEM Prompt
+            // "Discovery", egal was tatsächlich hinterlegt war.
+            (prompt.prompt_type === 'stable_core' ? 'Stable Core' : 'Discovery') +
             (prompt.topic_name ? ' · ' + escapeHtml(prompt.topic_name) : '') +
           '</span>';
         list.appendChild(row);
