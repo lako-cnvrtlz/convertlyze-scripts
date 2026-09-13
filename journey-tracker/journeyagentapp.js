@@ -1317,8 +1317,10 @@
       tr.setAttribute('data-cvz-topic-id', topic.id);
       tr.innerHTML =
         '<td>' + escapeHtml(topic.name) + '</td>' +
-        '<td><span class="cvz-status-badge ' + status.className + '">' + status.label + '</span>' +
-          (topic.status === 'collecting' ? '<span class="cvz-status-hint">Erster Durchlauf l\u00e4uft, kann bis zu 60 Sek. dauern</span>' : '') +
+        '<td><span class="cvz-status-badge ' + status.className + '">' +
+          (topic.status === 'collecting' ? '<span class="cvz-spinner"></span>' : '') +
+          status.label + '</span>' +
+          (topic.status === 'collecting' ? '<span class="cvz-status-hint">Kann bis zu 60 Sek. dauern</span>' : '') +
           (topic.status === 'error' ? (
             '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + topic.id + '"' +
               (state.retryingTopicId === topic.id ? ' disabled' : '') + '>' +
@@ -1370,16 +1372,23 @@
     wrap.appendChild(renderSummaryCard(detail.topic));
 
     if (detail.topic.status === 'collecting') {
+      // Bewusst KEINE Tabs/Tab-Inhalte rendern, solange noch gesammelt wird,
+      // die wären ohnehin größtenteils leer und würden nur wie ein Fehler
+      // aussehen ("überall steht leer"). Stattdessen nur der Banner mit
+      // Spinner, das war explizit der Wunsch.
       var loadingBanner = document.createElement('div');
       loadingBanner.className = 'cvz-card cvz-collecting-banner';
       loadingBanner.innerHTML =
         '<p class="cvz-collecting-banner-text">' +
-          '\u23f3 Erster Datenlauf l\u00e4uft noch, kann bis zu 60 Sekunden dauern. ' +
-          'Was unten als leer angezeigt wird, ist noch nicht "fertig und leer", sondern "noch nicht dran". ' +
+          '<span class="cvz-spinner"></span>' +
+          'Erster Datenlauf l\u00e4uft noch, kann bis zu 60 Sekunden dauern. ' +
           'Diese Seite aktualisiert sich automatisch, sobald der Lauf fertig ist.' +
         '</p>';
       wrap.appendChild(loadingBanner);
-    } else if (detail.topic.status === 'error') {
+      return wrap;
+    }
+
+    if (detail.topic.status === 'error') {
       var errorBanner = document.createElement('div');
       errorBanner.className = 'cvz-card cvz-collecting-banner cvz-error-banner';
       errorBanner.innerHTML =
@@ -1915,8 +1924,21 @@
         '--cvz-border: #232b36;' +
         'font-family: "Geist", sans-serif;' +
         'color: var(--cvz-text);' +
+        // Fester Mindestplatz, damit die Seite (und damit der Footer
+        // darunter) nicht bei jedem Render-Wechsel springt, z.B. wenn ein
+        // "Sammelt Daten"-Zustand kurz ist und die volle Detailansicht viel
+        // länger. Wächst bei Bedarf noch darüber hinaus, schrumpft aber nie
+        // darunter.
+        'min-height: 640px;' +
       '}' +
       '#cvz-visibility-app h3 { font-family: "Syne", sans-serif; }' +
+
+      '@keyframes cvz-spin { to { transform: rotate(360deg); } }' +
+      '.cvz-spinner {' +
+        'display: inline-block; width: 14px; height: 14px; margin-right: 8px; vertical-align: middle;' +
+        'border: 2px solid var(--cvz-border); border-top-color: var(--cvz-teal); border-radius: 50%;' +
+        'animation: cvz-spin 0.8s linear infinite;' +
+      '}' +
 
       '.cvz-picker { position: relative; margin-bottom: 16px; max-width: 360px; }' +
       '.cvz-picker-input {' +
