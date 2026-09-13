@@ -490,6 +490,14 @@
       content_ideas: data.content_ideas || [],
       positioning_insight: data.positioning_insight || null,
       source_profiles: data.source_profiles || [],
+      // NEU (13.09.2026): Wettbewerber-Domains des Projekts, um die
+      // Zitations-Auswertung auf echte Wettbewerber zu filtern statt auf
+      // alle zitierten Quellen (siehe renderCompetitorInsightSection).
+      competitor_domains: data.competitor_domains || [],
+      // NEU (13.09.2026): dedizierte, themenweite Lücken-Analyse (siehe
+      // gap_analysis.py), getrennt von der pro-Domain-Differenzierungs-
+      // Idee in source_profiles.
+      content_gaps: data.content_gaps || [],
       search_queries: data.search_queries || [],
       competitors: [],
       gsc_rows: [],
@@ -649,6 +657,13 @@
     red:    'Nicht vorhanden',
   };
 
+  // NEU (13.09.2026): für die dedizierte Lücken-Analyse (content_gaps).
+  var GAP_PRIORITY_LABELS = {
+    hoch:    'Hohe Priorität',
+    mittel:  'Mittlere Priorität',
+    niedrig: 'Niedrige Priorität',
+  };
+
   // GEÄNDERT (13.09.2026): Die alten Keys 'gsc'/'keyword' existierten in
   // den echten Backend-Daten nie (die echten source-Werte sind
   // seed_keyword/related_keywords/keyword_ideas/keyword_suggestions/paa/
@@ -725,11 +740,6 @@
     var buySlot = event.target.closest('[data-cvz-buy-slot]');
     if (buySlot) {
       submitBuyTopicSlot();
-      return;
-    }
-    var logo = event.target.closest('[data-cvz-source-url]');
-    if (logo) {
-      window.open(logo.getAttribute('data-cvz-source-url'), '_blank', 'noopener');
       return;
     }
     // NEU (13.09.2026): Klicks innerhalb der aufgeklappten Prompt-Zitationen
@@ -1511,15 +1521,15 @@
 
     switch (state.activeSubTab) {
       case 'wettbewerber':
+        // GEÄNDERT (13.09.2026): Favicon-Wand raus (Favicons sitzen jetzt
+        // im Prompts-Tab direkt neben den Quellen, siehe
+        // renderPromptExpansion). Zitations-Tabelle und Quellen-Analyse
+        // sind zu EINER Ansicht zusammengeführt: häufigste ECHTE
+        // Wettbewerber (gefiltert auf detail.competitor_domains) inkl.
+        // ihrer Stärken und eurer Differenzierungs-Chance.
         var weeksData = state.citationTrendCache[state.activeTopicId];
-        tabContent.appendChild(renderCompetitorCitationTimeline(weeksData, state.isLoadingCitationTrend));
-        // GEÄNDERT (13.09.2026): vorher renderCompetitorTable(detail.competitors)
-        // (detail.competitors ist bei useMockData:false immer [], siehe
-        // loadTopicDetail, deshalb war hier faktisch immer nur die reine
-        // Logo-Wand oben zu sehen). Jetzt: echte Tabelle aus den bereits
-        // geladenen Zitations-Wochen, mit Modell- und Prompt-Aufschlüsselung.
-        tabContent.appendChild(renderTopicCompetitorTable(aggregateCompetitorDomains(weeksData)));
-        tabContent.appendChild(renderSourceProfilesSection(detail.source_profiles));
+        tabContent.appendChild(renderCompetitorInsightSection(weeksData, state.isLoadingCitationTrend, detail.source_profiles, detail.competitor_domains));
+        tabContent.appendChild(renderContentGapsSection(detail.content_gaps));
         break;
       case 'keywords':
         tabContent.appendChild(renderKeywordsTable(detail.search_queries));
@@ -1692,83 +1702,9 @@
     return section;
   }
 
-  var WEEKDAY_MONTHS_DE = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
-
-  function formatShortDate(isoDate) {
-    var parts = isoDate.split('-');
-    var monthIndex = parseInt(parts[1], 10) - 1;
-    return parseInt(parts[2], 10) + '. ' + (WEEKDAY_MONTHS_DE[monthIndex] || parts[1]);
-  }
-
-  function renderCompetitorCitationTimeline(weeks, isLoading) {
-    var section = document.createElement('div');
-    section.className = 'cvz-section';
-
-    var heading = document.createElement('p');
-    heading.className = 'cvz-section-label';
-    heading.textContent = 'Wettbewerber-Zitationen im Verlauf';
-    section.appendChild(heading);
-
-    if (isLoading) {
-      var loading = document.createElement('p');
-      loading.className = 'cvz-card-placeholder-text';
-      loading.textContent = 'Lädt...';
-      section.appendChild(loading);
-      return section;
-    }
-
-    if (!weeks || weeks.length === 0) {
-      var empty = document.createElement('p');
-      empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Noch keine Zitations-Historie verfügbar.';
-      section.appendChild(empty);
-      return section;
-    }
-
-    var card = document.createElement('div');
-    card.className = 'cvz-card cvz-timeline-card';
-
-    var track = document.createElement('div');
-    track.className = 'cvz-timeline-track';
-
-    weeks.forEach(function (weekEntry) {
-      var col = document.createElement('div');
-      col.className = 'cvz-timeline-week';
-
-      var stack = document.createElement('div');
-      stack.className = 'cvz-timeline-stack';
-
-      // Meistzitierte zuerst (Sortierung kommt schon so vom Backend/Mock).
-      // Kein Deckel mehr: Stapel wächst mit der Anzahl zitierter Domains,
-      // Übereinanderlegen (siehe CSS) hält es trotzdem kompakt.
-      weekEntry.domains.forEach(function (d) {
-        var img = document.createElement('img');
-        img.className = 'cvz-timeline-logo';
-        img.src = 'https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(d.domain);
-        img.alt = d.domain;
-        img.title = d.domain + ' (' + d.citations + 'x zitiert)';
-        img.setAttribute('data-cvz-source-url', d.url || ('https://' + d.domain));
-        stack.appendChild(img);
-      });
-
-      col.appendChild(stack);
-
-      var label = document.createElement('span');
-      label.className = 'cvz-timeline-week-label';
-      label.textContent = formatShortDate(weekEntry.week);
-      col.appendChild(label);
-
-      track.appendChild(col);
-    });
-
-    card.appendChild(track);
-    section.appendChild(card);
-    return section;
-  }
-
   // Für die Mock-only Domain-Übersicht (aggregiert über detail.competitors,
   // das nur im Mock-Datensatz existiert). Für die echte Topic-Detailansicht
-  // siehe renderTopicCompetitorTable weiter unten.
+  // siehe renderCompetitorInsightSection weiter unten.
   function renderDomainCompetitorTable(competitors) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -1829,49 +1765,148 @@
     }).sort(function (a, b) { return b.citations - a.citations; });
   }
 
-  // NEU (13.09.2026): ersetzt in der echten Topic-Detailansicht die reine
-  // Logo-Wand durch eine Tabelle mit Modell-Aufschlüsselung (ChatGPT vs.
-  // Gemini) und den zugehörigen Prompts pro Domain.
-  function renderTopicCompetitorTable(competitors) {
+  function normalizeDomainForMatch(domain) {
+    return (domain || '').toLowerCase().replace(/^www\./, '');
+  }
+
+  // GEÄNDERT (13.09.2026): ersetzt die reine "wer wird wie oft genannt"-
+  // Tabelle. Filtert auf die im Projekt hinterlegten Wettbewerber-Domains
+  // (sonst landen auch neutrale Wissensquellen wie SAP-Hilfeportal/Reddit/
+  // YouTube hier, siehe Beispiel-ai_runs vom 13.09., die keine echten
+  // Wettbewerber sind) und reichert jeden Treffer mit der bestehenden
+  // Quellen-Analyse an (source_profiles: Stärken + Differenzierungs-Chance),
+  // statt beides als zwei getrennte Listen zu zeigen.
+  function renderCompetitorInsightSection(weeks, isLoading, sourceProfiles, competitorDomains) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
-    heading.textContent = 'Wettbewerber-Zitationen nach Modell und Prompt';
+    heading.textContent = 'Häufigste Wettbewerber & wie ihr aufholt';
     section.appendChild(heading);
 
-    if (!competitors || competitors.length === 0) {
+    if (isLoading) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.textContent = 'Lädt...';
+      section.appendChild(loading);
+      return section;
+    }
+
+    var allDomains = aggregateCompetitorDomains(weeks);
+    if (allDomains.length === 0) {
       var empty = document.createElement('p');
       empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Noch keine Wettbewerber-Zitationsdaten verfügbar.';
+      empty.textContent = 'Noch keine Zitations-Historie verfügbar.';
       section.appendChild(empty);
       return section;
     }
 
-    var table = document.createElement('table');
-    table.className = 'cvz-table';
-    table.innerHTML =
-      '<thead><tr><th>Domain</th><th>Zitationen gesamt</th><th>' +
-        escapeHtml(MODEL_LABELS.chat_gpt) + '</th><th>' + escapeHtml(MODEL_LABELS.gemini) +
-      '</th><th>Prompts</th></tr></thead>';
-    var tbody = document.createElement('tbody');
-    competitors.forEach(function (comp) {
-      var byModel = comp.by_model || {};
-      var promptList = comp.prompts || [];
-      var tr = document.createElement('tr');
-      tr.innerHTML =
-        '<td>' + escapeHtml(comp.domain) + '</td>' +
-        '<td>' + escapeHtml(comp.citations) + '</td>' +
-        '<td>' + escapeHtml(byModel.chat_gpt || 0) + '</td>' +
-        '<td>' + escapeHtml(byModel.gemini || 0) + '</td>' +
-        '<td title="' + escapeHtml(promptList.join(' | ')) + '">' +
-          promptList.length + ' Prompt' + (promptList.length === 1 ? '' : 's') +
-        '</td>';
-      tbody.appendChild(tr);
+    var competitorSet = (competitorDomains || []).map(normalizeDomainForMatch);
+    var filtered = competitorSet.length > 0
+      ? allDomains.filter(function (d) { return competitorSet.indexOf(normalizeDomainForMatch(d.domain)) !== -1; })
+      : allDomains;
+
+    if (competitorSet.length === 0) {
+      var hint = document.createElement('p');
+      hint.className = 'cvz-card-placeholder-text';
+      hint.textContent =
+        'Für dieses Projekt sind noch keine Wettbewerber-Domains hinterlegt \u2013 zeigt deshalb aktuell ' +
+        'ALLE zitierten Quellen, nicht nur echte Wettbewerber.';
+      section.appendChild(hint);
+    } else if (filtered.length === 0) {
+      var noneFound = document.createElement('p');
+      noneFound.className = 'cvz-card-placeholder-text';
+      noneFound.textContent = 'Keiner eurer hinterlegten Wettbewerber wurde im geladenen Zeitraum zitiert.';
+      section.appendChild(noneFound);
+      return section;
+    }
+
+    var profileByDomain = {};
+    (sourceProfiles || []).forEach(function (p) {
+      profileByDomain[normalizeDomainForMatch(p.domain)] = p;
     });
-    table.appendChild(tbody);
-    section.appendChild(table);
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-opportunity-grid';
+    filtered.slice(0, 8).forEach(function (comp) {
+      var profile = profileByDomain[normalizeDomainForMatch(comp.domain)];
+      var byModel = comp.by_model || {};
+      var modelParts = [];
+      if (byModel.chat_gpt) modelParts.push(byModel.chat_gpt + '\u00d7 ' + MODEL_LABELS.chat_gpt);
+      if (byModel.gemini) modelParts.push(byModel.gemini + '\u00d7 ' + MODEL_LABELS.gemini);
+      var promptList = comp.prompts || [];
+
+      var card = document.createElement('div');
+      card.className = 'cvz-card cvz-idea-card';
+      card.innerHTML =
+        '<p class="cvz-opportunity-type">' +
+          '<img class="cvz-inline-favicon" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(comp.domain) + '" alt="">' +
+          escapeHtml(comp.domain) + ' \u00b7 ' + comp.citations + ' Zitationen' +
+        '</p>' +
+        (modelParts.length ? '<p class="cvz-opportunity-topic">' + escapeHtml(modelParts.join(' \u00b7 ')) + '</p>' : '') +
+        (profile && profile.summary
+          ? '<p class="cvz-opportunity-description"><strong>St\u00e4rken:</strong> ' + escapeHtml(profile.summary) + '</p>'
+          : '<p class="cvz-card-placeholder-text">Noch keine Quellen-Analyse f\u00fcr diese Domain.</p>') +
+        (profile && profile.differentiation_suggestion
+          // GEÄNDERT (13.09.2026): umbenannt von "Wie ihr aufholt / Lücke
+          // für euch" zu "Differenzierungs-Idee", um Verwechslung mit der
+          // neuen dedizierten, themenweiten Lücken-Analyse (siehe
+          // renderContentGapsSection) zu vermeiden. Diese Zeile ist PRO
+          // Wettbewerber-Domain, die neue Sektion ist themenweit.
+          ? '<p class="cvz-opportunity-description"><strong>Differenzierungs-Idee:</strong> ' + escapeHtml(profile.differentiation_suggestion) + '</p>'
+          : '') +
+        (promptList.length
+          ? '<p class="cvz-opportunity-topic" title="' + escapeHtml(promptList.join(' | ')) + '">Genannt bei ' + promptList.length + ' Prompt' + (promptList.length === 1 ? '' : 's') + '</p>'
+          : '');
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+    return section;
+  }
+
+  // NEU (13.09.2026): dedizierte, themenweite Lücken-Analyse (siehe
+  // gap_analysis.py, Tabelle content_gaps). Anders als die
+  // Differenzierungs-Idee pro Wettbewerber-Karte oben schaut das über ALLE
+  // zitierten Quellen und die eigene Prompt-Abdeckung hinweg (z.B. eine
+  // ganze Sichtbarkeits-Phase, die bei niemandem besetzt ist).
+  function renderContentGapsSection(gaps) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Content-Lücken (themenweite Analyse)';
+    section.appendChild(heading);
+
+    if (!gaps || gaps.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine Lücken-Analyse verfügbar.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-opportunity-grid';
+    gaps.forEach(function (gap) {
+      var priorityClass = gap.priority ? ' cvz-gap-priority-' + gap.priority : '';
+      var card = document.createElement('div');
+      card.className = 'cvz-card cvz-idea-card' + priorityClass;
+      card.innerHTML =
+        (gap.priority
+          ? '<p class="cvz-opportunity-type">' + escapeHtml(GAP_PRIORITY_LABELS[gap.priority] || gap.priority) + '</p>'
+          : '') +
+        '<p class="cvz-opportunity-description">' + escapeHtml(gap.gap_description || '') + '</p>' +
+        (gap.evidence
+          ? '<p class="cvz-opportunity-description"><strong>Beleg:</strong> ' + escapeHtml(gap.evidence) + '</p>'
+          : '') +
+        (gap.recommended_content_type
+          ? '<p class="cvz-opportunity-topic"><strong>Empfehlung:</strong> ' + escapeHtml(gap.recommended_content_type) + '</p>'
+          : '');
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
     return section;
   }
 
@@ -2024,7 +2059,7 @@
   }
 
   // NEU (13.09.2026): der aufgeklappte Bereich unter einem Prompt im
-  // Prompts-Tab (nur Topic-Detailansicht) — Engine-Tabs (ChatGPT/Gemini),
+  // Prompts-Tab (nur Topic-Detailansicht), Engine-Tabs (ChatGPT/Gemini),
   // Lauf-Auswahl (letzte PROMPT_CITATION_RUN_LIMIT Läufe), volle Antwort
   // und zitierte Quellen. Ersetzt die "Modal mit Pfeilen"-Idee aus dem
   // Referenz-Screenshot bewusst durch Inline-Aufklappen in der bestehenden
@@ -2116,16 +2151,26 @@
       sourceList.className = 'cvz-prompt-source-list';
       run.sources.forEach(function (s) {
         var item = document.createElement('a');
-        item.className = 'cvz-prompt-source-item';
+        item.className = 'cvz-prompt-source-item' + (s.is_competitor ? ' cvz-prompt-source-competitor' : '');
         item.href = s.url || '#';
         item.target = '_blank';
         item.rel = 'noopener';
         item.innerHTML =
           '<img class="cvz-timeline-logo" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(s.domain || '') + '" alt="">' +
-          '<span>' + escapeHtml(s.title || s.domain || s.url) + '</span>';
+          '<span>' + escapeHtml(s.title || s.domain || s.url) + '</span>' +
+          (s.is_competitor ? '<span class="cvz-competitor-badge">Wettbewerber</span>' : '');
         sourceList.appendChild(item);
       });
       wrap.appendChild(sourceList);
+    }
+
+    // NEU (13.09.2026): Wettbewerber, die im Antworttext vorkommen, aber
+    // nicht als Quelle verlinkt sind (siehe _extract_run_answer in main.py).
+    if (run.competitor_mentioned_only && run.competitor_mentioned_only.length) {
+      var mentionedNote = document.createElement('p');
+      mentionedNote.className = 'cvz-card-placeholder-text cvz-prompt-mentioned-note';
+      mentionedNote.textContent = 'Im Text erw\u00e4hnt, aber nicht als Quelle zitiert: ' + run.competitor_mentioned_only.join(', ');
+      wrap.appendChild(mentionedNote);
     }
 
     return wrap;
@@ -2134,7 +2179,7 @@
   // GEÄNDERT (13.09.2026): zweiter Parameter enableCitations steuert, ob
   // Prompt-Zeilen aufklappbar sind. Nur in der Topic-Detailansicht true
   // (siehe renderTopicDetailView), da nur dort ein Prompt eindeutig einem
-  // Topic zugeordnet ist, das der /citations-Endpoint braucht — in der
+  // Topic zugeordnet ist, das der /citations-Endpoint braucht. In der
   // Domain-Übersicht sind Prompts über mehrere Topics aggregiert.
   function renderPromptsByPhase(prompts, enableCitations) {
     var section = document.createElement('div');
@@ -2353,17 +2398,18 @@
       '.cvz-tab-btn:hover { color: var(--cvz-text); }' +
       '.cvz-tab-btn-active { color: var(--cvz-teal); border-bottom-color: var(--cvz-teal); }' +
 
-      '.cvz-timeline-card { overflow-x: auto; }' +
-      '.cvz-timeline-track { display: flex; gap: 20px; align-items: flex-end; padding: 8px 4px 4px; min-width: max-content; }' +
-      '.cvz-timeline-week { display: flex; flex-direction: column; align-items: center; gap: 6px; }' +
-      '.cvz-timeline-stack { display: flex; flex-direction: column-reverse; align-items: center; }' +
+      // GEÄNDERT (13.09.2026): Timeline (Favicon-Wand) entfernt, siehe
+      // renderCompetitorInsightSection. .cvz-timeline-logo bleibt bestehen,
+      // wird jetzt für die freistehenden Favicons in Prompt-Quellen und
+      // Wettbewerber-Karten genutzt (kein Stapel mehr, daher vereinfacht).
       '.cvz-timeline-logo {' +
-        'width: 24px; height: 24px; border-radius: 0; border: 1px solid var(--cvz-navy);' +
-        'background: var(--cvz-text); margin-top: -8px; cursor: pointer; display: block;' +
+        'width: 20px; height: 20px; border-radius: 0; border: 1px solid var(--cvz-border);' +
+        'background: var(--cvz-text); cursor: pointer; display: inline-block; vertical-align: middle;' +
       '}' +
-      '.cvz-timeline-logo:first-child { margin-top: 0; }' +
-      '.cvz-timeline-logo:hover { outline: 2px solid var(--cvz-teal); position: relative; z-index: 5; }' +
-      '.cvz-timeline-week-label { font-size: 11px; color: var(--cvz-text-muted); white-space: nowrap; }' +
+      '.cvz-inline-favicon {' +
+        'width: 16px; height: 16px; border-radius: 0; border: 1px solid var(--cvz-border);' +
+        'background: var(--cvz-text); vertical-align: middle; margin-right: 6px;' +
+      '}' +
 
       '.cvz-status-badge { font-size: 12px; padding: 3px 8px; border: 1px solid; }' +
       '.cvz-status-hint { display: block; font-size: 11px; color: var(--cvz-text-muted); margin-top: 4px; }' +
@@ -2390,6 +2436,14 @@
       '.cvz-opportunity-type { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--cvz-red); }' +
       '.cvz-opportunity-description { margin: 0 0 8px; font-size: 14px; line-height: 1.4; color: var(--cvz-text); }' +
       '.cvz-opportunity-topic { margin: 0; font-size: 11px; color: var(--cvz-text-muted); }' +
+
+      // NEU (13.09.2026): Prioritäts-Färbung für Content-Lücken-Karten.
+      '.cvz-gap-priority-hoch { border-left-color: var(--cvz-red); }' +
+      '.cvz-gap-priority-mittel { border-left-color: var(--cvz-amber); }' +
+      '.cvz-gap-priority-niedrig { border-left-color: var(--cvz-teal); }' +
+      '.cvz-gap-priority-hoch .cvz-opportunity-type { color: var(--cvz-red); }' +
+      '.cvz-gap-priority-mittel .cvz-opportunity-type { color: var(--cvz-amber); }' +
+      '.cvz-gap-priority-niedrig .cvz-opportunity-type { color: var(--cvz-teal); }' +
 
       '.cvz-table { width: 100%; border-collapse: collapse; font-size: 14px; }' +
       '.cvz-table th { text-align: left; font-weight: 600; color: var(--cvz-text-muted); font-size: 12px; padding: 8px 12px; border-bottom: 1px solid var(--cvz-border); }' +
@@ -2426,6 +2480,11 @@
         'display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--cvz-text); text-decoration: none;' +
       '}' +
       '.cvz-prompt-source-item:hover { color: var(--cvz-teal); }' +
+      '.cvz-prompt-source-competitor { font-weight: 600; }' +
+      '.cvz-competitor-badge {' +
+        'font-size: 10px; padding: 1px 6px; border: 1px solid var(--cvz-red); color: var(--cvz-red); margin-left: 4px;' +
+      '}' +
+      '.cvz-prompt-mentioned-note { margin-top: 8px; }' +
 
       '.cvz-dot { width: 8px; height: 8px; flex-shrink: 0; display: inline-block; }' +
       '.cvz-dot-green { background: var(--cvz-green); }' +
