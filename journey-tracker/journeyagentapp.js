@@ -283,6 +283,13 @@
     topicUsage:     null,   // { current_count, limit, can_create }, siehe loadTopicUsage
     pollTimer:      null,   // siehe maybeStartPolling
     retryingTopicId: null,  // Topic-ID, für die gerade ein Retry läuft, siehe retryTopic
+    // NEU (13.09.2026): Zitationen je Prompt, direkt im Prompts-Tab
+    // aufklappbar (nur Topic-Detailansicht, siehe togglePromptExpansion).
+    promptCitationsCache: {},      // promptId -> { chat_gpt: [...], gemini: [...] } | null
+    loadingPromptCitations: {},    // promptId -> bool
+    expandedPromptId: null,        // nur ein Prompt gleichzeitig aufgeklappt
+    expandedPromptEngine: {},      // promptId -> 'chat_gpt' | 'gemini'
+    expandedPromptRunIndex: {},    // promptId -> Index im Lauf-Verlauf (0 = neuester)
   };
 
   // =========================================================================
@@ -491,6 +498,9 @@
         // "messymiddle_phase", renderPromptsByPhase gruppiert aber nach
         // "phase". Ohne dieses Mapping war der Prompts-Tab immer leer,
         // obwohl die Prompts im Backend längst vorhanden waren.
+        // visibility_status kommt jetzt (13.09.2026) tatsächlich vom
+        // Backend berechnet mit (siehe get_topic_detail in main.py),
+        // vorher stand hier immer hart null.
         return Object.assign({ visibility_status: null }, p, { phase: p.messymiddle_phase || null });
       }),
     };
@@ -515,6 +525,47 @@
       state.citationTrendCache[topicId] = [];
     }
     state.isLoadingCitationTrend = false;
+    render();
+  }
+
+  // =========================================================================
+  // NEU (13.09.2026): Zitationen je Prompt (Antwort + Quellen, letzte
+  // PROMPT_CITATION_RUN_LIMIT Läufe je Engine), lazy geladen beim Aufklappen
+  // eines Prompts im Prompts-Tab. Nur in der Topic-Detailansicht nutzbar,
+  // siehe renderPromptsByPhase(prompts, enableCitations).
+  // =========================================================================
+  async function loadPromptCitations(topicId, promptId) {
+    if (CONFIG.useMockData) {
+      // Mock-Modus liefert keine echten Läufe, siehe MOCK_TOPIC_DETAIL.
+      // Leerer, aber gültiger Zustand, damit die UI nicht bricht.
+      return { prompt_id: promptId, prompt_text: '', chat_gpt: [], gemini: [] };
+    }
+    return apiFetch('/topics/' + topicId + '/prompts/' + promptId + '/citations');
+  }
+
+  async function togglePromptExpansion(promptId) {
+    if (state.expandedPromptId === promptId) {
+      state.expandedPromptId = null;
+      render();
+      return;
+    }
+    state.expandedPromptId = promptId;
+    if (!state.promptCitationsCache[promptId]) {
+      state.loadingPromptCitations[promptId] = true;
+      render();
+      try {
+        var data = await loadPromptCitations(state.activeTopicId, promptId);
+        state.promptCitationsCache[promptId] = data;
+        state.expandedPromptEngine[promptId] =
+          (data.chat_gpt && data.chat_gpt.length) ? 'chat_gpt' :
+          (data.gemini && data.gemini.length) ? 'gemini' : 'chat_gpt';
+        state.expandedPromptRunIndex[promptId] = 0;
+      } catch (e) {
+        console.error('[CVZ Visibility] Prompt-Zitationen konnten nicht geladen werden:', e);
+        state.promptCitationsCache[promptId] = null;
+      }
+      state.loadingPromptCitations[promptId] = false;
+    }
     render();
   }
 
@@ -614,7 +665,8 @@
     gsc_near_miss:        'Google Search Console',
   };
 
-  // NEU (13.09.2026): für die Modell-Aufschlüsselung im Wettbewerber-Tab.
+  // NEU (13.09.2026): für die Modell-Aufschlüsselung im Wettbewerber-Tab
+  // und für die Engine-Tabs im aufgeklappten Prompt.
   var MODEL_LABELS = {
     chat_gpt: 'ChatGPT',
     gemini:   'Gemini',
@@ -678,6 +730,31 @@
     var logo = event.target.closest('[data-cvz-source-url]');
     if (logo) {
       window.open(logo.getAttribute('data-cvz-source-url'), '_blank', 'noopener');
+      return;
+    }
+    // NEU (13.09.2026): Klicks innerhalb der aufgeklappten Prompt-Zitationen
+    // (Lauf-Auswahl, Engine-Tab, Aufklappen/Zuklappen der Zeile selbst).
+    // Bewusst VOR data-cvz-tab geprüft, alle drei sitzen strukturell nicht
+    // ineinander verschachtelt, Reihenfolge ist hier unkritisch, aber so
+    // bleiben verwandte Prompt-Handler beieinander.
+    var runSelect = event.target.closest('[data-cvz-run-select]');
+    if (runSelect) {
+      var runOwner = runSelect.getAttribute('data-cvz-run-owner');
+      state.expandedPromptRunIndex[runOwner] = parseInt(runSelect.getAttribute('data-cvz-run-select'), 10);
+      render();
+      return;
+    }
+    var engineTab = event.target.closest('[data-cvz-prompt-engine]');
+    if (engineTab) {
+      var engineOwner = engineTab.getAttribute('data-cvz-prompt-engine-owner');
+      state.expandedPromptEngine[engineOwner] = engineTab.getAttribute('data-cvz-prompt-engine');
+      state.expandedPromptRunIndex[engineOwner] = 0;
+      render();
+      return;
+    }
+    var promptToggle = event.target.closest('[data-cvz-prompt-toggle]');
+    if (promptToggle) {
+      togglePromptExpansion(promptToggle.getAttribute('data-cvz-prompt-toggle'));
       return;
     }
     var tabBtn = event.target.closest('[data-cvz-tab]');
@@ -1260,7 +1337,12 @@
         if (domainPositioning) tabContent.appendChild(domainPositioning);
         break;
       case 'prompts':
-        tabContent.appendChild(renderPromptsByPhase(data.prompts));
+        // enableCitations=false: die Domain-Übersicht aggregiert Prompts
+        // über mehrere Topics hinweg (siehe getDomainDashboardData), ein
+        // einzelner Prompt hier hat kein eindeutiges topic_id mehr, das
+        // der /citations-Endpoint bräuchte. Aufklappen nur in der
+        // Topic-Detailansicht (siehe renderTopicDetailView weiter unten).
+        tabContent.appendChild(renderPromptsByPhase(data.prompts, false));
         break;
       case 'themen':
         tabContent.appendChild(renderTopicStatusTable(data.topics));
@@ -1445,7 +1527,10 @@
         if (positioning) tabContent.appendChild(positioning);
         break;
       case 'prompts':
-        tabContent.appendChild(renderPromptsByPhase(detail.prompts));
+        // enableCitations=true: nur hier ist jedem Prompt eindeutig SEIN
+        // Topic (state.activeTopicId) zugeordnet, das der /citations-
+        // Endpoint braucht. Siehe renderPromptsByPhase.
+        tabContent.appendChild(renderPromptsByPhase(detail.prompts, true));
         break;
       case 'gsc':
         tabContent.appendChild(renderGscBlock(detail.gsc_rows));
@@ -1906,7 +1991,152 @@
     return section;
   }
 
-  function renderPromptsByPhase(prompts) {
+  // =========================================================================
+  // NEU (13.09.2026): leichter Markdown-Renderer für Prompt-Antworten aus
+  // DataForSEO (raw_response[0].markdown). Keine externe Library, deckt
+  // aber Links, Fettschrift, Überschriften und Listen ab, was in den
+  // gesehenen ChatGPT/Gemini-Antworten praktisch immer ausreicht.
+  // =========================================================================
+  function renderMarkdownLite(markdown) {
+    if (!markdown) return '';
+    var escaped = escapeHtml(markdown);
+    escaped = escaped.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function (m, text, url) {
+      return '<a href="' + url + '" target="_blank" rel="noopener">' + text + '</a>';
+    });
+    escaped = escaped.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    escaped = escaped.replace(/^###\s+(.+)$/gm, '<h5>$1</h5>');
+    escaped = escaped.replace(/^##\s+(.+)$/gm, '<h4>$1</h4>');
+
+    var html = '', inList = false;
+    escaped.split('\n').forEach(function (line) {
+      var t = line.trim();
+      if (t.indexOf('- ') === 0) {
+        if (!inList) { html += '<ul>'; inList = true; }
+        html += '<li>' + t.slice(2) + '</li>';
+      } else {
+        if (inList) { html += '</ul>'; inList = false; }
+        if (t === '') return;
+        html += (t.indexOf('<h4>') === 0 || t.indexOf('<h5>') === 0) ? t : '<p>' + t + '</p>';
+      }
+    });
+    if (inList) html += '</ul>';
+    return html;
+  }
+
+  // NEU (13.09.2026): der aufgeklappte Bereich unter einem Prompt im
+  // Prompts-Tab (nur Topic-Detailansicht) — Engine-Tabs (ChatGPT/Gemini),
+  // Lauf-Auswahl (letzte PROMPT_CITATION_RUN_LIMIT Läufe), volle Antwort
+  // und zitierte Quellen. Ersetzt die "Modal mit Pfeilen"-Idee aus dem
+  // Referenz-Screenshot bewusst durch Inline-Aufklappen in der bestehenden
+  // Tab-Struktur, wie gewünscht.
+  function renderPromptExpansion(prompt) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-prompt-expansion';
+
+    if (state.loadingPromptCitations[prompt.id]) {
+      wrap.innerHTML = '<p class="cvz-card-placeholder-text">Lädt...</p>';
+      return wrap;
+    }
+    var data = state.promptCitationsCache[prompt.id];
+    if (!data) {
+      wrap.innerHTML = '<p class="cvz-card-placeholder-text">Für diesen Prompt liegen noch keine Antwort-Daten vor.</p>';
+      return wrap;
+    }
+
+    var engines = [
+      { id: 'chat_gpt', label: MODEL_LABELS.chat_gpt, runs: data.chat_gpt || [] },
+      { id: 'gemini', label: MODEL_LABELS.gemini, runs: data.gemini || [] },
+    ];
+
+    var engineNav = document.createElement('div');
+    engineNav.className = 'cvz-prompt-engine-nav';
+    engines.forEach(function (engine) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cvz-prompt-engine-btn' + (state.expandedPromptEngine[prompt.id] === engine.id ? ' cvz-prompt-engine-btn-active' : '');
+      btn.setAttribute('data-cvz-prompt-engine', engine.id);
+      btn.setAttribute('data-cvz-prompt-engine-owner', prompt.id);
+      btn.textContent = engine.label + ' (' + engine.runs.length + ')';
+      engineNav.appendChild(btn);
+    });
+    wrap.appendChild(engineNav);
+
+    var activeEngine = engines.filter(function (e) { return e.id === state.expandedPromptEngine[prompt.id]; })[0] || engines[0];
+    var runIndex = state.expandedPromptRunIndex[prompt.id] || 0;
+    var run = activeEngine.runs[runIndex];
+
+    if (!run) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Für ' + activeEngine.label + ' liegt noch kein Lauf vor.';
+      wrap.appendChild(empty);
+      return wrap;
+    }
+
+    if (activeEngine.runs.length > 1) {
+      var runNav = document.createElement('div');
+      runNav.className = 'cvz-prompt-run-nav';
+      activeEngine.runs.forEach(function (r, i) {
+        var runBtn = document.createElement('button');
+        runBtn.type = 'button';
+        runBtn.className = 'cvz-prompt-run-btn' + (i === runIndex ? ' cvz-prompt-run-btn-active' : '');
+        runBtn.setAttribute('data-cvz-run-select', i);
+        runBtn.setAttribute('data-cvz-run-owner', prompt.id);
+        runBtn.textContent = formatRelativeTime(r.collected_at);
+        runNav.appendChild(runBtn);
+      });
+      wrap.appendChild(runNav);
+    }
+
+    var statusLine = document.createElement('p');
+    statusLine.className = 'cvz-prompt-run-status';
+    statusLine.textContent = run.own_domain_cited
+      ? '\u2713 zitiert' + (run.own_domain_citation_position ? ' (Position ' + run.own_domain_citation_position + ')' : '')
+      : (run.own_domain_mentioned ? '\u2013 nur erw\u00e4hnt, nicht zitiert' : '\u2717 nicht vorhanden');
+    if (run.own_domain_recommended === true) statusLine.textContent += ' \u00b7 aktiv empfohlen';
+    wrap.appendChild(statusLine);
+
+    var answerBlock = document.createElement('div');
+    answerBlock.className = 'cvz-prompt-answer';
+    answerBlock.innerHTML = renderMarkdownLite(run.answer_markdown);
+    wrap.appendChild(answerBlock);
+
+    var sourcesHeading = document.createElement('p');
+    sourcesHeading.className = 'cvz-section-label';
+    sourcesHeading.textContent = 'Zitierte Quellen (' + run.sources.length + ')';
+    wrap.appendChild(sourcesHeading);
+
+    if (run.sources.length === 0) {
+      var noSources = document.createElement('p');
+      noSources.className = 'cvz-card-placeholder-text';
+      noSources.textContent = 'Keine Quellen in dieser Antwort.';
+      wrap.appendChild(noSources);
+    } else {
+      var sourceList = document.createElement('div');
+      sourceList.className = 'cvz-prompt-source-list';
+      run.sources.forEach(function (s) {
+        var item = document.createElement('a');
+        item.className = 'cvz-prompt-source-item';
+        item.href = s.url || '#';
+        item.target = '_blank';
+        item.rel = 'noopener';
+        item.innerHTML =
+          '<img class="cvz-timeline-logo" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(s.domain || '') + '" alt="">' +
+          '<span>' + escapeHtml(s.title || s.domain || s.url) + '</span>';
+        sourceList.appendChild(item);
+      });
+      wrap.appendChild(sourceList);
+    }
+
+    return wrap;
+  }
+
+  // GEÄNDERT (13.09.2026): zweiter Parameter enableCitations steuert, ob
+  // Prompt-Zeilen aufklappbar sind. Nur in der Topic-Detailansicht true
+  // (siehe renderTopicDetailView), da nur dort ein Prompt eindeutig einem
+  // Topic zugeordnet ist, das der /citations-Endpoint braucht — in der
+  // Domain-Übersicht sind Prompts über mehrere Topics aggregiert.
+  function renderPromptsByPhase(prompts, enableCitations) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
@@ -1931,7 +2161,8 @@
         var statusLabel = prompt.visibility_status ? VISIBILITY_LABELS[prompt.visibility_status] : 'Unbekannt';
 
         var row = document.createElement('div');
-        row.className = 'cvz-prompt-row';
+        row.className = 'cvz-prompt-row' + (enableCitations ? ' cvz-prompt-row-clickable' : '');
+        if (enableCitations) row.setAttribute('data-cvz-prompt-toggle', prompt.id);
         row.innerHTML =
           '<span class="cvz-dot ' + dotClass + '" title="' + escapeHtml(statusLabel) + '"></span>' +
           '<span class="cvz-prompt-text">' + escapeHtml(prompt.prompt_text) + '</span>' +
@@ -1942,8 +2173,13 @@
             // "Discovery", egal was tatsächlich hinterlegt war.
             (prompt.prompt_type === 'stable_core' ? 'Stable Core' : 'Discovery') +
             (prompt.topic_name ? ' · ' + escapeHtml(prompt.topic_name) : '') +
-          '</span>';
+          '</span>' +
+          (enableCitations ? '<span class="cvz-prompt-expand-chevron">' + (state.expandedPromptId === prompt.id ? '\u25be' : '\u25b8') + '</span>' : '');
         list.appendChild(row);
+
+        if (enableCitations && state.expandedPromptId === prompt.id) {
+          list.appendChild(renderPromptExpansion(prompt));
+        }
       });
       section.appendChild(list);
     });
@@ -2166,6 +2402,30 @@
       '.cvz-prompt-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 14px; }' +
       '.cvz-prompt-text { flex: 1; }' +
       '.cvz-prompt-source { font-size: 11px; color: var(--cvz-text-muted); }' +
+
+      // NEU (13.09.2026): aufklappbare Prompt-Zeile + Engine-/Lauf-Tabs +
+      // Antwort- und Quellen-Darstellung im Prompts-Tab.
+      '.cvz-prompt-row-clickable { cursor: pointer; }' +
+      '.cvz-prompt-row-clickable:hover { background: rgba(79, 209, 197, 0.06); }' +
+      '.cvz-prompt-expand-chevron { color: var(--cvz-text-muted); font-size: 11px; }' +
+      '.cvz-prompt-expansion { margin: 4px 0 12px 18px; padding: 14px; border-left: 2px solid var(--cvz-teal); background: rgba(79, 209, 197, 0.03); }' +
+      '.cvz-prompt-engine-nav, .cvz-prompt-run-nav { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }' +
+      '.cvz-prompt-engine-btn, .cvz-prompt-run-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 10px;' +
+        'background: none; color: var(--cvz-text-muted); border: 1px solid var(--cvz-border); border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-prompt-engine-btn-active, .cvz-prompt-run-btn-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
+      '.cvz-prompt-run-status { font-size: 13px; margin: 0 0 10px; color: var(--cvz-text); }' +
+      '.cvz-prompt-answer { font-size: 13px; line-height: 1.5; margin-bottom: 14px; }' +
+      '.cvz-prompt-answer h4, .cvz-prompt-answer h5 { font-size: 13px; margin: 10px 0 4px; color: var(--cvz-text-muted); }' +
+      '.cvz-prompt-answer p { margin: 0 0 8px; }' +
+      '.cvz-prompt-answer ul { margin: 0 0 8px; padding-left: 18px; }' +
+      '.cvz-prompt-answer a { color: var(--cvz-teal); }' +
+      '.cvz-prompt-source-list { display: flex; flex-direction: column; gap: 6px; }' +
+      '.cvz-prompt-source-item {' +
+        'display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--cvz-text); text-decoration: none;' +
+      '}' +
+      '.cvz-prompt-source-item:hover { color: var(--cvz-teal); }' +
 
       '.cvz-dot { width: 8px; height: 8px; flex-shrink: 0; display: inline-block; }' +
       '.cvz-dot-green { background: var(--cvz-green); }' +
