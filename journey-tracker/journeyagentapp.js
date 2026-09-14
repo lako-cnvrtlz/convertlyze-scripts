@@ -280,6 +280,12 @@
     activeSubTab:     'themen', // Tab innerhalb der jeweiligen Ansicht
     topicDetailCache: {},
     isLoadingDetail:  false,
+    // NEU (14.09.2026): echte Domain-Dashboard-Daten (Trend/Opportunities/
+    // Content-Ideen über alle aktiven Themen einer Domain), siehe
+    // loadDomainDashboard / GET /projects/{id}/dashboard. Ersetzt
+    // MOCK_TOPIC_DETAIL für useMockData:false in getDomainDashboardData.
+    domainDashboardCache: {},        // projectId -> { trend, opportunities, contentIdeas } | null
+    isLoadingDomainDashboard: false,
     citationTrendCache: {},  // topicId -> weeks[], nur bei Bedarf geladen (siehe maybeLoadCitationTrend)
     isLoadingCitationTrend: false,
     showCreateForm: false,   // ob das "Neues Thema anlegen"-Formular gerade offen ist
@@ -407,6 +413,7 @@
     }
 
     render();
+    loadDomainDashboard(state.activeProjectId); // NEU (14.09.2026)
   }
 
   // =========================================================================
@@ -564,6 +571,40 @@
         return Object.assign({ visibility_status: null }, p, { phase: p.messymiddle_phase || null });
       }),
     };
+  }
+
+  // NEU (14.09.2026): echte Aggregation über GET /projects/{id}/dashboard
+  // statt der bisherigen client-seitigen MOCK_TOPIC_DETAIL-Zusammenrechnung
+  // in getDomainDashboardData (siehe Chat-Verlauf 14.09.2026).
+  async function loadDomainDashboardData(projectId) {
+    var data = await apiFetch('/projects/' + projectId + '/dashboard');
+    return {
+      trend: data.trend || [],
+      opportunities: data.opportunities || [],
+      contentIdeas: data.content_ideas || [],
+    };
+  }
+
+  // Cache-Wrapper analog zu openTopicDetail: lädt bei Bedarf nach, rendert
+  // vor und nach dem Request. Bewusst NICHT im Mock-Modus aktiv, dort bleibt
+  // getDomainDashboardData weiterhin an MOCK_TOPIC_DETAIL/MOCK_DOMAIN_TREND
+  // hängen (siehe dortiger Fallback).
+  async function loadDomainDashboard(projectId, force) {
+    if (!projectId || CONFIG.useMockData) return;
+    if (!force && (state.domainDashboardCache[projectId] || state.isLoadingDomainDashboard)) return;
+
+    state.isLoadingDomainDashboard = true;
+    render();
+
+    try {
+      state.domainDashboardCache[projectId] = await loadDomainDashboardData(projectId);
+    } catch (e) {
+      console.error('[CVZ Visibility] Domain-Dashboard konnte nicht geladen werden:', e);
+      state.domainDashboardCache[projectId] = { trend: [], opportunities: [], contentIdeas: [] };
+    }
+
+    state.isLoadingDomainDashboard = false;
+    render();
   }
 
   async function loadCompetitorCitationTrend(topicId) {
@@ -892,6 +933,7 @@
     state.activeSubTab = 'themen'; // GEÄNDERT (13.09.2026): siehe activeSubTab-Default oben
     updateUrlParams({ cvz_topic: null, cvz_tab: 'themen' });
     render();
+    loadDomainDashboard(state.activeProjectId); // NEU (14.09.2026): no-op falls schon gecacht
   }
 
   // Zentrale Auswahl-Funktion für die zwei Picklisten (Domain/Topic):
@@ -909,6 +951,7 @@
       state.activeSubTab = 'themen'; // GEÄNDERT (13.09.2026): siehe activeSubTab-Default oben
       updateUrlParams({ cvz_project: id, cvz_topic: null, cvz_tab: 'themen' });
       render();
+      loadDomainDashboard(id); // NEU (14.09.2026): echte Trend/Opportunity/Content-Idee-Daten nachladen
     } else if (kind === 'topic') {
       openTopicDetail(id);
     }
@@ -1446,6 +1489,18 @@
         await loadTopicUsage();
       }
 
+      // NEU (14.09.2026): Archivieren/Aktivieren ändert die Menge der
+      // aktiven Themen einer Domain, auf der GET /projects/{id}/dashboard
+      // aggregiert — alter Cache-Stand wäre sonst falsch, bis die Seite
+      // neu geladen wird.
+      var affectedTopic = getTopicById(topicId);
+      if (affectedTopic) {
+        delete state.domainDashboardCache[affectedTopic.project_id];
+        if (state.activeView === 'overview' && state.activeProjectId === affectedTopic.project_id) {
+          loadDomainDashboard(affectedTopic.project_id, /* force */ true);
+        }
+      }
+
       if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
         delete state.topicDetailCache[topicId];
         await openTopicDetail(topicId, false);
@@ -1690,12 +1745,14 @@
     return badge;
   }
 
-  // NUR MOCK: aggregiert MOCK_TOPIC_DETAIL über alle Themen einer Domain.
-  // Für useMockData:false gibt's dafür noch KEINE echte Implementierung,
-  // weil eine korrekte Aggregation einen eigenen Backend-Endpunkt braucht
-  // (client-seitiges Zusammenrechnen über N einzelne GET /topics/{id}-
-  // Aufrufe wäre bei vielen Themen langsam und teuer, siehe Chat-Verlauf).
-    function getDomainDashboardData(projectId) {
+  // GEÄNDERT (14.09.2026): Trend/Opportunities/Content-Ideen kommen jetzt
+  // für useMockData:false über GET /projects/{id}/dashboard (siehe
+  // loadDomainDashboard), NICHT mehr aus MOCK_TOPIC_DETAIL. Der Rest
+  // (competitors/keywords/prompts/positioningInsights/sourceProfiles)
+  // hängt bewusst NOCH an MOCK_TOPIC_DETAIL — für echte Themen bleibt das
+  // vorerst leer, siehe Docstring bei get_project_dashboard_endpoint in
+  // main.py, warum das ein zweiter Schritt ist.
+  function getDomainDashboardData(projectId) {
     var topics = state.allTopics.filter(function (t) { return t.project_id === projectId; });
     // NEU (14.09.2026): archivierte Themen bleiben in `topics` (für die
     // Themen-Tabelle), fließen aber NICHT in die aggregierten Ansichten
@@ -1703,8 +1760,17 @@
     // Domain) — die sollen den aktuell relevanten Hebel zeigen, nicht von
     // pausierten Themen verwässert werden.
     var activeTopics = topics.filter(function (t) { return t.status !== 'archived'; });
-    var opportunities = [];
-    var contentIdeas = [];
+
+    var live = CONFIG.useMockData ? null : state.domainDashboardCache[projectId];
+
+    // GEÄNDERT (14.09.2026): opportunities/contentIdeas kommen bei
+    // useMockData:false direkt aus dem echten Dashboard-Endpunkt (bereits
+    // mit topic_name angereichert, siehe get_project_dashboard_endpoint),
+    // die MOCK_TOPIC_DETAIL-Schleife unten trägt dafür in dem Fall nichts
+    // mehr bei (detail.opportunities/detail.content_ideas werden dann
+    // einfach nicht in diese Arrays geschrieben).
+    var opportunities = live ? live.opportunities.slice() : [];
+    var contentIdeas = live ? live.contentIdeas.slice() : [];
     var positioningInsights = [];
     var sourceProfileMap = {};
     var competitorMap = {};
@@ -1715,13 +1781,15 @@
       var detail = MOCK_TOPIC_DETAIL[topic.id];
       if (!detail) return;
 
-      (detail.opportunities || []).forEach(function (opp) {
-        opportunities.push(Object.assign({ topic_name: topic.name }, opp));
-      });
+      if (!live) {
+        (detail.opportunities || []).forEach(function (opp) {
+          opportunities.push(Object.assign({ topic_name: topic.name }, opp));
+        });
 
-      (detail.content_ideas || []).forEach(function (idea) {
-        contentIdeas.push(Object.assign({ topic_name: topic.name }, idea));
-      });
+        (detail.content_ideas || []).forEach(function (idea) {
+          contentIdeas.push(Object.assign({ topic_name: topic.name }, idea));
+        });
+      }
 
       if (detail.positioning_insight) {
         positioningInsights.push(Object.assign({ topic_name: topic.name }, detail.positioning_insight));
@@ -1765,8 +1833,17 @@
     var keywords = Object.keys(keywordMap).map(function (k) { return keywordMap[k]; })
       .sort(function (a, b) { return (b.search_volume || 0) - (a.search_volume || 0); });
 
+    // WICHTIG: live.trend hat eine ANDERE Form als MOCK_DOMAIN_TREND
+    // ({week, mentioned, cited, recommended, total}[] vs. {total_prompts,
+    // weeks:[{week, visible_prompts}]}), das sind unterschiedliche
+    // Kennzahlen (Lauf-Anteile vs. Prompt-Anzahl). Deshalb hier bewusst
+    // NICHT ineinander gemappt — renderDomainDashboard() wählt je nach
+    // CONFIG.useMockData die passende Render-Funktion (renderTrendChart
+    // fürs Mock-Schema, renderDomainTrendChart fürs echte).
+    var trend = live ? live.trend : null;
+
     return {
-      topics: topics, opportunities: opportunities, contentIdeas: contentIdeas,
+      topics: topics, opportunities: opportunities, contentIdeas: contentIdeas, trend: trend,
       positioningInsights: positioningInsights, sourceProfiles: Object.values(sourceProfileMap),
       competitors: competitors, keywords: keywords, prompts: prompts,
     };
@@ -1820,7 +1897,15 @@
         break;
       case 'uebersicht':
       default:
-        tabContent.appendChild(renderTrendChart(MOCK_DOMAIN_TREND[project.id]));
+        // GEÄNDERT (14.09.2026): Mock- und echtes Trend-Schema sind
+        // unterschiedliche Kennzahlen (siehe Kommentar bei
+        // getDomainDashboardData), deshalb zwei getrennte Render-Pfade
+        // statt eines gemeinsamen Feldes.
+        if (CONFIG.useMockData) {
+          tabContent.appendChild(renderTrendChart(MOCK_DOMAIN_TREND[project.id]));
+        } else {
+          tabContent.appendChild(renderDomainTrendChart(data.trend, state.isLoadingDomainDashboard));
+        }
         tabContent.appendChild(renderDomainOpportunitySection(data.opportunities));
         tabContent.appendChild(renderContentIdeasSection(data.contentIdeas));
         break;
@@ -1852,8 +1937,13 @@
     opportunities.forEach(function (opp) {
       var card = document.createElement('div');
       card.className = 'cvz-card cvz-opportunity-card';
+      // KORRIGIERT (14.09.2026): war opp.type, die echte Spalte in der
+      // opportunities-Tabelle heißt opportunity_type. MOCK_TOPIC_DETAIL
+      // hat das Feld unter 'type' angelegt, das hat den Fehler bisher
+      // kaschiert; bei echten (nicht-Mock) Opportunities zeigte der Badge
+      // dadurch immer "undefined".
       card.innerHTML =
-        '<p class="cvz-opportunity-type">' + escapeHtml(OPPORTUNITY_TYPE_LABELS[opp.type] || opp.type) + '</p>' +
+        '<p class="cvz-opportunity-type">' + escapeHtml(OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type) + '</p>' +
         '<p class="cvz-opportunity-description">' + escapeHtml(opp.description || '') + '</p>' +
         '<p class="cvz-opportunity-topic">' + escapeHtml(opp.topic_name) + '</p>';
       grid.appendChild(card);
@@ -2193,6 +2283,62 @@
       '<p class="cvz-chart-caption">Sichtbare Stable-Core-Prompts pro Woche, von ' + trendData.total_prompts + ' insgesamt. ' +
       'Komplett erfundene Werte, siehe Kommentar bei MOCK_DOMAIN_TREND im Code.</p>'
     );
+  }
+
+  // NEU (14.09.2026): echter Domain-Trend (GET /projects/{id}/dashboard),
+  // gleiche Kennzahl wie renderVisibilityTrendSection (mentioned/cited/
+  // recommended-Anteil pro Woche), aber über alle aktiven Themen der
+  // Domain aufsummiert statt für ein einzelnes Topic. BEWUSST kein
+  // xKeys/week-detail-Klick (siehe buildLineChartSvg-Kommentar: "beim
+  // Mock-Chart/Domain-Dashboard bewusst nicht") — /topics/{id}/week-detail
+  // hängt an genau einem Topic, eine Domain-Woche kann aber mehrere
+  // Themen zusammenfassen, dafür bräuchte es einen eigenen Endpunkt.
+  function renderDomainTrendChart(weeks, isLoading) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Sichtbarkeits-Entwicklung über die Wochen';
+    section.appendChild(heading);
+
+    if (isLoading) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.textContent = 'Lädt...';
+      section.appendChild(loading);
+      return section;
+    }
+
+    if (!weeks || weeks.length < 2) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch kein Verlauf verfügbar, braucht mindestens zwei Wochen mit ausgewerteten Läufen über alle Themen dieser Domain.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    var xLabels = weeks.map(function (w) { return formatShortDate(w.week); });
+    var mentionedRate = weeks.map(function (w) { return w.total ? Math.round((w.mentioned / w.total) * 100) : null; });
+    var citedRate = weeks.map(function (w) { return w.total ? Math.round((w.cited / w.total) * 100) : null; });
+    var recommendedRate = weeks.map(function (w) { return w.total ? Math.round((w.recommended / w.total) * 100) : null; });
+
+    var card = document.createElement('div');
+    card.className = 'cvz-card';
+    card.innerHTML =
+      buildLineChartSvg([
+        { label: 'Erwähnt', values: mentionedRate, color: 'var(--cvz-amber)' },
+        { label: 'Zitiert', values: citedRate, color: 'var(--cvz-teal)' },
+        { label: 'Empfohlen', values: recommendedRate, color: 'var(--cvz-red)' },
+      ], xLabels, { maxY: 100 }) +
+      '<div class="cvz-chart-legend">' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-amber)"></span>Erwähnt</span>' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Zitiert</span>' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-red)"></span>Empfohlen</span>' +
+      '</div>' +
+      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-L\u00e4ufe pro Woche (0\u2013100\u202f%), \u00fcber alle aktiven Themen dieser Domain aufsummiert, in dem die eigene Domain erw\u00e4hnt, zitiert bzw. aktiv empfohlen wurde.</p>';
+    section.appendChild(card);
+    return section;
   }
 
   var WEEKDAY_MONTHS_DE = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
@@ -2569,7 +2715,7 @@
       var card = document.createElement('div');
       card.className = 'cvz-card cvz-opportunity-card';
       card.innerHTML =
-        '<p class="cvz-opportunity-type">' + escapeHtml(OPPORTUNITY_TYPE_LABELS[opp.type] || opp.type) + '</p>' +
+        '<p class="cvz-opportunity-type">' + escapeHtml(OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type) + '</p>' +
         '<p class="cvz-opportunity-description">' + escapeHtml(opp.description || '') + '</p>';
       grid.appendChild(card);
     });
