@@ -1804,32 +1804,31 @@
     var tbody = document.createElement('tbody');
     topics.forEach(function (topic) {
       var status = STATUS_LABELS[topic.status] || { label: topic.status, className: '' };
-      var isBusy = state.archivingTopicId === topic.id;
+            var isBusy = state.archivingTopicId === topic.id;
+      // NEU (14.09.2026): "Aktivieren" ausgrauen, solange kein Topic-Slot
+      // frei ist (state.topicUsage.can_create), statt den User erst
+      // klicken und dann den 403-Fehler vom Server sehen zu lassen.
+      // Deaktivieren bleibt davon unberührt — Slots freigeben soll immer
+      // möglich sein.
+      var noSlotAvailable = !!(state.topicUsage && !state.topicUsage.can_create);
+      var reactivateDisabled = isBusy || noSlotAvailable;
+      var reactivateTitle = (!isBusy && noSlotAvailable)
+        ? ' title="Alle ' + state.topicUsage.limit + ' Topic-Slots sind aktuell belegt (' +
+          state.topicUsage.current_count + '/' + state.topicUsage.limit +
+          '). Erst ein anderes Thema deaktivieren oder ein weiteres Slot kaufen."'
+        : '';
       // NEU (14.09.2026): eigene Aktions-Spalte statt in die Status-Zelle
       // gequetscht, damit Deaktivieren/Aktivieren unabhängig vom Status
       // immer gut auffindbar ist (nicht nur, wenn zufällig 'error').
       var actionCell = topic.status === 'archived'
         ? '<button type="button" class="cvz-retry-btn" data-cvz-reactivate-topic="' + topic.id + '"' +
-            (isBusy ? ' disabled' : '') + '>' +
+            (reactivateDisabled ? ' disabled' : '') + reactivateTitle + '>' +
             (isBusy ? 'Wird aktiviert …' : 'Aktivieren') +
           '</button>'
         : '<button type="button" class="cvz-archive-btn" data-cvz-archive-topic="' + topic.id + '"' +
             (isBusy ? ' disabled' : '') + '>' +
             (isBusy ? 'Wird deaktiviert …' : 'Deaktivieren') +
           '</button>';
-      var tr = document.createElement('tr');
-      tr.setAttribute('data-cvz-topic-id', topic.id);
-      tr.innerHTML =
-        '<td>' + escapeHtml(topic.name) + '</td>' +
-        '<td><span class="cvz-status-badge ' + status.className + '">' +
-          (topic.status === 'collecting' ? '<span class="cvz-spinner"></span>' : '') +
-          status.label + '</span>' +
-          (topic.status === 'collecting' ? '<span class="cvz-status-hint">Das wird mehrere Minuten dauern. Sobald der Lauf fertig ist, aktualisiert sich die Seite automatisch.</span>' : '') +
-          (topic.status === 'error' ? (
-            '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + topic.id + '"' +
-              (state.retryingTopicId === topic.id ? ' disabled' : '') + '>' +
-              (state.retryingTopicId === topic.id ? 'Wird erneut versucht …' : 'Erneut versuchen') +
-            '</button>'
           ) : '') +
         '</td>' +
         '<td>' + formatRelativeTime(topic.created_at) + '</td>' +
@@ -1862,9 +1861,12 @@
     var topActionRow = document.createElement('div');
     topActionRow.className = 'cvz-top-action-row';
     topActionRow.appendChild(backBtn);
-    if (currentTopicListEntry) {
+        if (currentTopicListEntry) {
       var isArchivedNow = currentTopicListEntry.status === 'archived';
       var isBusyNow = state.archivingTopicId === currentTopicListEntry.id;
+      // NEU (14.09.2026): gleiche Sperre wie in der Themen-Tabelle (siehe
+      // Block 8) — "Thema aktivieren" ausgrauen, solange kein Slot frei ist.
+      var noSlotAvailableNow = !!(state.topicUsage && !state.topicUsage.can_create);
       var archiveToggleBtn = document.createElement('button');
       archiveToggleBtn.type = 'button';
       archiveToggleBtn.className = isArchivedNow ? 'cvz-retry-btn' : 'cvz-archive-btn';
@@ -1872,7 +1874,13 @@
         isArchivedNow ? 'data-cvz-reactivate-topic' : 'data-cvz-archive-topic',
         currentTopicListEntry.id
       );
-      archiveToggleBtn.disabled = isBusyNow;
+      archiveToggleBtn.disabled = isBusyNow || (isArchivedNow && noSlotAvailableNow);
+      if (isArchivedNow && !isBusyNow && noSlotAvailableNow) {
+        archiveToggleBtn.title =
+          'Alle ' + state.topicUsage.limit + ' Topic-Slots sind aktuell belegt (' +
+          state.topicUsage.current_count + '/' + state.topicUsage.limit +
+          '). Erst ein anderes Thema deaktivieren oder ein weiteres Slot kaufen.';
+      }
       archiveToggleBtn.textContent = isBusyNow
         ? (isArchivedNow ? 'Wird aktiviert …' : 'Wird deaktiviert …')
         : (isArchivedNow ? 'Thema aktivieren' : 'Thema deaktivieren');
