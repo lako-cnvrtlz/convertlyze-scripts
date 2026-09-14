@@ -291,6 +291,12 @@
     // MOCK_TOPIC_DETAIL für useMockData:false in getDomainDashboardData.
     domainDashboardCache: {},        // projectId -> { trend, opportunities, contentIdeas } | null
     isLoadingDomainDashboard: false,
+    // NEU (14.09.2026): manueller GSC-Nachzieh-Trigger (siehe
+    // refreshGscData/main.py: refresh_gsc_endpoint), für den Fall, dass
+    // die GSC-Verbindung erst nach dem Anlegen eines Themas hergestellt
+    // wurde und man nicht bis zu 30 Tage auf den nächsten Monatslauf
+    // warten will.
+    isRefreshingGsc: false,
     citationTrendCache: {},  // topicId -> weeks[], nur bei Bedarf geladen (siehe maybeLoadCitationTrend)
     isLoadingCitationTrend: false,
     showCreateForm: false,   // ob das "Neues Thema anlegen"-Formular gerade offen ist
@@ -1377,6 +1383,19 @@
       cancelArchiveTopic(cancelArchiveBtn.getAttribute('data-cvz-cancel-archive-topic'));
       return;
     }
+    // NEU (14.09.2026): endgültiges Löschen (nur für nie gestartete Themen,
+    // siehe deleteTopicPermanently/main.py: delete_topic_endpoint).
+    var deleteTopicBtn = event.target.closest('[data-cvz-delete-topic]');
+    if (deleteTopicBtn) {
+      deleteTopicPermanently(deleteTopicBtn.getAttribute('data-cvz-delete-topic'));
+      return;
+    }
+    // NEU (14.09.2026): manueller GSC-Nachzieh-Trigger.
+    var refreshGscBtn = event.target.closest('[data-cvz-refresh-gsc]');
+    if (refreshGscBtn) {
+      refreshGscData(refreshGscBtn.getAttribute('data-cvz-refresh-gsc'));
+      return;
+    }
     var topicCard = event.target.closest('[data-cvz-topic-id]');
     if (topicCard) {
       openTopicDetail(topicCard.getAttribute('data-cvz-topic-id'));
@@ -1681,6 +1700,79 @@
     }
 
         state.archivingTopicId = null;
+    render();
+  }
+
+  // NEU (14.09.2026): endgültiges Löschen statt nur Archivieren — nur
+  // sinnvoll für Themen, die nie einen Lauf hatten (siehe main.py:
+  // delete_topic_endpoint, das die eigentliche Sicherheitsprüfung macht).
+  // Das Frontend zeigt den Button nur für status='queued' oder
+  // 'archived' ohne last_monthly_collection_at (siehe
+  // renderTopicStatusTable), das Backend ist trotzdem die verbindliche
+  // Prüfung — schlägt mit 409, wenn doch schon Läufe existieren.
+  async function deleteTopicPermanently(topicId) {
+    var confirmed = await showCvzConfirm(
+      'Dieses Thema wurde nie gestartet und kann folgenlos entfernt werden. Das ist NICHT r\u00fcckg\u00e4ngig zu machen.',
+      { title: 'Thema endg\u00fcltig l\u00f6schen?', confirmLabel: 'Endg\u00fcltig l\u00f6schen' }
+    );
+    if (!confirmed) return;
+
+    var affectedTopic = getTopicById(topicId); // vor dem Löschen merken, project_id wird danach gebraucht
+    state.archivingTopicId = topicId;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        state.allTopics = state.allTopics.filter(function (t) { return t.id !== topicId; });
+      } else {
+        await apiFetch('/topics/' + topicId, { method: 'DELETE' });
+        await loadTopics();
+        await loadTopicUsage();
+      }
+      delete state.topicDetailCache[topicId];
+      if (affectedTopic) delete state.domainDashboardCache[affectedTopic.project_id];
+      if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
+        backToOverview();
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Thema konnte nicht gel\u00f6scht werden:', e);
+      await showCvzAlert('Thema konnte nicht gel\u00f6scht werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.archivingTopicId = null;
+    render();
+  }
+
+  // NEU (14.09.2026): manueller Nachzieh-Trigger für GSC-Near-Miss-Daten
+  // (siehe main.py: refresh_gsc_endpoint/refresh_gsc_data in run_topic.py).
+  // Läuft als Hintergrund-Task im Backend, die Antwort kommt sofort — hier
+  // wird nur EINMALIG nach kurzer Wartezeit neu geladen, kein Polling wie
+  // bei 'collecting' (der GSC-Abruf selbst dauert nur wenige Sekunden).
+  async function refreshGscData(topicId) {
+    if (state.isRefreshingGsc) return;
+    state.isRefreshingGsc = true;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        await showCvzAlert('Im Mock-Modus nicht verf\u00fcgbar.');
+      } else {
+        await apiFetch('/topics/' + topicId + '/refresh-gsc', { method: 'POST' });
+        // Läuft im Hintergrund weiter, hier nur kurz warten und dann neu
+        // laden — reicht für einen einzelnen GSC-API-Call, kein
+        // dauerhaftes Polling nötig wie bei einem kompletten Erstlauf.
+        await new Promise(function (resolve) { setTimeout(resolve, 6000); });
+        delete state.topicDetailCache[topicId];
+        if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
+          await openTopicDetail(topicId, false);
+        }
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] GSC-Daten konnten nicht nachgezogen werden:', e);
+      await showCvzAlert('GSC-Daten konnten nicht nachgezogen werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.isRefreshingGsc = false;
     render();
   }
 
@@ -2106,6 +2198,15 @@
       // aus der Warteschlange (siehe archive_topic_endpoint: status='queued'
       // wird sofort archiviert, kein Vormerken nötig).
       var pendingArchival = topic.status === 'active' && !!topic.archive_effective_at;
+      // NEU (14.09.2026): "Ganz löschen" nur anbieten, wenn dieses Thema
+      // nie einen Lauf hatte — last_monthly_collection_at ist dafür die
+      // verlässliche clientseitige Heuristik (echte Prüfung macht das
+      // Backend über ai_runs, siehe main.py: delete_topic_endpoint). Ein
+      // 'queued'-Thema hatte per Definition noch nie einen Lauf; ein
+      // 'archived'-Thema nur dann, wenn last_monthly_collection_at leer
+      // ist (deckt auch ältere, schon vor dieser Änderung archivierte
+      // Themen mit ab).
+      var neverRan = topic.status === 'queued' || (topic.status === 'archived' && !topic.last_monthly_collection_at);
       var actionCell;
       if (topic.status === 'archived') {
         actionCell =
@@ -2127,6 +2228,12 @@
               ? (topic.status === 'queued' ? 'Wird entfernt …' : 'Wird deaktiviert …')
               : (topic.status === 'queued' ? 'Aus Warteschlange entfernen' : 'Deaktivieren')) +
           '</button>';
+      }
+      if (neverRan) {
+        actionCell += '<button type="button" class="cvz-delete-topic-btn" data-cvz-delete-topic="' + topic.id + '"' +
+          (isBusy ? ' disabled' : '') + '>' +
+          (isBusy ? 'Wird gel\u00f6scht …' : 'Ganz l\u00f6schen') +
+        '</button>';
       }
       // NEU (14.09.2026): Status-Hinweis für die beiden neuen Zwischenzustände,
       // gleiches Muster wie der bestehende 'collecting'-Hinweis unten.
@@ -2306,7 +2413,7 @@
         tabContent.appendChild(renderPromptsByPhase(detail.prompts, true, detail.changelog));
         break;
       case 'gsc':
-        tabContent.appendChild(renderGscBlock(detail.gsc_rows));
+        tabContent.appendChild(renderGscBlock(detail.gsc_rows, state.activeTopicId));
         break;
       case 'uebersicht':
       default:
@@ -3985,7 +4092,7 @@
     return section;
   }
 
-  function renderGscBlock(gscRows) {
+  function renderGscBlock(gscRows, topicId) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
@@ -3994,10 +4101,22 @@
     heading.textContent = 'Google-Search-Console-Performance';
     section.appendChild(heading);
 
+    // NEU (14.09.2026): manueller Nachzieh-Button, unabhängig davon ob
+    // schon Daten da sind — falls die GSC-Verbindung erst nach dem
+    // Anlegen des Themas hergestellt wurde, muss man sonst bis zu 30 Tage
+    // auf den nächsten Monatslauf warten (siehe Chat-Verlauf 14.09.2026).
+    var refreshBtn = document.createElement('button');
+    refreshBtn.type = 'button';
+    refreshBtn.className = 'cvz-create-toggle-btn';
+    refreshBtn.setAttribute('data-cvz-refresh-gsc', topicId);
+    refreshBtn.disabled = state.isRefreshingGsc;
+    refreshBtn.textContent = state.isRefreshingGsc ? 'Wird nachgezogen \u2026' : 'GSC-Daten jetzt nachziehen';
+    section.appendChild(refreshBtn);
+
     if (!gscRows || gscRows.length === 0) {
       var empty = document.createElement('p');
       empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Noch keine GSC-Daten verfügbar.';
+      empty.textContent = 'Noch keine GSC-Daten verf\u00fcgbar. Falls die GSC-Verbindung erst k\u00fcrzlich hergestellt wurde, oben auf "GSC-Daten jetzt nachziehen" klicken, statt auf den n\u00e4chsten Monatslauf zu warten.';
       section.appendChild(empty);
       return section;
     }
@@ -4270,6 +4389,16 @@
       '}' +
       '.cvz-archive-btn:hover { color: var(--cvz-text); border-color: var(--cvz-text-muted); }' +
       '.cvz-archive-btn:disabled { opacity: 0.6; cursor: default; }' +
+      // NEU (14.09.2026): "Ganz löschen", nur für nie gestartete Themen.
+      // Bewusst zurückhaltend (Text statt Kasten) — kein prominenter roter
+      // Button, das soll kein häufig genutzter Pfad sein, aber trotzdem
+      // erreichbar.
+      '.cvz-delete-topic-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 11px; padding: 4px 0 4px 10px;' +
+        'background: none; color: var(--cvz-text-muted); border: none; text-decoration: underline; cursor: pointer;' +
+      '}' +
+      '.cvz-delete-topic-btn:hover { color: var(--cvz-red); }' +
+      '.cvz-delete-topic-btn:disabled { opacity: 0.6; cursor: default; }' +
       '.cvz-top-action-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }' +
       '.cvz-top-action-row .cvz-back-btn { padding: 0; margin: 0; }' +
       '.cvz-archived-notice { font-size: 13px; color: var(--cvz-text-muted); margin: 0 0 8px; font-style: italic; }' +
