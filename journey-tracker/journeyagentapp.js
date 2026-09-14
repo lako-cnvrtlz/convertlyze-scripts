@@ -290,8 +290,9 @@
     topicUsage:     null,   // { current_count, limit, can_create }, siehe loadTopicUsage
     pollTimer:      null,   // siehe maybeStartPolling
     retryingTopicId: null,  // Topic-ID, für die gerade ein Retry läuft, siehe retryTopic
-    // NEU (14.09.2026): Topic-ID, für die gerade Archivieren/Aktivieren läuft,
-    // siehe setTopicArchiveStatus.
+        // NEU (14.09.2026): Topic-ID, für die gerade Archivieren/Aktivieren/
+    // Deaktivierung-Abbrechen läuft, siehe setTopicArchiveStatus und
+    // cancelArchiveTopic.
     archivingTopicId: null,
     // NEU (13.09.2026): Zitationen je Prompt, direkt im Prompts-Tab
     // aufklappbar (nur Topic-Detailansicht, siehe togglePromptExpansion).
@@ -913,11 +914,15 @@
     }
   }
 
-  var STATUS_LABELS = {
+    var STATUS_LABELS = {
     active:     { label: 'Aktiv',         className: 'cvz-status-active' },
     collecting: { label: 'Sammelt Daten', className: 'cvz-status-collecting' },
     error:      { label: 'Fehler',        className: 'cvz-status-error' },
     archived:   { label: 'Archiviert',    className: 'cvz-status-archived' },
+    // NEU (14.09.2026): Thema wartet auf einen frei werdenden Slot, siehe
+    // create_topic_endpoint (Backend legt es mit status='queued' an, statt
+    // mit 403 abzulehnen, wenn zumindest eine Deaktivierung ansteht).
+    queued:     { label: 'Wartet',        className: 'cvz-status-queued' },
   };
 
   var OPPORTUNITY_TYPE_LABELS = {
@@ -1148,9 +1153,15 @@
       setTopicArchiveStatus(archiveBtn.getAttribute('data-cvz-archive-topic'), true);
       return;
     }
-    var reactivateBtn = event.target.closest('[data-cvz-reactivate-topic]');
+        var reactivateBtn = event.target.closest('[data-cvz-reactivate-topic]');
     if (reactivateBtn) {
       setTopicArchiveStatus(reactivateBtn.getAttribute('data-cvz-reactivate-topic'), false);
+      return;
+    }
+    // NEU (14.09.2026): "Deaktivierung abbrechen", gleiches Prinzip.
+    var cancelArchiveBtn = event.target.closest('[data-cvz-cancel-archive-topic]');
+    if (cancelArchiveBtn) {
+      cancelArchiveTopic(cancelArchiveBtn.getAttribute('data-cvz-cancel-archive-topic'));
       return;
     }
     var topicCard = event.target.closest('[data-cvz-topic-id]');
@@ -1299,7 +1310,7 @@
         }
       }
 
-      var newTopic;
+            var newTopic;
       if (CONFIG.useMockData) {
         newTopic = { id: 'topic-' + Date.now(), project_id: project.id, name: topicText, seed_keyword: topicText, status: 'collecting', opportunities_count: 0 };
       } else {
@@ -1310,19 +1321,31 @@
           method: 'POST',
           body: { project_id: project.id, topic_name: topicText, seed_keyword: topicText, sample_prompts: [] },
         });
-        newTopic = { id: topicData.topic_id, project_id: project.id, name: topicText, seed_keyword: topicText, status: 'collecting', opportunities_count: 0 };
+        // GEÄNDERT (14.09.2026): Backend kann jetzt statt 'collecting' auch
+        // 'queued' zurückgeben (kein Slot frei, aber eine Deaktivierung
+        // steht an, siehe main.py: create_topic_endpoint). Status 1:1
+        // übernehmen statt hart 'collecting' anzunehmen.
+        newTopic = { id: topicData.topic_id, project_id: project.id, name: topicText, seed_keyword: topicText, status: topicData.status || 'collecting', opportunities_count: 0 };
       }
       state.allTopics.push(newTopic);
       state.activeProjectId = project.id;
 
-      // Nutzungsstand lokal nachziehen, damit das Formular beim nächsten
-      // Öffnen sofort den richtigen Zustand zeigt, ohne erst neu laden zu
-      // müssen (bei useMockData:false wäre ein Refetch zwar korrekter,
-      // aber unnötig, current_count hat sich ja genau um 1 erhöht).
-      if (state.topicUsage) {
+      // GEÄNDERT (14.09.2026): current_count NUR hochzählen, wenn das
+      // Thema wirklich sofort einen Slot belegt (status 'collecting').
+      // Ein 'queued'-Thema belegt noch keinen Slot (siehe get_topic_usage
+      // in run_topic.py: zählt nur 'active'+'collecting'), das lokale
+      // Nachziehen hier würde sonst can_create fälschlich sperren.
+      if (state.topicUsage && newTopic.status !== 'queued') {
         state.topicUsage.current_count += 1;
         state.topicUsage.can_create = state.topicUsage.current_count < state.topicUsage.limit;
       }
+
+      state.isCreating = false;
+      state.showCreateForm = false;
+      if (newTopic.status !== 'queued') {
+        maybeStartPolling(); // neues Thema ist 'collecting', Live-Nachladen anstoßen
+      }
+      openTopicDetail(newTopic.id); // Detailansicht zeigt "collecting"/"queued", bis der Hintergrundlauf fertig bzw. das Thema befördert ist, das ist erwartetes Verhalten
 
       state.isCreating = false;
       state.showCreateForm = false;
@@ -1425,6 +1448,40 @@
       window.alert('Status konnte nicht geändert werden: ' + (e.message || 'Unbekannter Fehler'));
     }
 
+        state.archivingTopicId = null;
+    render();
+  }
+
+  // NEU (14.09.2026): Gegenstück zur Deaktivierungs-Vormerkung – nimmt ein
+  // Thema wieder von der "wird zum Monatsende deaktiviert"-Liste, ohne dass
+  // zwischendurch überhaupt etwas archiviert wurde (das Thema war die ganze
+  // Zeit weiter 'active', siehe main.py: archive_topic_endpoint /
+  // cancel_archive_endpoint).
+  async function cancelArchiveTopic(topicId) {
+    state.archivingTopicId = topicId;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        var mockTopic = getTopicById(topicId);
+        if (mockTopic) mockTopic.archive_effective_at = null;
+        if (state.topicDetailCache[topicId]) {
+          state.topicDetailCache[topicId].topic.archive_effective_at = null;
+        }
+      } else {
+        await apiFetch('/topics/' + topicId + '/cancel-archive', { method: 'POST' });
+        await loadTopics();
+      }
+
+      if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
+        delete state.topicDetailCache[topicId];
+        await openTopicDetail(topicId, false);
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Deaktivierung konnte nicht abgebrochen werden:', e);
+      window.alert('Deaktivierung konnte nicht abgebrochen werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
     state.archivingTopicId = null;
     render();
   }
@@ -1484,15 +1541,16 @@
 
     if (!state.showCreateForm) return wrap;
 
-    var form = document.createElement('div');
+        var form = document.createElement('div');
     form.className = 'cvz-create-form-fields';
 
-    // NEU: Wenn wir schon VOR jedem Anlege-Versuch wissen, dass kein Platz
-    // mehr ist (state.topicUsage von loadTopicUsage), zeigen wir gar nicht
-    // erst die Eingabefelder, sondern direkt Meldung + Kauf-Button. Der
-    // Nutzer kann so gar nicht erst auf "Anlegen" klicken, um dann einen
-    // Fehler zu bekommen, das war der Wunsch.
-    var limitReachedUpfront = state.topicUsage && !state.topicUsage.can_create && !state.limitReached;
+    // GEÄNDERT (14.09.2026): kein Platz mehr heißt jetzt nicht mehr
+    // automatisch "Formular sperren" — ist can_queue true (siehe
+    // get_topic_status_endpoint), kann das Thema trotzdem angelegt werden,
+    // landet dann nur erstmal in der Warteschlange (status='queued', siehe
+    // create_topic_endpoint). Die harte Sperre samt Kauf-Button gilt nur
+    // noch, wenn wirklich GAR NICHTS geht (auch kein reservierbarer Platz).
+    var limitReachedUpfront = state.topicUsage && !state.topicUsage.can_create && !state.topicUsage.can_queue && !state.limitReached;
     if (limitReachedUpfront) {
       var upfrontMsg = document.createElement('p');
       upfrontMsg.className = 'cvz-create-error';
@@ -1506,11 +1564,26 @@
       upfrontBuyBtn.className = 'cvz-create-buy-btn';
       upfrontBuyBtn.setAttribute('data-cvz-buy-slot', '');
       upfrontBuyBtn.disabled = state.isBuyingSlot;
-      upfrontBuyBtn.textContent = state.isBuyingSlot ? 'Wird bearbeitet \u2026' : '+ 1 Topic-Slot kaufen';
+      upfrontBuyBtn.textContent = state.isBuyingSlot ? 'Wird bearbeitet …' : '+ 1 Topic-Slot kaufen';
       form.appendChild(upfrontBuyBtn);
 
       wrap.appendChild(form);
       return wrap;
+    }
+
+    // NEU (14.09.2026): informativer (NICHT blockierender) Hinweis, wenn
+    // aktuell zwar kein Slot frei ist, das Thema aber in die Warteschlange
+    // könnte (state.topicUsage.can_queue). Formular bleibt normal nutzbar.
+    var queueNotice = state.topicUsage && !state.topicUsage.can_create && state.topicUsage.can_queue;
+    if (queueNotice) {
+      var queueMsg = document.createElement('p');
+      queueMsg.className = 'cvz-create-info';
+      var queueDate = formatShortDate(state.topicUsage.next_slot_at);
+      queueMsg.textContent =
+        'Euer Plan-Limit ist aktuell ausgeschöpft (' + state.topicUsage.current_count + '/' + state.topicUsage.limit + '). ' +
+        'Das Thema wird angelegt und startet automatisch, sobald ein Slot frei wird' +
+        (queueDate ? ' (voraussichtlich ab ' + queueDate + ')' : '') + '.';
+      form.appendChild(queueMsg);
     }
 
     var domainSelect = document.createElement('select');
@@ -1804,7 +1877,7 @@
     var tbody = document.createElement('tbody');
     topics.forEach(function (topic) {
       var status = STATUS_LABELS[topic.status] || { label: topic.status, className: '' };
-            var isBusy = state.archivingTopicId === topic.id;
+                              var isBusy = state.archivingTopicId === topic.id;
       // NEU (14.09.2026): "Aktivieren" ausgrauen, solange kein Topic-Slot
       // frei ist (state.topicUsage.can_create), statt den User erst
       // klicken und dann den 403-Fehler vom Server sehen zu lassen.
@@ -1817,18 +1890,61 @@
           state.topicUsage.current_count + '/' + state.topicUsage.limit +
           '). Erst ein anderes Thema deaktivieren oder ein weiteres Slot kaufen."'
         : '';
-      // NEU (14.09.2026): eigene Aktions-Spalte statt in die Status-Zelle
-      // gequetscht, damit Deaktivieren/Aktivieren unabhängig vom Status
-      // immer gut auffindbar ist (nicht nur, wenn zufällig 'error').
-      var actionCell = topic.status === 'archived'
-        ? '<button type="button" class="cvz-retry-btn" data-cvz-reactivate-topic="' + topic.id + '"' +
+      // GEÄNDERT (14.09.2026): Deaktivieren wird jetzt nur noch VORGEMERKT
+      // (siehe main.py: archive_topic_endpoint), das Thema bleibt bis zum
+      // Ende seines Monatszyklus 'active'. Ist eine Deaktivierung schon
+      // vorgemerkt (topic.archive_effective_at gesetzt), zeigen wir
+      // stattdessen "Deaktivierung abbrechen". Ein 'queued'-Thema hat noch
+      // gar nicht begonnen, "Deaktivieren" entfernt es dort direkt wieder
+      // aus der Warteschlange (siehe archive_topic_endpoint: status='queued'
+      // wird sofort archiviert, kein Vormerken nötig).
+      var pendingArchival = topic.status === 'active' && !!topic.archive_effective_at;
+      var actionCell;
+      if (topic.status === 'archived') {
+        actionCell =
+          '<button type="button" class="cvz-retry-btn" data-cvz-reactivate-topic="' + topic.id + '"' +
             (reactivateDisabled ? ' disabled' : '') + reactivateTitle + '>' +
             (isBusy ? 'Wird aktiviert …' : 'Aktivieren') +
-          '</button>'
-        : '<button type="button" class="cvz-archive-btn" data-cvz-archive-topic="' + topic.id + '"' +
-            (isBusy ? ' disabled' : '') + '>' +
-            (isBusy ? 'Wird deaktiviert …' : 'Deaktivieren') +
           '</button>';
+      } else if (pendingArchival) {
+        actionCell =
+          '<button type="button" class="cvz-archive-btn" data-cvz-cancel-archive-topic="' + topic.id + '"' +
+            (isBusy ? ' disabled' : '') + '>' +
+            (isBusy ? 'Wird bearbeitet …' : 'Deaktivierung abbrechen') +
+          '</button>';
+      } else {
+        actionCell =
+          '<button type="button" class="cvz-archive-btn" data-cvz-archive-topic="' + topic.id + '"' +
+            (isBusy ? ' disabled' : '') + '>' +
+            (isBusy
+              ? (topic.status === 'queued' ? 'Wird entfernt …' : 'Wird deaktiviert …')
+              : (topic.status === 'queued' ? 'Aus Warteschlange entfernen' : 'Deaktivieren')) +
+          '</button>';
+      }
+      // NEU (14.09.2026): Status-Hinweis für die beiden neuen Zwischenzustände,
+      // gleiches Muster wie der bestehende 'collecting'-Hinweis unten.
+      var extraStatusHint = '';
+      if (pendingArchival) {
+        var archiveDate = formatShortDate(topic.archive_effective_at);
+        extraStatusHint = '<span class="cvz-status-hint">Wird deaktiviert' +
+          (archiveDate ? ' am ' + archiveDate : '') + ', bisherige Daten bleiben erhalten.</span>';
+      } else if (topic.status === 'queued') {
+        extraStatusHint = '<span class="cvz-status-hint">Wartet auf einen freien Themen-Slot, startet automatisch, sobald einer frei wird.</span>';
+      }
+      var tr = document.createElement('tr');
+      tr.setAttribute('data-cvz-topic-id', topic.id);
+      tr.innerHTML =
+        '<td>' + escapeHtml(topic.name) + '</td>' +
+        '<td><span class="cvz-status-badge ' + status.className + '">' +
+          (topic.status === 'collecting' ? '<span class="cvz-spinner"></span>' : '') +
+          status.label + '</span>' +
+          (topic.status === 'collecting' ? '<span class="cvz-status-hint">Das wird mehrere Minuten dauern. Sobald der Lauf fertig ist, aktualisiert sich die Seite automatisch.</span>' : '') +
+          extraStatusHint +
+          (topic.status === 'error' ? (
+            '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + topic.id + '"' +
+              (state.retryingTopicId === topic.id ? ' disabled' : '') + '>' +
+              (state.retryingTopicId === topic.id ? 'Wird erneut versucht …' : 'Erneut versuchen') +
+            '</button>'
           ) : '') +
         '</td>' +
         '<td>' + formatRelativeTime(topic.created_at) + '</td>' +
@@ -1861,29 +1977,44 @@
     var topActionRow = document.createElement('div');
     topActionRow.className = 'cvz-top-action-row';
     topActionRow.appendChild(backBtn);
-        if (currentTopicListEntry) {
+            if (currentTopicListEntry) {
       var isArchivedNow = currentTopicListEntry.status === 'archived';
+      var isQueuedNow = currentTopicListEntry.status === 'queued';
       var isBusyNow = state.archivingTopicId === currentTopicListEntry.id;
       // NEU (14.09.2026): gleiche Sperre wie in der Themen-Tabelle (siehe
       // Block 8) — "Thema aktivieren" ausgrauen, solange kein Slot frei ist.
       var noSlotAvailableNow = !!(state.topicUsage && !state.topicUsage.can_create);
+      // GEÄNDERT (14.09.2026): Deaktivieren wird nur noch vorgemerkt (siehe
+      // main.py: archive_topic_endpoint) — ist für dieses Thema schon eine
+      // Deaktivierung vorgemerkt, zeigen wir stattdessen "Deaktivierung
+      // abbrechen", gleiches Prinzip wie in der Themen-Tabelle (Block 15).
+      var pendingArchivalNow = currentTopicListEntry.status === 'active' && !!currentTopicListEntry.archive_effective_at;
       var archiveToggleBtn = document.createElement('button');
       archiveToggleBtn.type = 'button';
-      archiveToggleBtn.className = isArchivedNow ? 'cvz-retry-btn' : 'cvz-archive-btn';
-      archiveToggleBtn.setAttribute(
-        isArchivedNow ? 'data-cvz-reactivate-topic' : 'data-cvz-archive-topic',
-        currentTopicListEntry.id
-      );
-      archiveToggleBtn.disabled = isBusyNow || (isArchivedNow && noSlotAvailableNow);
-      if (isArchivedNow && !isBusyNow && noSlotAvailableNow) {
-        archiveToggleBtn.title =
-          'Alle ' + state.topicUsage.limit + ' Topic-Slots sind aktuell belegt (' +
-          state.topicUsage.current_count + '/' + state.topicUsage.limit +
-          '). Erst ein anderes Thema deaktivieren oder ein weiteres Slot kaufen.';
+      if (isArchivedNow) {
+        archiveToggleBtn.className = 'cvz-retry-btn';
+        archiveToggleBtn.setAttribute('data-cvz-reactivate-topic', currentTopicListEntry.id);
+        archiveToggleBtn.disabled = isBusyNow || noSlotAvailableNow;
+        if (!isBusyNow && noSlotAvailableNow) {
+          archiveToggleBtn.title =
+            'Alle ' + state.topicUsage.limit + ' Topic-Slots sind aktuell belegt (' +
+            state.topicUsage.current_count + '/' + state.topicUsage.limit +
+            '). Erst ein anderes Thema deaktivieren oder ein weiteres Slot kaufen.';
+        }
+        archiveToggleBtn.textContent = isBusyNow ? 'Wird aktiviert …' : 'Thema aktivieren';
+      } else if (pendingArchivalNow) {
+        archiveToggleBtn.className = 'cvz-archive-btn';
+        archiveToggleBtn.setAttribute('data-cvz-cancel-archive-topic', currentTopicListEntry.id);
+        archiveToggleBtn.disabled = isBusyNow;
+        archiveToggleBtn.textContent = isBusyNow ? 'Wird bearbeitet …' : 'Deaktivierung abbrechen';
+      } else {
+        archiveToggleBtn.className = 'cvz-archive-btn';
+        archiveToggleBtn.setAttribute('data-cvz-archive-topic', currentTopicListEntry.id);
+        archiveToggleBtn.disabled = isBusyNow;
+        archiveToggleBtn.textContent = isBusyNow
+          ? (isQueuedNow ? 'Wird entfernt …' : 'Wird deaktiviert …')
+          : (isQueuedNow ? 'Aus Warteschlange entfernen' : 'Thema deaktivieren');
       }
-      archiveToggleBtn.textContent = isBusyNow
-        ? (isArchivedNow ? 'Wird aktiviert …' : 'Wird deaktiviert …')
-        : (isArchivedNow ? 'Thema aktivieren' : 'Thema deaktivieren');
       topActionRow.appendChild(archiveToggleBtn);
     }
     wrap.appendChild(topActionRow);
@@ -2382,15 +2513,23 @@
     return wrap;
   }
 
-    function renderSummaryCard(topic) {
+      function renderSummaryCard(topic) {
     var card = document.createElement('div');
     card.className = 'cvz-card cvz-summary-card';
-    // NEU (14.09.2026): Hinweis direkt in der Detailansicht, damit auch
-    // über einen Deep-Link/Lesezeichen sofort klar ist, dass hier gerade
-    // keine neuen Datenläufe stattfinden.
-    var archivedNotice = topic.status === 'archived'
-      ? '<p class="cvz-archived-notice">Archiviert – es werden aktuell keine neuen Datenläufe für dieses Thema gestartet. Alle bisher gesammelten Daten bleiben unten sichtbar.</p>'
-      : '';
+    // GEÄNDERT (14.09.2026): drei mögliche Hinweise statt nur einem –
+    // endgültig archiviert, zur Deaktivierung vorgemerkt (läuft noch bis
+    // zum Monatsende weiter), oder wartend auf einen freien Slot.
+    var archivedNotice = '';
+    if (topic.status === 'archived') {
+      archivedNotice = '<p class="cvz-archived-notice">Archiviert – es werden aktuell keine neuen Datenläufe für dieses Thema gestartet. Alle bisher gesammelten Daten bleiben unten sichtbar.</p>';
+    } else if (topic.status === 'active' && topic.archive_effective_at) {
+      var archiveDate = formatShortDate(topic.archive_effective_at);
+      archivedNotice = '<p class="cvz-archived-notice">Deaktivierung vorgemerkt' +
+        (archiveDate ? ' für ' + archiveDate : '') +
+        ' – bis dahin laufen die regulären Datenläufe für dieses Thema noch normal weiter.</p>';
+    } else if (topic.status === 'queued') {
+      archivedNotice = '<p class="cvz-archived-notice">Wartet auf einen freien Themen-Slot – der erste Datenlauf startet automatisch, sobald einer frei wird.</p>';
+    }
     card.innerHTML =
       '<h3 class="cvz-section-title">' + escapeHtml(topic.name) + '</h3>' +
       '<p class="cvz-card-eyebrow">' + escapeHtml(topic.seed_keyword) + ' · ' + escapeHtml(topic.own_domain) + '</p>' +
@@ -3320,8 +3459,19 @@
     return section;
   }
 
+    // NEU (14.09.2026): absolutes Datum (TT.MM.YYYY) für vorgemerkte
+  // Deaktivierungen/Warteschlangen-Hinweise – formatRelativeTime oben ist
+  // dafür zu ungenau ("vor 12 Tagen" ist bei einem ZUKÜNFTIGEN Datum
+  // verwirrend), daher ein zweiter, einfacherer Formatter.
+  function formatShortDate(isoString) {
+    if (!isoString) return null;
+    var d = new Date(isoString);
+    if (isNaN(d.getTime())) return null;
+    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
   function formatRelativeTime(isoString) {
-    if (!isoString) return '\u2013';
+    if (!isoString) return '–';
     var diffSeconds = Math.round((Date.now() - new Date(isoString).getTime()) / 1000);
     if (diffSeconds < 5) return 'gerade eben';
     if (diffSeconds < 60) return 'vor ' + diffSeconds + ' Sek.';
@@ -3476,10 +3626,19 @@
       '.cvz-top-action-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }' +
       '.cvz-top-action-row .cvz-back-btn { padding: 0; margin: 0; }' +
       '.cvz-archived-notice { font-size: 13px; color: var(--cvz-text-muted); margin: 0 0 8px; font-style: italic; }' +
-      '.cvz-status-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
+            '.cvz-status-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
       '.cvz-status-collecting { color: var(--cvz-amber); border-color: var(--cvz-amber); }' +
       '.cvz-status-error { color: var(--cvz-red); border-color: var(--cvz-red); }' +
       '.cvz-status-archived { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
+      // NEU (14.09.2026): 'queued' bewusst optisch ähnlich zu 'archived'
+      // gehalten (beide "gerade nicht aktiv laufend"), Label + Hinweistext
+      // unterscheiden trotzdem klar genug zwischen "endgültig weg" und
+      // "wartet, startet automatisch".
+      '.cvz-status-queued { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
+      // NEU (14.09.2026): informativer Hinweis im Anlege-Formular (siehe
+      // Block 19), bewusst NICHT in Rot wie .cvz-create-error — ist kein
+      // Fehler, das Formular bleibt ja nutzbar.
+      '.cvz-create-info { width: 100%; font-size: 13px; color: var(--cvz-text-muted); margin: 6px 0 0; }' +
 
       '.cvz-section { margin-bottom: 24px; }' +
       '.cvz-section-label { font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
