@@ -3533,7 +3533,7 @@
 
       box.appendChild(actions);
       overlay.appendChild(box);
-      document.body.appendChild(overlay);
+      document.documentElement.appendChild(overlay);
       okBtn.focus();
 
       function onOverlayClick(e) {
