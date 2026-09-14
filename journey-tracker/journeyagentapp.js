@@ -1586,10 +1586,11 @@
       var queueMsg = document.createElement('p');
       queueMsg.className = 'cvz-create-info';
       var queueDate = formatShortDate(state.topicUsage.next_slot_at);
-      queueMsg.textContent =
+            queueMsg.textContent =
         'Euer Plan-Limit ist aktuell ausgeschöpft (' + state.topicUsage.current_count + '/' + state.topicUsage.limit + '). ' +
         'Das Thema wird angelegt und startet automatisch, sobald ein Slot frei wird' +
-        (queueDate ? ' (voraussichtlich ab ' + queueDate + ')' : '') + '.';
+        (queueDate ? ' (voraussichtlich ab ' + queueDate + ')' : '') +
+        ', das kann nach dem Freiwerden eines Slots noch bis zu 30 Minuten dauern.';
       form.appendChild(queueMsg);
     }
 
@@ -1936,7 +1937,7 @@
         extraStatusHint = '<span class="cvz-status-hint">Wird deaktiviert' +
           (archiveDate ? ' am ' + archiveDate : '') + ', bisherige Daten bleiben erhalten.</span>';
       } else if (topic.status === 'queued') {
-        extraStatusHint = '<span class="cvz-status-hint">Wartet auf einen freien Themen-Slot, startet automatisch, sobald einer frei wird.</span>';
+          extraStatusHint = '<span class="cvz-status-hint">Wartet auf einen freien Themen-Slot. Startet automatisch, kann nach Freiwerden eines Slots aber bis zu 30 Minuten dauern.</span>';
       }
       var tr = document.createElement('tr');
       tr.setAttribute('data-cvz-topic-id', topic.id);
@@ -2535,7 +2536,7 @@
         (archiveDate ? ' für ' + archiveDate : '') +
         ' – bis dahin laufen die regulären Datenläufe für dieses Thema noch normal weiter.</p>';
     } else if (topic.status === 'queued') {
-      archivedNotice = '<p class="cvz-archived-notice">Wartet auf einen freien Themen-Slot – der erste Datenlauf startet automatisch, sobald einer frei wird.</p>';
+      archivedNotice = '<p class="cvz-archived-notice">Wartet auf einen freien Themen-Slot – der erste Datenlauf startet automatisch, kann nach Freiwerden eines Slots aber bis zu 30 Minuten dauern.</p>';
     }
     card.innerHTML =
       '<h3 class="cvz-section-title">' + escapeHtml(topic.name) + '</h3>' +
@@ -3733,15 +3734,15 @@
             '.cvz-create-info { width: 100%; font-size: 13px; color: var(--cvz-text-muted); margin: 6px 0 0; }' +
       // NEU (14.09.2026): eigenes Bestätigungs-Popup, siehe showCvzModal.
       '.cvz-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 16px; }' +
-      '.cvz-modal-box { background: var(--cvz-navy-raised); border: 1px solid var(--cvz-border); border-radius: 4px; padding: 20px; max-width: 380px; width: 100%; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }' +
-      '.cvz-modal-title { font-family: "Geist", sans-serif; font-size: 15px; font-weight: 600; color: var(--cvz-text); margin: 0 0 8px; }' +
-      '.cvz-modal-text { font-family: "Geist", sans-serif; font-size: 13px; color: var(--cvz-text-muted); margin: 0 0 20px; line-height: 1.5; }' +
+      '.cvz-modal-box { background: #141b24; border: 1px solid #232b36; border-radius: 4px; padding: 20px; max-width: 380px; width: 100%; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }' +
+      '.cvz-modal-title { font-family: "Geist", sans-serif; font-size: 15px; font-weight: 600; color: #e6edf3; margin: 0 0 8px; }' +
+      '.cvz-modal-text { font-family: "Geist", sans-serif; font-size: 13px; color: #8b98a5; margin: 0 0 20px; line-height: 1.5; }' +
       '.cvz-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }' +
       '.cvz-modal-btn { font-family: "Geist", sans-serif; font-size: 12px; padding: 6px 14px; border-radius: 0; cursor: pointer; border: 1px solid transparent; }' +
-      '.cvz-modal-btn-secondary { background: none; color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
-      '.cvz-modal-btn-secondary:hover { color: var(--cvz-text); border-color: var(--cvz-text-muted); }' +
-      '.cvz-modal-btn-primary { background: none; color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
-      '.cvz-modal-btn-primary:hover { background: var(--cvz-teal); color: var(--cvz-navy); }' +
+      '.cvz-modal-btn-secondary { background: none; color: #8b98a5; border-color: #232b36; }' +
+      '.cvz-modal-btn-secondary:hover { color: #e6edf3; border-color: #8b98a5; }' +
+      '.cvz-modal-btn-primary { background: none; color: #4fd1c5; border-color: #4fd1c5; }' +
+      '.cvz-modal-btn-primary:hover { background: #4fd1c5; color: #0d1117; }' +
 
       '.cvz-section { margin-bottom: 24px; }' +
       '.cvz-section-label { font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
