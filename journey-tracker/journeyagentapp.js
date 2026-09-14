@@ -1738,7 +1738,7 @@
         '<td><span class="cvz-status-badge ' + status.className + '">' +
           (topic.status === 'collecting' ? '<span class="cvz-spinner"></span>' : '') +
           status.label + '</span>' +
-          (topic.status === 'collecting' ? '<span class="cvz-status-hint">Kann bis zu 60 Sek. dauern</span>' : '') +
+          (topic.status === 'collecting' ? '<span class="cvz-status-hint">Das wird mehrere Minuten dauern. Sobald der Lauf fertig ist, aktualisiert sich die Seite automatisch.</span>' : '') +
           (topic.status === 'error' ? (
             '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + topic.id + '"' +
               (state.retryingTopicId === topic.id ? ' disabled' : '') + '>' +
