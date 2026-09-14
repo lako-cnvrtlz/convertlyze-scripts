@@ -290,6 +290,9 @@
     topicUsage:     null,   // { current_count, limit, can_create }, siehe loadTopicUsage
     pollTimer:      null,   // siehe maybeStartPolling
     retryingTopicId: null,  // Topic-ID, für die gerade ein Retry läuft, siehe retryTopic
+    // NEU (14.09.2026): Topic-ID, für die gerade Archivieren/Aktivieren läuft,
+    // siehe setTopicArchiveStatus.
+    archivingTopicId: null,
     // NEU (13.09.2026): Zitationen je Prompt, direkt im Prompts-Tab
     // aufklappbar (nur Topic-Detailansicht, siehe togglePromptExpansion).
     promptCitationsCache: {},      // promptId -> { chat_gpt: [...], gemini: [...] } | null
@@ -1138,6 +1141,18 @@
       return; // WICHTIG: vor der Zeilen-Navigation prüfen, der Button sitzt
               // innerhalb einer Zeile, die selbst auch data-cvz-topic-id trägt.
     }
+    // NEU (14.09.2026): Deaktivieren/Aktivieren, gleiches Prinzip wie beim
+    // Retry-Button oben — auch hier VOR der Zeilen-Navigation prüfen.
+    var archiveBtn = event.target.closest('[data-cvz-archive-topic]');
+    if (archiveBtn) {
+      setTopicArchiveStatus(archiveBtn.getAttribute('data-cvz-archive-topic'), true);
+      return;
+    }
+    var reactivateBtn = event.target.closest('[data-cvz-reactivate-topic]');
+    if (reactivateBtn) {
+      setTopicArchiveStatus(reactivateBtn.getAttribute('data-cvz-reactivate-topic'), false);
+      return;
+    }
     var topicCard = event.target.closest('[data-cvz-topic-id]');
     if (topicCard) {
       openTopicDetail(topicCard.getAttribute('data-cvz-topic-id'));
@@ -1358,7 +1373,59 @@
       // ein erneuter Klick ist in beiden Fällen sicher möglich.
     }
 
-    state.retryingTopicId = null;
+        state.retryingTopicId = null;
+    render();
+  }
+
+  // NEU (14.09.2026): Thema deaktivieren ("archivieren") bzw. wieder
+  // aktivieren. Archivierte Themen bleiben mit allen bisher gesammelten
+  // Daten voll einsehbar (Tabs, Opportunities, Keywords, Prompts, GSC —
+  // nichts wird gelöscht), es werden nur keine neuen Cron-Durchläufe mehr
+  // für sie gestartet. WICHTIG: das kann rein client-seitig nicht
+  // funktionieren — das Backend muss den wöchentlichen Cron-Job so
+  // anpassen, dass er Themen mit status='archived' überspringt, sonst tut
+  // dieser Button nur so, als würde er etwas bewirken.
+  async function setTopicArchiveStatus(topicId, archive) {
+    var confirmText = archive
+      ? 'Thema deaktivieren? Es werden dann keine neuen Datenläufe mehr gestartet, alle bisherigen Daten bleiben aber sichtbar. Du kannst das Thema jederzeit wieder aktivieren.'
+      : 'Thema wieder aktivieren? Ab dem nächsten wöchentlichen Lauf werden wieder neue Daten gesammelt.';
+    if (!window.confirm(confirmText)) return;
+
+    state.archivingTopicId = topicId;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        var mockTopic = getTopicById(topicId);
+        if (mockTopic) mockTopic.status = archive ? 'archived' : 'active';
+        if (state.topicDetailCache[topicId]) {
+          state.topicDetailCache[topicId].topic.status = archive ? 'archived' : 'active';
+        }
+      } else {
+        // Annahme (nicht bestätigt, Backend-Code nie gesehen): POST
+        // /topics/{id}/archive bzw. /topics/{id}/reactivate, analog zum
+        // bestehenden POST /topics/{id}/retry-Muster. Falls euer Backend
+        // stattdessen ein generisches PATCH /topics/{id} mit body
+        // {status: 'archived'} erwartet, hier nur URL/Methode anpassen,
+        // der Rest der Funktion bleibt gleich.
+        await apiFetch('/topics/' + topicId + '/' + (archive ? 'archive' : 'reactivate'), { method: 'POST' });
+        await loadTopics();
+        // Nutzungsstand neu laden: falls archivierte Themen nicht mehr
+        // gegen das Plan-Limit zählen sollen (siehe Chat-Hinweis zur
+        // Backend-Anpassung), ändert sich current_count/can_create hier.
+        await loadTopicUsage();
+      }
+
+      if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
+        delete state.topicDetailCache[topicId];
+        await openTopicDetail(topicId, false);
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Status konnte nicht geändert werden:', e);
+      window.alert('Status konnte nicht geändert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.archivingTopicId = null;
     render();
   }
 
@@ -1547,8 +1614,14 @@
   // weil eine korrekte Aggregation einen eigenen Backend-Endpunkt braucht
   // (client-seitiges Zusammenrechnen über N einzelne GET /topics/{id}-
   // Aufrufe wäre bei vielen Themen langsam und teuer, siehe Chat-Verlauf).
-  function getDomainDashboardData(projectId) {
+    function getDomainDashboardData(projectId) {
     var topics = state.allTopics.filter(function (t) { return t.project_id === projectId; });
+    // NEU (14.09.2026): archivierte Themen bleiben in `topics` (für die
+    // Themen-Tabelle), fließen aber NICHT in die aggregierten Ansichten
+    // ein (Opportunities/Wettbewerber/Keywords/Prompts über die ganze
+    // Domain) — die sollen den aktuell relevanten Hebel zeigen, nicht von
+    // pausierten Themen verwässert werden.
+    var activeTopics = topics.filter(function (t) { return t.status !== 'archived'; });
     var opportunities = [];
     var contentIdeas = [];
     var positioningInsights = [];
@@ -1557,7 +1630,7 @@
     var keywordMap = {};
     var prompts = [];
 
-    topics.forEach(function (topic) {
+    activeTopics.forEach(function (topic) {
       var detail = MOCK_TOPIC_DETAIL[topic.id];
       if (!detail) return;
 
@@ -1725,12 +1798,25 @@
       return section;
     }
 
-    var table = document.createElement('table');
+        var table = document.createElement('table');
     table.className = 'cvz-table cvz-table-clickable';
-    table.innerHTML = '<thead><tr><th>Thema</th><th>Status</th><th>Gestartet</th><th>Opportunities</th></tr></thead>';
+    table.innerHTML = '<thead><tr><th>Thema</th><th>Status</th><th>Gestartet</th><th>Opportunities</th><th>Aktion</th></tr></thead>';
     var tbody = document.createElement('tbody');
     topics.forEach(function (topic) {
       var status = STATUS_LABELS[topic.status] || { label: topic.status, className: '' };
+      var isBusy = state.archivingTopicId === topic.id;
+      // NEU (14.09.2026): eigene Aktions-Spalte statt in die Status-Zelle
+      // gequetscht, damit Deaktivieren/Aktivieren unabhängig vom Status
+      // immer gut auffindbar ist (nicht nur, wenn zufällig 'error').
+      var actionCell = topic.status === 'archived'
+        ? '<button type="button" class="cvz-retry-btn" data-cvz-reactivate-topic="' + topic.id + '"' +
+            (isBusy ? ' disabled' : '') + '>' +
+            (isBusy ? 'Wird aktiviert …' : 'Aktivieren') +
+          '</button>'
+        : '<button type="button" class="cvz-archive-btn" data-cvz-archive-topic="' + topic.id + '"' +
+            (isBusy ? ' disabled' : '') + '>' +
+            (isBusy ? 'Wird deaktiviert …' : 'Deaktivieren') +
+          '</button>';
       var tr = document.createElement('tr');
       tr.setAttribute('data-cvz-topic-id', topic.id);
       tr.innerHTML =
@@ -1742,12 +1828,13 @@
           (topic.status === 'error' ? (
             '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + topic.id + '"' +
               (state.retryingTopicId === topic.id ? ' disabled' : '') + '>' +
-              (state.retryingTopicId === topic.id ? 'Wird erneut versucht \u2026' : 'Erneut versuchen') +
+              (state.retryingTopicId === topic.id ? 'Wird erneut versucht …' : 'Erneut versuchen') +
             '</button>'
           ) : '') +
         '</td>' +
         '<td>' + formatRelativeTime(topic.created_at) + '</td>' +
-        '<td>' + (topic.opportunities_count === null ? '\u2013' : escapeHtml(topic.opportunities_count)) + '</td>';
+        '<td>' + (topic.opportunities_count === null ? '–' : escapeHtml(topic.opportunities_count)) + '</td>' +
+        '<td>' + actionCell + '</td>';
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
@@ -1758,7 +1845,7 @@
   // =========================================================================
   // UI: Ebene 3 (Topic-Detail)
   // =========================================================================
-  function renderTopicDetailView() {
+    function renderTopicDetailView() {
     var wrap = document.createElement('div');
 
     wrap.appendChild(renderDomainAndTopicPicker());
@@ -1768,7 +1855,30 @@
     backBtn.className = 'cvz-back-btn';
     backBtn.setAttribute('data-cvz-back', '');
     backBtn.textContent = '← Zur Domain-Übersicht';
-    wrap.appendChild(backBtn);
+
+    // NEU (14.09.2026): Deaktivieren/Aktivieren auch direkt in der
+    // Detailansicht möglich, nicht nur über die Themen-Tabelle.
+    var currentTopicListEntry = getTopicById(state.activeTopicId);
+    var topActionRow = document.createElement('div');
+    topActionRow.className = 'cvz-top-action-row';
+    topActionRow.appendChild(backBtn);
+    if (currentTopicListEntry) {
+      var isArchivedNow = currentTopicListEntry.status === 'archived';
+      var isBusyNow = state.archivingTopicId === currentTopicListEntry.id;
+      var archiveToggleBtn = document.createElement('button');
+      archiveToggleBtn.type = 'button';
+      archiveToggleBtn.className = isArchivedNow ? 'cvz-retry-btn' : 'cvz-archive-btn';
+      archiveToggleBtn.setAttribute(
+        isArchivedNow ? 'data-cvz-reactivate-topic' : 'data-cvz-archive-topic',
+        currentTopicListEntry.id
+      );
+      archiveToggleBtn.disabled = isBusyNow;
+      archiveToggleBtn.textContent = isBusyNow
+        ? (isArchivedNow ? 'Wird aktiviert …' : 'Wird deaktiviert …')
+        : (isArchivedNow ? 'Thema aktivieren' : 'Thema deaktivieren');
+      topActionRow.appendChild(archiveToggleBtn);
+    }
+    wrap.appendChild(topActionRow);
 
     if (state.isLoadingDetail) {
       var loading = document.createElement('p');
@@ -2264,12 +2374,19 @@
     return wrap;
   }
 
-  function renderSummaryCard(topic) {
+    function renderSummaryCard(topic) {
     var card = document.createElement('div');
     card.className = 'cvz-card cvz-summary-card';
+    // NEU (14.09.2026): Hinweis direkt in der Detailansicht, damit auch
+    // über einen Deep-Link/Lesezeichen sofort klar ist, dass hier gerade
+    // keine neuen Datenläufe stattfinden.
+    var archivedNotice = topic.status === 'archived'
+      ? '<p class="cvz-archived-notice">Archiviert – es werden aktuell keine neuen Datenläufe für dieses Thema gestartet. Alle bisher gesammelten Daten bleiben unten sichtbar.</p>'
+      : '';
     card.innerHTML =
       '<h3 class="cvz-section-title">' + escapeHtml(topic.name) + '</h3>' +
       '<p class="cvz-card-eyebrow">' + escapeHtml(topic.seed_keyword) + ' · ' + escapeHtml(topic.own_domain) + '</p>' +
+      archivedNotice +
       '<p class="cvz-summary-text">' + escapeHtml(topic.latest_summary || 'Noch keine Zusammenfassung vorhanden.') + '</p>';
     return card;
   }
@@ -3338,7 +3455,19 @@
         'display: block; margin-top: 4px; font-family: "Geist", sans-serif; font-size: 11px; padding: 2px 8px;' +
         'background: none; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer;' +
       '}' +
-      '.cvz-retry-btn:disabled { opacity: 0.6; cursor: default; }' +
+            '.cvz-retry-btn:disabled { opacity: 0.6; cursor: default; }' +
+      // NEU (14.09.2026): Deaktivieren-Button (neutral/grau statt teal,
+      // damit er sich klar von "positiven" Aktionen wie Retry/Aktivieren
+      // unterscheidet) und der Archiviert-Hinweis in der Detailansicht.
+      '.cvz-archive-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 10px;' +
+        'background: none; color: var(--cvz-text-muted); border: 1px solid var(--cvz-border); border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-archive-btn:hover { color: var(--cvz-text); border-color: var(--cvz-text-muted); }' +
+      '.cvz-archive-btn:disabled { opacity: 0.6; cursor: default; }' +
+      '.cvz-top-action-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }' +
+      '.cvz-top-action-row .cvz-back-btn { padding: 0; margin: 0; }' +
+      '.cvz-archived-notice { font-size: 13px; color: var(--cvz-text-muted); margin: 0 0 8px; font-style: italic; }' +
       '.cvz-status-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
       '.cvz-status-collecting { color: var(--cvz-amber); border-color: var(--cvz-amber); }' +
       '.cvz-status-error { color: var(--cvz-red); border-color: var(--cvz-red); }' +
