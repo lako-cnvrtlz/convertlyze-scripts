@@ -280,6 +280,11 @@
     activeSubTab:     'themen', // Tab innerhalb der jeweiligen Ansicht
     topicDetailCache: {},
     isLoadingDetail:  false,
+    // NEU (14.09.2026): Rollen-Filter im Prompts-Tab (persona pro Prompt,
+    // siehe prompt_discovery.py). null = "Alle Rollen", sonst der exakte
+    // persona-String, den Claude für dieses Topic vergeben hat (variiert
+    // pro Projekt/target_group, siehe Kommentar dort).
+    activePersonaFilter: null,
     // NEU (14.09.2026): echte Domain-Dashboard-Daten (Trend/Opportunities/
     // Content-Ideen über alle aktiven Themen einer Domain), siehe
     // loadDomainDashboard / GET /projects/{id}/dashboard. Ersetzt
@@ -333,6 +338,18 @@
     deletedChangelogCache: {},     // topicId -> gelöschte Einträge[]
     isLoadingDeletedChangelog: false,
     changelogDraft: '',   // nur zum Überleben des Lade-Renders beim Absenden, siehe submitChangelogEntry
+    // NEU (14.09.2026): geführte Zusatzfelder beim Anlegen eines Eintrags
+    // ("Wo?"/"Erwarteter Effekt", werden zu entry_text zusammengesetzt,
+    // siehe composeChangelogEntryText) sowie die optionale Verknüpfung mit
+    // konkreten Keywords/Prompts dieses Topics (linked_search_query_ids/
+    // linked_prompt_ids, siehe main.py). changelogLinkSectionOpen steuert,
+    // ob die beiden Verknüpfungs-Listen überhaupt aufgeklappt sind (per
+    // Default zu, das Formular soll für den Normalfall — keine
+    // Verknüpfung — nicht überladen wirken).
+    changelogLocationDraft: null,      // 'landingpage' | 'blogartikel' | 'preisseite' | 'meta' | 'sonstiges' | null
+    changelogEffectDraft: null,        // 'mehr_zitierungen' | 'bessere_position' | 'beides' | 'unklar' | null
+    changelogLinkSectionOpen: { keywords: false, prompts: false },
+    changelogDraftLinkedIds: { keywords: [], prompts: [] },
     // NEU (13.09.2026): eigener Sichtbarkeits-Verlauf über die Zeit, lazy
     // geladen wenn die Übersicht geöffnet wird (siehe maybeLoadVisibilityTrend).
     visibilityTrendCache: {},      // topicId -> weeks[]
@@ -734,6 +751,18 @@
     render();
   }
 
+  // NEU (14.09.2026): setzt die optionalen geführten Felder ("Wo?" /
+  // "Erwarteter Effekt") vor den freien Text, statt sie als eigene
+  // Backend-Spalten zu speichern (siehe Chat-Verlauf 14.09.2026: kein
+  // Schema-Umbau nötig, entry_text bleibt ein einzelnes Feld). Reine
+  // Text-Komposition, keine Seiteneffekte — auch fürs Vorschau-Rendering
+  // im Formular selbst genutzt (renderChangelogSection).
+  function composeChangelogEntryText(rawText, location, effect) {
+    var prefix = location ? '[' + (CHANGELOG_LOCATION_LABELS[location] || location) + '] ' : '';
+    var suffix = effect ? ' — erwarteter Effekt: ' + (CHANGELOG_EFFECT_LABELS[effect] || effect) : '';
+    return prefix + rawText + suffix;
+  }
+
   async function submitChangelogEntry(topicId) {
     // GEÄNDERT (13.09.2026): liest den Wert direkt aus dem Textfeld (wie
     // submitCreateForm), aber merkt ihn sich zusätzlich kurz in
@@ -742,25 +771,46 @@
     // sonst sofort leeren, bevor überhaupt klar ist, ob das Speichern
     // geklappt hat.
     var textarea = document.getElementById('cvz-changelog-input');
-    var entryText = ((textarea && textarea.value) || '').trim();
-    if (!entryText || state.isSubmittingChangelog) return;
+    var rawText = ((textarea && textarea.value) || '').trim();
+    if (!rawText || state.isSubmittingChangelog) return;
 
-    state.changelogDraft = entryText;
+    // NEU (14.09.2026): geführte Felder + Verknüpfungen mit in den Entwurf
+    // übernehmen, aus demselben Grund wie rawText oben — der Lade-Render
+    // darf die gerade getroffene Auswahl nicht verwerfen, bevor klar ist,
+    // ob das Speichern klappt.
+    var entryText = composeChangelogEntryText(rawText, state.changelogLocationDraft, state.changelogEffectDraft);
+    var linkedKeywordIds = state.changelogDraftLinkedIds.keywords.slice();
+    var linkedPromptIds = state.changelogDraftLinkedIds.prompts.slice();
+
+    state.changelogDraft = rawText;
     state.isSubmittingChangelog = true;
     render();
 
     try {
       if (CONFIG.useMockData) {
-        var mockEntry = { id: 'entry-' + Date.now(), entry_text: entryText, author_name: null, created_at: new Date().toISOString() };
+        var mockEntry = {
+          id: 'entry-' + Date.now(), entry_text: entryText, author_name: null, created_at: new Date().toISOString(),
+          linked_search_query_ids: linkedKeywordIds, linked_prompt_ids: linkedPromptIds,
+        };
         _prependChangelogEntry(topicId, mockEntry);
       } else {
         var data = await apiFetch('/topics/' + topicId + '/changelog', {
           method: 'POST',
-          body: { entry_text: entryText },
+          body: {
+            entry_text: entryText,
+            linked_search_query_ids: linkedKeywordIds,
+            linked_prompt_ids: linkedPromptIds,
+          },
         });
         _prependChangelogEntry(topicId, data.entry);
       }
-      state.changelogDraft = ''; // nur bei Erfolg leeren, bei Fehler bleibt der Entwurf erhalten
+      // Nur bei Erfolg zurücksetzen, bei Fehler bleibt die ganze Auswahl
+      // erhalten, damit der Nutzer nicht von vorn anfangen muss.
+      state.changelogDraft = '';
+      state.changelogLocationDraft = null;
+      state.changelogEffectDraft = null;
+      state.changelogDraftLinkedIds = { keywords: [], prompts: [] };
+      state.changelogLinkSectionOpen = { keywords: false, prompts: false };
     } catch (e) {
       console.error('[CVZ Visibility] Changelog-Eintrag konnte nicht gespeichert werden:', e);
       // Bewusst kein showErrorMessage(): würde die komplette App
@@ -799,6 +849,12 @@
       delete state.deletedChangelogCache[topicId];
     } catch (e) {
       console.error('[CVZ Visibility] Eintrag konnte nicht gel\u00f6scht werden:', e);
+      // NEU (14.09.2026): vorher nur console.error, der Eintrag blieb
+      // dadurch scheinbar grundlos stehen (siehe Chat-Verlauf 14.09.2026 —
+      // z.B. wenn die deleted_at-Migration in Supabase noch fehlt, schlägt
+      // der Request fehl und die Zeile bleibt unverändert). Jetzt sichtbar,
+      // damit klar ist: der Klick kam an, das Löschen ist fehlgeschlagen.
+      await showCvzAlert('Eintrag konnte nicht gel\u00f6scht werden: ' + (e.message || 'Unbekannter Fehler'));
     }
     render();
   }
@@ -816,13 +872,23 @@
       var cached = state.topicDetailCache[topicId];
       if (cached && restored) {
         cached.changelog = [
-          { id: restored.id, entry_text: restored.entry_text, author_name: restored.author_name, created_at: restored.created_at },
+          {
+            id: restored.id, entry_text: restored.entry_text, author_name: restored.author_name,
+            created_at: restored.created_at,
+            // NEU (14.09.2026): Verknüpfungen bei der Wiederherstellung
+            // mit übernehmen, sonst verschwinden sie sichtbar aus der
+            // Hauptliste, obwohl sie in der DB unverändert weiter bestehen.
+            linked_search_query_ids: restored.linked_search_query_ids || [],
+            linked_prompt_ids: restored.linked_prompt_ids || [],
+          },
         ].concat(cached.changelog || []).sort(function (a, b) {
           return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
         });
       }
     } catch (e) {
       console.error('[CVZ Visibility] Eintrag konnte nicht wiederhergestellt werden:', e);
+      // NEU (14.09.2026): wie bei deleteChangelogEntry, siehe Kommentar dort.
+      await showCvzAlert('Eintrag konnte nicht wiederhergestellt werden: ' + (e.message || 'Unbekannter Fehler'));
     }
     render();
   }
@@ -898,6 +964,21 @@
       state.activeSubTab = 'uebersicht';
     }
     state.activeView = 'topic-detail';
+    if (state.activeTopicId !== topicId) {
+      // NEU (14.09.2026): Rollen-Filter ist pro Topic sinnvoll (Personas
+      // unterscheiden sich pro Projekt), beim Wechsel auf ein anderes
+      // Topic soll kein Filter eines fremden Themas hängen bleiben.
+      state.activePersonaFilter = null;
+      // NEU (14.09.2026): dieselbe Begründung für die Changelog-
+      // Verknüpfungsauswahl — Keyword-/Prompt-IDs gehören zu genau einem
+      // Topic, ohne Reset könnten unsichtbar IDs eines fremden Themas im
+      // Auswahl-Array hängen bleiben (Backend validiert das zwar gegen
+      // das Topic weg, ist aber unsauber).
+      state.changelogDraftLinkedIds = { keywords: [], prompts: [] };
+      state.changelogLinkSectionOpen = { keywords: false, prompts: false };
+      state.changelogLocationDraft = null;
+      state.changelogEffectDraft = null;
+    }
     state.activeTopicId = topicId;
     var topic = getTopicById(topicId);
     if (topic) state.activeProjectId = topic.project_id;
@@ -991,6 +1072,44 @@
     red:    'Nicht vorhanden',
   };
 
+  // NEU (14.09.2026): geführte Auswahl-Felder beim Anlegen eines
+  // Changelog-Eintrags (siehe Chat-Verlauf 14.09.2026 — statt einem
+  // einzelnen freien Textfeld). Beide optional, werden bei Auswahl vor
+  // den freien entry_text gesetzt (siehe composeChangelogEntryText),
+  // keine eigenen Backend-Spalten dafür nötig.
+  var CHANGELOG_LOCATION_LABELS = {
+    landingpage: 'Landingpage',
+    blogartikel: 'Blogartikel',
+    preisseite:  'Preisseite',
+    meta:        'Meta-Daten',
+    sonstiges:   'Sonstiges',
+  };
+  var CHANGELOG_LOCATION_ORDER = ['landingpage', 'blogartikel', 'preisseite', 'meta', 'sonstiges'];
+
+  var CHANGELOG_EFFECT_LABELS = {
+    mehr_zitierungen: 'Mehr KI-Zitierungen',
+    bessere_position: 'Bessere Google-Position',
+    beides:           'Beides',
+    unklar:           'Unklar',
+  };
+  var CHANGELOG_EFFECT_ORDER = ['mehr_zitierungen', 'bessere_position', 'beides', 'unklar'];
+
+  // NEU (14.09.2026): für das Content-Typ-Badge in der Prompt-Zeile
+  // (siehe main.py: _compute_top_cited_domain_by_prompt +
+  // source_analysis.py: source_content_profiles.content_type). Fallback
+  // auf den rohen Wert, falls Claude dort mal eine Kategorie außerhalb
+  // dieser Liste liefert (die Kategorien in source_analysis.py sind ein
+  // Vorschlag im System-Prompt, kein hart erzwungener Enum).
+  var CONTENT_TYPE_LABELS = {
+    review_plattform:  'Review-Plattform',
+    vergleichsartikel: 'Vergleichsartikel',
+    produktseite:      'Produktseite',
+    fachartikel:       'Fachartikel',
+    video:             'Video',
+    forum:             'Forum',
+    sonstiges:         'Sonstiges',
+  };
+
   // NEU (13.09.2026): für die dedizierte Lücken-Analyse (content_gaps).
   var GAP_PRIORITY_LABELS = {
     hoch:    'Hohe Priorität',
@@ -1036,12 +1155,13 @@
   // GEÄNDERT (13.09.2026): "themen" steht jetzt vorne, ist außerdem der
   // Default-Tab beim Öffnen einer Domain (siehe activeSubTab-Deklaration
   // oben und selectFromPicker/backToOverview).
+  // GEÄNDERT (14.09.2026): Wettbewerber/Keywords/Prompts entfernt — das ist
+  // themenspezifische Auswertung (siehe Chat-Verlauf), auf Domain-Ebene
+  // bisher ohnehin nur über MOCK_TOPIC_DETAIL simuliert (siehe
+  // getDomainDashboardData). Bleibt in TOPIC_TABS unverändert erhalten.
   var DOMAIN_TABS = [
     { id: 'themen', label: 'Themen' },
     { id: 'uebersicht', label: 'Übersicht' },
-    { id: 'wettbewerber', label: 'Wettbewerber & Quellen' },
-    { id: 'keywords', label: 'Keywords' },
-    { id: 'prompts', label: 'Prompts' },
   ];
 
   // =========================================================================
@@ -1108,6 +1228,15 @@
       togglePromptExpansion(promptToggle.getAttribute('data-cvz-prompt-toggle'));
       return;
     }
+    // NEU (14.09.2026): Rollen-Filter-Chips im Prompts-Tab (siehe
+    // renderPersonaFilterChips). Leerer Attributwert ("") heißt "Alle".
+    var personaFilter = event.target.closest('[data-cvz-persona-filter]');
+    if (personaFilter) {
+      var personaValue = personaFilter.getAttribute('data-cvz-persona-filter');
+      state.activePersonaFilter = personaValue || null;
+      render();
+      return;
+    }
     // NEU (13.09.2026): Keyword-Zeilen im selben Auf-/Zuklapp-Stil.
     var keywordToggle = event.target.closest('[data-cvz-keyword-toggle]');
     if (keywordToggle) {
@@ -1122,6 +1251,47 @@
     var changelogSubmit = event.target.closest('[data-cvz-changelog-submit]');
     if (changelogSubmit) {
       submitChangelogEntry(state.activeTopicId);
+      return;
+    }
+    // NEU (14.09.2026): geführte "Wo?"/"Erwarteter Effekt"-Chips. Erneutes
+    // Klicken derselben Chip hebt die Auswahl wieder auf (Toggle), beide
+    // Felder sind optional.
+    var changelogLocation = event.target.closest('[data-cvz-changelog-location]');
+    if (changelogLocation) {
+      var locationValue = changelogLocation.getAttribute('data-cvz-changelog-location');
+      state.changelogLocationDraft = (state.changelogLocationDraft === locationValue) ? null : locationValue;
+      render();
+      return;
+    }
+    var changelogEffect = event.target.closest('[data-cvz-changelog-effect]');
+    if (changelogEffect) {
+      var effectValue = changelogEffect.getAttribute('data-cvz-changelog-effect');
+      state.changelogEffectDraft = (state.changelogEffectDraft === effectValue) ? null : effectValue;
+      render();
+      return;
+    }
+    // NEU (14.09.2026): Verknüpfungs-Listen (Keywords/Prompts) auf-/zuklappen.
+    var changelogLinkToggle = event.target.closest('[data-cvz-changelog-link-toggle]');
+    if (changelogLinkToggle) {
+      var linkKind = changelogLinkToggle.getAttribute('data-cvz-changelog-link-toggle');
+      state.changelogLinkSectionOpen[linkKind] = !state.changelogLinkSectionOpen[linkKind];
+      render();
+      return;
+    }
+    // NEU (14.09.2026): einzelne Keyword-/Prompt-Chip in der Verknüpfungs-
+    // Liste an-/abwählen. Mehrfachauswahl, daher Array statt Einzelwert.
+    var changelogLinkChip = event.target.closest('[data-cvz-changelog-link-chip]');
+    if (changelogLinkChip) {
+      var chipKind = changelogLinkChip.getAttribute('data-cvz-changelog-link-kind');
+      var chipId = changelogLinkChip.getAttribute('data-cvz-changelog-link-chip');
+      var currentIds = state.changelogDraftLinkedIds[chipKind];
+      var idIndex = currentIds.indexOf(chipId);
+      if (idIndex === -1) {
+        currentIds.push(chipId);
+      } else {
+        currentIds.splice(idIndex, 1);
+      }
+      render();
       return;
     }
     // NEU (13.09.2026): "Weitere anzeigen" im Änderungsprotokoll, zeigt
@@ -1747,18 +1917,22 @@
 
   // GEÄNDERT (14.09.2026): Trend/Opportunities/Content-Ideen kommen jetzt
   // für useMockData:false über GET /projects/{id}/dashboard (siehe
-  // loadDomainDashboard), NICHT mehr aus MOCK_TOPIC_DETAIL. Der Rest
-  // (competitors/keywords/prompts/positioningInsights/sourceProfiles)
-  // hängt bewusst NOCH an MOCK_TOPIC_DETAIL — für echte Themen bleibt das
-  // vorerst leer, siehe Docstring bei get_project_dashboard_endpoint in
-  // main.py, warum das ein zweiter Schritt ist.
+  // loadDomainDashboard), NICHT mehr aus MOCK_TOPIC_DETAIL.
+  //
+  // GEÄNDERT (14.09.2026), zweite Änderung: competitors/keywords/prompts/
+  // positioningInsights/sourceProfiles rausgenommen — die Domain-Übersicht
+  // zeigt diese Tabs nicht mehr (siehe DOMAIN_TABS/renderDomainDashboard,
+  // Wettbewerber/Keywords/Prompts sind themenspezifisch und bleiben in der
+  // Topic-Detailansicht). Falls das später wieder auf Domain-Ebene
+  // gebraucht wird, siehe Git-Historie für die alte MOCK_TOPIC_DETAIL-
+  // Aggregationslogik.
   function getDomainDashboardData(projectId) {
     var topics = state.allTopics.filter(function (t) { return t.project_id === projectId; });
     // NEU (14.09.2026): archivierte Themen bleiben in `topics` (für die
     // Themen-Tabelle), fließen aber NICHT in die aggregierten Ansichten
-    // ein (Opportunities/Wettbewerber/Keywords/Prompts über die ganze
-    // Domain) — die sollen den aktuell relevanten Hebel zeigen, nicht von
-    // pausierten Themen verwässert werden.
+    // ein (Opportunities/Trend über die ganze Domain) — die sollen den
+    // aktuell relevanten Hebel zeigen, nicht von pausierten Themen
+    // verwässert werden.
     var activeTopics = topics.filter(function (t) { return t.status !== 'archived'; });
 
     var live = CONFIG.useMockData ? null : state.domainDashboardCache[projectId];
@@ -1771,17 +1945,12 @@
     // einfach nicht in diese Arrays geschrieben).
     var opportunities = live ? live.opportunities.slice() : [];
     var contentIdeas = live ? live.contentIdeas.slice() : [];
-    var positioningInsights = [];
-    var sourceProfileMap = {};
-    var competitorMap = {};
-    var keywordMap = {};
-    var prompts = [];
 
-    activeTopics.forEach(function (topic) {
-      var detail = MOCK_TOPIC_DETAIL[topic.id];
-      if (!detail) return;
+    if (!live) {
+      activeTopics.forEach(function (topic) {
+        var detail = MOCK_TOPIC_DETAIL[topic.id];
+        if (!detail) return;
 
-      if (!live) {
         (detail.opportunities || []).forEach(function (opp) {
           opportunities.push(Object.assign({ topic_name: topic.name }, opp));
         });
@@ -1789,49 +1958,8 @@
         (detail.content_ideas || []).forEach(function (idea) {
           contentIdeas.push(Object.assign({ topic_name: topic.name }, idea));
         });
-      }
-
-      if (detail.positioning_insight) {
-        positioningInsights.push(Object.assign({ topic_name: topic.name }, detail.positioning_insight));
-      }
-
-      // Pro Domain nur einmal, die Analyse ist domainweit gecacht, nicht
-      // pro Topic unterschiedlich, mehrfaches Anzeigen wäre nur Duplikat.
-      (detail.source_profiles || []).forEach(function (profile) {
-        if (!sourceProfileMap[profile.domain]) {
-          sourceProfileMap[profile.domain] = profile;
-        }
       });
-
-      (detail.competitors || []).forEach(function (comp) {
-        if (!competitorMap[comp.domain]) {
-          competitorMap[comp.domain] = { domain: comp.domain, citations: 0, phasesSet: {} };
-        }
-        competitorMap[comp.domain].citations += comp.citations;
-        (comp.phases || []).forEach(function (phase) { competitorMap[comp.domain].phasesSet[phase] = true; });
-      });
-
-      // Dedupe über Themen hinweg: dasselbe Keyword kann bei zwei Themen
-      // auftauchen (z.B. weil beide Themen thematisch überlappen), dann
-      // zählt der höhere Suchvolumen-Wert.
-      (detail.search_queries || []).forEach(function (kw) {
-        if (!keywordMap[kw.keyword] || (kw.search_volume || 0) > (keywordMap[kw.keyword].search_volume || 0)) {
-          keywordMap[kw.keyword] = kw;
-        }
-      });
-
-      (detail.prompts || []).forEach(function (p) {
-        prompts.push(Object.assign({ topic_name: topic.name }, p));
-      });
-    });
-
-    var competitors = Object.keys(competitorMap).map(function (domain) {
-      var entry = competitorMap[domain];
-      return { domain: entry.domain, citations: entry.citations, phases: Object.keys(entry.phasesSet) };
-    }).sort(function (a, b) { return b.citations - a.citations; });
-
-    var keywords = Object.keys(keywordMap).map(function (k) { return keywordMap[k]; })
-      .sort(function (a, b) { return (b.search_volume || 0) - (a.search_volume || 0); });
+    }
 
     // WICHTIG: live.trend hat eine ANDERE Form als MOCK_DOMAIN_TREND
     // ({week, mentioned, cited, recommended, total}[] vs. {total_prompts,
@@ -1844,8 +1972,6 @@
 
     return {
       topics: topics, opportunities: opportunities, contentIdeas: contentIdeas, trend: trend,
-      positioningInsights: positioningInsights, sourceProfiles: Object.values(sourceProfileMap),
-      competitors: competitors, keywords: keywords, prompts: prompts,
     };
   }
 
@@ -1875,23 +2001,6 @@
     tabContent.className = 'cvz-tab-content';
 
     switch (state.activeSubTab) {
-      case 'wettbewerber':
-        tabContent.appendChild(renderDomainCompetitorTable(data.competitors));
-        tabContent.appendChild(renderSourceProfilesSection(data.sourceProfiles));
-        break;
-      case 'keywords':
-        tabContent.appendChild(renderKeywordsTable(data.keywords, false));
-        var domainPositioning = renderPositioningInsightsList(data.positioningInsights);
-        if (domainPositioning) tabContent.appendChild(domainPositioning);
-        break;
-      case 'prompts':
-        // enableCitations=false: die Domain-Übersicht aggregiert Prompts
-        // über mehrere Topics hinweg (siehe getDomainDashboardData), ein
-        // einzelner Prompt hier hat kein eindeutiges topic_id mehr, das
-        // der /citations-Endpoint bräuchte. Aufklappen nur in der
-        // Topic-Detailansicht (siehe renderTopicDetailView weiter unten).
-        tabContent.appendChild(renderPromptsByPhase(data.prompts, false));
-        break;
       case 'themen':
         tabContent.appendChild(renderTopicStatusTable(data.topics));
         break;
@@ -2194,7 +2303,7 @@
         // enableCitations=true: nur hier ist jedem Prompt eindeutig SEIN
         // Topic (state.activeTopicId) zugeordnet, das der /citations-
         // Endpoint braucht. Siehe renderPromptsByPhase.
-        tabContent.appendChild(renderPromptsByPhase(detail.prompts, true));
+        tabContent.appendChild(renderPromptsByPhase(detail.prompts, true, detail.changelog));
         break;
       case 'gsc':
         tabContent.appendChild(renderGscBlock(detail.gsc_rows));
@@ -2216,7 +2325,7 @@
         ));
         tabContent.appendChild(renderOpportunitySection(detail.opportunities));
         tabContent.appendChild(renderContentIdeasSection(detail.content_ideas));
-        tabContent.appendChild(renderChangelogSection(detail.changelog, state.activeTopicId));
+        tabContent.appendChild(renderChangelogSection(detail.changelog, state.activeTopicId, detail.search_queries, detail.prompts));
         break;
     }
 
@@ -2310,11 +2419,17 @@
       return section;
     }
 
+    // GEÄNDERT (14.09.2026): vorher nur ein Platzhaltertext ohne Grafik.
+    // Jetzt wird die Chart-Hülle (Achse, keine Datenpunkte) schon gezeigt,
+    // damit klar ist, dass hier später eine Grafik erscheint, statt dass
+    // der Bereich einfach leer wirkt (siehe Chat-Verlauf 14.09.2026).
     if (!weeks || weeks.length < 2) {
-      var empty = document.createElement('p');
-      empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Noch kein Verlauf verfügbar, braucht mindestens zwei Wochen mit ausgewerteten Läufen über alle Themen dieser Domain.';
-      section.appendChild(empty);
+      var emptyCard = document.createElement('div');
+      emptyCard.className = 'cvz-card';
+      emptyCard.innerHTML =
+        buildEmptyChartSvg() +
+        '<p class="cvz-chart-caption">Es liegen noch nicht genügend Daten vor. Ab der zweiten Woche mit ausgewerteten Läufen siehst du hier den Sichtbarkeits-Verlauf.</p>';
+      section.appendChild(emptyCard);
       return section;
     }
 
@@ -2367,6 +2482,21 @@
   // Tooltip. Für Changelog-Einträge auf dem übergreifenden Verlauf (siehe
   // renderCombinedTrendSection), bewusst VOR den Datenserien gezeichnet,
   // damit sie im Hintergrund liegen und die Linien/Punkte nicht verdecken.
+  // NEU (14.09.2026): leere Chart-Hülle (nur Grund-Achse, keine Datenpunkte)
+  // für "noch nicht genug Daten"-Zustände, damit dort schon eine Grafik
+  // sitzt statt eines reinen Textblocks. Dieselben width/height/padding-
+  // Werte wie buildLineChartSvg/buildTrendChartSvg, damit die Kachel beim
+  // späteren Umschalten auf echte Daten nicht "springt".
+  function buildEmptyChartSvg() {
+    var width = 640, height = 180, padding = 32;
+    var baselineY = height - padding;
+    return (
+      '<svg viewBox="0 0 ' + width + ' ' + height + '" class="cvz-chart-svg" preserveAspectRatio="xMidYMid meet">' +
+        '<line x1="' + padding + '" y1="' + baselineY + '" x2="' + (width - padding) + '" y2="' + baselineY + '" class="cvz-chart-axis"></line>' +
+      '</svg>'
+    );
+  }
+
   function buildLineChartSvg(seriesList, xLabels, opts) {
     opts = opts || {};
     var width = opts.width || 640, height = opts.height || 180, padding = 32;
@@ -2998,7 +3128,13 @@
     ideas.forEach(function (idea) {
       var card = document.createElement('div');
       card.className = 'cvz-card cvz-idea-card';
+      // NEU (14.09.2026): Phase kommt jetzt vom Backend mit (content_ideas.
+      // prompt_id -> prompts.messymiddle_phase, siehe main.py), damit
+      // Content-Ideen wie Prompts nach Journey-Phase priorisierbar sind.
+      // Kann fehlen (z.B. wenn der zugehörige Prompt keine Phase hat, etwa
+      // ein Discovery-Prompt) — dann einfach kein Badge, kein Platzhalter.
       card.innerHTML =
+        (idea.phase ? '<p class="cvz-opportunity-type">' + escapeHtml(PHASE_LABELS[idea.phase] || idea.phase) + '</p>' : '') +
         '<p class="cvz-opportunity-description">' + escapeHtml(idea.description || '') + '</p>' +
         (idea.topic_name ? '<p class="cvz-opportunity-topic">' + escapeHtml(idea.topic_name) + '</p>' : '');
       grid.appendChild(card);
@@ -3080,7 +3216,53 @@
   // jeweils 10 mehr nach. Braucht topicId, um den Zähler pro Topic
   // getrennt zu halten (sonst würde das Aufklappen bei einem Topic auch
   // beim nächsten wieder mehr als 10 zeigen).
-  function renderChangelogSection(entries, topicId) {
+  // NEU (14.09.2026): wiederverwendbarer Picker für die optionale
+  // Keyword-/Prompt-Verknüpfung eines Changelog-Eintrags. Nutzt dieselben
+  // Chip-Klassen wie der Rollen-Filter (cvz-persona-chip), damit kein
+  // zusätzlicher visueller Stil eingeführt wird. `kind` ist 'keywords'
+  // oder 'prompts', `getLabel` liefert den Anzeigetext pro Element.
+  function renderChangelogLinkPicker(kind, items, getLabel) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-changelog-link-picker';
+
+    var isOpen = !!state.changelogLinkSectionOpen[kind];
+    var selectedIds = state.changelogDraftLinkedIds[kind];
+    var kindLabel = kind === 'keywords' ? 'Keywords' : 'Prompts';
+
+    var toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'cvz-create-toggle-btn';
+    toggleBtn.setAttribute('data-cvz-changelog-link-toggle', kind);
+    var countSuffix = selectedIds.length ? ' (' + selectedIds.length + ')' : '';
+    toggleBtn.textContent = (isOpen ? '\u2212 ' : '+ ') + 'Mit ' + kindLabel + ' verkn\u00fcpfen (optional)' + countSuffix;
+    wrap.appendChild(toggleBtn);
+
+    if (!isOpen) return wrap;
+
+    if (!items || items.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Keine ' + kindLabel + ' in diesem Thema vorhanden.';
+      wrap.appendChild(empty);
+      return wrap;
+    }
+
+    var chipList = document.createElement('div');
+    chipList.className = 'cvz-persona-filter cvz-changelog-link-chip-list';
+    items.forEach(function (item) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cvz-persona-chip' + (selectedIds.indexOf(item.id) !== -1 ? ' cvz-persona-chip-active' : '');
+      chip.setAttribute('data-cvz-changelog-link-chip', item.id);
+      chip.setAttribute('data-cvz-changelog-link-kind', kind);
+      chip.textContent = getLabel(item);
+      chipList.appendChild(chip);
+    });
+    wrap.appendChild(chipList);
+    return wrap;
+  }
+
+  function renderChangelogSection(entries, topicId, searchQueries, prompts) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
@@ -3093,7 +3275,7 @@
     form.className = 'cvz-changelog-form';
     form.innerHTML =
       '<textarea id="cvz-changelog-input" class="cvz-changelog-input" rows="2" ' +
-        'placeholder="Was habt ihr ge\u00e4ndert? (z.B. Landingpage-Text \u00fcberarbeitet)">' +
+        'placeholder="Was habt ihr ge\u00e4ndert? (z.B. Preistabelle als Vergleichstabelle umgebaut)">' +
         escapeHtml(state.changelogDraft || '') +
       '</textarea>' +
       '<button type="button" class="cvz-changelog-submit-btn" data-cvz-changelog-submit ' +
@@ -3101,6 +3283,58 @@
         (state.isSubmittingChangelog ? 'Wird gespeichert \u2026' : 'Eintragen') +
       '</button>';
     section.appendChild(form);
+
+    // NEU (14.09.2026): geführte Zusatzfelder statt eines einzelnen freien
+    // Textfelds (siehe Chat-Verlauf 14.09.2026) — "Wo?" und "Erwarteter
+    // Effekt" als Chips, beide optional. Werden beim Absenden vor den
+    // freien Text gesetzt (siehe composeChangelogEntryText).
+    var locationLabel = document.createElement('p');
+    locationLabel.className = 'cvz-changelog-guided-label';
+    locationLabel.textContent = 'Wo? (optional)';
+    section.appendChild(locationLabel);
+
+    var locationChips = document.createElement('div');
+    locationChips.className = 'cvz-persona-filter';
+    CHANGELOG_LOCATION_ORDER.forEach(function (loc) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cvz-persona-chip' + (state.changelogLocationDraft === loc ? ' cvz-persona-chip-active' : '');
+      chip.setAttribute('data-cvz-changelog-location', loc);
+      chip.textContent = CHANGELOG_LOCATION_LABELS[loc];
+      locationChips.appendChild(chip);
+    });
+    section.appendChild(locationChips);
+
+    var effectLabel = document.createElement('p');
+    effectLabel.className = 'cvz-changelog-guided-label';
+    effectLabel.textContent = 'Erwarteter Effekt (optional)';
+    section.appendChild(effectLabel);
+
+    var effectChips = document.createElement('div');
+    effectChips.className = 'cvz-persona-filter';
+    CHANGELOG_EFFECT_ORDER.forEach(function (effect) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cvz-persona-chip' + (state.changelogEffectDraft === effect ? ' cvz-persona-chip-active' : '');
+      chip.setAttribute('data-cvz-changelog-effect', effect);
+      chip.textContent = CHANGELOG_EFFECT_LABELS[effect];
+      effectChips.appendChild(chip);
+    });
+    section.appendChild(effectChips);
+
+    // NEU (14.09.2026): optionale Verknüpfung mit konkreten Keywords/
+    // Prompts dieses Topics (siehe main.py: linked_search_query_ids/
+    // linked_prompt_ids). Ermöglicht später präzise Marker im Keyword-
+    // Rank-Verlauf (renderKeywordExpansion) bzw. eine Kontextzeile in der
+    // aufgeklappten Prompt-Ansicht (renderPromptExpansion), statt dass
+    // jeder Eintrag auf jedem Chart erscheint.
+    section.appendChild(renderChangelogLinkPicker('keywords', searchQueries, function (q) { return q.keyword; }));
+    section.appendChild(renderChangelogLinkPicker('prompts', prompts, function (p) {
+      // Prompt-Text kann lang sein, in der Chip-Liste gekürzt, voller Text
+      // im title-Tooltip. Chips sind Buttons, kein natives title auf
+      // textContent nötig — hier bewusst über die Länge selbst gekürzt.
+      return p.prompt_text.length > 60 ? p.prompt_text.slice(0, 57) + '\u2026' : p.prompt_text;
+    }));
 
     if (!entries || entries.length === 0) {
       var empty = document.createElement('p');
@@ -3111,16 +3345,33 @@
       var visibleCount = state.changelogVisibleCount[topicId] || 10;
       var visibleEntries = entries.slice(0, visibleCount);
 
+      // NEU (14.09.2026): Nachschlage-Karten, um verlinkte IDs in
+      // lesbaren Text zu übersetzen (Keyword-Text/Prompt-Text statt UUID).
+      var keywordTextById = {};
+      (searchQueries || []).forEach(function (q) { keywordTextById[q.id] = q.keyword; });
+      var promptTextById = {};
+      (prompts || []).forEach(function (p) { promptTextById[p.id] = p.prompt_text; });
+
       var list = document.createElement('div');
       list.className = 'cvz-changelog-list';
       visibleEntries.forEach(function (entry) {
         var item = document.createElement('div');
         item.className = 'cvz-changelog-item';
+
+        var linkedLabels = []
+          .concat((entry.linked_search_query_ids || []).map(function (id) { return keywordTextById[id]; }))
+          .concat((entry.linked_prompt_ids || []).map(function (id) { return promptTextById[id]; }))
+          .filter(Boolean);
+        var linkedLine = linkedLabels.length
+          ? '<p class="cvz-changelog-linked">verkn\u00fcpft mit: ' + escapeHtml(linkedLabels.join(', ')) + '</p>'
+          : '';
+
         item.innerHTML =
           '<div class="cvz-changelog-item-row">' +
             '<p class="cvz-changelog-text">' + escapeHtml(entry.entry_text) + '</p>' +
             '<button type="button" class="cvz-changelog-delete-btn" data-cvz-changelog-delete="' + escapeHtml(entry.id) + '" aria-label="L\u00f6schen">\u00d7</button>' +
           '</div>' +
+          linkedLine +
           '<p class="cvz-changelog-meta">' +
             formatRelativeTime(entry.created_at) +
             (entry.author_name ? ' \u00b7 ' + escapeHtml(entry.author_name) : '') +
@@ -3342,14 +3593,22 @@
         // NEU (13.09.2026): Changelog-Marker auch hier, gemappt auf die
         // tatsächlichen Snapshot-Zeitpunkte dieses Keywords (nicht auf
         // Wochen-Buckets wie bei den beiden Übersicht-Charts).
-        var markers = mapChangelogToMarkers(changelogEntries, snapshotDates);
+        // GEÄNDERT (14.09.2026): vorher erschien JEDER Changelog-Eintrag
+        // auf JEDEM Keyword-Chart, rein über Datums-Nähe, unabhängig
+        // davon, ob die Änderung überhaupt dieses Keyword betraf (siehe
+        // Chat-Verlauf 14.09.2026). Jetzt nur noch Einträge, die explizit
+        // mit diesem Keyword verknüpft sind (linked_search_query_ids).
+        var linkedEntries = (changelogEntries || []).filter(function (entry) {
+          return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
+        });
+        var markers = mapChangelogToMarkers(linkedEntries, snapshotDates);
         var chartWrap = document.createElement('div');
         chartWrap.className = 'cvz-card';
         chartWrap.innerHTML =
           buildLineChartSvg(series, xLabels, { markers: markers }) +
           '<p class="cvz-chart-caption">Position im Verlauf, niedriger ist besser. Historie beginnt mit eurem ersten ' +
-          'Monatslauf nach Einf\u00fchrung dieser Auswertung, keine r\u00fcckwirkenden Daten. Gestrichelte Linien sind eure ' +
-          'Eintr\u00e4ge im \u00c4nderungsprotokoll.</p>';
+          'Monatslauf nach Einf\u00fchrung dieser Auswertung, keine r\u00fcckwirkenden Daten. Gestrichelte Linien sind ' +
+          'Eintr\u00e4ge im \u00c4nderungsprotokoll, die ihr explizit mit diesem Keyword verkn\u00fcpft habt.</p>';
         wrap.appendChild(chartWrap);
       }
     } else if (snapshots && snapshots.length === 1) {
@@ -3400,19 +3659,38 @@
   // und zitierte Quellen. Ersetzt die "Modal mit Pfeilen"-Idee aus dem
   // Referenz-Screenshot bewusst durch Inline-Aufklappen in der bestehenden
   // Tab-Struktur, wie gewünscht.
-  function renderPromptExpansion(prompt) {
+  function renderPromptExpansion(prompt, changelogEntries) {
     var wrap = document.createElement('div');
     wrap.className = 'cvz-prompt-expansion';
 
+    // NEU (14.09.2026): günstige Kontextzeile statt eines eigenen
+    // Zeitverlaufs pro Prompt (den gibt es aktuell nicht, siehe Chat-
+    // Verlauf 14.09.2026 — ein neuer Zeitreihen-Endpunkt wäre ein
+    // eigenständiges Stück Arbeit). Zeigt einfach, WELCHE Änderungen
+    // explizit mit diesem Prompt verknüpft wurden, chronologisch.
+    var linkedEntries = (changelogEntries || []).filter(function (entry) {
+      return (entry.linked_prompt_ids || []).indexOf(prompt.id) !== -1;
+    });
+    var linkedHtml = '';
+    if (linkedEntries.length > 0) {
+      linkedHtml = '<div class="cvz-prompt-linked-changelog">' +
+        '<p class="cvz-changelog-guided-label">Verkn\u00fcpfte \u00c4nderungen</p>' +
+        linkedEntries.map(function (entry) {
+          return '<p class="cvz-changelog-linked">' + formatRelativeTime(entry.created_at) + ': ' + escapeHtml(entry.entry_text) + '</p>';
+        }).join('') +
+      '</div>';
+    }
+
     if (state.loadingPromptCitations[prompt.id]) {
-      wrap.innerHTML = '<p class="cvz-card-placeholder-text">Lädt...</p>';
+      wrap.innerHTML = linkedHtml + '<p class="cvz-card-placeholder-text">Lädt...</p>';
       return wrap;
     }
     var data = state.promptCitationsCache[prompt.id];
     if (!data) {
-      wrap.innerHTML = '<p class="cvz-card-placeholder-text">Für diesen Prompt liegen noch keine Antwort-Daten vor.</p>';
+      wrap.innerHTML = linkedHtml + '<p class="cvz-card-placeholder-text">Für diesen Prompt liegen noch keine Antwort-Daten vor.</p>';
       return wrap;
     }
+    if (linkedHtml) wrap.innerHTML = linkedHtml;
 
     var engines = [
       { id: 'chat_gpt', label: MODEL_LABELS.chat_gpt, runs: data.chat_gpt || [] },
@@ -3517,7 +3795,107 @@
   // (siehe renderTopicDetailView), da nur dort ein Prompt eindeutig einem
   // Topic zugeordnet ist, das der /citations-Endpoint braucht. In der
   // Domain-Übersicht sind Prompts über mehrere Topics aggregiert.
-  function renderPromptsByPhase(prompts, enableCitations) {
+  // NEU (14.09.2026): aggregiert Sichtbarkeit (grün/gelb/rot) pro Journey-
+  // Phase, statt jede Prompt-Zeile einzeln lesen zu müssen (siehe Chat-
+  // Verlauf 14.09.2026, Punkt 1). Arbeitet auf der bereits (ggf. per
+  // Rollen-Filter) eingeschränkten Prompt-Liste, damit das Rollup zur
+  // aktuell sichtbaren Auswahl passt.
+  function computePhaseRollup(prompts) {
+    return PHASE_ORDER.map(function (phase) {
+      var inPhase = prompts.filter(function (p) { return p.phase === phase; });
+      var counts = { green: 0, yellow: 0, red: 0, unknown: 0 };
+      inPhase.forEach(function (p) {
+        var key = p.visibility_status || 'unknown';
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      return { phase: phase, total: inPhase.length, counts: counts };
+    }).filter(function (row) { return row.total > 0; });
+  }
+
+  function renderPhaseRollup(prompts) {
+    var rollup = computePhaseRollup(prompts);
+    if (rollup.length === 0) return null;
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Sichtbarkeit über die Journey-Phasen';
+    section.appendChild(heading);
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-phase-rollup-grid';
+    rollup.forEach(function (row) {
+      // Bewusst KEIN Trichter-Framing im Text ("Stufe X von Y"): der
+      // Messy-Middle-Ansatz ist explizit nicht linear, eine Balken-
+      // Darstellung als "Verteilung" statt als "Trichterstufe" vermeidet
+      // eine Linearität, die es in B2B-Buying-Committees so nicht gibt
+      // (siehe Chat-Verlauf 14.09.2026).
+      var greenPct = Math.round((row.counts.green / row.total) * 100);
+      var yellowPct = Math.round((row.counts.yellow / row.total) * 100);
+      var redPct = Math.max(0, 100 - greenPct - yellowPct); // Rest inkl. 'unknown'
+
+      var card = document.createElement('div');
+      card.className = 'cvz-phase-rollup-card';
+      card.innerHTML =
+        '<p class="cvz-phase-rollup-label">' + escapeHtml(PHASE_LABELS[row.phase] || row.phase) + '</p>' +
+        '<div class="cvz-phase-rollup-bar">' +
+          (greenPct ? '<span class="cvz-phase-rollup-segment cvz-dot-green" style="width:' + greenPct + '%" title="' + row.counts.green + ' zitiert"></span>' : '') +
+          (yellowPct ? '<span class="cvz-phase-rollup-segment cvz-dot-yellow" style="width:' + yellowPct + '%" title="' + row.counts.yellow + ' erwähnt, nicht zitiert"></span>' : '') +
+          (redPct ? '<span class="cvz-phase-rollup-segment cvz-dot-red" style="width:' + redPct + '%" title="' + (row.counts.red + row.counts.unknown) + ' nicht vorhanden/unbekannt"></span>' : '') +
+        '</div>' +
+        '<p class="cvz-phase-rollup-count">' + row.counts.green + ' von ' + row.total + ' zitiert</p>';
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+    return section;
+  }
+
+  // NEU (14.09.2026): Rollen-Filter (persona pro Prompt, siehe
+  // prompt_discovery.py). BEWUSST ein einfacher Filter über der
+  // bestehenden Phasen-Liste, KEINE Phase-x-Rolle-Matrix (siehe Chat-
+  // Verlauf 14.09.2026: bei 16 Prompts wäre die Matrix meist halbleer und
+  // würde die Interpretationslast verdoppeln statt sie zu senken).
+  function getDistinctPersonas(prompts) {
+    var seen = {};
+    var personas = [];
+    prompts.forEach(function (p) {
+      if (p.persona && !seen[p.persona]) {
+        seen[p.persona] = true;
+        personas.push(p.persona);
+      }
+    });
+    return personas.sort();
+  }
+
+  function renderPersonaFilterChips(prompts) {
+    var personas = getDistinctPersonas(prompts);
+    if (personas.length === 0) return null; // Kein Prompt hat eine Rolle (z.B. target_group leer), kein Filter nötig
+
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-persona-filter';
+
+    var allChip = document.createElement('button');
+    allChip.type = 'button';
+    allChip.className = 'cvz-persona-chip' + (!state.activePersonaFilter ? ' cvz-persona-chip-active' : '');
+    allChip.setAttribute('data-cvz-persona-filter', '');
+    allChip.textContent = 'Alle';
+    wrap.appendChild(allChip);
+
+    personas.forEach(function (persona) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cvz-persona-chip' + (state.activePersonaFilter === persona ? ' cvz-persona-chip-active' : '');
+      chip.setAttribute('data-cvz-persona-filter', persona);
+      chip.textContent = persona;
+      wrap.appendChild(chip);
+    });
+
+    return wrap;
+  }
+
+  function renderPromptsByPhase(prompts, enableCitations, changelogEntries) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
@@ -3526,8 +3904,20 @@
     heading.textContent = 'Prompts nach Phase';
     section.appendChild(heading);
 
+    // NEU (14.09.2026): Rollen-Filter VOR dem Rollup/der Liste, damit
+    // beide dieselbe (ggf. eingeschränkte) Auswahl zeigen.
+    var personaChips = renderPersonaFilterChips(prompts);
+    if (personaChips) section.appendChild(personaChips);
+
+    var filteredPrompts = state.activePersonaFilter
+      ? prompts.filter(function (p) { return p.persona === state.activePersonaFilter; })
+      : prompts;
+
+    var rollup = renderPhaseRollup(filteredPrompts);
+    if (rollup) section.appendChild(rollup);
+
     PHASE_ORDER.forEach(function (phase) {
-      var promptsInPhase = prompts.filter(function (p) { return p.phase === phase; });
+      var promptsInPhase = filteredPrompts.filter(function (p) { return p.phase === phase; });
       if (promptsInPhase.length === 0) return;
 
       var phaseHeading = document.createElement('p');
@@ -3549,6 +3939,22 @@
           ? '<span class="cvz-prompt-citation-count">' + prompt.cited_count + '/' + prompt.total_runs + ' zitiert</span>'
           : '';
 
+        // NEU (14.09.2026): "was für Inhalte helfen hier" — meistzitierte
+        // Quelle + deren Content-Typ, direkt an der Prompt-Zeile (siehe
+        // main.py: _compute_top_cited_domain_by_prompt, source_analysis.py:
+        // source_content_profiles). Nur sichtbar, wenn die Domain bereits
+        // analysiert wurde (monatlicher Lauf, siehe source_analysis.py-
+        // Docstring) — fehlt das, wird gar kein Badge gezeigt, kein Platzhalter.
+        var contentTypeBadge = prompt.top_cited_content_type
+          ? '<span class="cvz-prompt-content-type" title="Meistzitierte Quelle: ' + escapeHtml(prompt.top_cited_domain || '') + '">' +
+              (CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || escapeHtml(prompt.top_cited_content_type)) +
+            '</span>'
+          : '';
+
+        var personaBadge = prompt.persona
+          ? '<span class="cvz-prompt-persona">' + escapeHtml(prompt.persona) + '</span>'
+          : '';
+
         var row = document.createElement('div');
         row.className = 'cvz-prompt-row' + (enableCitations ? ' cvz-prompt-row-clickable' : '');
         if (enableCitations) row.setAttribute('data-cvz-prompt-toggle', prompt.id);
@@ -3556,6 +3962,8 @@
           '<span class="cvz-dot ' + dotClass + '" title="' + escapeHtml(statusLabel) + '"></span>' +
           '<span class="cvz-prompt-text">' + escapeHtml(prompt.prompt_text) + '</span>' +
           citationBadge +
+          contentTypeBadge +
+          personaBadge +
           '<span class="cvz-prompt-source">' +
             // GEÄNDERT (13.09.2026): war prompt.source (Herkunft, z.B.
             // "manual"), gemeint war aber prompt.prompt_type
@@ -3568,7 +3976,7 @@
         list.appendChild(row);
 
         if (enableCitations && state.expandedPromptId === prompt.id) {
-          list.appendChild(renderPromptExpansion(prompt));
+          list.appendChild(renderPromptExpansion(prompt, changelogEntries));
         }
       });
       section.appendChild(list);
@@ -3960,6 +4368,36 @@
       '.cvz-dot-red { background: var(--cvz-red); }' +
       '.cvz-dot-unknown { background: var(--cvz-border); }' +
 
+      // NEU (14.09.2026): Phasen-Rollup über der Prompt-Liste (Sichtbarkeit
+      // grün/gelb/rot pro Journey-Phase, aggregiert statt jede Prompt-Zeile
+      // einzeln lesen zu müssen).
+      '.cvz-phase-rollup-grid { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0 20px; }' +
+      '.cvz-phase-rollup-card { flex: 1; min-width: 140px; }' +
+      '.cvz-phase-rollup-label { font-size: 13px; margin: 0 0 6px; color: var(--cvz-text); }' +
+      '.cvz-phase-rollup-bar { display: flex; height: 8px; width: 100%; background: var(--cvz-border); overflow: hidden; }' +
+      '.cvz-phase-rollup-segment { height: 100%; }' +
+      '.cvz-phase-rollup-count { font-size: 11px; margin: 4px 0 0; color: var(--cvz-text-muted); }' +
+
+      // NEU (14.09.2026): Rollen-Filter-Chips (persona pro Prompt, siehe
+      // prompt_discovery.py). Nur sichtbar, wenn mindestens ein Prompt
+      // dieses Topics eine Rolle trägt.
+      '.cvz-persona-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }' +
+      '.cvz-persona-chip {' +
+        'font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 10px;' +
+        'background: none; color: var(--cvz-text-muted); border: 1px solid var(--cvz-border); border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-persona-chip-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
+
+      // NEU (14.09.2026): Content-Typ-Badge in der Prompt-Zeile (welche
+      // Quelle zitiert wird und was für ein Content-Typ das ist, siehe
+      // main.py: _compute_top_cited_domain_by_prompt + source_analysis.py).
+      '.cvz-prompt-content-type {' +
+        'font-size: 11px; color: var(--cvz-amber); white-space: nowrap;' +
+      '}' +
+      '.cvz-prompt-persona {' +
+        'font-size: 11px; color: var(--cvz-text-muted); white-space: nowrap; border-left: 1px solid var(--cvz-border); padding-left: 8px;' +
+      '}' +
+
       '.cvz-chart-svg { width: 100%; height: auto; display: block; }' +
       '.cvz-chart-axis { stroke: var(--cvz-border); stroke-width: 1; }' +
       '.cvz-chart-line { fill: none; stroke: var(--cvz-teal); stroke-width: 2; }' +
@@ -4006,6 +4444,13 @@
       '.cvz-changelog-item-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }' +
       '.cvz-changelog-text { font-size: 14px; margin: 0 0 2px; flex: 1; }' +
       '.cvz-changelog-meta { font-size: 11px; color: var(--cvz-text-muted); margin: 0; }' +
+      // NEU (14.09.2026): geführte Felder + Verknüpfungs-Picker im
+      // Changelog-Formular.
+      '.cvz-changelog-guided-label { font-size: 12px; color: var(--cvz-text-muted); margin: 10px 0 4px; }' +
+      '.cvz-changelog-link-picker { margin: 10px 0; }' +
+      '.cvz-changelog-link-chip-list { margin-top: 8px; }' +
+      '.cvz-changelog-linked { font-size: 11px; color: var(--cvz-teal); margin: 2px 0; }' +
+      '.cvz-prompt-linked-changelog { margin: 0 0 12px; }' +
       '.cvz-changelog-delete-btn {' +
         'background: none; border: none; color: var(--cvz-text-muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; flex-shrink: 0;' +
       '}' +
