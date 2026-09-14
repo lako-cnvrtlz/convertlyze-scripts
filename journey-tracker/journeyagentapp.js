@@ -274,7 +274,10 @@
     allTopics:     [],
     activeView:       'overview', // 'overview' | 'topic-detail'
     activeTopicId:    null,
-    activeSubTab:     'uebersicht', // Tab innerhalb der jeweiligen Ansicht
+    // GEÄNDERT (13.09.2026): 'themen' statt 'uebersicht' als Default,
+    // siehe Chat vom 13.09.2026 – beim Öffnen einer Domain soll man
+    // direkt die Themen-Liste sehen, nicht erst die aggregierte Übersicht.
+    activeSubTab:     'themen', // Tab innerhalb der jeweiligen Ansicht
     topicDetailCache: {},
     isLoadingDetail:  false,
     citationTrendCache: {},  // topicId -> weeks[], nur bei Bedarf geladen (siehe maybeLoadCitationTrend)
@@ -840,7 +843,15 @@
   }
 
   async function openTopicDetail(topicId, resetTab) {
-    if (resetTab !== false) state.activeSubTab = 'uebersicht';
+    if (resetTab !== false) {
+      state.activeSubTab = 'uebersicht';
+    } else if (TOPIC_TABS.every(function (t) { return t.id !== state.activeSubTab; })) {
+      // NEU (13.09.2026): kommt man mit einem Tab hierher, den die Topic-
+      // Detailansicht gar nicht kennt (z.B. "themen" aus der Domain-
+      // Ansicht, seit dort Default), auf die Topic-Übersicht zurückfallen,
+      // statt mit einem nicht markierten Tab hängen zu bleiben.
+      state.activeSubTab = 'uebersicht';
+    }
     state.activeView = 'topic-detail';
     state.activeTopicId = topicId;
     var topic = getTopicById(topicId);
@@ -874,13 +885,14 @@
   function backToOverview() {
     state.activeView = 'overview';
     state.activeTopicId = null;
-    state.activeSubTab = 'uebersicht';
-    updateUrlParams({ cvz_topic: null, cvz_tab: null });
+    state.activeSubTab = 'themen'; // GEÄNDERT (13.09.2026): siehe activeSubTab-Default oben
+    updateUrlParams({ cvz_topic: null, cvz_tab: 'themen' });
     render();
   }
 
-  // Zentrale Auswahl-Funktion für die Such-Combobox: "project:<id>" zeigt
-  // die Domain-Übersicht, "topic:<id>" springt direkt in die Detail-Ansicht.
+  // Zentrale Auswahl-Funktion für die zwei Picklisten (Domain/Topic):
+  // "project:<id>" zeigt die Domain-Übersicht, "topic:<id>" springt direkt
+  // in die Detail-Ansicht.
   function selectFromPicker(rawValue) {
     var separatorIndex = rawValue.indexOf(':');
     var kind = rawValue.slice(0, separatorIndex);
@@ -890,8 +902,8 @@
       state.activeProjectId = id;
       state.activeView = 'overview';
       state.activeTopicId = null;
-      state.activeSubTab = 'uebersicht';
-      updateUrlParams({ cvz_project: id, cvz_topic: null, cvz_tab: null });
+      state.activeSubTab = 'themen'; // GEÄNDERT (13.09.2026): siehe activeSubTab-Default oben
+      updateUrlParams({ cvz_project: id, cvz_topic: null, cvz_tab: 'themen' });
       render();
     } else if (kind === 'topic') {
       openTopicDetail(id);
@@ -970,12 +982,15 @@
     { id: 'gsc', label: 'GSC-Performance' },
   ];
 
+  // GEÄNDERT (13.09.2026): "themen" steht jetzt vorne, ist außerdem der
+  // Default-Tab beim Öffnen einer Domain (siehe activeSubTab-Deklaration
+  // oben und selectFromPicker/backToOverview).
   var DOMAIN_TABS = [
+    { id: 'themen', label: 'Themen' },
     { id: 'uebersicht', label: 'Übersicht' },
     { id: 'wettbewerber', label: 'Wettbewerber & Quellen' },
     { id: 'keywords', label: 'Keywords' },
     { id: 'prompts', label: 'Prompts' },
-    { id: 'themen', label: 'Themen' },
   ];
 
   // =========================================================================
@@ -1112,11 +1127,6 @@
       render();
       return;
     }
-    var pickerItem = event.target.closest('[data-cvz-picker-select]');
-    if (pickerItem) {
-      selectFromPicker(pickerItem.getAttribute('data-cvz-picker-select'));
-      return;
-    }
     var backBtn = event.target.closest('[data-cvz-back]');
     if (backBtn) {
       backToOverview();
@@ -1150,116 +1160,79 @@
   }
 
   // =========================================================================
-  // UI: Such-Combobox (Domain + Topic in einem Feld)
+  // UI: zwei getrennte Picklisten (Domain, Topic) statt einer gemeinsamen
+  // Such-Combobox. GEÄNDERT (13.09.2026): vorher ein einziges Textfeld mit
+  // Fuzzy-Suche über Domains UND Themen gemischt in einem Dropdown, auf
+  // Wunsch jetzt klar getrennt: die Themen-Picklist zeigt außerdem nur
+  // Themen DER GERADE GEWÄHLTEN Domain, nicht alle Themen team-weit.
   // =========================================================================
-  function renderProjectPicker() {
+  function renderDomainAndTopicPicker() {
     var wrap = document.createElement('div');
-    wrap.className = 'cvz-picker';
-
-    var input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'cvz-picker-input';
-    input.placeholder = 'Domain oder Thema suchen…';
-    input.setAttribute('autocomplete', 'off');
+    wrap.className = 'cvz-picker-row';
 
     var activeProject = getProjectById(state.activeProjectId);
-    var activeTopic = state.activeTopicId ? getTopicById(state.activeTopicId) : null;
-    input.value = activeTopic ? activeTopic.name : (activeProject ? activeProject.domain : '');
 
-    var dropdown = document.createElement('div');
-    dropdown.className = 'cvz-picker-dropdown';
-    dropdown.hidden = true;
+    var domainSelect = document.createElement('select');
+    domainSelect.className = 'cvz-picker-select';
+    domainSelect.setAttribute('aria-label', 'Domain w\u00e4hlen');
+    if (state.projects.length === 0) {
+      var noDomainOption = document.createElement('option');
+      noDomainOption.value = '';
+      noDomainOption.textContent = 'Keine Domains vorhanden';
+      domainSelect.appendChild(noDomainOption);
+      domainSelect.disabled = true;
+    } else {
+      state.projects.forEach(function (project) {
+        var option = document.createElement('option');
+        option.value = project.id;
+        option.textContent = project.domain;
+        if (project.id === state.activeProjectId) option.selected = true;
+        domainSelect.appendChild(option);
+      });
+    }
+    // Direkt gebunden statt über Klick-Delegation, "change" bei <select>
+    // ist dafür der zuverlässigere Weg (gleiches Muster wie schon beim
+    // Domain-Select im "Neues Thema anlegen"-Formular, siehe renderCreateTopicForm).
+    domainSelect.addEventListener('change', function () {
+      if (domainSelect.value) selectFromPicker('project:' + domainSelect.value);
+    });
 
-    // Direkt an DIESES Input-Element gebunden statt über Event-Delegation
-    // am Container, weil 'input'/'focus'/'blur' entweder gar nicht bubbeln
-    // (focus/blur) oder bei jedem Tastendruck einen kompletten render()
-    // auslösen würden, was den Cursor/Fokus im Feld zerstören würde.
-    input.addEventListener('focus', function () {
-      input.select();
-      updatePickerDropdown(dropdown, '');
-      dropdown.hidden = false;
+    var topicsForActiveDomain = state.allTopics.filter(function (t) { return t.project_id === state.activeProjectId; });
+
+    var topicSelect = document.createElement('select');
+    topicSelect.className = 'cvz-picker-select';
+    topicSelect.setAttribute('aria-label', 'Thema w\u00e4hlen');
+
+    var placeholderOption = document.createElement('option');
+    placeholderOption.value = '';
+    placeholderOption.textContent = topicsForActiveDomain.length
+      ? (state.activeTopicId ? '\u2192 Zur Domain-\u00dcbersicht' : 'Thema w\u00e4hlen \u2026')
+      : (activeProject ? 'Noch keine Themen f\u00fcr ' + activeProject.domain : 'Erst Domain w\u00e4hlen');
+    placeholderOption.selected = !state.activeTopicId;
+    topicSelect.appendChild(placeholderOption);
+
+    topicsForActiveDomain.forEach(function (topic) {
+      var option = document.createElement('option');
+      option.value = topic.id;
+      option.textContent = topic.name;
+      if (topic.id === state.activeTopicId) option.selected = true;
+      topicSelect.appendChild(option);
     });
-    input.addEventListener('input', function () {
-      updatePickerDropdown(dropdown, input.value);
-      dropdown.hidden = false;
-    });
-    input.addEventListener('blur', function () {
-      // Kurze Verzögerung, sonst schließt das Dropdown, bevor der Klick
-      // auf ein Ergebnis überhaupt ankommt (blur feuert vor click).
-      setTimeout(function () { dropdown.hidden = true; }, 150);
-    });
-    input.addEventListener('keydown', function (event) {
-      if (event.key === 'Enter') {
-        var firstItem = dropdown.querySelector('[data-cvz-picker-select]');
-        if (firstItem) {
-          selectFromPicker(firstItem.getAttribute('data-cvz-picker-select'));
-          input.blur();
-        }
-      } else if (event.key === 'Escape') {
-        input.blur();
+    topicSelect.disabled = topicsForActiveDomain.length === 0;
+
+    topicSelect.addEventListener('change', function () {
+      if (topicSelect.value) {
+        selectFromPicker('topic:' + topicSelect.value);
+      } else if (state.activeTopicId) {
+        // Platzhalter "Zur Domain-Übersicht" gewählt, während ein Topic
+        // offen war: wie der "← Zur Domain-Übersicht"-Button verhalten.
+        backToOverview();
       }
     });
 
-    wrap.appendChild(input);
-    wrap.appendChild(dropdown);
+    wrap.appendChild(domainSelect);
+    wrap.appendChild(topicSelect);
     return wrap;
-  }
-
-  function updatePickerDropdown(dropdown, query) {
-    var q = query.trim().toLowerCase();
-
-    var projectMatches = state.projects.filter(function (p) {
-      return !q || p.name.toLowerCase().indexOf(q) !== -1 || p.domain.toLowerCase().indexOf(q) !== -1;
-    }).slice(0, 8);
-
-    var topicMatches = state.allTopics.filter(function (t) {
-      return !q || t.name.toLowerCase().indexOf(q) !== -1 || t.seed_keyword.toLowerCase().indexOf(q) !== -1;
-    }).slice(0, 8);
-
-    dropdown.innerHTML = '';
-
-    if (projectMatches.length === 0 && topicMatches.length === 0) {
-      var empty = document.createElement('div');
-      empty.className = 'cvz-picker-empty';
-      empty.textContent = 'Keine Treffer.';
-      dropdown.appendChild(empty);
-      return;
-    }
-
-    if (projectMatches.length > 0) {
-      var domainLabel = document.createElement('div');
-      domainLabel.className = 'cvz-picker-group-label';
-      domainLabel.textContent = 'Domains';
-      dropdown.appendChild(domainLabel);
-
-      projectMatches.forEach(function (project) {
-        var item = document.createElement('div');
-        item.className = 'cvz-picker-item';
-        item.setAttribute('data-cvz-picker-select', 'project:' + project.id);
-        item.innerHTML =
-          '<span class="cvz-picker-item-title">' + escapeHtml(project.domain) + '</span>' +
-          '<span class="cvz-picker-item-sub">' + escapeHtml(project.name) + '</span>';
-        dropdown.appendChild(item);
-      });
-    }
-
-    if (topicMatches.length > 0) {
-      var topicLabel = document.createElement('div');
-      topicLabel.className = 'cvz-picker-group-label';
-      topicLabel.textContent = 'Themen';
-      dropdown.appendChild(topicLabel);
-
-      topicMatches.forEach(function (topic) {
-        var parentProject = getProjectById(topic.project_id);
-        var item = document.createElement('div');
-        item.className = 'cvz-picker-item';
-        item.setAttribute('data-cvz-picker-select', 'topic:' + topic.id);
-        item.innerHTML =
-          '<span class="cvz-picker-item-title">' + escapeHtml(topic.name) + '</span>' +
-          '<span class="cvz-picker-item-sub">' + escapeHtml(parentProject ? parentProject.domain : '') + '</span>';
-        dropdown.appendChild(item);
-      });
-    }
   }
 
   async function submitCreateForm() {
@@ -1550,7 +1523,7 @@
   // =========================================================================
   function renderOverview() {
     var wrap = document.createElement('div');
-    wrap.appendChild(renderProjectPicker());
+    wrap.appendChild(renderDomainAndTopicPicker());
     var usageBadge = renderTopicUsageBadge();
     if (usageBadge) wrap.appendChild(usageBadge);
     wrap.appendChild(renderCreateTopicForm());
@@ -1788,7 +1761,7 @@
   function renderTopicDetailView() {
     var wrap = document.createElement('div');
 
-    wrap.appendChild(renderProjectPicker());
+    wrap.appendChild(renderDomainAndTopicPicker());
 
     var backBtn = document.createElement('button');
     backBtn.type = 'button';
@@ -3278,24 +3251,18 @@
         'animation: cvz-spin 0.8s linear infinite;' +
       '}' +
 
-      '.cvz-picker { position: relative; margin-bottom: 16px; max-width: 360px; }' +
-      '.cvz-picker-input {' +
-        'width: 100%; box-sizing: border-box; font-family: "Geist", sans-serif; font-size: 14px;' +
-        'padding: 10px 12px; background: var(--cvz-navy-raised); color: var(--cvz-text);' +
+      // GEÄNDERT (13.09.2026): ersetzt die alte Such-Combobox (ein
+      // Textfeld, Domains+Themen gemischt im Dropdown) durch zwei
+      // getrennte, native Selects nebeneinander.
+      '.cvz-picker-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }' +
+      '.cvz-picker-select {' +
+        'flex: 1; min-width: 160px; max-width: 280px; box-sizing: border-box;' +
+        'font-family: "Geist", sans-serif; font-size: 14px; padding: 10px 12px;' +
+        'background: var(--cvz-navy-raised); color: var(--cvz-text);' +
         'border: 1px solid var(--cvz-border); border-radius: 0;' +
       '}' +
-      '.cvz-picker-input:focus { outline: none; border-color: var(--cvz-teal); }' +
-      '.cvz-picker-dropdown {' +
-        'position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 10;' +
-        'background: var(--cvz-navy-raised); border: 1px solid var(--cvz-border);' +
-        'max-height: 320px; overflow-y: auto;' +
-      '}' +
-      '.cvz-picker-group-label { font-size: 11px; color: var(--cvz-text-muted); padding: 8px 12px 4px; }' +
-      '.cvz-picker-item { display: flex; flex-direction: column; padding: 8px 12px; cursor: pointer; }' +
-      '.cvz-picker-item:hover { background: rgba(79, 209, 197, 0.08); }' +
-      '.cvz-picker-item-title { font-size: 14px; color: var(--cvz-text); }' +
-      '.cvz-picker-item-sub { font-size: 12px; color: var(--cvz-text-muted); }' +
-      '.cvz-picker-empty { padding: 12px; font-size: 13px; color: var(--cvz-text-muted); }' +
+      '.cvz-picker-select:focus { outline: none; border-color: var(--cvz-teal); }' +
+      '.cvz-picker-select:disabled { opacity: 0.5; cursor: default; }' +
 
       '.cvz-topic-usage-badge { font-size: 13px; color: var(--cvz-text-muted); margin: 0 0 16px; }' +
 
