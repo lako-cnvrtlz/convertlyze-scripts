@@ -1621,11 +1621,13 @@
       maybeStartPolling();
     } catch (e) {
       console.error('[CVZ Visibility] Retry fehlgeschlagen f\u00fcr Topic ' + topicId + ':', e);
-      // Bewusst KEIN showErrorMessage() hier, das würde die komplette App
-      // überschreiben, nur weil ein einzelner Retry-Klick fehlschlug. Status
-      // bleibt serverseitig 'error' (falls die PATCH-Query nicht durchkam)
-      // oder 'collecting' (falls sie durchkam, aber der Rest scheiterte),
-      // ein erneuter Klick ist in beiden Fällen sicher möglich.
+      // GEÄNDERT (14.09.2026): jetzt sichtbar (vorher nur console.error).
+      // Seit der Erweiterung auf hängengebliebenes 'collecting' (siehe
+      // main.py: retry_topic_endpoint) kann dieser Klick einen echten,
+      // für den Nutzer relevanten Grund haben ("läuft noch innerhalb der
+      // erwarteten Zeit") — das sollte nicht stillschweigend im Nichts
+      // verschwinden.
+      await showCvzAlert('Erneut versuchen fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler'));
     }
 
         state.retryingTopicId = null;
@@ -2245,6 +2247,21 @@
       } else if (topic.status === 'queued') {
           extraStatusHint = '<span class="cvz-status-hint">Wartet auf einen freien Themen-Slot. Startet automatisch, kann nach Freiwerden eines Slots aber bis zu 30 Minuten dauern.</span>';
       }
+      // NEU (14.09.2026): erkennt ein hängengebliebenes 'collecting'
+      // clientseitig (gleicher Schwellenwert wie main.py:
+      // STUCK_COLLECTING_THRESHOLD_MINUTES), damit der Nutzer nicht erst
+      // den Fehler beim Klick sieht, sondern der Button gar nicht erst als
+      // "läuft normal" aussieht. Das Backend prüft das bei /retry
+      // trotzdem nochmal verbindlich, hier nur fürs Anzeigen.
+      var STUCK_COLLECTING_THRESHOLD_MINUTES = 45;
+      var isStuckCollecting = false;
+      if (topic.status === 'collecting') {
+        var startedAtRaw = topic.collecting_started_at || topic.created_at;
+        var startedAtMs = startedAtRaw ? new Date(startedAtRaw).getTime() : NaN;
+        if (!isNaN(startedAtMs)) {
+          isStuckCollecting = (Date.now() - startedAtMs) / 60000 >= STUCK_COLLECTING_THRESHOLD_MINUTES;
+        }
+      }
       var tr = document.createElement('tr');
       tr.setAttribute('data-cvz-topic-id', topic.id);
       tr.innerHTML =
@@ -2252,9 +2269,10 @@
         '<td><span class="cvz-status-badge ' + status.className + '">' +
           (topic.status === 'collecting' ? '<span class="cvz-spinner"></span>' : '') +
           status.label + '</span>' +
-          (topic.status === 'collecting' ? '<span class="cvz-status-hint">Das wird mehrere Minuten dauern. Sobald der Lauf fertig ist, aktualisiert sich die Seite automatisch.</span>' : '') +
+          (topic.status === 'collecting' && !isStuckCollecting ? '<span class="cvz-status-hint">Das wird mehrere Minuten dauern. Sobald der Lauf fertig ist, aktualisiert sich die Seite automatisch.</span>' : '') +
+          (isStuckCollecting ? '<span class="cvz-status-hint">L\u00e4uft ungew\u00f6hnlich lange, wirkt h\u00e4ngengeblieben (z. B. durch einen Server-Neustart mittendrin).</span>' : '') +
           extraStatusHint +
-          (topic.status === 'error' ? (
+          (topic.status === 'error' || isStuckCollecting ? (
             '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + topic.id + '"' +
               (state.retryingTopicId === topic.id ? ' disabled' : '') + '>' +
               (state.retryingTopicId === topic.id ? 'Wird erneut versucht …' : 'Erneut versuchen') +
@@ -2353,18 +2371,44 @@
     wrap.appendChild(renderSummaryCard(detail.topic));
 
     if (detail.topic.status === 'collecting') {
+      // NEU (14.09.2026): gleiche Erkennung wie in renderTopicStatusTable
+      // (siehe Kommentar dort) — hier zusätzlich mit Retry-Button, statt
+      // die Tabs für immer verborgen zu halten, wenn der Hintergrund-Task
+      // mittendrin gestorben ist.
+      var STUCK_COLLECTING_THRESHOLD_MINUTES_DETAIL = 45;
+      var detailStartedAtRaw = detail.topic.collecting_started_at || detail.topic.created_at;
+      var detailStartedAtMs = detailStartedAtRaw ? new Date(detailStartedAtRaw).getTime() : NaN;
+      var isDetailStuck = !isNaN(detailStartedAtMs) &&
+        (Date.now() - detailStartedAtMs) / 60000 >= STUCK_COLLECTING_THRESHOLD_MINUTES_DETAIL;
+
       // Bewusst KEINE Tabs/Tab-Inhalte rendern, solange noch gesammelt wird,
       // die wären ohnehin größtenteils leer und würden nur wie ein Fehler
       // aussehen ("überall steht leer"). Stattdessen nur der Banner mit
       // Spinner, das war explizit der Wunsch.
       var loadingBanner = document.createElement('div');
       loadingBanner.className = 'cvz-card cvz-collecting-banner';
-      loadingBanner.innerHTML =
-        '<p class="cvz-collecting-banner-text">' +
-          '<span class="cvz-spinner"></span>' +
-          'Erster Datenlauf l\u00e4uft noch, kann bis zu 60 Sekunden dauern. ' +
-          'Diese Seite aktualisiert sich automatisch, sobald der Lauf fertig ist.' +
-        '</p>';
+      if (isDetailStuck) {
+        loadingBanner.innerHTML =
+          '<p class="cvz-collecting-banner-text">' +
+            '\u26a0\ufe0f L\u00e4uft ungew\u00f6hnlich lange, wirkt h\u00e4ngengeblieben (z. B. durch einen Server-Neustart mittendrin).' +
+          '</p>' +
+          '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + detail.topic.id + '"' +
+            (state.retryingTopicId === detail.topic.id ? ' disabled' : '') + '>' +
+            (state.retryingTopicId === detail.topic.id ? 'Wird erneut versucht \u2026' : 'Erneut versuchen') +
+          '</button>';
+      } else {
+        // GEÄNDERT (14.09.2026): war "kann bis zu 60 Sekunden dauern" —
+        // seit der vollständigen Pipeline (Keywords/Prompts/ChatGPT+
+        // Gemini/Quellen-Analyse, siehe run_topic.py) realistisch eher
+        // 10-15 Minuten, selbst mit der Parallelisierung von
+        // collect_weekly_data.
+        loadingBanner.innerHTML =
+          '<p class="cvz-collecting-banner-text">' +
+            '<span class="cvz-spinner"></span>' +
+            'Erster Datenlauf l\u00e4uft noch, kann mehrere Minuten dauern. ' +
+            'Diese Seite aktualisiert sich automatisch, sobald der Lauf fertig ist.' +
+          '</p>';
+      }
       wrap.appendChild(loadingBanner);
       return wrap;
     }
