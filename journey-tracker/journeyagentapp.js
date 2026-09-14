@@ -1408,11 +1408,18 @@
   // funktionieren — das Backend muss den wöchentlichen Cron-Job so
   // anpassen, dass er Themen mit status='archived' überspringt, sonst tut
   // dieser Button nur so, als würde er etwas bewirken.
-  async function setTopicArchiveStatus(topicId, archive) {
-    var confirmText = archive
-      ? 'Thema deaktivieren? Es werden dann keine neuen Datenläufe mehr gestartet, alle bisherigen Daten bleiben aber sichtbar. Du kannst das Thema jederzeit wieder aktivieren.'
-      : 'Thema wieder aktivieren? Ab dem nächsten wöchentlichen Lauf werden wieder neue Daten gesammelt.';
-    if (!window.confirm(confirmText)) return;
+    async function setTopicArchiveStatus(topicId, archive) {
+    // GEÄNDERT (14.09.2026): eigenes Popup (showCvzConfirm) statt des
+    // nativen window.confirm, siehe showCvzModal weiter oben.
+    var confirmTitle = archive ? 'Thema deaktivieren?' : 'Thema wieder aktivieren?';
+    var confirmBody = archive
+      ? 'Es werden dann keine neuen Datenläufe mehr gestartet, alle bisherigen Daten bleiben aber sichtbar. Du kannst das Thema jederzeit wieder aktivieren.'
+      : 'Ab dem nächsten wöchentlichen Lauf werden wieder neue Daten gesammelt.';
+    var confirmed = await showCvzConfirm(confirmBody, {
+      title: confirmTitle,
+      confirmLabel: archive ? 'Deaktivieren' : 'Aktivieren',
+    });
+    if (!confirmed) return;
 
     state.archivingTopicId = topicId;
     render();
@@ -1443,9 +1450,9 @@
         delete state.topicDetailCache[topicId];
         await openTopicDetail(topicId, false);
       }
-    } catch (e) {
+        } catch (e) {
       console.error('[CVZ Visibility] Status konnte nicht geändert werden:', e);
-      window.alert('Status konnte nicht geändert werden: ' + (e.message || 'Unbekannter Fehler'));
+      await showCvzAlert('Status konnte nicht geändert werden: ' + (e.message || 'Unbekannter Fehler'));
     }
 
         state.archivingTopicId = null;
@@ -1477,9 +1484,9 @@
         delete state.topicDetailCache[topicId];
         await openTopicDetail(topicId, false);
       }
-    } catch (e) {
+        } catch (e) {
       console.error('[CVZ Visibility] Deaktivierung konnte nicht abgebrochen werden:', e);
-      window.alert('Deaktivierung konnte nicht abgebrochen werden: ' + (e.message || 'Unbekannter Fehler'));
+      await showCvzAlert('Deaktivierung konnte nicht abgebrochen werden: ' + (e.message || 'Unbekannter Fehler'));
     }
 
     state.archivingTopicId = null;
@@ -3463,12 +3470,99 @@
   // Deaktivierungen/Warteschlangen-Hinweise – formatRelativeTime oben ist
   // dafür zu ungenau ("vor 12 Tagen" ist bei einem ZUKÜNFTIGEN Datum
   // verwirrend), daher ein zweiter, einfacherer Formatter.
-  function formatShortDate(isoString) {
+    function formatShortDate(isoString) {
     if (!isoString) return null;
     var d = new Date(isoString);
     if (isNaN(d.getTime())) return null;
     return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
+
+  // NEU (14.09.2026): eigenes, zum Dashboard passendes Bestätigungs-Popup
+  // statt des nativen Browser-Dialogs (window.confirm/window.alert).
+  // showCvzConfirm gibt ein Promise<boolean> zurück (true = bestätigt),
+  // showCvzAlert ein Promise, das aufgelöst wird sobald der User auf OK
+  // klickt (nur ein Button, kein Abbrechen).
+  function showCvzModal(message, options) {
+    options = options || {};
+    var isConfirm = options.mode !== 'alert';
+
+    return new Promise(function(resolve) {
+      var overlay = document.createElement('div');
+      overlay.className = 'cvz-modal-overlay';
+
+      var box = document.createElement('div');
+      box.className = 'cvz-modal-box';
+
+      if (options.title) {
+        var titleEl = document.createElement('p');
+        titleEl.className = 'cvz-modal-title';
+        titleEl.textContent = options.title;
+        box.appendChild(titleEl);
+      }
+
+      var textEl = document.createElement('p');
+      textEl.className = 'cvz-modal-text';
+      textEl.textContent = message;
+      box.appendChild(textEl);
+
+      var actions = document.createElement('div');
+      actions.className = 'cvz-modal-actions';
+
+      function close(result) {
+        overlay.removeEventListener('click', onOverlayClick);
+        document.removeEventListener('keydown', onKeyDown);
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        resolve(result);
+      }
+
+      if (isConfirm) {
+        var cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'cvz-modal-btn cvz-modal-btn-secondary';
+        cancelBtn.textContent = options.cancelLabel || 'Abbrechen';
+        cancelBtn.addEventListener('click', function() { close(false); });
+        actions.appendChild(cancelBtn);
+      }
+
+      var okBtn = document.createElement('button');
+      okBtn.type = 'button';
+      okBtn.className = 'cvz-modal-btn cvz-modal-btn-primary';
+      okBtn.textContent = options.confirmLabel || 'OK';
+      okBtn.addEventListener('click', function() { close(true); });
+      actions.appendChild(okBtn);
+
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      okBtn.focus();
+
+      function onOverlayClick(e) {
+        if (e.target === overlay) close(false);
+      }
+      overlay.addEventListener('click', onOverlayClick);
+
+      function onKeyDown(e) {
+        if (e.key === 'Escape') close(false);
+      }
+      document.addEventListener('keydown', onKeyDown);
+    });
+  }
+
+  function showCvzConfirm(message, options) {
+    return showCvzModal(message, options);
+  }
+
+  function showCvzAlert(message, options) {
+    var alertOptions = { mode: 'alert' };
+    if (options) {
+      for (var key in options) {
+        if (Object.prototype.hasOwnProperty.call(options, key)) alertOptions[key] = options[key];
+      }
+    }
+    return showCvzModal(message, alertOptions);
+  }
+
+  function formatRelativeTime(isoString) {
 
   function formatRelativeTime(isoString) {
     if (!isoString) return '–';
@@ -3638,7 +3732,18 @@
       // NEU (14.09.2026): informativer Hinweis im Anlege-Formular (siehe
       // Block 19), bewusst NICHT in Rot wie .cvz-create-error — ist kein
       // Fehler, das Formular bleibt ja nutzbar.
-      '.cvz-create-info { width: 100%; font-size: 13px; color: var(--cvz-text-muted); margin: 6px 0 0; }' +
+            '.cvz-create-info { width: 100%; font-size: 13px; color: var(--cvz-text-muted); margin: 6px 0 0; }' +
+      // NEU (14.09.2026): eigenes Bestätigungs-Popup, siehe showCvzModal.
+      '.cvz-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 16px; }' +
+      '.cvz-modal-box { background: var(--cvz-navy-raised); border: 1px solid var(--cvz-border); border-radius: 4px; padding: 20px; max-width: 380px; width: 100%; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }' +
+      '.cvz-modal-title { font-family: "Geist", sans-serif; font-size: 15px; font-weight: 600; color: var(--cvz-text); margin: 0 0 8px; }' +
+      '.cvz-modal-text { font-family: "Geist", sans-serif; font-size: 13px; color: var(--cvz-text-muted); margin: 0 0 20px; line-height: 1.5; }' +
+      '.cvz-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }' +
+      '.cvz-modal-btn { font-family: "Geist", sans-serif; font-size: 12px; padding: 6px 14px; border-radius: 0; cursor: pointer; border: 1px solid transparent; }' +
+      '.cvz-modal-btn-secondary { background: none; color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
+      '.cvz-modal-btn-secondary:hover { color: var(--cvz-text); border-color: var(--cvz-text-muted); }' +
+      '.cvz-modal-btn-primary { background: none; color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
+      '.cvz-modal-btn-primary:hover { background: var(--cvz-teal); color: var(--cvz-navy); }' +
 
       '.cvz-section { margin-bottom: 24px; }' +
       '.cvz-section-label { font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
