@@ -3563,8 +3563,6 @@
   }
 
   function formatRelativeTime(isoString) {
-
-  function formatRelativeTime(isoString) {
     if (!isoString) return '–';
     var diffSeconds = Math.round((Date.now() - new Date(isoString).getTime()) / 1000);
     if (diffSeconds < 5) return 'gerade eben';
