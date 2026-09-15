@@ -17,8 +17,8 @@
   --wl-orange:    #fbbf24;
   --wl-orange-bg: #1f1a0e;
   --wl-orange-bdr:#4a3a10;
-  --radius:       14px;
-  --radius-sm:    10px;
+  --radius:       0px;
+  --radius-sm:    0px;
   font-family: inherit;
   color: var(--wl-text);
 }
