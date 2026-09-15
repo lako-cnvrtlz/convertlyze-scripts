@@ -1,106 +1,373 @@
-// contentStrategyAgent.app.js
-//
-// Frontend für den Content-Strategie-Agenten (routes/contentStrategyAgent.ts).
-// Eigenständiges Vanilla-JS-Embed-Script, analog zum bestehenden Landingpage-Assistant-Embed
-// (app.js für pageAgent) - bewusst NICHT von diesem abhängig oder aus ihm abgeleitet, weil mir
-// dessen genauer Quelltext beim Schreiben dieser Datei nicht mehr vorlag (nur die Beschreibung
-// aus dem bisherigen Chat-Verlauf). Der API-Vertrag hier ist gegen den TATSÄCHLICHEN
-// Backend-Code verifiziert (middleware/auth.js, routes/contentStrategyAgent.ts,
-// routes/googleIntegration.ts), NICHT geraten:
-//   - Authentifizierung: Header "Authorization: Bearer <memberstack_id>" - authenticateUser in
-//     middleware/auth.js sucht den User direkt über memberstack_id, kein JWT/Session-Token.
-//   - GET  /api/content-strategy/me                    -> { user_id }
-//   - GET  /api/content-strategy/quota?user_id=...      -> Kontingent-Vorschau
-//   - GET  /api/integrations/google/status              -> { connected, sites: [{site_url, connected_at}] }
-//   - POST /api/content-strategy/generate {user_id, topic, domain?}  -> 202 { session_id, status, ... }
-//   - GET  /api/content-strategy/:id                    -> vollständige Session inkl. status/result
-//   - PATCH /api/content-strategy/:id/pages/:index {status} -> { success, result }
-//
-// WICHTIGER HINWEIS ZUR LAUFZEIT: /generate liefert sofort (202) eine session_id zurück und
-// läuft im Hintergrund weiter - ein kompletter Lauf (Themen-Analyse + Domain-Abgleich +
-// GEO-Check, IMMER MIT 3 echten LLM-Prompt-Tests, siehe Chat-Verlauf: die Checkbox dafür wurde
-// entfernt, der Test ist jetzt fester Bestandteil, nicht mehr abwählbar - ein Kill-Switch dafür
-// existiert nur noch serverseitig in routes/contentStrategyAgent.ts) dauert inzwischen meist
-// 10-15 Minuten, nicht mehr nur ein paar Sekunden (siehe CVZ_CS_PROGRESS_MESSAGES weiter unten
-// für die zeitbasierten Lade-Texte). Dieses Script pollt deshalb GET /:id, statt auf die
-// Antwort von /generate zu warten.
-//
-// GEÄNDERT (siehe Chat-Verlauf, Lasse: "Fehlermeldung nach Handy schließen/wieder öffnen, obwohl
-// die Strategie fertig war"): früher pollte dieses Script einen eigenen In-Memory-turn_id-Job
-// (GET /status/:turn_id im Backend). Diese Map hatte eine feste TTL von 30 Minuten UND war
-// reiner Prozessspeicher - schloss man das Handy während eines langen Laufs und öffnete die
-// Seite erst nach dessen Fertigstellung wieder, war der Job auf der (ggf. anderen) antwortenden
-// Backend-Instanz oft nicht mehr auffindbar, obwohl die Strategie in der Datenbank längst fertig
-// war. Der komplette turn_id-Mechanismus für /generate ist deshalb entfernt: pollSession() weiter
-// unten pollt jetzt ausschließlich GET /:id gegen die DB-Zeile selbst - dieselbe Route, die auch
-// ein direkter Session-Link (?session_id=...) und das Dashboard nutzen. Der Report-Chat behält
-// bewusst weiterhin sein eigenes turn_id-Polling (siehe pollChatStatus), das Zeitfenster dort ist
-// mit CHAT_TURN_TIMEOUT_MS von nur 90 Sekunden im Backend verschwindend klein im Vergleich zu den
-// 30 Minuten beim Hauptlauf.
-//
-// NICHT ENTHALTEN (bewusst, siehe Chat-Verlauf): ein Kauf-Flow für PPU-Strategie-Pakete
-// (1er/5er/10er). Dieses Script zeigt nur die verbleibenden PPU-Credits an und ruft bei
-// fehlendem Kontingent einen konfigurierbaren Callback auf (onNoQuota) - die eigentliche
-// Bezahl-/Checkout-Anbindung kennt dieses Script nicht und sollte an den bestehenden
-// Billing-Flow angebunden werden.
-//
-// PRODUKTENTSCHEIDUNG (Nachtrag): das Verbinden/Trennen der Google Search Console passiert
-// NICHT mehr hier, sondern in den Account-Einstellungen (siehe contentStrategySettings.app.js)
-// - eine GSC-Verbindung ist Account-weit, kein Formular-Feld für dieses eine Tool. Diese Seite
-// hier prüft nur noch den Status (GET /api/integrations/google/status) und zeigt bei fehlender
-// Verbindung einen Hinweis mit Link zu CONFIG.settingsUrl, statt selbst einen Connect-Button
-// anzubieten.
 (function () {
   'use strict';
   // ==================== KONFIGURATION ====================
-  // Vor dem Einbetten anpassen (oder per window.CVZ_CONTENT_STRATEGY_CONFIG vor dem Laden
-  // dieses Scripts überschreiben).
   var DEFAULT_CONFIG = {
-    apiBaseUrl: 'https://YOUR-API-DOMAIN.example', // z.B. die Railway-Domain der API, OHNE trailing slash
+    apiBaseUrl: 'https://YOUR-API-DOMAIN.example',
     containerId: 'cvz-content-strategy-agent',
-    settingsUrl: '/member/einstellungen#integrationen', // echte Convertlyze-Einstellungen-Seite - der Anker setzt voraus, dass der neue "Integrationen"-Abschnitt dort die id="integrationen" bekommt (siehe contentStrategySettings.app.js)
-    // TODO: echten Pfad eintragen, falls die Landingpage-Assistent-Seite unter einer anderen
-    // URL liegt (gleiches Muster/gleicher Platzhalter wie CONFIG.NEW_LANDINGPAGE_URL in
-    // dashboard-v5.js bzw. CONFIG.chatPageUrl in page-projects-embed.html - bitte synchron halten).
+    settingsUrl: '/member/einstellungen#integrationen',
     landingpageAssistantUrl: '/member/landingpage-assistant',
     pollIntervalMs: 3000,
-    // ANGEHOBEN von 15 auf 22, dann auf 32 Minuten (siehe Chat-Verlauf, Lasse: "Strategie-
-    // Erstellung dauert jetzt über 10 Minuten", später "Timeout wird knapp, so viel wie da
-    // passiert"): der GEO-Prompt-Test läuft standardmäßig mit, dazu inzwischen bis zu 3 weitere
-    // sequenzielle content_parsing-Calls für die Wettbewerber-Struktur-Analyse - siehe
-    // ausführliche Begründung bei BACKGROUND_TURN_TIMEOUT_MS in routes/contentStrategyAgent.ts,
-    // das parallel auf 30 Minuten angehoben wurde. Hier bewusst weiterhin 2 Minuten MEHR als das
-    // Backend-Limit, damit bei einem echten Timeout die genaue Backend-Fehlermeldung
-    // (session.status === 'error') den Client erreicht, BEVOR der eigene, generische
-    // "Zeitüberschreitung"-Text in pollSession() zuschlägt.
     pollTimeoutMs: 32 * 60 * 1000,
-    // NEU (siehe Chat-Verlauf, Lasse: "KI-Agent, der Fragen des Users zu dem Report beantworten
-    // kann") - eigenes, kürzeres Poll-Intervall/Timeout für den Report-Chat: eine Chat-Antwort
-    // ist deutlich schneller als ein kompletter Report-Lauf (der echte GEO-Prompt-Test läuft im
-    // Chat serverseitig nie mit, siehe CHAT_TOOLS in routes/contentStrategyAgent.ts). 2 Minuten
-    // Timeout, bewusst mit Puffer ÜBER CHAT_TURN_TIMEOUT_MS (90s im Backend) - gleicher Grund wie
-    // bei pollTimeoutMs oben: die echte Backend-Fehlermeldung soll ankommen, bevor der eigene
-    // generische Timeout-Text feuert. Der Chat pollt bewusst weiterhin gegen seinen eigenen
-    // turn_id-Endpunkt (GET /chat/status/:turn_id), siehe Begründung im Datei-Kopf.
     chatPollIntervalMs: 1500,
     chatPollTimeoutMs: 2 * 60 * 1000,
   };
   var CONFIG = Object.assign({}, DEFAULT_CONFIG, window.CVZ_CONTENT_STRATEGY_CONFIG || {});
-  // NEU (siehe Chat-Verlauf, Lasse: "im Chat UND im Bericht selbst - z.B. Executive Summary -
-  // wird noch mit ##/** markiert statt gerendert"): lädt "marked" (https://marked.js.org/)
-  // JETZT SELBST nach, statt sich wie bisher darauf zu verlassen, dass es manuell als
-  // <script>-Tag in Webflows Custom Code eingebunden wurde. Genau DAS war die eigentliche
-  // Fehlerquelle beim zuvor gemeldeten Chat-Markdown-Bug: der Code-Fix (marked.parse() in
-  // renderChatMessageBubble) war korrekt, griff aber nicht zuverlässig, weil das manuelle
-  // Einbinden der Bibliothek fehleranfällig ist (leicht vergessen, oder auf einer Seite
-  // vorhanden, auf einer anderen nicht). Idempotent: lädt nur einmal nach und nur, falls
-  // "marked" nicht schon da ist (z.B. weil der Landingpage-Assistent auf derselben Seite
-  // bereits läuft und es selbst einbindet - dann passiert hier nichts). Wird ganz am Anfang
-  // von init() angestoßen, lange bevor ein Bericht oder Chat tatsächlich gerendert wird -
-  // blockiert dabei nichts, jede Render-Stelle prüft weiterhin "typeof marked" selbst und
-  // fällt auf reinen Text zurück, falls das Nachladen (noch) nicht fertig ist oder fehlschlägt.
+
   var MARKED_CDN_URL = 'https://cdn.jsdelivr.net/npm/marked/marked.min.js';
   var markedLoadStarted = false;
+
+  // ==================== STYLES (Convertlyze Design v2) ====================
+  // Syne für Headlines, Geist für Body-Text, border-radius: 0 überall.
+  // Wird einmalig in <head> eingespritzt (idempotent). Farb-Tokens als CSS Custom
+  // Properties auf #cvz-content-strategy-agent – lassen sich von außen überschreiben:
+  //   #cvz-content-strategy-agent { --cvz-dark: #YourBrand; --cvz-blue: #YourAccent; }
+  function injectStyles() {
+    if (document.getElementById('cvz-cs-styles')) return;
+
+    // Syne + Geist von Google Fonts (Geist ist seit 2024 dort verfügbar)
+    if (!document.getElementById('cvz-cs-fonts')) {
+      var fontLink = document.createElement('link');
+      fontLink.id = 'cvz-cs-fonts';
+      fontLink.rel = 'stylesheet';
+      fontLink.href = 'https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Syne:wght@500;600;700;800&display=swap';
+      document.head.appendChild(fontLink);
+    }
+
+    var css = [
+      /* ---- Reset & Tokens ---- */
+      '#cvz-content-strategy-agent{',
+        '--cvz-dark:#0F172A;--cvz-ink:#1F2937;--cvz-muted:#6B7280;',
+        '--cvz-border:#E5E7EB;--cvz-surface:#F9FAFB;',
+        '--cvz-blue:#2563EB;--cvz-white:#FFFFFF;',
+        'font-family:"Geist","Inter",system-ui,-apple-system,sans-serif;',
+        'font-size:15px;line-height:1.65;color:var(--cvz-ink);',
+      '}',
+      '#cvz-content-strategy-agent *,',
+      '#cvz-content-strategy-agent *::before,',
+      '#cvz-content-strategy-agent *::after{box-sizing:border-box;}',
+
+      /* ---- Headlines: Syne ---- */
+      '#cvz-content-strategy-agent h2,',
+      '#cvz-content-strategy-agent h3,',
+      '#cvz-content-strategy-agent h4,',
+      '#cvz-content-strategy-agent h5,',
+      '#cvz-content-strategy-agent h6{',
+        'font-family:"Syne",sans-serif;font-weight:700;',
+        'line-height:1.2;color:var(--cvz-dark);margin:0 0 .6em;',
+      '}',
+      '#cvz-content-strategy-agent h2{font-size:1.75rem;}',
+      '#cvz-content-strategy-agent h3{font-size:1.3rem;}',
+      '#cvz-content-strategy-agent h4{font-size:1.05rem;}',
+      '#cvz-content-strategy-agent h5{font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;}',
+      '#cvz-content-strategy-agent h6{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--cvz-muted);}',
+      '#cvz-content-strategy-agent p{margin:0 0 .75em;}',
+      '#cvz-content-strategy-agent ul,#cvz-content-strategy-agent ol{padding-left:1.25em;margin:0 0 .75em;}',
+      '#cvz-content-strategy-agent li{margin-bottom:.3em;}',
+      '#cvz-content-strategy-agent a{color:var(--cvz-blue);}',
+      '#cvz-content-strategy-agent a:hover{text-decoration:underline;}',
+
+      /* ---- Hint ---- */
+      '.cvz-cs-hint{font-size:13px;color:var(--cvz-muted);margin:.2em 0;}',
+
+      /* ---- Banner ---- */
+      '.cvz-cs-banner{display:flex;flex-wrap:wrap;align-items:center;gap:12px;',
+        'padding:10px 14px;background:var(--cvz-surface);border:1px solid var(--cvz-border);',
+        'font-size:13px;margin-bottom:20px;}',
+      '.cvz-cs-quota{color:var(--cvz-ink);}',
+      '.cvz-cs-quota-empty{color:#DC2626;font-weight:600;}',
+      '.cvz-cs-gsc-connected{color:#15803D;}',
+      '.cvz-cs-gsc-hint{color:#B45309;}',
+      '.cvz-cs-gsc-hint a{color:#B45309;text-decoration:underline;}',
+
+      /* ---- Form ---- */
+      '.cvz-cs-form{display:flex;flex-direction:column;gap:18px;max-width:580px;}',
+      '.cvz-cs-label{display:flex;flex-direction:column;gap:5px;font-size:14px;font-weight:500;color:var(--cvz-ink);}',
+      '#cvz-content-strategy-agent input[type="text"],',
+      '#cvz-content-strategy-agent select,',
+      '#cvz-content-strategy-agent textarea{',
+        'padding:9px 11px;border:1px solid var(--cvz-border);border-radius:0;',
+        'font-family:"Geist","Inter",system-ui,sans-serif;font-size:14px;',
+        'color:var(--cvz-ink);background:var(--cvz-white);',
+        'transition:border-color .15s;outline:none;width:100%;',
+      '}',
+      '#cvz-content-strategy-agent input[type="text"]:focus,',
+      '#cvz-content-strategy-agent select:focus,',
+      '#cvz-content-strategy-agent textarea:focus{border-color:var(--cvz-blue);}',
+
+      /* ---- Buttons ---- */
+      '#cvz-content-strategy-agent button.cvz-cs-submit-btn,',
+      '#cvz-content-strategy-agent .cvz-cs-submit-btn{',
+        'display:inline-flex;align-items:center;justify-content:center;',
+        'padding:10px 22px;background:var(--cvz-dark);color:var(--cvz-white);',
+        'border:2px solid var(--cvz-dark);border-radius:0;',
+        'font-family:"Syne",sans-serif;font-size:14px;font-weight:600;',
+        'letter-spacing:.025em;cursor:pointer;',
+        'transition:background .15s,border-color .15s;text-decoration:none;line-height:1;',
+      '}',
+      '#cvz-content-strategy-agent button.cvz-cs-submit-btn:hover:not(:disabled)',
+      '{background:#1E293B;border-color:#1E293B;}',
+      '#cvz-content-strategy-agent button.cvz-cs-submit-btn:disabled{opacity:.4;cursor:not-allowed;}',
+
+      '#cvz-content-strategy-agent button.cvz-cs-retry-btn,',
+      '#cvz-content-strategy-agent .cvz-cs-retry-btn{',
+        'display:inline-flex;align-items:center;justify-content:center;',
+        'padding:8px 18px;background:transparent;color:var(--cvz-dark);',
+        'border:2px solid var(--cvz-dark);border-radius:0;',
+        'font-family:"Syne",sans-serif;font-size:13px;font-weight:600;',
+        'letter-spacing:.025em;cursor:pointer;',
+        'transition:background .15s,color .15s;text-decoration:none;line-height:1;',
+      '}',
+      '#cvz-content-strategy-agent button.cvz-cs-retry-btn:hover,',
+      '#cvz-content-strategy-agent .cvz-cs-retry-btn:hover',
+      '{background:var(--cvz-dark);color:var(--cvz-white);}',
+
+      '.cvz-cs-export-btn{',
+        'display:inline-flex;align-items:center;justify-content:center;',
+        'padding:8px 16px;background:transparent;color:var(--cvz-dark);',
+        'border:2px solid var(--cvz-dark);border-radius:0;',
+        'font-family:"Syne",sans-serif;font-size:13px;font-weight:600;',
+        'cursor:pointer;transition:background .15s,color .15s;',
+        'white-space:nowrap;line-height:1;',
+      '}',
+      '.cvz-cs-export-btn:hover:not(:disabled){background:var(--cvz-dark);color:var(--cvz-white);}',
+      '.cvz-cs-export-btn:disabled{opacity:.45;cursor:wait;}',
+
+      '.cvz-cs-build-btn{',
+        'display:inline-flex;align-items:center;justify-content:center;',
+        'padding:8px 16px;background:var(--cvz-blue);color:var(--cvz-white);',
+        'border:2px solid var(--cvz-blue);border-radius:0;',
+        'font-family:"Syne",sans-serif;font-size:13px;font-weight:600;',
+        'cursor:pointer;transition:background .15s,border-color .15s;text-decoration:none;line-height:1;',
+      '}',
+      '.cvz-cs-build-btn:hover{background:#1D4ED8;border-color:#1D4ED8;text-decoration:none;}',
+
+      /* ---- Spinner / Keyframe ---- */
+      '@keyframes cvz-cs-spin{to{transform:rotate(360deg);}}',
+      '.cvz-cs-spinner{',
+        'width:32px;height:32px;',
+        'border:3px solid var(--cvz-border);border-top-color:var(--cvz-dark);',
+        'border-radius:50%;animation:cvz-cs-spin .8s linear infinite;',
+      '}',
+
+      /* ---- Processing ---- */
+      '.cvz-cs-processing{',
+        'display:flex;flex-direction:column;align-items:center;',
+        'gap:14px;padding:48px 24px;text-align:center;',
+      '}',
+      '.cvz-cs-progress-text{font-size:15px;color:var(--cvz-ink);max-width:460px;}',
+
+      /* ---- Error ---- */
+      '.cvz-cs-error{',
+        'padding:20px 24px;background:#FEF2F2;',
+        'border:1px solid #FECACA;color:#991B1B;',
+      '}',
+      '.cvz-cs-error p{margin:0 0 10px;}',
+      '.cvz-cs-error p:last-child{margin:0;}',
+
+      /* ---- Badges ---- */
+      '.cvz-cs-badge{',
+        'display:inline-flex;align-items:center;',
+        'padding:2px 7px;font-size:10px;font-weight:700;',
+        'text-transform:uppercase;letter-spacing:.07em;border-radius:0;',
+        'background:var(--cvz-surface);color:var(--cvz-ink);',
+        'border:1px solid var(--cvz-border);white-space:nowrap;',
+      '}',
+      '.cvz-cs-badge-conversion{background:#EFF6FF;color:#1D4ED8;border-color:#BFDBFE;}',
+      '.cvz-cs-badge-audience{background:#F0FDF4;color:#15803D;border-color:#BBF7D0;}',
+      '.cvz-cs-badge-recommended{background:#FEF3C7;color:#B45309;border-color:#FDE68A;}',
+      '.cvz-cs-badge-commodity{background:#FEF2F2;color:#991B1B;border-color:#FECACA;}',
+      '.cvz-cs-badge-role-coverage{background:#F0FDF4;color:#166534;border-color:#BBF7D0;}',
+      '.cvz-cs-badge-role-citation{background:#EFF6FF;color:#1E40AF;border-color:#BFDBFE;}',
+      '.cvz-cs-badge-role-existing{background:var(--cvz-surface);color:var(--cvz-muted);border-color:var(--cvz-border);}',
+      '.cvz-cs-badge-intent-besser{background:#F0FDF4;color:#166534;border-color:#BBF7D0;}',
+      '.cvz-cs-badge-intent-gleichwertig{background:#EFF6FF;color:#1E40AF;border-color:#BFDBFE;}',
+      '.cvz-cs-badge-intent-schlechter{background:#FEF2F2;color:#991B1B;border-color:#FECACA;}',
+      '.cvz-cs-badge-intent-zu_breit{background:#FFF7ED;color:#C2410C;border-color:#FED7AA;}',
+      '.cvz-cs-badge-roadmap-urgent{background:var(--cvz-dark);color:var(--cvz-white);border-color:var(--cvz-dark);}',
+      '.cvz-cs-badge-roadmap-quick{background:var(--cvz-blue);color:var(--cvz-white);border-color:var(--cvz-blue);}',
+      '.cvz-cs-badge-roadmap-next{background:var(--cvz-surface);color:var(--cvz-ink);border-color:var(--cvz-border);}',
+      '.cvz-cs-badge-roadmap-later{background:var(--cvz-white);color:var(--cvz-muted);border-color:var(--cvz-border);}',
+
+      /* ---- Report Header ---- */
+      '.cvz-cs-report-header{padding-bottom:20px;border-bottom:2px solid var(--cvz-dark);margin-bottom:28px;}',
+      '.cvz-cs-report-header-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;}',
+      '.cvz-cs-report-eyebrow{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--cvz-muted);margin:0 0 6px;}',
+      '.cvz-cs-report-title{font-family:"Syne",sans-serif;font-size:clamp(1.5rem,3vw,2rem);font-weight:800;color:var(--cvz-dark);margin:0 0 4px;line-height:1.15;}',
+      '.cvz-cs-report-meta{font-size:13px;color:var(--cvz-muted);margin:0;}',
+
+      /* ---- Report Sections ---- */
+      '.cvz-cs-report-section{margin-bottom:36px;}',
+      '.cvz-cs-report-section-title{',
+        'font-family:"Syne",sans-serif;font-size:1.05rem;font-weight:700;',
+        'color:var(--cvz-dark);padding-bottom:8px;',
+        'border-bottom:1px solid var(--cvz-border);margin-bottom:18px;',
+      '}',
+
+      /* ---- Conversion Card ---- */
+      '.cvz-cs-conversion-card{padding:18px 22px;background:var(--cvz-dark);color:var(--cvz-white);margin-bottom:20px;}',
+      '.cvz-cs-conversion-card h4{font-family:"Syne",sans-serif;font-size:1.1rem;font-weight:700;color:var(--cvz-white);margin:0 0 6px;}',
+      '.cvz-cs-conversion-card .cvz-cs-hint{color:#94A3B8;}',
+      '.cvz-cs-conversion-card .cvz-cs-badge{background:#1E293B;color:#94A3B8;border-color:#334155;}',
+      '.cvz-cs-conversion-card .cvz-cs-badge-conversion{background:#1E3A8A;color:#BFDBFE;border-color:#1D4ED8;}',
+      '.cvz-cs-conversion-card .cvz-cs-badge-audience{background:#14532D;color:#BBF7D0;border-color:#166534;}',
+      '.cvz-cs-conversion-card .cvz-cs-page-card-badges{margin-bottom:8px;}',
+
+      /* ---- Page Cards ---- */
+      '.cvz-cs-page-card{padding:14px 18px;background:var(--cvz-white);border:1px solid var(--cvz-border);margin-bottom:10px;}',
+      '.cvz-cs-page-card-badges{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;}',
+      '.cvz-cs-page-card-topic{font-family:"Syne",sans-serif;font-size:1rem;font-weight:700;color:var(--cvz-dark);margin:0 0 5px;}',
+      '.cvz-cs-page-card-footer{display:flex;align-items:center;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--cvz-surface);flex-wrap:wrap;}',
+      '.cvz-cs-page-card-type-explanation{font-size:13px;color:var(--cvz-muted);font-style:italic;margin:5px 0;}',
+
+      /* ---- Phase Groups ---- */
+      '.cvz-cs-phase-group{margin-bottom:24px;}',
+      '.cvz-cs-phase-title{font-family:"Syne",sans-serif;font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--cvz-muted);margin:0 0 3px;}',
+      '.cvz-cs-phase-desc{font-size:13px;color:var(--cvz-muted);margin:0 0 10px;}',
+
+      /* ---- Status Select ---- */
+      '.cvz-cs-status-select{padding:4px 8px;border:1px solid var(--cvz-border);border-radius:0;',
+        'font-family:"Geist","Inter",system-ui,sans-serif;font-size:12px;',
+        'color:var(--cvz-ink);background:var(--cvz-surface);cursor:pointer;}',
+      '.cvz-cs-status-select:focus{outline:none;border-color:var(--cvz-blue);}',
+      '.cvz-cs-status-select:disabled{opacity:.5;cursor:wait;}',
+
+      /* ---- Content Brief ---- */
+      '.cvz-cs-brief{margin-top:10px;padding:10px 14px;background:var(--cvz-surface);border-left:3px solid var(--cvz-dark);}',
+      '.cvz-cs-brief-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--cvz-muted);margin:0 0 5px;}',
+      '.cvz-cs-brief-list{margin:0;padding-left:16px;}',
+      '.cvz-cs-brief-list li{font-size:13px;color:var(--cvz-ink);margin-bottom:3px;}',
+
+      /* ---- Tables ---- */
+      '.cvz-cs-table-wrap{overflow-x:auto;margin:10px 0;}',
+      '.cvz-cs-table{width:100%;border-collapse:collapse;font-size:13px;}',
+      '.cvz-cs-table th{font-family:"Syne",sans-serif;font-weight:700;font-size:10px;',
+        'text-transform:uppercase;letter-spacing:.07em;color:var(--cvz-muted);',
+        'padding:7px 10px;text-align:left;border-bottom:2px solid var(--cvz-border);white-space:nowrap;}',
+      '.cvz-cs-table td{padding:7px 10px;border-bottom:1px solid var(--cvz-surface);color:var(--cvz-ink);vertical-align:top;}',
+      '.cvz-cs-table tr:hover td{background:var(--cvz-surface);}',
+      '@media(max-width:600px){',
+        '.cvz-cs-table.cvz-cs-table-cards thead{display:none;}',
+        '.cvz-cs-table.cvz-cs-table-cards tr{display:block;border:1px solid var(--cvz-border);margin-bottom:10px;padding:10px;}',
+        '.cvz-cs-table.cvz-cs-table-cards td{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:none;font-size:13px;}',
+        '.cvz-cs-table.cvz-cs-table-cards td::before{content:attr(data-label);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--cvz-muted);flex-shrink:0;padding-top:1px;}',
+      '}',
+
+      /* ---- Ist-Zustand ---- */
+      '.cvz-cs-current-state-general-title{margin-top:20px;padding-top:14px;border-top:1px solid var(--cvz-border);}',
+
+      /* ---- Executive Summary ---- */
+      '.cvz-cs-executive-summary{padding:18px 22px;background:var(--cvz-surface);border:1px solid var(--cvz-border);}',
+
+      /* ---- GEO ---- */
+      '.cvz-cs-citation-note{padding:14px 18px;background:#EFF6FF;border-left:3px solid var(--cvz-blue);margin-bottom:16px;}',
+      '.cvz-cs-aio{margin-bottom:18px;}',
+
+      /* ---- Roadmap ---- */
+      '.cvz-cs-roadmap-group{margin-bottom:18px;}',
+      '.cvz-cs-roadmap-list{margin:8px 0 0;padding-left:0;list-style:none;}',
+      '.cvz-cs-roadmap-item{padding:10px 14px;border:1px solid var(--cvz-border);margin-bottom:7px;background:var(--cvz-white);}',
+      '.cvz-cs-roadmap-item-title{font-family:"Syne",sans-serif;font-weight:700;font-size:14px;color:var(--cvz-dark);margin:0 0 4px;}',
+
+      /* ---- Topic Check ---- */
+      '.cvz-cs-topic-check{padding:22px;border:1px solid var(--cvz-border);background:var(--cvz-white);}',
+      '.cvz-cs-topic-options{display:flex;flex-direction:column;gap:8px;margin-bottom:18px;}',
+      '.cvz-cs-topic-option{padding:10px 14px;border:1px solid var(--cvz-border);cursor:pointer;transition:border-color .15s,background .15s;}',
+      '.cvz-cs-topic-option:hover{border-color:var(--cvz-dark);background:var(--cvz-surface);}',
+      '.cvz-cs-topic-option label{display:flex;align-items:center;gap:9px;cursor:pointer;font-size:14px;color:var(--cvz-ink);}',
+      '.cvz-cs-topic-recommendation-box{padding:12px 16px;background:#F0FDF4;border-left:3px solid #15803D;margin-bottom:14px;}',
+      '.cvz-cs-topic-recommendation-box p{margin:0 0 3px;font-size:14px;}',
+      '.cvz-cs-topic-check-actions{display:flex;align-items:center;gap:10px;margin-top:18px;flex-wrap:wrap;}',
+      '.cvz-cs-topic-free-input{display:block;width:100%;padding:9px 11px;border:1px solid var(--cvz-border);border-radius:0;',
+        'font-family:"Geist","Inter",system-ui,sans-serif;font-size:14px;color:var(--cvz-ink);margin-top:5px;}',
+      '.cvz-cs-topic-free-input:focus{outline:none;border-color:var(--cvz-blue);}',
+      '.cvz-cs-topic-alt-list{padding-left:18px;margin:6px 0 14px;}',
+      '.cvz-cs-topic-alt-list li{font-size:13px;color:var(--cvz-ink);margin-bottom:7px;line-height:1.5;}',
+      '.cvz-cs-topic-validation{font-size:14px;}',
+      '.cvz-cs-topic-validation p{margin:0 0 7px;}',
+      '.cvz-cs-topic-recommendation{font-style:italic;color:var(--cvz-ink);}',
+
+      /* ---- Commodity ---- */
+      '.cvz-cs-commodity-note{font-size:12px;color:#B45309;padding:5px 9px;background:#FFF7ED;border-left:2px solid #F59E0B;margin-top:7px;}',
+
+      /* ---- Internal Links ---- */
+      '.cvz-cs-link-list{padding-left:18px;font-size:14px;}',
+      '.cvz-cs-link-list li{margin-bottom:5px;color:var(--cvz-ink);}',
+
+      /* ---- Prose (Markdown) ---- */
+      '.cvz-cs-prose{font-size:14px;line-height:1.7;color:var(--cvz-ink);}',
+      '.cvz-cs-prose h1,.cvz-cs-prose h2,.cvz-cs-prose h3,',
+      '.cvz-cs-prose h4,.cvz-cs-prose h5,.cvz-cs-prose h6{',
+        'font-family:"Syne",sans-serif;color:var(--cvz-dark);margin:.9em 0 .35em;line-height:1.25;',
+      '}',
+      '.cvz-cs-prose p{margin:0 0 .6em;}',
+      '.cvz-cs-prose ul,.cvz-cs-prose ol{padding-left:1.2em;margin:0 0 .6em;}',
+      '.cvz-cs-prose li{margin-bottom:.25em;}',
+      '.cvz-cs-prose strong{font-weight:600;color:var(--cvz-dark);}',
+      '.cvz-cs-prose a{color:var(--cvz-blue);}',
+      '.cvz-cs-prose table{border-collapse:collapse;width:100%;font-size:13px;margin:.5em 0;}',
+      '.cvz-cs-prose th{background:var(--cvz-surface);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:7px 10px;border:1px solid var(--cvz-border);text-align:left;}',
+      '.cvz-cs-prose td{padding:7px 10px;border:1px solid var(--cvz-border);}',
+
+      /* ---- Chat ---- */
+      '.cvz-cs-chat{margin-top:36px;padding-top:28px;border-top:2px solid var(--cvz-dark);}',
+      '.cvz-cs-chat-title{font-family:"Syne",sans-serif;font-size:1.05rem;font-weight:700;color:var(--cvz-dark);margin:0 0 4px;}',
+      '.cvz-cs-chat-messages{',
+        'display:flex;flex-direction:column;gap:10px;',
+        'min-height:72px;max-height:440px;overflow-y:auto;',
+        'padding:14px;background:var(--cvz-surface);border:1px solid var(--cvz-border);margin:10px 0;',
+      '}',
+      '.cvz-cs-chat-msg{max-width:84%;padding:9px 13px;font-size:14px;line-height:1.6;}',
+      '.cvz-cs-chat-msg-user{align-self:flex-end;background:var(--cvz-dark);color:var(--cvz-white);}',
+      '.cvz-cs-chat-msg-assistant{align-self:flex-start;background:var(--cvz-white);border:1px solid var(--cvz-border);color:var(--cvz-ink);}',
+      '.cvz-cs-chat-msg-loading{display:flex;align-items:center;gap:7px;color:var(--cvz-muted);font-style:italic;font-size:13px;}',
+      '.cvz-cs-chat-spinner-inline{',
+        'display:inline-block;width:13px;height:13px;',
+        'border:2px solid var(--cvz-border);border-top-color:var(--cvz-muted);',
+        'border-radius:50%;animation:cvz-cs-spin .8s linear infinite;flex-shrink:0;',
+      '}',
+      '.cvz-cs-chat-form{margin-bottom:6px;}',
+      '.cvz-cs-chat-input-row{display:flex;align-items:flex-end;gap:7px;}',
+      '.cvz-cs-chat-input{',
+        'flex:1;padding:9px 11px;border:1px solid var(--cvz-border);border-radius:0;',
+        'font-family:"Geist","Inter",system-ui,sans-serif;font-size:14px;color:var(--cvz-ink);',
+        'resize:none;line-height:1.5;min-height:40px;max-height:110px;',
+      '}',
+      '.cvz-cs-chat-input:focus{outline:none;border-color:var(--cvz-blue);}',
+      '.cvz-cs-chat-input:disabled{background:var(--cvz-surface);cursor:not-allowed;}',
+      '#cvz-content-strategy-agent button.cvz-cs-chat-send-btn{',
+        'padding:9px 18px;background:var(--cvz-dark);color:var(--cvz-white);',
+        'border:2px solid var(--cvz-dark);border-radius:0;',
+        'font-family:"Syne",sans-serif;font-size:13px;font-weight:600;',
+        'cursor:pointer;white-space:nowrap;transition:background .15s;line-height:1;flex-shrink:0;',
+      '}',
+      '#cvz-content-strategy-agent button.cvz-cs-chat-send-btn:hover:not(:disabled){background:#1E293B;}',
+      '#cvz-content-strategy-agent button.cvz-cs-chat-send-btn:disabled{opacity:.4;cursor:not-allowed;}',
+      '.cvz-cs-chat-status{font-size:13px;color:#DC2626;min-height:18px;margin:2px 0;}',
+      '.cvz-cs-chat-limit-notice{color:#B45309;}',
+      '.cvz-cs-chat-msg-assistant h1,.cvz-cs-chat-msg-assistant h2,',
+      '.cvz-cs-chat-msg-assistant h3,.cvz-cs-chat-msg-assistant h4,',
+      '.cvz-cs-chat-msg-assistant h5,.cvz-cs-chat-msg-assistant h6{',
+        'font-family:"Syne",sans-serif;color:var(--cvz-dark);margin:.8em 0 .3em;line-height:1.25;',
+      '}',
+      '.cvz-cs-chat-msg-assistant p{margin:0 0 .5em;}',
+      '.cvz-cs-chat-msg-assistant p:last-child{margin:0;}',
+      '.cvz-cs-chat-msg-assistant ul,.cvz-cs-chat-msg-assistant ol{padding-left:1.2em;margin:0 0 .5em;}',
+      '.cvz-cs-chat-msg-assistant strong{font-weight:600;}',
+      '.cvz-cs-chat-msg-assistant a{color:var(--cvz-blue);}',
+
+      /* ---- Footer ---- */
+      '.cvz-cs-footer{display:flex;align-items:center;justify-content:space-between;',
+        'gap:14px;padding-top:20px;border-top:1px solid var(--cvz-border);margin-top:28px;flex-wrap:wrap;}',
+    ].join('');
+
+    var style = document.createElement('style');
+    style.id = 'cvz-cs-styles';
+    style.textContent = css;
+    document.head.appendChild(style);
+  }
+
+  // ==================== STYLES-ENDE ====================
+
   function ensureMarkedLoaded() {
     if (markedLoadStarted || typeof marked !== 'undefined') return;
     markedLoadStarted = true;
@@ -111,6 +378,7 @@
     };
     document.head.appendChild(script);
   }
+
   var PAGE_TYPE_LABELS = {
     conversion_landingpage: 'Conversion-Landingpage',
     comparison: 'Vergleichsseite',
@@ -121,43 +389,26 @@
     review: 'Test/Review',
     integration: 'Integration',
     topic_coverage: 'Themenabdeckung',
-    // NEU (siehe Chat-Verlauf, Lasse: "auch Typen wie Pillar Pages vorschlagen, wenn sinnvoll,
-    // und erklären") - Klammerzusatz direkt im Badge-Label, weil "Pillar-Page" für sich allein
-    // ein SEO-Fachbegriff ist, den nicht jeder Convertlyze-User kennt (gleicher Gedanke wie
-    // schon beim GEO-Prompt-Test-Hinweistext: Begriffe erklären statt vorauszusetzen).
     pillar_page: 'Pillar-Page (Themen-Hub)',
   };
-  // Kurze, für Nicht-SEO-Experten verständliche Definition - wird in renderPageCard IMMER
-  // sichtbar unter dem Badge angezeigt (nicht nur als Hover-Tooltip), wenn der Typ erklärungs-
-  // bedürftig ist. Ergänzt page.reasoning (das WARUM für dieses konkrete Thema), diese Zeile
-  // ist das WAS/generelle Konzept.
+
   var PAGE_TYPE_EXPLANATIONS = {
     pillar_page: 'Eine Pillar-Page ist eine breite Übersichtsseite zu einem Kern-Thema, die mehrere verwandte Unterseiten bündelt und zu ihnen verlinkt - baut Themenautorität auf und dient als zentrale Anlaufstelle im Cluster.',
   };
+
   var ROLE_LABELS = {
     coverage: 'Trust/Themenabdeckung',
     citation: 'Rank- & Zitier-Ziel',
     existing: 'bereits vorhanden',
   };
-  // NEU (siehe Chat-Verlauf, "Phasen des Messy Middle ... um eine volle Abdeckung zu
-  // gewährleisten"): feste Reihenfolge für die Gruppierung der Unterstützenden-Seiten-Karten -
-  // Backend erzwingt per Zod-superRefine, dass mind. exploration + evaluation vorkommen,
-  // decision ist optional (siehe contentStrategyAgent.schemas.ts).
+
   var MESSY_MIDDLE_PHASES = [
     { value: 'exploration', label: 'Exploration', description: 'Schafft Bewusstsein und deckt offene Grundlagenfragen ab.' },
     { value: 'evaluation', label: 'Evaluation', description: 'Hilft beim Vergleichen und Eingrenzen der Optionen.' },
     { value: 'decision', label: 'Entscheidung', description: 'Unmittelbar vor der Kaufentscheidung.' },
-    // WHY 4. Eintrag "legacy": bereits gespeicherte Strategien von VOR diesem Update haben kein
-    // messy_middle_phase-Feld (undefined) - ohne diesen Auffangkorb würden ihre Seiten beim
-    // Ansehen einer alten Session (?session_id=...) kommentarlos aus "Unterstützende Seiten"
-    // verschwinden (byPhase[undefined] existiert zwar, wird aber nie gerendert). Lieber
-    // ehrlich als "ohne Phasen-Zuordnung" zeigen als eine Phase raten, die so nie eingeschätzt wurde.
     { value: 'legacy', label: 'Weitere Seiten', description: 'Aus einer älteren Strategie-Version ohne Phasen-Zuordnung.' },
   ];
-  // Gruppiert nach Phase, behält aber den ORIGINALEN Index in supporting_pages bei (nicht die
-  // Position innerhalb der Gruppe) - der Status-PATCH-Endpunkt (/pages/:index) und
-  // describeLink() referenzieren Seiten über diesen Original-Index, der beim Umsortieren nach
-  // Phase sonst durcheinandergeraten würde.
+
   function groupPagesByPhase(pages) {
     var byPhase = {};
     MESSY_MIDDLE_PHASES.forEach(function (phase) { byPhase[phase.value] = []; });
@@ -168,12 +419,14 @@
     });
     return byPhase;
   }
+
   var STATUS_OPTIONS = [
     { value: 'vorgeschlagen', label: 'Vorgeschlagen' },
     { value: 'geplant', label: 'Geplant' },
     { value: 'in_arbeit', label: 'In Arbeit' },
     { value: 'live', label: 'Live' },
   ];
+
   // ==================== STATE ====================
   var state = {
     root: null,
@@ -185,20 +438,18 @@
     pollStartedAt: null,
     currentSessionId: null,
     currentResult: null,
-    // NEU (siehe Chat-Verlauf, Report-Chat): eigener, klar abgegrenzter Unter-Zustand statt
-    // einzelner Top-Level-Felder - macht renderChatSection() unabhängig davon, ob der Report
-    // gerade frisch generiert wurde oder über loadExistingSession() geladen wird.
     chat: {
       sessionId: null,
-      messages: [], // [{role: 'user'|'assistant', content: string}]
+      messages: [],
       messagesUsed: 0,
       messagesLimit: 20,
       pollHandle: null,
       pollStartedAt: null,
       sending: false,
-      _pendingUserMessage: null, // während des Pollens zwischengespeichert, siehe sendChatMessage/pollChatStatus
+      _pendingUserMessage: null,
     },
   };
+
   // ==================== API-HELFER ====================
   function apiFetch(path, options) {
     options = options || {};
@@ -216,11 +467,8 @@
       });
     });
   }
+
   // ==================== MEMBERSTACK-IDENTITÄT ====================
-  // Erwartet, dass das Memberstack-DOM-Package (window.$memberstackDom) auf der Host-Seite
-  // bereits geladen/initialisiert ist - genau wie beim bestehenden Landingpage-Assistant-Embed.
-  // Wird hier NICHT selbst geladen, um keine zweite Memberstack-Instanz auf derselben Seite zu
-  // riskieren.
   function waitForMemberstack(timeoutMs) {
     return new Promise(function (resolve, reject) {
       var waited = 0;
@@ -239,15 +487,10 @@
       }, interval);
     });
   }
+
   function resolveIdentity() {
     return waitForMemberstack(5000)
       .then(function (memberstackDom) {
-        // WICHTIG (Sicherheits-Fix, siehe Chat-Verlauf): NICHT mehr member.id als Bearer-Token
-        // verwenden - das ist die pure, unsignierte Member-ID, keine echte Authentifizierung.
-        // getMemberCookie() liefert das tatsächliche, von Memberstack signierte JWT, das der
-        // Server jetzt kryptographisch verifiziert (services/memberstackAuth.js), bevor er der
-        // enthaltenen ID glaubt. getCurrentMember() bleibt nötig, um "eingeloggt oder nicht" zu
-        // prüfen (getMemberCookie() liefert bei keiner Session einfach null/leer).
         return Promise.all([memberstackDom.getCurrentMember(), memberstackDom.getMemberCookie()]);
       })
       .then(function (results) {
@@ -264,6 +507,7 @@
         return me.user_id;
       });
   }
+
   // ==================== KONTINGENT & GSC-STATUS ====================
   function loadQuota() {
     return apiFetch('/api/content-strategy/quota?user_id=' + encodeURIComponent(state.userId)).then(function (quota) {
@@ -271,6 +515,7 @@
       return quota;
     });
   }
+
   function loadGscStatus() {
     return apiFetch('/api/integrations/google/status')
       .then(function (status) {
@@ -278,13 +523,12 @@
         return status;
       })
       .catch(function (err) {
-        // Nicht fatal fürs restliche Formular - Domain-Abgleich fällt serverseitig ohnehin
-        // automatisch auf DataForSEO zurück, wenn keine GSC-Verbindung besteht.
         console.warn('GSC-Status konnte nicht geladen werden:', err.message);
         state.gscStatus = { connected: false, sites: [] };
         return state.gscStatus;
       });
   }
+
   // ==================== RENDERING ====================
   function el(tag, attrs, children) {
     var node = document.createElement(tag);
@@ -300,9 +544,11 @@
     });
     return node;
   }
+
   function clear(node) {
     while (node.firstChild) node.removeChild(node.firstChild);
   }
+
   function renderQuotaBanner() {
     var q = state.quota;
     var gsc = state.gscStatus;
@@ -319,8 +565,6 @@
         );
       }
     }
-    // Verbinden/Trennen passiert in den Einstellungen (contentStrategySettings.app.js) - hier
-    // nur noch ein Status-Hinweis mit Link dorthin, siehe Produktentscheidung im Datei-Kopf.
     var gscBadge;
     if (gsc && gsc.connected) {
       gscBadge = el('span', { class: 'cvz-cs-gsc-connected' }, ['Search Console verbunden (' + gsc.sites.length + ' Property/-ies)']);
@@ -334,28 +578,19 @@
     banner.appendChild(gscBadge);
     return banner;
   }
-  // NEU (siehe Chat-Verlauf, Lasse: "können wir im Formular ein Modell frei wählen lassen?" ->
-  // kuratierte Anbieter-Auswahl statt freiem model_name, siehe Begründung in
-  // services/contentStrategyGeo.ts): die vier von DataForSEO unterstützten LLM-Familien mit
-  // sprechendem deutschen Label statt technischem llm_type-Wert. Server wählt innerhalb der
-  // gewählten Familie weiterhin automatisch ein günstiges, websuche-fähiges Modell - kein
-  // model_name hier, bewusst (Kosten-Deckel/Footgun-Begründung siehe Backend-Kommentar).
+
   var GEO_LLM_TYPE_OPTIONS = [
     { value: 'chat_gpt', label: 'ChatGPT (OpenAI)' },
     { value: 'gemini', label: 'Google Gemini' },
     { value: 'perplexity', label: 'Perplexity' },
     { value: 'claude', label: 'Claude (Anthropic)' },
   ];
-  // Auch für die Ergebnis-Anzeige (renderGeoSection) genutzt, damit dort derselbe sprechende Name
-  // steht statt des rohen llm_type-Werts.
+
   var GEO_LLM_TYPE_LABELS = GEO_LLM_TYPE_OPTIONS.reduce(function (acc, o) {
     acc[o.value] = o.label;
     return acc;
   }, {});
-  // GEÄNDERT (siehe Chat-Verlauf, Themen-Validierung): optionaler prefill-Parameter, damit ein
-  // "Zurück zum Formular" von der neuen Validierungs-Ansicht aus (siehe
-  // renderTopicValidationResult weiter unten) die zuletzt eingegebenen Werte nicht verwirft.
-  // renderApp() ruft weiterhin renderForm() ohne Argument auf - prefill ist dann einfach {}.
+
   function renderForm(prefill) {
     prefill = prefill || {};
     var form = el('form', { class: 'cvz-cs-form' });
@@ -375,13 +610,6 @@
         return el('option', { value: o.value }, [o.label]);
       })
     );
-    // ENTFERNT (siehe Chat-Verlauf, Lasse: "sollten wir die Checkbox entfernen und es
-    // standardmäßig machen, weil GEO ein wichtiger Bereich für User ist?" - bestätigt, inkl.
-    // Kostendaten: 17 Cent DataForSEO-Gesamtkosten für 3 Läufe an einem Tag, also kein
-    // Kostenfaktor): der GEO-Prompt-Test lief hier vorher über eine Checkbox (promptTestCheckbox),
-    // die ist jetzt komplett raus - der Test läuft für jeden Lauf mit, ohne Wahlmöglichkeit im
-    // Formular. Ein Kill-Switch für den Test existiert weiterhin, aber nur noch operativ
-    // serverseitig (ENV-Variable in routes/contentStrategyAgent.ts), nicht mehr als User-Option.
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Thema / Ziel-Keyword', topicInput]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Eigene Domain', domainInput]));
     form.appendChild(
@@ -402,31 +630,24 @@
       var topic = topicInput.value.trim();
       var domain = domainInput.value.trim();
       if (!topic) return;
-      // GEÄNDERT (siehe Chat-Verlauf, Themen-Validierung, "Kunde entscheidet vor dem Lauf"):
-      // ruft nicht mehr direkt startGeneration() auf, sondern prüft zuerst, ob "topic"
-      // tatsächlich das beste Kern-Keyword ist (siehe startTopicValidation weiter unten).
-      // startGeneration() wird jetzt erst aufgerufen, NACHDEM der Kunde das Ergebnis der Prüfung
-      // bestätigt hat.
       startTopicValidation(topic, domain || undefined, llmTypeSelect.value);
     });
     return form;
   }
-  // NEU (siehe Chat-Verlauf, Themen-Validierung, "Kunde entscheidet vor dem Lauf"): erster
-  // Schritt des jetzt zweistufigen Flows. Ruft POST /validate-topic auf (synchron, kein
-  // Polling - deutlich kürzer als die eigentliche Cluster-Generierung) und zeigt danach
-  // renderTopicValidationResult() zur Bestätigung, bevor überhaupt ein Kontingent-Slot
-  // verbraucht wird.
+
   var INTENT_FIT_LABELS = {
     besser: 'Besserer Fit',
     gleichwertig: 'Gleichwertiger Fit',
     schlechter: 'Schwächerer Fit',
     zu_breit: 'Zu breit für das Angebot',
   };
+
   var TOPIC_RECOMMENDATION_LABELS = {
     thema_beibehalten: 'Empfehlung: ursprüngliches Thema beibehalten',
     thema_wechseln: 'Empfehlung: zu einer Alternative wechseln',
     thema_erweitern: 'Empfehlung: Thema erweitern statt wechseln',
   };
+
   function renderValidating(topic) {
     clear(state.root);
     var box = el('div', { class: 'cvz-cs-processing' }, [
@@ -437,12 +658,7 @@
     state.root.appendChild(renderQuotaBanner());
     state.root.appendChild(box);
   }
-  // Eigener, kurzer Timeout fürs Fetch selbst (AbortController) - die Validierung ist synchron,
-  // ein hängender Request soll die Seite nicht unbegrenzt im Ladezustand lassen. Etwas über dem
-  // 60-Sekunden-Timeout, das die Route selbst serverseitig setzt (withTimeout(...), siehe
-  // routes/contentStrategyAgent.ts, POST /validate-topic), aus demselben Grund wie
-  // CONFIG.pollTimeoutMs bei pollSession: die echte Backend-Fehlermeldung soll ankommen, bevor
-  // der eigene generische Text feuert.
+
   function startTopicValidation(topic, domain, geoTestLlmType) {
     renderValidating(topic);
     var controller = new AbortController();
@@ -467,11 +683,7 @@
         renderError(message);
       });
   }
-  // result: Antwort von POST /validate-topic ({ validation_id, seed_topic, seed_search_volume,
-  // alternatives_checked, empfehlung, empfohlenes_thema, reasoning }). Zeigt das Original-Thema
-  // und alle geprüften Alternativen als auswählbare Optionen, dazu ein freies Textfeld für eine
-  // eigene Formulierung - der Kunde entscheidet, welches Thema tatsächlich gebaut wird, die
-  // Empfehlung ist nur vorausgewählt, nie erzwungen.
+
   function renderTopicValidationResult(result, domain, geoTestLlmType, originalTopic) {
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
@@ -545,21 +757,11 @@
     state.root.appendChild(renderQuotaBanner());
     state.root.appendChild(wrap);
   }
-  // GEÄNDERT (siehe Datei-Kopf-Kommentar zum session-basierten Polling-Umbau): pollt nach dem
-  // Start jetzt direkt über die zurückgegebene session_id statt über einen turn_id-Job.
-  // GEÄNDERT (siehe Chat-Verlauf, Themen-Validierung): neuer 4. Parameter validationId, jetzt
-  // PFLICHT im Request-Body (siehe POST /generate im Backend - lehnt ohne validation_id mit 400
-  // ab, siehe routes/contentStrategyAgent.ts).
+
   function startGeneration(topic, domain, geoTestLlmType, validationId) {
     renderProcessing(topic);
     apiFetch('/api/content-strategy/generate', {
       method: 'POST',
-      // run_prompt_test ist jetzt immer true (siehe Kommentar bei renderForm) - das Feld bleibt
-      // im Request-Body erhalten, weil das Backend darauf weiterhin den echten, kostenpflichtigen
-      // Prompt-Test-Aufruf hart absichert (allowPromptTest), nicht auf einer Modell-Entscheidung.
-      // geo_test_llm_type ist NEU (siehe Kommentar bei GEO_LLM_TYPE_OPTIONS oben) - das Backend
-      // validiert diesen Wert ohnehin serverseitig gegen die vier echten llm_type-Werte
-      // (normalizeGeoLlmType), ein manipulierter/unbekannter Wert hier ist also unkritisch.
       body: JSON.stringify({
         user_id: state.userId,
         topic: topic,
@@ -570,15 +772,6 @@
       }),
     })
       .then(function (res) {
-        // NEU (siehe Chat-Verlauf, Lasse: "beim Aktualisieren öffnet sich das leere Formular
-        // statt die laufende/fertige Strategie zu laden"): session_id sofort in die URL
-        // schreiben, sobald sie vom Server kommt - history.replaceState statt pushState, damit
-        // kein zusätzlicher Browser-Verlauf-Eintrag entsteht (ein Klick auf "Zurück" soll nicht
-        // mitten im Polling wieder auf das leere Formular springen). Ein Reload/erneutes Öffnen
-        // trifft dadurch auf init()/getParam('session_id') und läuft automatisch über
-        // loadExistingSession() statt renderApp() - unabhängig davon, ob die Strategie zu dem
-        // Zeitpunkt noch läuft oder schon fertig ist (loadExistingSession behandelt beide Fälle,
-        // siehe dort).
         var url = new URL(window.location.href);
         url.searchParams.set('session_id', res.session_id);
         window.history.replaceState(null, '', url.toString());
@@ -588,27 +781,7 @@
         renderError('Start fehlgeschlagen: ' + err.message, err.body);
       });
   }
-  // ERSETZT die frühere pollStatus()-Funktion (siehe Datei-Kopf-Kommentar): statt einen
-  // flüchtigen In-Memory-Job über GET /status/:turn_id abzufragen, pollt diese Funktion jetzt
-  // direkt gegen die Datenbank-Zeile per GET /:id - denselben Endpunkt, den auch das Dashboard
-  // und ein direkter Session-Link (loadExistingSession) nutzen. Funktioniert dadurch unverändert
-  // korrekt, auch wenn zwischen Start und Abruf ein Backend-Deployment oder ein Instanz-Wechsel
-  // liegt, weil es keine zweite, flüchtige Wahrheitsquelle mehr gibt - "fertig" bedeutet
-  // ausschließlich status === 'done' in der DB-Zeile.
-  //
-  // BUGFIX (siehe Chat-Verlauf, Lasse: "Zeitüberschreitung, obwohl die Daten wieder da sind"):
-  // die vorherige Fassung prüfte CONFIG.pollTimeoutMs, BEVOR sie überhaupt den echten Status
-  // abgefragt hat - wurde das Handy/der Tab lange pausiert (z.B. Bildschirm aus, App in den
-  // Hintergrund), lässt das Betriebssystem JS-Timer schlicht nicht mehr feuern; beim
-  // Fortsetzen ist die reale, mit Date.now() gemessene Zeit dann oft weit über
-  // pollTimeoutMs, obwohl die Session im Hintergrund längst fertig geworden ist. Das Skript
-  // zeigte in diesem Fall sofort den Timeout-Fehler, OHNE noch einmal nachzufragen, ob die
-  // Strategie inzwischen fertig ist - exakt das ursprünglich gemeldete Symptom, nur beim
-  // CLIENT-seitigen Timeout statt (wie zuvor) beim serverseitigen turn_id-Verlust. Fix: JEDE
-  // Runde fragt zuerst den echten Status ab; die Zeitgrenze wird erst NACH der Antwort geprüft
-  // und nur dann als Fehler gewertet, wenn die Session laut Server tatsächlich noch
-  // 'in_progress' ist. Ein 'done'/'error' aus der Antwort gewinnt dadurch immer gegen eine
-  // zwischenzeitlich abgelaufene Uhr.
+
   function pollSession(sessionId) {
     state.pollStartedAt = Date.now();
     function tick() {
@@ -626,7 +799,6 @@
             });
             return;
           }
-          // status === 'in_progress': Zeitgrenze erst HIER prüfen, siehe Bugfix-Begründung oben.
           if (Date.now() - state.pollStartedAt > CONFIG.pollTimeoutMs) {
             renderError('Zeitüberschreitung: Die Generierung läuft im Hintergrund ungewöhnlich lange. Bitte später erneut prüfen oder Support kontaktieren.');
             return;
@@ -639,14 +811,8 @@
     }
     tick();
   }
-  // ==================== FORTSCHRITTS-TEXTE (zeitbasiert statt fester Takt) ====================
-  // NEU (siehe Chat-Verlauf, Lasse: "Strategie-Erstellung dauert jetzt über 10 Minuten, Spinner-
-  // Nachrichten anpassen, gerne mit Humor - hier ein Beispiel aus der Aufbau-Session"): gleiches
-  // Muster wie CVZ_KICKOFF_MESSAGES in pageAgent.app.js (dortige Vorlage), aber mit eigenen,
-  // auf den Content-Strategie-Ablauf zugeschnittenen Texten/Schwellen - der GEO-Prompt-Test läuft
-  // jetzt immer mit (Checkbox entfernt, siehe renderForm), >10 Minuten sind damit der Normalfall,
-  // nicht mehr die Ausnahme. Format: { at: Sekunden-Schwelle, text: Anzeigetext }, Liste MUSS
-  // nach "at" aufsteigend sortiert sein.
+
+  // ==================== FORTSCHRITTS-TEXTE ====================
   var CVZ_CS_PROGRESS_MESSAGES = [
     { at: 8, text: 'Analyse startet, das dauert jetzt eine Weile, hol dir ruhig einen Kaffee' },
     { at: 30, text: 'Suchvolumen und die häufigsten Nutzerfragen zum Thema werden ausgewertet' },
@@ -663,26 +829,25 @@
     { at: 950, text: 'Fast geschafft, wir polieren gerade die letzten Details' },
     { at: 1100, text: 'Letzte Meter. Wenn dein Kaffee jetzt auch leer ist, wart\'s ab, gleich ist Land in Sicht' },
   ];
-  // Wählt die Nachricht, deren "at"-Schwelle zuletzt unterschritten wurde - vor der ersten
-  // Schwelle bleibt null (dann zeigt der Aufrufer den baseText).
+
   function pickTimedMessage(messages, elapsedSec) {
     var chosen = null;
     for (var i = 0; i < messages.length; i++) {
       if (elapsedSec >= messages[i].at) chosen = messages[i];
-      else break; // Liste ist aufsteigend sortiert, weitere Einträge liegen noch in der Zukunft
+      else break;
     }
     return chosen;
   }
+
   var progressTickTimer = null;
+
   function stopProgressTicker() {
     if (progressTickTimer) {
       clearInterval(progressTickTimer);
       progressTickTimer = null;
     }
   }
-  // Aktualisiert .cvz-cs-progress-text jede Sekunde direkt im DOM statt über einen Callback -
-  // stoppt sich selbst, sobald dieses Element nicht mehr existiert (Ergebnis oder Fehler wurden
-  // inzwischen gerendert), statt separat von jedem Aufrufer abgeräumt werden zu müssen.
+
   function startProgressTicker(startedAt, baseText) {
     stopProgressTicker();
     function tick() {
@@ -700,14 +865,11 @@
     tick();
     progressTickTimer = setInterval(tick, 1000);
   }
+
   function renderProcessing(topic) {
     clear(state.root);
     var startedAt = Date.now();
     var baseText = 'Baue Content-Cluster für "' + topic + '" …';
-    // GEÄNDERT (siehe Chat-Verlauf, Lasse: "Das verstehen User nicht" zur alten
-    // relativen Formulierung mit dem unsichtbaren Vergleichswert "ohne Prompt-Test") und
-    // vereinfacht (siehe Chat-Verlauf, Checkbox entfernt): nur noch EIN, absoluter Hinweistext,
-    // kein Vergleich mehr nötig, weil es nur noch den einen Fall (mit Prompt-Test) gibt.
     var box = el('div', { class: 'cvz-cs-processing' }, [
       el('div', { class: 'cvz-cs-spinner' }),
       el('p', { class: 'cvz-cs-progress-text' }, [baseText]),
@@ -717,6 +879,7 @@
     state.root.appendChild(box);
     startProgressTicker(startedAt, baseText);
   }
+
   function renderError(message, body) {
     clear(state.root);
     var box = el('div', { class: 'cvz-cs-error' }, [el('p', {}, [message])]);
@@ -727,14 +890,7 @@
     box.appendChild(retryBtn);
     state.root.appendChild(box);
   }
-  // NEU (siehe Chat-Verlauf, Lasse: Content-Strategie-Sessions bekommen einen Status wie
-  // Analysen/Aufbau-Sessions): eine Session kann jetzt existieren, OHNE dass result schon
-  // gefüllt ist (status='in_progress', während der Agent noch läuft, oder status='error' nach
-  // einem gescheiterten Lauf). Wird nach dem session-basierten Polling-Umbau NUR NOCH für den
-  // Fehlerfall aufgerufen (siehe loadExistingSession weiter unten) - ein noch laufender Link
-  // wird stattdessen aktiv über pollSession() weiterverfolgt, statt hier nur eine statische
-  // "bitte später erneut klicken"-Meldung zu zeigen. Der isError-Zweig bleibt trotzdem als
-  // eigenständige, verständliche Fehleransicht bestehen.
+
   function renderPendingSession(session) {
     clear(state.root);
     var isError = session.status === 'error';
@@ -750,41 +906,17 @@
     var retryBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn', onclick: renderApp }, [isError ? 'Neue Strategie erstellen' : 'Zurück zum Formular']);
     state.root.appendChild(retryBtn);
   }
-  function pageTypeLabel(type) {
-    return PAGE_TYPE_LABELS[type] || type;
-  }
-  function roleLabel(role) {
-    return ROLE_LABELS[role] || role;
-  }
-  // NEU (siehe Chat-Verlauf, "richtiger Bericht"): das Ergebnis wird jetzt als durchgehender,
-  // nummerierter Bericht gerendert (Ausgangslage → Executive Summary → Content-Cluster-Strategie
-  // → Ist-Zustand → GEO-Strategie) statt als lose Abfolge von Widget-Blöcken. Bewusst weiter im
-  // selben Embed/DOM gerendert, kein separates Dokument - der spätere Word-Export (siehe
-  // Chat-Verlauf: Agenturen sollen die Strategie herunterladen/verändern können) ist ein
-  // eigenständiges, noch offenes Vorhaben, das dieselben result-Felder (ausgangslage,
-  // executive_summary, ...) wiederverwenden kann, sobald es angegangen wird.
-  // session (4. Parameter, optional): nur gesetzt, wenn eine BEREITS GESPEICHERTE Strategie über
-  // loadExistingSession() angezeigt wird (liefert u.a. created_at fürs Berichts-Datum) - bei
-  // einem frisch generierten Ergebnis (Aufruf aus pollSession()) ist das jetzt ebenfalls gesetzt
-  // (siehe pollSession, die die komplette Session-Zeile ohnehin schon vorliegen hat), bleibt hier
-  // aber als optionaler Parameter bestehen, damit renderReportHeader ohne session weiterhin ein
-  // sinnvolles "heute"-Datum anzeigt.
-  // NEU (siehe Chat-Verlauf, Themen-Validierung): zeigt im fertigen Bericht nachträglich
-  // nachvollziehbar, welches Thema geprüft wurde, welche Alternativen zur Wahl standen und
-  // welches Thema der Kunde am Ende tatsächlich gewählt hat. result.topic_validation.seed_topic
-  // ist das ursprünglich GEPRÜFTE Thema, finalSeedTopic (= result.seed_topic, oberste Ebene) ist
-  // das Thema, um das der Cluster tatsächlich gebaut wurde - beides kann auseinanderfallen, wenn
-  // der Kunde eine Alternative oder eine eigene Formulierung gewählt hat.
+
+  function pageTypeLabel(type) { return PAGE_TYPE_LABELS[type] || type; }
+  function roleLabel(role) { return ROLE_LABELS[role] || role; }
+
   function renderTopicValidationSection(topicValidation, finalSeedTopic) {
     var box = el('div', { class: 'cvz-cs-topic-validation' });
     if (!topicValidation) {
-      box.appendChild(
-        el('p', { class: 'cvz-cs-hint' }, ['Keine Themen-Prüfung für diese Strategie vorhanden (älterer Lauf, vor diesem Feature erstellt).'])
-      );
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine Themen-Prüfung für diese Strategie vorhanden (älterer Lauf, vor diesem Feature erstellt).']));
       return box;
     }
-    var seedVolText =
-      topicValidation.seed_search_volume != null ? 'ca. ' + topicValidation.seed_search_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
+    var seedVolText = topicValidation.seed_search_volume != null ? 'ca. ' + topicValidation.seed_search_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
     box.appendChild(el('p', {}, ['Geprüftes Ausgangsthema: "' + topicValidation.seed_topic + '" (' + seedVolText + ')']));
     if (topicValidation.alternatives_checked && topicValidation.alternatives_checked.length > 0) {
       var list = el('ul', { class: 'cvz-cs-topic-alt-list' });
@@ -799,38 +931,25 @@
       });
       box.appendChild(list);
     }
-    box.appendChild(
-      el('p', { class: 'cvz-cs-topic-recommendation' }, [
-        (TOPIC_RECOMMENDATION_LABELS[topicValidation.empfehlung] || topicValidation.empfehlung) + '. ' + topicValidation.reasoning,
-      ])
-    );
+    box.appendChild(el('p', { class: 'cvz-cs-topic-recommendation' }, [
+      (TOPIC_RECOMMENDATION_LABELS[topicValidation.empfehlung] || topicValidation.empfehlung) + '. ' + topicValidation.reasoning,
+    ]));
     if (finalSeedTopic && finalSeedTopic !== topicValidation.seed_topic) {
       box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für diesen Cluster tatsächlich gewähltes Thema: "' + finalSeedTopic + '"']));
     }
     return box;
   }
+
   function renderResult(sessionId, result, fundedBy, session) {
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
     wrap.appendChild(renderReportHeader(result, session, sessionId));
-    // NEU (siehe Chat-Verlauf, Themen-Validierung) - neuer Abschnitt 1, alle bisherigen
-    // Abschnitte rutschen entsprechend von 1-6 auf 2-7.
     wrap.appendChild(renderReportSection(1, 'Themen-Check', [renderTopicValidationSection(result.topic_validation, result.seed_topic)]));
     wrap.appendChild(renderReportSection(2, 'Ausgangslage', [renderProse(result.ausgangslage)]));
-    wrap.appendChild(
-      renderReportSection(3, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])])
-    );
-    // REIHENFOLGE GEÄNDERT (siehe Chat-Verlauf, Lasse: "Ist-Zustand nach Executive Summary,
-    // dann ist [Content-Cluster-Strategie] quasi der Soll-Zustand"): Ist-Zustand kommt jetzt
-    // VOR der Content-Cluster-Strategie, die entsprechend als Soll-Zustand betitelt ist -
-    // liest sich jetzt als Themen-Check → Ausgangslage → Summary → Ist → Soll → GEO statt Ist
-    // irgendwo nachgeschoben zwischen zwei Soll-Abschnitten.
+    wrap.appendChild(renderReportSection(3, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])]));
     wrap.appendChild(renderReportSection(4, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
     wrap.appendChild(renderReportSection(5, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
     wrap.appendChild(renderReportSection(6, 'GEO-Strategie', [renderGeoSection(result.geo_strategy)]));
-    // NEU (siehe Chat-Verlauf, Lasse: "Empfohlene Roadmap ... so wie wir es in der Analyse
-    // machen, nur mit weniger Inhalt") - letzter inhaltlicher Abschnitt, priorisierte
-    // Verdichtung der wichtigsten Punkte aus dem gesamten Report, keine neue Analyse.
     wrap.appendChild(renderReportSection(7, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]));
     var fundingText = fundedBy
       ? 'Finanziert aus: ' + (fundedBy === 'ppu_strategy' ? 'Pay-per-Use-Credit' : 'Plan-Kontingent')
@@ -840,20 +959,12 @@
       el('button', { type: 'button', class: 'cvz-cs-retry-btn', onclick: renderApp }, ['Neue Strategie erstellen']),
     ]);
     wrap.appendChild(footer);
-    // GEÄNDERT (siehe Chat-Verlauf, Lasse: "nur derjenige, der die Struktur erstellt hat, sollte
-    // chatten können, damit Nachrichten nicht mehrfach verbraucht werden") - der Chat ist jetzt
-    // NUR für den Ersteller sichtbar, anders als der Report selbst (der bleibt teamweit
-    // einsehbar). Ohne `session` ist der aktuelle User IMMER der Ersteller - man kann keine
-    // fremde Generierung live mitverfolgen, das gibt es in diesem Produkt nicht. MIT `session`
-    // (loadExistingSession, z.B. über den teamweiten Dashboard-Tab geöffnet) wird explizit gegen
-    // session.user_id geprüft - das Backend setzt dieselbe Einschränkung ohnehin hart durch
-    // (403), hier geht es nur darum, Team-Mitgliedern gar nicht erst ein Eingabefeld zu zeigen,
-    // das für sie sowieso fehlschlägt.
     var isCreator = !session || session.user_id === state.userId;
     if (sessionId && isCreator) wrap.appendChild(renderChatSection(sessionId));
     state.root.appendChild(renderQuotaBanner());
     state.root.appendChild(wrap);
   }
+
   function renderReportHeader(result, session, sessionId) {
     var header = el('div', { class: 'cvz-cs-report-header' });
     var topRow = el('div', { class: 'cvz-cs-report-header-top' });
@@ -868,10 +979,7 @@
     header.appendChild(topRow);
     return header;
   }
-  // NEU (siehe Chat-Verlauf, Lasse: "Export einbauen ... Pro/Enterprise White-Label, Pay-per-Use
-  // bleibt beim Convertlyze-PDF-Stil"). Welches Theme das PDF bekommt, entscheidet ausschließlich
-  // der Server anhand des license_type (siehe POST /:id/export in routes/contentStrategyAgent.ts)
-  // - hier keine eigene Tarif-Logik, nur "Button klicken, PDF laden".
+
   function renderExportButton(sessionId) {
     var button = el('button', { class: 'cvz-cs-retry-btn cvz-cs-export-btn', type: 'button' }, ['Als PDF exportieren']);
     button.addEventListener('click', function () {
@@ -880,55 +988,29 @@
       button.disabled = true;
       button.textContent = 'PDF wird erstellt …';
       apiFetch('/api/content-strategy/' + sessionId + '/export', { method: 'POST' })
-        .then(function (data) {
-          // Signed URL (60s gültig, Content-Disposition: attachment serverseitig gesetzt, siehe
-          // routes/contentStrategyAgent.ts) - direktes Öffnen löst den Download aus, kein eigener
-          // a.download nötig (der ist bei cross-origin Links ohnehin unzuverlässig, siehe
-          // gleichlautender Kommentar in routes/pdfExport.js).
-          window.open(data.url, '_blank');
-        })
-        .catch(function (err) {
-          alert('PDF-Export fehlgeschlagen: ' + (err.message || 'Unbekannter Fehler') + '. Bitte erneut versuchen.');
-        })
-        .finally(function () {
-          button.disabled = false;
-          button.textContent = originalLabel;
-        });
+        .then(function (data) { window.open(data.url, '_blank'); })
+        .catch(function (err) { alert('PDF-Export fehlgeschlagen: ' + (err.message || 'Unbekannter Fehler') + '. Bitte erneut versuchen.'); })
+        .finally(function () { button.disabled = false; button.textContent = originalLabel; });
     });
     return button;
   }
+
   function renderReportSection(number, title, children) {
     var section = el('section', { class: 'cvz-cs-report-section' });
     section.appendChild(el('h3', { class: 'cvz-cs-report-section-title' }, [number + '. ' + title]));
-    (children || []).forEach(function (child) {
-      if (child) section.appendChild(child);
-    });
+    (children || []).forEach(function (child) { if (child) section.appendChild(child); });
     return section;
   }
-  // GEÄNDERT (siehe Chat-Verlauf, Lasse: "im Bericht wird noch mit ** markiert statt
-  // gerendert"): Fließtext-Felder (ausgangslage, executive_summary, citation_strategy_note,
-  // reasoning, roadmap.begruendung) laufen jetzt durch dieselbe Markdown-Rendering-Logik wie
-  // die Chat-Antworten (renderMarkdownInto, siehe dort) - Claude hält sich trotz Anweisung im
-  // System-Prompt (ANTI_SLOP_STYLE_GUIDE im Backend) nicht zuverlässig zu 100% davon ab,
-  // gelegentlich **fett**/## Überschriften in Fließtext einzustreuen (typisches LLM-Verhalten,
-  // lässt sich prompt-seitig nicht garantieren). Robuster, das beim Rendern abzufangen, als
-  // sich darauf zu verlassen, dass es nie passiert - bei reinem Text ohne Markdown-Syntax sieht
-  // das Ergebnis identisch aus wie vorher (marked.parse() macht aus einem Absatz ohne
-  // Markdown-Zeichen einfach ein <p> mit dem Text). extraClass optional, für Aufrufstellen mit
-  // eigener zusätzlicher CSS-Klasse (z.B. .cvz-cs-page-card-reasoning).
+
   function renderProse(text, extraClass) {
     var container = el('div', { class: 'cvz-cs-prose' + (extraClass ? ' ' + extraClass : '') });
     renderMarkdownInto(container, text);
     return container;
   }
+
   function buildClusterSectionChildren(sessionId, result) {
     var children = [];
-    var volumeText =
-      result.conversion_page.estimated_volume != null ? 'ca. ' + result.conversion_page.estimated_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
-    // NEU (siehe Chat-Verlauf, Lasse: "Zielgruppen mit reinnehmen") - primary_audience als
-    // eigenes Badge neben "Conversion-Seite", analog zu den Page-Cards unten. Defensive
-    // Prüfung, weil ältere, bereits gespeicherte Sessions (vor diesem Update) das Feld noch
-    // nicht haben - dann einfach kein zusätzliches Badge, statt eines leeren/kaputten.
+    var volumeText = result.conversion_page.estimated_volume != null ? 'ca. ' + result.conversion_page.estimated_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
     var conversionBadges = [el('span', { class: 'cvz-cs-badge cvz-cs-badge-conversion' }, ['Conversion-Seite'])];
     if (result.conversion_page.primary_audience) {
       conversionBadges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-audience' }, [result.conversion_page.primary_audience]));
@@ -944,17 +1026,6 @@
     conversionCardChildren.push(buildLandingpageButton(result.conversion_page.topic));
     children.push(el('div', { class: 'cvz-cs-conversion-card' }, conversionCardChildren));
     children.push(el('h5', {}, ['Unterstützende Seiten']));
-    // FIX (siehe Chat-Verlauf, 2. Runde "Typ/Rolle/Volumen passt immer noch nicht"): eine
-    // Tabelle mit fest schmalen Typ-/Rolle-Spalten (Versuch 1) lässt lange Badge-Texte wie
-    // "THEMENABDECKUNG" trotzdem über die Zellgrenze hinaus überlappen, weil ein <span> nicht
-    // automatisch innerhalb der Zellbreite umbricht. Statt die Spalten ein zweites Mal enger/
-    // breiter zu justieren: komplett von einer starren Tabelle auf eine Karten-Liste
-    // umgestellt - jede Seite ist jetzt eine eigene Karte, Badges stehen in einer
-    // flex-wrap-Zeile und brechen bei Bedarf einfach in die nächste Zeile um, statt sich zu
-    // überlappen. Passt außerdem besser zum "durchgehender Bericht statt Tabellen-Widget"-Stil
-    // (siehe frühere Chat-Runde). NEU zusätzlich: Karten sind nach messy_middle_phase
-    // gruppiert (siehe MESSY_MIDDLE_PHASES), damit die Journey-Abdeckung auf einen Blick
-    // sichtbar ist - "um eine volle Abdeckung zu gewährleisten" (Lasse).
     var pagesByPhase = groupPagesByPhase(result.supporting_pages || []);
     MESSY_MIDDLE_PHASES.forEach(function (phase) {
       var pagesInPhase = pagesByPhase[phase.value];
@@ -962,60 +1033,41 @@
       var group = el('div', { class: 'cvz-cs-phase-group' });
       group.appendChild(el('h6', { class: 'cvz-cs-phase-title' }, [phase.label]));
       group.appendChild(el('p', { class: 'cvz-cs-phase-desc' }, [phase.description]));
-      pagesInPhase.forEach(function (entry) {
-        group.appendChild(renderPageCard(sessionId, entry.page, entry.index));
-      });
+      pagesInPhase.forEach(function (entry) { group.appendChild(renderPageCard(sessionId, entry.page, entry.index)); });
       children.push(group);
     });
     if (result.internal_links && result.internal_links.length > 0) {
       children.push(el('h5', {}, ['Interne Verlinkung']));
       var linkList = el('ul', { class: 'cvz-cs-link-list' });
-      result.internal_links.forEach(function (link) {
-        linkList.appendChild(el('li', {}, [describeLink(link, result)]));
-      });
+      result.internal_links.forEach(function (link) { linkList.appendChild(el('li', {}, [describeLink(link, result)])); });
       children.push(linkList);
     }
     return children;
   }
+
   function describeLink(link, result) {
     var fromLabel = link.from_index === -1 ? result.conversion_page.topic : (result.supporting_pages[link.from_index] || {}).topic || ('#' + link.from_index);
     var toLabel = link.to_index === -1 ? result.conversion_page.topic : (result.supporting_pages[link.to_index] || {}).topic || ('#' + link.to_index);
     return fromLabel + ' → ' + toLabel + (link.anchor_text_idea ? ' ("' + link.anchor_text_idea + '")' : '');
   }
-  // FIX (siehe Chat-Verlauf, ersetzt das frühere renderPageRow()/<tr>): eine Karte statt einer
-  // starren Tabellenzeile - Badges stehen in einer flex-wrap-Zeile (siehe .cvz-cs-page-card-
-  // badges) und brechen bei Bedarf um, statt sich bei schmalen Spalten zu überlappen.
+
   function renderPageCard(sessionId, page, index) {
     var card = el('div', { class: 'cvz-cs-page-card' });
     var badges = [
       el('span', { class: 'cvz-cs-badge' }, [pageTypeLabel(page.page_type)]),
       el('span', { class: 'cvz-cs-badge cvz-cs-badge-role-' + page.role }, [roleLabel(page.role)]),
     ];
-    // NEU (siehe Chat-Verlauf, Lasse: "Zielgruppen mit reinnehmen und Inhalten/Seiten
-    // zuordnen") - primary_audience als eigenes, dezentes Badge. Defensive Prüfung: ältere,
-    // bereits gespeicherte Sessions haben das Feld noch nicht, dann einfach kein Badge.
-    if (page.primary_audience) {
-      badges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-audience' }, [page.primary_audience]));
-    }
-    if (page.commodity_risk) {
-      badges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-commodity', title: page.commodity_reasoning || '' }, ['Commodity-Risiko']));
-    }
+    if (page.primary_audience) badges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-audience' }, [page.primary_audience]));
+    if (page.commodity_risk) badges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-commodity', title: page.commodity_reasoning || '' }, ['Commodity-Risiko']));
     card.appendChild(el('div', { class: 'cvz-cs-page-card-badges' }, badges));
     card.appendChild(el('h4', { class: 'cvz-cs-page-card-topic' }, [page.topic]));
     var volumeText = page.estimated_volume != null ? 'ca. ' + page.estimated_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
     card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + page.keyword + ' · ' + volumeText]));
-    // NEU (siehe Chat-Verlauf, Pillar-Pages erklären): generelle Typ-Erklärung VOR der
-    // themenspezifischen Begründung, falls für diesen page_type vorhanden - "was ist das"
-    // zuerst, dann "warum hier".
     if (PAGE_TYPE_EXPLANATIONS[page.page_type]) {
       card.appendChild(el('p', { class: 'cvz-cs-page-card-type-explanation' }, [PAGE_TYPE_EXPLANATIONS[page.page_type]]));
     }
-    if (page.reasoning) {
-      card.appendChild(renderProse(page.reasoning, 'cvz-cs-page-card-reasoning'));
-    }
-    if (page.content_brief && page.content_brief.length > 0) {
-      card.appendChild(renderContentBrief(page.content_brief));
-    }
+    if (page.reasoning) card.appendChild(renderProse(page.reasoning, 'cvz-cs-page-card-reasoning'));
+    if (page.content_brief && page.content_brief.length > 0) card.appendChild(renderContentBrief(page.content_brief));
     if (page.commodity_risk && page.commodity_reasoning) {
       card.appendChild(el('p', { class: 'cvz-cs-commodity-note' }, ['Commodity-Hinweis: ' + page.commodity_reasoning]));
     }
@@ -1032,114 +1084,81 @@
         method: 'PATCH',
         body: JSON.stringify({ status: statusSelect.value }),
       })
-        .then(function () {
-          page.status = statusSelect.value;
-          statusSelect.removeAttribute('disabled');
-        })
-        .catch(function (err) {
-          statusSelect.value = previous;
-          statusSelect.removeAttribute('disabled');
-          alert('Status konnte nicht gespeichert werden: ' + err.message);
-        });
+        .then(function () { page.status = statusSelect.value; statusSelect.removeAttribute('disabled'); })
+        .catch(function (err) { statusSelect.value = previous; statusSelect.removeAttribute('disabled'); alert('Status konnte nicht gespeichert werden: ' + err.message); });
     });
     var footer = el('div', { class: 'cvz-cs-page-card-footer' }, [statusSelect]);
-    if (page.page_type === 'conversion_landingpage') {
-      footer.appendChild(buildLandingpageButton(page.topic));
-    }
+    if (page.page_type === 'conversion_landingpage') footer.appendChild(buildLandingpageButton(page.topic));
     card.appendChild(footer);
     return card;
   }
-  // NEU (siehe Chat-Verlauf, Strategie-Tiefe v2): Content-Brief als Stichpunkt-Liste statt
-  // Fließtext - direkt für die conversion_page-Karte UND jede supporting_page-Zeile nutzbar.
+
   function renderContentBrief(brief) {
     var box = el('div', { class: 'cvz-cs-brief' });
     box.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Content-Brief:']));
     var list = el('ul', { class: 'cvz-cs-brief-list' });
-    brief.forEach(function (item) {
-      list.appendChild(el('li', {}, [item]));
-    });
+    brief.forEach(function (item) { list.appendChild(el('li', {}, [item])); });
     box.appendChild(list);
     return box;
   }
-  // NEU: Ist-Zustand-Abschnitt (welche Seiten ranken schon für welche Keywords). Zeigt explizit
-  // die Datenquelle (current_state.note) an, damit eine Schätzung nie wie ein Fakt wirkt (siehe
-  // Chat-Verlauf/Schema-Kommentar zu CurrentStateSchema).
+
   function renderCurrentStateTable(rows, isEstimate) {
-  var table = el('table', { class: 'cvz-cs-table cvz-cs-current-state-table' });
-  table.appendChild(
-    el('thead', {}, [
-      el('tr', {}, [
-        el('th', {}, ['Seite']),
-        el('th', {}, ['Keyword']),
-        el('th', {}, ['Ø Position']),
-        el('th', {}, ['CTR']),
-        el('th', {}, ['Impressionen']),
-        el('th', {}, ['Klicks']),
-      ]),
-    ])
-  );
-  var tbody = el('tbody');
-  rows.forEach(function (row) {
-    tbody.appendChild(
-      el('tr', {}, [
+    var table = el('table', { class: 'cvz-cs-table cvz-cs-current-state-table' });
+    table.appendChild(el('thead', {}, [el('tr', {}, [
+      el('th', {}, ['Seite']),
+      el('th', {}, ['Keyword']),
+      el('th', {}, ['Ø Position']),
+      el('th', {}, ['CTR']),
+      el('th', {}, ['Impressionen']),
+      el('th', {}, ['Klicks']),
+    ])]));
+    var tbody = el('tbody');
+    rows.forEach(function (row) {
+      tbody.appendChild(el('tr', {}, [
         el('td', {}, [row.page_url]),
         el('td', {}, [row.query]),
         el('td', {}, [row.avg_position != null ? row.avg_position.toFixed(1) : '-']),
         el('td', {}, [row.ctr != null ? (row.ctr * 100).toFixed(1) + '%' : (isEstimate ? 'k.A.' : '-')]),
         el('td', {}, [row.impressions != null ? String(row.impressions) : (isEstimate ? 'k.A.' : '-')]),
         el('td', {}, [row.clicks != null ? String(row.clicks) : (isEstimate ? 'k.A.' : '-')]),
-      ])
-    );
-  });
-  table.appendChild(tbody);
-  return el('div', { class: 'cvz-cs-table-wrap' }, [table]);
-}
-function renderCurrentStateSection(currentState) {
-  var box = el('div', { class: 'cvz-cs-current-state' });
-  if (!currentState) return box;
-  box.appendChild(el('p', { class: 'cvz-cs-hint' }, [currentState.note || '']));
-  if (!currentState.rows || currentState.rows.length === 0) {
-    box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine bestehenden Rankings gefunden.']));
+      ]));
+    });
+    table.appendChild(tbody);
+    return el('div', { class: 'cvz-cs-table-wrap' }, [table]);
+  }
+
+  function renderCurrentStateSection(currentState) {
+    var box = el('div', { class: 'cvz-cs-current-state' });
+    if (!currentState) return box;
+    box.appendChild(el('p', { class: 'cvz-cs-hint' }, [currentState.note || '']));
+    if (!currentState.rows || currentState.rows.length === 0) {
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine bestehenden Rankings gefunden.']));
+      return box;
+    }
+    var isEstimate = currentState.source !== 'google_search_console';
+    var topicRows = currentState.rows.filter(function (r) { return r.relevance !== 'general'; });
+    var generalRows = currentState.rows.filter(function (r) { return r.relevance === 'general'; });
+    if (topicRows.length > 0) {
+      box.appendChild(renderCurrentStateTable(topicRows, isEstimate));
+    } else {
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Noch keine eigene Sichtbarkeit zu diesem Thema gefunden.']));
+    }
+    if (generalRows.length > 0) {
+      box.appendChild(el('h5', { class: 'cvz-cs-current-state-general-title' }, ['Weitere starke Keywords der Domain (unabhängig vom Thema)']));
+      box.appendChild(renderCurrentStateTable(generalRows, isEstimate));
+    }
     return box;
   }
-  var isEstimate = currentState.source !== 'google_search_console';
-  var topicRows = currentState.rows.filter(function (r) { return r.relevance !== 'general'; });
-  var generalRows = currentState.rows.filter(function (r) { return r.relevance === 'general'; });
-  if (topicRows.length > 0) {
-    box.appendChild(renderCurrentStateTable(topicRows, isEstimate));
-  } else {
-    box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Noch keine eigene Sichtbarkeit zu diesem Thema gefunden.']));
-  }
-  if (generalRows.length > 0) {
-    box.appendChild(el('h5', { class: 'cvz-cs-current-state-general-title' }, ['Weitere starke Keywords der Domain (unabhängig vom Thema)']));
-    box.appendChild(renderCurrentStateTable(generalRows, isEstimate));
-  }
-  return box;
-}
-  // FIX (siehe Chat-Verlauf): Button feuerte bisher nur ein CustomEvent
-  // ('cvz:build-landingpage'), auf das nirgends im Projekt jemand hört - der
-  // Klick passierte optisch, aber es geschah schlicht nichts, was sich wie
-  // "nicht klickbar" anfühlt. Navigiert jetzt direkt zum Landingpage-
-  // Assistenten (?new=1, gleiches Muster wie CONFIG.NEW_LANDINGPAGE_URL in
-  // dashboard-v5.js). Das Ziel-Keyword wird als ?topic=... mitgegeben, falls
-  // der Assistent das später mal vorbelegt - aktuell (siehe TODO in
-  // pageAgent.app.js) liest cvzTryResume() nur ?new=1/?project=, ?topic= wird
-  // dort noch ignoriert, der Wizard startet also leer und der Nutzer trägt
-  // das Thema einmal selbst ein. Kein Grund, deswegen NICHTS zu verlinken.
+
   function buildLandingpageButton(topic) {
     var href = CONFIG.landingpageAssistantUrl + '?new=1&topic=' + encodeURIComponent(topic);
     return el('a', { class: 'cvz-cs-build-btn', href: href }, ['Jetzt mit dem Landingpage-Tool bauen']);
   }
+
   function renderGeoSection(geo) {
     if (!geo) return el('div');
     var box = el('div', { class: 'cvz-cs-geo' });
-    // Zitier-Strategie-Hinweis ZUERST (siehe Chat-Verlauf: das ist die eigentliche Antwort auf
-    // "was für Content hat Zitier-Chancen", nicht nur eine Portale-Liste) - dafür in einer
-    // hervorgehobenen Box statt als weiterer Listenpunkt.
-    if (geo.citation_strategy_note) {
-      box.appendChild(renderProse(geo.citation_strategy_note, 'cvz-cs-citation-note'));
-    }
-    // Google AI Overview - konkret MIT Links, siehe Schema-Kommentar zu AiOverviewSchema.
+    if (geo.citation_strategy_note) box.appendChild(renderProse(geo.citation_strategy_note, 'cvz-cs-citation-note'));
     var aio = geo.ai_overview;
     if (aio) {
       var aioBox = el('div', { class: 'cvz-cs-aio' });
@@ -1148,55 +1167,37 @@ function renderCurrentStateSection(currentState) {
         aioBox.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Kein AI Overview für dieses Thema vorhanden.']));
       } else if (!aio.references || aio.references.length === 0) {
         aioBox.appendChild(el('h5', {}, ['Google AI Overview']));
-        aioBox.appendChild(
-          el('p', { class: 'cvz-cs-gsc-hint' }, ['AI Overview vorhanden, aber ohne zitierte Quellen-Links - Hinweis auf Commodity-Charakter dieses Themas.'])
-        );
+        aioBox.appendChild(el('p', { class: 'cvz-cs-gsc-hint' }, ['AI Overview vorhanden, aber ohne zitierte Quellen-Links - Hinweis auf Commodity-Charakter dieses Themas.']));
       } else {
-        aioBox.appendChild(
-          el('h5', {}, ['Google AI Overview' + (aio.own_domain_cited ? ' (eigene Domain wird bereits zitiert)' : ' - zitiert, eigene Domain fehlt noch')])
-        );
+        aioBox.appendChild(el('h5', {}, ['Google AI Overview' + (aio.own_domain_cited ? ' (eigene Domain wird bereits zitiert)' : ' - zitiert, eigene Domain fehlt noch')]));
         var aioList = el('ul', {});
         aio.references.forEach(function (r) {
-          aioList.appendChild(
-            el('li', {}, [el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain]), r.title ? ' – "' + r.title + '"' : ''])
-          );
+          aioList.appendChild(el('li', {}, [el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain]), r.title ? ' – "' + r.title + '"' : '']));
         });
         aioBox.appendChild(aioList);
       }
       box.appendChild(aioBox);
     }
-    // Top-SEO-Ergebnisse zum Abgleich
     if (geo.top_serp_results && geo.top_serp_results.length > 0) {
       box.appendChild(el('h5', {}, ['Top-SEO-Ergebnisse (organisch)']));
       var serpList = el('ul', {});
       geo.top_serp_results.forEach(function (r) {
-        serpList.appendChild(
-          el('li', {}, [r.position + '. ', el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain])])
-        );
+        serpList.appendChild(el('li', {}, [r.position + '. ', el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain])]));
       });
       box.appendChild(serpList);
     }
-    // Wettbewerber-Content-Struktur
     if (geo.competitor_content_notes && geo.competitor_content_notes.length > 0) {
       box.appendChild(el('h5', {}, ['Was Wettbewerber-Seiten konkret enthalten']));
       var compList = el('ul', {});
       geo.competitor_content_notes.forEach(function (c) {
-        compList.appendChild(
-          el('li', {}, [el('a', { href: c.url, target: '_blank', rel: 'noopener' }, [c.domain]), ': ' + c.structure_summary])
-        );
+        compList.appendChild(el('li', {}, [el('a', { href: c.url, target: '_blank', rel: 'noopener' }, [c.domain]), ': ' + c.structure_summary]));
       });
       box.appendChild(compList);
     }
-    // Bestehende Portale-Liste (DataForSEO llm_mentions, ChatGPT-Aggregat) - bewusst erhalten,
-    // aber jetzt als ein Baustein unter mehreren statt der einzige GEO-Inhalt (siehe Chat-Verlauf).
-    box.appendChild(
-      el('h5', {}, ['Bereits zitierte Portale (LLM-Erwähnungen allgemein)' + (geo.own_domain_already_cited ? ' - eigene Domain bereits darunter' : '')])
-    );
+    box.appendChild(el('h5', {}, ['Bereits zitierte Portale (LLM-Erwähnungen allgemein)' + (geo.own_domain_already_cited ? ' - eigene Domain bereits darunter' : '')]));
     if (geo.top_portals && geo.top_portals.length > 0) {
       var list = el('ul', {});
       geo.top_portals.forEach(function (p) {
-        // ai_search_volume ergänzt (siehe Chat-Verlauf, DEPLOYMENT-HINWEISE.md "PDF-Export"-Update):
-        // war vorher schon im Schema nutzbar, wurde im Frontend aber noch nirgends angezeigt.
         var volumeText = typeof p.ai_search_volume === 'number' ? ', AI-Search-Volumen ca. ' + p.ai_search_volume : '';
         list.appendChild(el('li', {}, [p.domain + (p.mention_count ? ' (' + p.mention_count + 'x' + volumeText + ')' : volumeText) + (p.note ? ' - ' + p.note : '')]));
       });
@@ -1208,53 +1209,26 @@ function renderCurrentStateSection(currentState) {
       box.appendChild(el('h5', {}, ['Prompt-Test-Ergebnisse']));
       var ptList = el('ul', {});
       geo.prompt_tests.forEach(function (r) {
-        // FIX (siehe Chat-Verlauf, Lasse: "zitierte Domains ist immer leer, im Zweifel sollte
-        // dort zumindest 'keine zitierten Domains gefunden' statt einer leeren Fläche stehen"):
-        // vorher stand hier bei leerem cited_domains-Array einfach nichts hinter dem
-        // Doppelpunkt (.join(', ') von [] ergibt ''), das sah wie ein Darstellungsfehler aus,
-        // nicht wie ein echtes, wenn auch mögliches Ergebnis ("dieser Prompt-Test hat keine
-        // Quellen zitiert"). Gilt unabhängig vom aktuellen Backend-Bug (siehe
-        // services/contentStrategyGeo.ts) - auch nach dessen Fix wird es legitime Fälle ganz
-        // ohne Zitate geben.
         var citedText = r.cited_domains && r.cited_domains.length > 0 ? r.cited_domains.join(', ') : 'keine zitierten Domains gefunden';
-        // NEU (siehe Chat-Verlauf, Lasse: "wir sollten bei den Prompts immer das Modell mit
-        // angeben, das getestet wurde"): model_name ist ein neues Feld (siehe
-        // services/contentStrategyGeo.ts) - ältere, bereits gespeicherte Sessions in Supabase
-        // haben es noch nicht, deshalb der Fallback-Text statt einer leeren Klammer.
-        // GEÄNDERT (siehe Chat-Verlauf, Anbieter-Auswahl im Formular): llm_type war bisher IMMER
-        // "chat_gpt" und wurde deshalb in der Anzeige nie gebraucht - jetzt kann es je nach
-        // Formular-Auswahl "gemini"/"perplexity"/"claude" sein, also sprechendes Label (siehe
-        // GEO_LLM_TYPE_LABELS oben) statt des rohen Werts zeigen. Fallback auf den rohen Wert,
-        // falls DataForSEO künftig einen fünften llm_type einführt, den GEO_LLM_TYPE_LABELS noch
-        // nicht kennt.
         var providerLabel = r.llm_type ? GEO_LLM_TYPE_LABELS[r.llm_type] || r.llm_type : null;
         var modelText = r.model_name ? ' [' + (providerLabel ? providerLabel + ', Modell: ' : 'Modell: ') + r.model_name + ']' : providerLabel ? ' [' + providerLabel + ']' : '';
-        ptList.appendChild(
-          el('li', {}, [
-            '"' + r.prompt + '"' + modelText + ': eigene Domain zitiert: ' + (r.own_domain_cited ? 'ja' : 'nein') + ' · zitierte Domains: ' + citedText,
-          ])
-        );
+        ptList.appendChild(el('li', {}, ['"' + r.prompt + '"' + modelText + ': eigene Domain zitiert: ' + (r.own_domain_cited ? 'ja' : 'nein') + ' · zitierte Domains: ' + citedText]));
       });
       box.appendChild(ptList);
     }
     return box;
   }
-  // NEU (siehe Chat-Verlauf, Lasse: "Empfohlene Roadmap ... so wie wir es in der Analyse machen,
-  // nur mit weniger Inhalt") - gleiche 4 Aufwand/Impact-Buckets wie im Analyse-Tool
-  // (roadmap_matrix), hier bewusst nur mit einem kurzen Titel + einem Begründungssatz pro
-  // Punkt (kein category/effort/impact/cross_category je Punkt - die Bucket-Zugehörigkeit
-  // codiert das schon, siehe Schema-Kommentar zu ContentRoadmapSchema).
+
   var ROADMAP_BUCKETS = [
     { key: 'sofort_umsetzen', label: 'Sofort umsetzen', badgeClass: 'cvz-cs-badge-roadmap-urgent' },
     { key: 'quick_wins', label: 'Quick Wins', badgeClass: 'cvz-cs-badge-roadmap-quick' },
     { key: 'als_naechstes', label: 'Als Nächstes', badgeClass: 'cvz-cs-badge-roadmap-next' },
     { key: 'spaeter', label: 'Später', badgeClass: 'cvz-cs-badge-roadmap-later' },
   ];
+
   function renderRoadmapSection(roadmap) {
     var box = el('div', { class: 'cvz-cs-roadmap' });
     if (!roadmap) return box;
-    // Leere Buckets sind laut Schema erlaubt (z.B. "spaeter" bei einem kleinen Cluster) - werden
-    // hier einfach übersprungen statt als leere Gruppe angezeigt zu werden.
     var hasAnyItem = ROADMAP_BUCKETS.some(function (b) { return roadmap[b.key] && roadmap[b.key].length > 0; });
     if (!hasAnyItem) {
       box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine priorisierten Punkte für diesen Cluster.']));
@@ -1267,46 +1241,25 @@ function renderCurrentStateSection(currentState) {
       group.appendChild(el('span', { class: 'cvz-cs-badge ' + bucket.badgeClass }, [bucket.label]));
       var list = el('ul', { class: 'cvz-cs-roadmap-list' });
       items.forEach(function (item) {
-        list.appendChild(
-          el('li', { class: 'cvz-cs-roadmap-item' }, [
-            el('p', { class: 'cvz-cs-roadmap-item-title' }, [item.titel]),
-            renderProse(item.begruendung, 'cvz-cs-roadmap-item-reason'),
-          ])
-        );
+        list.appendChild(el('li', { class: 'cvz-cs-roadmap-item' }, [
+          el('p', { class: 'cvz-cs-roadmap-item-title' }, [item.titel]),
+          renderProse(item.begruendung, 'cvz-cs-roadmap-item-reason'),
+        ]));
       });
       group.appendChild(list);
       box.appendChild(group);
     });
     return box;
   }
+
   // ==================== REPORT-CHAT ====================
-  // NEU (siehe Chat-Verlauf, Lasse: "KI-Agent, der Fragen des Users zu dem Report beantworten
-  // kann") - eigener Abschnitt am Ende des Reports, lädt vorhandenen Verlauf beim Öffnen und
-  // pollt wie die Report-Generierung selbst pollte, ABER weiterhin über den eigenen
-  // turn_id-Endpunkt (siehe Datei-Kopf-Kommentar, warum der Chat NICHT auf das
-  // session-basierte Polling umgestellt wurde).
-  //
-  // Chat-Optik + Markdown-Rendering bewusst an das bestehende Chat-Fenster des Landingpage-
-  // Assistenten angelehnt (siehe Chat-Verlauf, Lasse: "kannst du dich beim Chat eher hieran
-  // orientieren?") - gleiche Bubble-Form, gleiches "marked"-basiertes Markdown-Rendering mit
-  // Tabellen-Karten-Fallback auf Mobilgeräten (cvzCsLabelTablesForCards()), nur mit eigenem
-  // "cvz-cs-"-Klassen-Namespace. WICHTIG: setzt voraus, dass "marked" (https://marked.js.org/)
-  // als globales Script auf der Webflow-Seite geladen ist - genau wie beim Landingpage-
-  // Assistenten (<script src="…/marked.min.js"></script> im Custom Code). Ist "marked" NICHT
-  // geladen, greift dieselbe defensive Ausweich-Logik wie dort: die Antwort wird als reiner
-  // Text statt als gerendertes Markdown angezeigt (kein Absturz, nur weniger schön) - genau der
-  // vorher gemeldete Bug ("# Überschrift" erschien wörtlich mit Raute statt gerendert), nur
-  // jetzt als bewusster Fallback statt als Dauerzustand.
   function stopChatPolling() {
     if (state.chat.pollHandle) {
       clearTimeout(state.chat.pollHandle);
       state.chat.pollHandle = null;
     }
   }
-  // Kopiert die <thead>-Überschriften als data-label auf jede <td>-Zelle einer Markdown-Tabelle
-  // in einer Chat-Antwort. Das CSS blendet ab <=640px den Header aus und zeigt das Label über
-  // dem jeweiligen Wert - aus einer Zeile wird eine Karte. 1:1 dieselbe Technik wie
-  // cvzLabelTablesForCards() im Landingpage-Assistenten, nur mit "cvz-cs-"-Klassen.
+
   function cvzCsLabelTablesForCards(container) {
     var tables = container.querySelectorAll('table:not([data-cvz-cs-labeled])');
     for (var t = 0; t < tables.length; t++) {
@@ -1325,13 +1278,7 @@ function renderCurrentStateSection(currentState) {
       table.setAttribute('data-cvz-cs-labeled', '1');
     }
   }
-  // GEÄNDERT (siehe Chat-Verlauf, Lasse: "im Bericht selbst wird auch noch mit ** markiert") -
-  // geteilte Markdown-Logik mit renderProse() weiter oben, statt zwei eigenständigen
-  // marked.parse()-Aufrufen, die bei einer künftigen Änderung (z.B. am Tabellen-Karten-Fallback)
-  // sonst leicht auseinanderlaufen. Fällt auf reinen Text zurück, wenn "marked" (noch) nicht
-  // geladen ist - kein Absturz, siehe ensureMarkedLoaded() weiter oben für den eigentlichen Fix
-  // dieses Bugs (bisher musste "marked" manuell in Webflow eingebunden werden, das war die
-  // eigentliche Fehlerquelle).
+
   function renderMarkdownInto(container, text) {
     var str = String(text || '');
     if (typeof marked !== 'undefined') {
@@ -1343,11 +1290,9 @@ function renderCurrentStateSection(currentState) {
       });
     }
   }
+
   function renderChatMessageBubble(message) {
     var bubble = el('div', { class: 'cvz-cs-chat-msg cvz-cs-chat-msg-' + message.role });
-    // Nur Assistant-Antworten werden als Markdown gerendert (# Überschriften, Tabellen, Listen
-    // etc.) - User-Fragen bleiben bewusst reiner Text (kein Grund, eigene Eingaben als
-    // Markdown zu interpretieren, und textContent ist automatisch XSS-sicher).
     if (message.role === 'assistant') {
       renderMarkdownInto(bubble, message.content);
     } else {
@@ -1355,10 +1300,7 @@ function renderCurrentStateSection(currentState) {
     }
     return bubble;
   }
-  // Baut NUR die Nachrichtenliste + den Zähler neu auf (nicht das ganze Formular drumherum) -
-  // wird bei jedem neuen Verlaufs-Stand aufgerufen (nach dem Laden, während des Sendens für die
-  // optimistische Anzeige, UND nach jeder neuen Antwort), ohne das Eingabefeld/den Fokus zu
-  // verlieren.
+
   function refreshChatMessagesView() {
     var listEl = state.root.querySelector('.cvz-cs-chat-messages');
     var counterEl = state.root.querySelector('.cvz-cs-chat-counter');
@@ -1368,10 +1310,6 @@ function renderCurrentStateSection(currentState) {
         listEl.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Noch keine Fragen gestellt - frag zum Beispiel, warum eine bestimmte Seite empfohlen wurde.']));
       } else {
         state.chat.messages.forEach(function (m) { listEl.appendChild(renderChatMessageBubble(m)); });
-        // Optimistische Anzeige während eine Antwort läuft: eigene Frage sofort sichtbar (noch
-        // nicht im gespeicherten Verlauf - wird erst bei Erfolg persistiert, siehe
-        // pollChatStatus) + Ladeblase mit Spinner, statt dass der Chat bis zur fertigen Antwort
-        // einfach nichts tut.
         if (state.chat.sending && state.chat._pendingUserMessage) {
           listEl.appendChild(renderChatMessageBubble({ role: 'user', content: state.chat._pendingUserMessage }));
           var loadingBubble = el('div', { class: 'cvz-cs-chat-msg cvz-cs-chat-msg-assistant cvz-cs-chat-msg-loading' });
@@ -1390,6 +1328,7 @@ function renderCurrentStateSection(currentState) {
     if (formEl) formEl.style.display = limitReached ? 'none' : '';
     if (limitNoticeEl) limitNoticeEl.style.display = limitReached ? '' : 'none';
   }
+
   function loadChatHistory(sessionId) {
     return apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId) + '/chat')
       .then(function (data) {
@@ -1400,16 +1339,10 @@ function renderCurrentStateSection(currentState) {
         refreshChatMessagesView();
       })
       .catch(function (err) {
-        // Nicht fatal für den Rest des Reports - der Report selbst bleibt lesbar, nur der
-        // Chat-Verlauf fehlt dann eben (z.B. bei einem kurzen API-Hänger beim Laden).
         console.warn('Chat-Verlauf konnte nicht geladen werden:', err.message);
       });
   }
-  // Bewusst UNVERÄNDERT gegenüber der vorherigen Fassung (siehe Datei-Kopf-Kommentar): der
-  // Report-Chat behält sein eigenes, kurzlebiges turn_id-Polling gegen
-  // GET /chat/status/:turn_id im Backend - CHAT_TURN_TIMEOUT_MS liegt dort bei nur 90 Sekunden,
-  // das Zeitfenster für einen verlorenen In-Memory-Job ist damit im Vergleich zum Hauptlauf
-  // verschwindend klein und bislang nie als Problem gemeldet worden.
+
   function pollChatStatus(turnId) {
     state.chat.pollStartedAt = Date.now();
     function tick() {
@@ -1427,19 +1360,17 @@ function renderCurrentStateSection(currentState) {
             finishChatSending('Antwort fehlgeschlagen: ' + job.error);
             return;
           }
-          // job.status === 'done'
           state.chat.messages.push({ role: 'user', content: state.chat._pendingUserMessage });
           state.chat.messages.push({ role: 'assistant', content: job.reply });
           state.chat.messagesUsed = job.messages_used;
           state.chat.messagesLimit = job.messages_limit;
           finishChatSending(null);
         })
-        .catch(function (err) {
-          finishChatSending('Antwort konnte nicht abgerufen werden: ' + err.message);
-        });
+        .catch(function (err) { finishChatSending('Antwort konnte nicht abgerufen werden: ' + err.message); });
     }
     tick();
   }
+
   function finishChatSending(errorMessage) {
     stopChatPolling();
     state.chat.sending = false;
@@ -1452,8 +1383,9 @@ function renderCurrentStateSection(currentState) {
     if (inputEl) inputEl.removeAttribute('disabled');
     refreshChatMessagesView();
   }
+
   function sendChatMessage(sessionId, text) {
-    if (state.chat.sending) return; // Doppel-Klick-Schutz
+    if (state.chat.sending) return;
     state.chat.sending = true;
     state.chat._pendingUserMessage = text;
     var sendBtn = state.root.querySelector('.cvz-cs-chat-send-btn');
@@ -1462,14 +1394,12 @@ function renderCurrentStateSection(currentState) {
     if (inputEl) inputEl.setAttribute('disabled', 'disabled');
     var statusEl = state.root.querySelector('.cvz-cs-chat-status');
     if (statusEl) statusEl.textContent = '';
-    refreshChatMessagesView(); // zeigt sofort die eigene Frage + Ladeblase mit Spinner
+    refreshChatMessagesView();
     apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId) + '/chat', {
       method: 'POST',
       body: JSON.stringify({ message: text }),
     })
-      .then(function (res) {
-        pollChatStatus(res.turn_id);
-      })
+      .then(function (res) { pollChatStatus(res.turn_id); })
       .catch(function (err) {
         var msg = 'Frage konnte nicht gesendet werden: ' + err.message;
         if (err.status === 402 && err.body) {
@@ -1480,17 +1410,12 @@ function renderCurrentStateSection(currentState) {
         finishChatSending(msg);
       });
   }
+
   function renderChatSection(sessionId) {
     var section = el('div', { class: 'cvz-cs-chat' });
     section.appendChild(el('h4', { class: 'cvz-cs-chat-title' }, ['Fragen zum Report']));
-    section.appendChild(
-      el('p', { class: 'cvz-cs-hint' }, [
-        'Der Agent kennt diesen Report und kann bei Bedarf auch neue Daten live nachschlagen (kein erneuter GEO-Prompt-Test).',
-      ])
-    );
+    section.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Der Agent kennt diesen Report und kann bei Bedarf auch neue Daten live nachschlagen (kein erneuter GEO-Prompt-Test).']));
     section.appendChild(el('div', { class: 'cvz-cs-chat-messages' }, []));
-    // Textarea statt einzeiligem Input (wie beim Landingpage-Assistenten) - Enter sendet,
-    // Shift+Enter fügt einen Zeilenumbruch ein, damit auch mehrzeilige Fragen bequem gehen.
     var inputEl = el('textarea', {
       class: 'cvz-cs-chat-input',
       placeholder: 'z.B. "Warum diese Seite und nicht X?"',
@@ -1506,33 +1431,23 @@ function renderCurrentStateSection(currentState) {
       inputEl.value = '';
       sendChatMessage(sessionId, text);
     }
-    form.addEventListener('submit', function (event) {
-      event.preventDefault();
-      trySend();
-    });
+    form.addEventListener('submit', function (event) { event.preventDefault(); trySend(); });
     inputEl.addEventListener('keydown', function (event) {
-      if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        trySend();
-      }
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); trySend(); }
     });
     section.appendChild(form);
     section.appendChild(el('p', { class: 'cvz-cs-chat-status', 'aria-live': 'polite' }, ['']));
-    section.appendChild(
-      el('p', { class: 'cvz-cs-chat-limit-notice cvz-cs-hint', style: 'display:none' }, [
-        'Frage-Kontingent für diesen Report erreicht - für weitere Fragen bitte eine neue Strategie erstellen.',
-      ])
-    );
+    section.appendChild(el('p', { class: 'cvz-cs-chat-limit-notice cvz-cs-hint', style: 'display:none' }, ['Frage-Kontingent für diesen Report erreicht - für weitere Fragen bitte eine neue Strategie erstellen.']));
     section.appendChild(el('p', { class: 'cvz-cs-chat-counter cvz-cs-hint' }, ['']));
-    // Verlauf erst NACH dem Einhängen ins DOM laden - refreshChatMessagesView() braucht die
-    // .cvz-cs-chat-messages/-counter-Elemente bereits im state.root.
     loadChatHistory(sessionId);
     return section;
   }
+
   // ==================== APP-LEBENSZYKLUS ====================
   function getParam(key) {
     return new URLSearchParams(window.location.search).get(key);
   }
+
   function renderApp() {
     clear(state.root);
     var loading = el('p', { class: 'cvz-cs-hint' }, ['Lade Kontingent ...']);
@@ -1547,19 +1462,7 @@ function renderCurrentStateSection(currentState) {
         renderError('Konnte nicht geladen werden: ' + err.message);
       });
   }
-  // NEU (siehe Chat-Verlauf, Dashboard-Konsolidierung): das Dashboard verlinkt auf eine bereits
-  // gespeicherte Strategie per ?session_id=<uuid> - vorher konnte diese Seite ausschliesslich das
-  // Formular für eine NEUE Strategie zeigen, es gab keinen Weg, eine vergangene erneut
-  // anzuzeigen. Nutzt den bestehenden GET /:id-Endpunkt (liefert die komplette Session inkl.
-  // result), lädt Kontingent/GSC-Status genau wie renderApp() (renderQuotaBanner() greift in
-  // renderResult() darauf zu), dann direkt renderResult() statt des Formulars.
-  //
-  // GEÄNDERT (siehe Datei-Kopf-Kommentar zum session-basierten Polling-Umbau): eine noch
-  // laufende Session (status='in_progress') zeigt jetzt NICHT mehr nur eine statische
-  // "bitte später erneut klicken"-Meldung (renderPendingSession), sondern wird aktiv über
-  // pollSession() weiterverfolgt - der User muss den Link nicht mehr manuell neu aufrufen, um
-  // das fertige Ergebnis zu sehen. renderPendingSession bleibt bestehen, wird aber nur noch für
-  // den Fehlerfall (status='error') gebraucht.
+
   function loadExistingSession(sessionId) {
     clear(state.root);
     state.root.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Lade gespeicherte Strategie ...']));
@@ -1591,8 +1494,10 @@ function renderCurrentStateSection(currentState) {
         }
       });
   }
+
   function init() {
-    ensureMarkedLoaded(); // so frueh wie moeglich anstossen, siehe Begruendung oben bei der Definition
+    injectStyles(); // NEU: Convertlyze Design v2 (Syne Headlines, Geist Body, eckige Kanten)
+    ensureMarkedLoaded();
     var root = document.getElementById(CONFIG.containerId);
     if (!root) {
       console.error('cvz-content-strategy-agent: Container #' + CONFIG.containerId + ' nicht gefunden.');
@@ -1616,6 +1521,7 @@ function renderCurrentStateSection(currentState) {
         root.appendChild(el('p', { class: 'cvz-cs-error' }, ['Fehler beim Laden: ' + err.message]));
       });
   }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
