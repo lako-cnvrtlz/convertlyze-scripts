@@ -35,6 +35,11 @@
 
     var css = [
       /* ---- Reset & Tokens (DARK THEME) ---- */
+      /* Webflow-Wrapper-Reset: Elternelement des Embeds bekommt keine runden Ecken */
+      '#cvz-content-strategy-agent,#cvz-content-strategy-agent *{border-radius:0 !important;}',
+      /* Ausnahme: Spinner bleibt rund */
+      '.cvz-cs-spinner,.cvz-cs-chat-spinner-inline{border-radius:50% !important;}',
+
       '#cvz-content-strategy-agent{',
         '--cvz-bg:#0d1117;--cvz-surface:rgba(255,255,255,.04);',
         '--cvz-surface-hover:rgba(255,255,255,.07);',
@@ -45,6 +50,7 @@
         'background:var(--cvz-bg);color:var(--cvz-text);',
         'font-family:"Geist","Inter",system-ui,-apple-system,sans-serif;',
         'font-size:15px;line-height:1.65;padding:24px;',
+        'border-radius:0 !important;',
       '}',
       '#cvz-content-strategy-agent *,',
       '#cvz-content-strategy-agent *::before,',
@@ -366,6 +372,10 @@
       /* ---- Footer ---- */
       '.cvz-cs-footer{display:flex;align-items:center;justify-content:space-between;',
         'gap:14px;padding-top:20px;border-top:1px solid var(--cvz-border);margin-top:28px;flex-wrap:wrap;}',
+
+      /* ---- KI-Disclaimer ---- */
+      '.cvz-cs-ki-disclaimer{margin-top:28px;padding-top:16px;border-top:1px solid var(--cvz-border);',
+        'color:var(--cvz-muted);font-size:12px;line-height:1.6;text-align:center;}',
     ].join('');
 
     var style = document.createElement('style');
@@ -969,6 +979,9 @@
     wrap.appendChild(footer);
     var isCreator = !session || session.user_id === state.userId;
     if (sessionId && isCreator) wrap.appendChild(renderChatSection(sessionId));
+    wrap.appendChild(el('p', { class: 'cvz-cs-ki-disclaimer' }, [
+      'Diese Analyse wurde vollständig durch ein KI-System erstellt. Alle Empfehlungen sollten durch eine qualifizierte Fachperson geprüft werden. Alle Angaben ohne Gewähr.'
+    ]));
     state.root.appendChild(renderQuotaBanner());
     state.root.appendChild(wrap);
   }
