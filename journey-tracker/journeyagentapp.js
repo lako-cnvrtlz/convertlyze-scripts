@@ -1008,12 +1008,32 @@
     state.activeTopicId = topicId;
     var topic = getTopicById(topicId);
     if (topic) state.activeProjectId = topic.project_id;
+    // NEU (15.09.2026): falls das Polling-Intervall aus irgendeinem Grund
+    // nicht (mehr) läuft (z.B. Seite neu geladen, während dieses Thema
+    // schon 'collecting' war), hier sicherstellen, dass es für ein gerade
+    // geöffnetes, noch laufendes Thema neu anläuft — sonst aktualisiert
+    // sich die offene Detailseite nie von selbst, bis man sie verlässt
+    // und wieder öffnet (siehe openTopicDetail-Fix oben).
+    if (topic && topic.status === 'collecting') {
+      maybeStartPolling();
+    }
     state.isLoadingDetail = true;
     updateUrlParams({ cvz_topic: topicId, cvz_project: state.activeProjectId, cvz_tab: resetTab !== false ? null : state.activeSubTab });
     render();
 
     try {
-      if (!state.topicDetailCache[topicId]) {
+      // GEÄNDERT (15.09.2026): vorher nur "wenn noch NICHTS im Cache
+      // steht" — das reicht nicht. Ein früher (während des Laufs)
+      // gecachter Eintrag mit status='collecting' bleibt sonst für immer
+      // stehen, auch wenn der Lauf im Hintergrund längst fertig ist,
+      // sobald man die Seite verlässt und später zurückkommt (das
+      // Polling-Intervall unten aktualisiert den Cache nur, solange man
+      // GENAU in dem Moment auf dieser Detailseite ist — verpasst man den
+      // Moment, bleibt der veraltete Stand für immer hängen, siehe Chat-
+      // Verlauf 15.09.2026). Ein gecachter 'collecting'-Stand wird daher
+      // hier zusätzlich nie vertraut, sondern jedes Mal neu abgefragt.
+      var cachedDetail = state.topicDetailCache[topicId];
+      if (!cachedDetail || (cachedDetail.topic && cachedDetail.topic.status === 'collecting')) {
         state.topicDetailCache[topicId] = await loadTopicDetail(topicId);
       }
     } catch (e) {
