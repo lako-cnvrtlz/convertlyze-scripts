@@ -2152,19 +2152,28 @@
         if (bestChances) tabContent.appendChild(bestChances);
         tabContent.appendChild(renderOpportunitySection(detail.opportunities));
         tabContent.appendChild(renderContentIdeasSection(detail.content_ideas));
-        tabContent.appendChild(renderCombinedTrendSection(
+        // GEÄNDERT (15.09.2026): alle Grafiken der Übersichtsseite jetzt
+        // in einem gemeinsamen Grid — Kundenwunsch: auf Desktop kleiner
+        // und nebeneinander statt jede einzeln über volle Breite
+        // gestapelt. renderMonthlyOverviewChart gibt seit dieser Änderung
+        // ein Array mit zwei getrennten Sections zurück, damit jede
+        // Grafik eine gleich große Grid-Zelle ist.
+        var chartsGrid = document.createElement('div');
+        chartsGrid.className = 'cvz-charts-grid';
+        chartsGrid.appendChild(renderCombinedTrendSection(
           state.visibilityTrendCache[state.activeTopicId],
           state.topicRankHistoryCache[state.activeTopicId],
           detail.changelog,
           state.isLoadingVisibilityTrend || state.isLoadingTopicRankHistory,
         ));
-        tabContent.appendChild(renderVisibilityTrendSection(
+        chartsGrid.appendChild(renderVisibilityTrendSection(
           state.visibilityTrendCache[state.activeTopicId], state.isLoadingVisibilityTrend,
           detail.changelog,
         ));
-        tabContent.appendChild(renderMonthlyOverviewChart(
+        renderMonthlyOverviewChart(
           state.monthlyOverviewTrendCache[state.activeTopicId], state.isLoadingMonthlyOverviewTrend,
-        ));
+        ).forEach(function (el) { chartsGrid.appendChild(el); });
+        tabContent.appendChild(chartsGrid);
         tabContent.appendChild(renderChangelogSection(detail.changelog, state.activeTopicId, detail.search_queries, detail.prompts));
         break;
     }
@@ -3117,21 +3126,37 @@
     return section;
   }
 
+  // GEÄNDERT (15.09.2026): gibt jetzt ZWEI getrennte Sections als Array
+  // zurück (vorher eine gemeinsame Section mit beiden Karten gestapelt) —
+  // Kundenwunsch: alle Übersicht-Grafiken sollen auf Desktop nebeneinander
+  // und kleiner dargestellt werden (siehe cvz-charts-grid am Aufrufer).
+  // Damit jede Grafik ein gleich großes Grid-Element ist, statt einer
+  // doppelt so hohen Zelle mit zwei gestapelten Karten.
   function renderMonthlyOverviewChart(months, isLoading) {
-    var section = document.createElement('div');
-    section.className = 'cvz-section';
+    var citationSection = document.createElement('div');
+    citationSection.className = 'cvz-section';
+    var citationHeading = document.createElement('p');
+    citationHeading.className = 'cvz-section-label';
+    citationHeading.textContent = 'Prompt-Zitierungen im Zeitverlauf';
+    citationSection.appendChild(citationHeading);
 
-    var heading = document.createElement('p');
-    heading.className = 'cvz-section-label';
-    heading.textContent = 'Prompt-Zitierungen & GSC-Performance im Zeitverlauf';
-    section.appendChild(heading);
+    var gscSection = document.createElement('div');
+    gscSection.className = 'cvz-section';
+    var gscHeading = document.createElement('p');
+    gscHeading.className = 'cvz-section-label';
+    gscHeading.textContent = 'GSC-Performance im Zeitverlauf';
+    gscSection.appendChild(gscHeading);
 
     if (isLoading) {
-      var loading = document.createElement('p');
-      loading.className = 'cvz-card-placeholder-text';
-      loading.textContent = 'Lädt...';
-      section.appendChild(loading);
-      return section;
+      var loading1 = document.createElement('p');
+      loading1.className = 'cvz-card-placeholder-text';
+      loading1.textContent = 'Lädt...';
+      citationSection.appendChild(loading1);
+      var loading2 = document.createElement('p');
+      loading2.className = 'cvz-card-placeholder-text';
+      loading2.textContent = 'Lädt...';
+      gscSection.appendChild(loading2);
+      return [citationSection, gscSection];
     }
 
     if (!months || months.length < 2) {
@@ -3140,14 +3165,14 @@
       var emptyCitationCard = document.createElement('div');
       emptyCitationCard.className = 'cvz-card';
       emptyCitationCard.innerHTML = buildEmptyChartSvg() + '<p class="cvz-chart-caption">' + emptyNoticeText + '</p>';
-      section.appendChild(emptyCitationCard);
+      citationSection.appendChild(emptyCitationCard);
 
       var emptyGscCard = document.createElement('div');
       emptyGscCard.className = 'cvz-card';
       emptyGscCard.innerHTML = buildEmptyChartSvg() + '<p class="cvz-chart-caption">' + emptyNoticeText + '</p>';
-      section.appendChild(emptyGscCard);
+      gscSection.appendChild(emptyGscCard);
 
-      return section;
+      return [citationSection, gscSection];
     }
 
     var xLabels = months.map(function (m) { return m.month; });
@@ -3160,7 +3185,13 @@
         { label: 'Ausgewertete L\u00e4ufe', values: months.map(function (m) { return m.total_runs; }), color: 'var(--cvz-border)' },
       ], xLabels, {}) +
       '<p class="cvz-chart-caption">Wie viele ausgewertete ChatGPT/Gemini-L\u00e4ufe pro Kalendermonat die eigene Domain zitiert haben, gegen die Gesamtzahl ausgewerteter L\u00e4ufe.</p>';
-    section.appendChild(citationCard);
+    citationSection.appendChild(citationCard);
+
+    var newKeywordsLine = document.createElement('p');
+    newKeywordsLine.className = 'cvz-chart-caption';
+    newKeywordsLine.textContent = 'Neue Keywords je Monat: ' +
+      months.map(function (m) { return m.month + ': ' + m.new_keywords; }).join(' \u00b7 ');
+    citationSection.appendChild(newKeywordsLine);
 
     var gscCard = document.createElement('div');
     gscCard.className = 'cvz-card';
@@ -3170,13 +3201,9 @@
         { label: 'Impressionen', values: months.map(function (m) { return m.gsc_impressions; }), color: 'var(--cvz-amber)' },
       ], xLabels, {}) +
       '<p class="cvz-chart-caption">Google-Search-Console-Klicks/Impressionen pro Kalendermonat, summiert \u00fcber alle GSC-Near-Miss-Keywords dieses Themas.</p>';
-    section.appendChild(gscCard);
+    gscSection.appendChild(gscCard);
 
-    var newKeywordsLine = document.createElement('p');
-    newKeywordsLine.className = 'cvz-chart-caption';
-    newKeywordsLine.textContent = 'Neue Keywords je Monat: ' +
-      months.map(function (m) { return m.month + ': ' + m.new_keywords; }).join(' \u00b7 ');
-    section.appendChild(newKeywordsLine);
+    return [citationSection, gscSection];
 
     return section;
   }
@@ -4395,6 +4422,15 @@
       '.cvz-modal-btn-primary:hover { background: #4fd1c5; color: #0d1117; }' +
 
       '.cvz-section { margin-bottom: 24px; }' +
+      // NEU (15.09.2026): Kundenwunsch — Grafiken der Übersichtsseite auf
+      // Desktop kleiner und nebeneinander statt einzeln über volle Breite.
+      // auto-fit/minmax fällt auf schmalen Bildschirmen automatisch auf
+      // eine Spalte zurück, keine eigene Media-Query nötig. Die einzelnen
+      // .cvz-section-Elemente darin behalten ihren eigenen margin-bottom
+      // nicht (siehe Regel direkt darunter), das Grid-"gap" übernimmt den
+      // Abstand stattdessen.
+      '.cvz-charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }' +
+      '.cvz-charts-grid > .cvz-section { margin-bottom: 0; }' +
       '.cvz-section-label { font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
       '.cvz-section-title { margin: 0 0 4px; font-size: 22px; }' +
 
