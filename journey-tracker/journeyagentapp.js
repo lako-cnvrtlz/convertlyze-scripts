@@ -283,6 +283,9 @@
       competitor_insights: data.competitor_insights || [],
       changelog: data.changelog || [],
       search_queries: data.search_queries || [],
+      // NEU (15.09.2026): "beste Content-Chancen", siehe main.py:
+      // _compute_best_content_chances.
+      best_content_chances: data.best_content_chances || [],
       competitors: [],
       gsc_rows: (data.search_queries || [])
         .filter(function (q) { return q.source === 'gsc_near_miss'; })
@@ -2081,6 +2084,14 @@
         // bewusst null zurück, wenn keine Prompts eine Phase haben.
         var overviewRollup = renderPhaseRollup(detail.prompts);
         if (overviewRollup) tabContent.appendChild(overviewRollup);
+        // GEÄNDERT (15.09.2026): Opportunities/Content-Ideen stehen jetzt
+        // VOR den grafischen Darstellungen (Kundenwunsch, siehe
+        // Chat-Verlauf 15.09.2026), vorher standen sie danach. Die neue
+        // "Beste Content-Chancen"-Sektion führt die Gruppe an.
+        var bestChances = renderBestContentChancesSection(detail.best_content_chances);
+        if (bestChances) tabContent.appendChild(bestChances);
+        tabContent.appendChild(renderOpportunitySection(detail.opportunities));
+        tabContent.appendChild(renderContentIdeasSection(detail.content_ideas));
         tabContent.appendChild(renderCombinedTrendSection(
           state.visibilityTrendCache[state.activeTopicId],
           state.topicRankHistoryCache[state.activeTopicId],
@@ -2094,8 +2105,6 @@
         tabContent.appendChild(renderMonthlyOverviewChart(
           state.monthlyOverviewTrendCache[state.activeTopicId], state.isLoadingMonthlyOverviewTrend,
         ));
-        tabContent.appendChild(renderOpportunitySection(detail.opportunities));
-        tabContent.appendChild(renderContentIdeasSection(detail.content_ideas));
         tabContent.appendChild(renderChangelogSection(detail.changelog, state.activeTopicId, detail.search_queries, detail.prompts));
         break;
     }
@@ -2572,6 +2581,38 @@
     }
 
     return html;
+  }
+
+  // NEU (15.09.2026): siehe main.py: _compute_best_content_chances.
+  var CONTENT_CHANCE_KIND_LABELS = {
+    seo_naeher_top10: 'Nah an/in Google Top 10, KI-unsichtbar',
+    erste_ki_zitierung: 'Erste KI-Zitierung, ausbaufähig',
+  };
+
+  function renderBestContentChancesSection(chances) {
+    if (!chances || chances.length === 0) return null;
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Beste Content-Chancen';
+    section.appendChild(heading);
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-opportunity-grid';
+    chances.forEach(function (chance) {
+      var card = document.createElement('div');
+      card.className = 'cvz-card cvz-idea-card';
+      card.innerHTML =
+        '<p class="cvz-opportunity-type">' + escapeHtml(CONTENT_CHANCE_KIND_LABELS[chance.kind] || chance.kind) + '</p>' +
+        '<p class="cvz-opportunity-description">' + escapeHtml(chance.label) + '</p>' +
+        '<p class="cvz-opportunity-topic">' + escapeHtml(chance.detail) + '</p>';
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+    return section;
   }
 
   function renderOpportunitySection(opportunities) {
@@ -3229,14 +3270,33 @@
       var tableWrap = document.createElement('div');
       tableWrap.className = 'cvz-changelog-table-wrap';
       var rowsHtml = visibleEntries.map(function (entry) {
-        var linkedLabels = []
-          .concat((entry.linked_search_query_ids || []).map(function (id) { return keywordTextById[id]; }))
-          .concat((entry.linked_prompt_ids || []).map(function (id) { return promptTextById[id]; }))
-          .filter(Boolean);
+        // GEÄNDERT (15.09.2026): verknüpfte Keywords bekommen jetzt einen
+        // Pfeil, wenn main.py ein Auf/Ab-Signal berechnet hat (siehe
+        // entry.keyword_deltas, main.py: _compute_changelog_keyword_deltas).
+        // Bewusst pro Keyword einzeln, ein Eintrag kann mehrere verknüpfte
+        // Keywords mit unterschiedlicher Richtung haben.
+        var keywordDeltas = entry.keyword_deltas || {};
+        var linkedKeywordItems = (entry.linked_search_query_ids || []).map(function (id) {
+          var text = keywordTextById[id];
+          if (!text) return null;
+          var direction = keywordDeltas[id];
+          var arrowHtml = '';
+          if (direction === 'up') {
+            arrowHtml = ' <span class="cvz-delta-up" title="Position seit dieser \u00c4nderung verbessert">\u25b2</span>';
+          } else if (direction === 'down') {
+            arrowHtml = ' <span class="cvz-delta-down" title="Position seit dieser \u00c4nderung verschlechtert">\u25bc</span>';
+          }
+          return escapeHtml(text) + arrowHtml;
+        }).filter(Boolean);
+        var linkedPromptItems = (entry.linked_prompt_ids || []).map(function (id) {
+          var text = promptTextById[id];
+          return text ? escapeHtml(text) : null;
+        }).filter(Boolean);
+        var linkedHtml = linkedKeywordItems.concat(linkedPromptItems).join(', ');
         return (
           '<tr>' +
             '<td class="cvz-changelog-cell-text">' + escapeHtml(entry.entry_text) + '</td>' +
-            '<td class="cvz-changelog-cell-linked">' + (linkedLabels.length ? escapeHtml(linkedLabels.join(', ')) : '\u2013') + '</td>' +
+            '<td class="cvz-changelog-cell-linked">' + (linkedHtml || '\u2013') + '</td>' +
             '<td class="cvz-changelog-cell-meta">' + formatRelativeTime(entry.created_at) + '</td>' +
             '<td class="cvz-changelog-cell-meta">' + (entry.author_name ? escapeHtml(entry.author_name) : '\u2013') + '</td>' +
             '<td class="cvz-changelog-cell-action">' +
@@ -4413,6 +4473,8 @@
       '.cvz-changelog-table td { padding: 8px 10px; border-bottom: 1px solid var(--cvz-border); vertical-align: top; }' +
       '.cvz-changelog-cell-text { min-width: 220px; }' +
       '.cvz-changelog-cell-linked { color: var(--cvz-teal); white-space: nowrap; }' +
+      '.cvz-delta-up { color: var(--cvz-teal); font-weight: 700; }' +
+      '.cvz-delta-down { color: var(--cvz-red); font-weight: 700; }' +
       '.cvz-changelog-cell-meta { color: var(--cvz-text-muted); white-space: nowrap; }' +
       '.cvz-changelog-cell-action { text-align: right; white-space: nowrap; }' +
       '.cvz-changelog-row-deleted td { opacity: 0.75; }' +
