@@ -256,7 +256,7 @@
         content:'';position:absolute;left:0;top:25%;
         height:50%;width:1px;background:rgba(255,255,255,.06);
       }
-      .cvz-anchor-nav a:focus-visible{outline:2px solid #4fd1c5;outline-offset:2px;border-radius:2px;}
+      .cvz-anchor-nav a:focus-visible{outline:2px solid #4fd1c5;outline-offset:2px;border-radius:0;}
       @media(max-width:600px){
         .cvz-anchor-nav-inner{justify-content:flex-start;padding:0;}
         .cvz-anchor-nav a{font-size:12px;padding:12px 16px;}
@@ -268,14 +268,14 @@
         display:flex;align-items:center;justify-content:space-between;
         padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:20px;
       }
-      .cvz-cat-name{font-size:18px;font-weight:700;color:#f0f4f8;letter-spacing:-.01em;}
+      .cvz-cat-name{font-size:18px;font-weight:700;color:#f0f4f8;letter-spacing:-.01em;font-family:'Syne',sans-serif;}
       .cvz-cat-score{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#e8edf5!important;}
 
       /* Karten */
       .cvz-cards{display:flex;flex-direction:column;gap:12px;margin-bottom:8px;}
       .cvz-card{
         background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);
-        border-radius:12px;padding:18px 20px;transition:border-color .2s,background .2s;
+        border-radius:0;padding:18px 20px;transition:border-color .2s,background .2s;
       }
       .cvz-card:hover{border-color:rgba(79,209,197,.2);background:rgba(79,209,197,.02);}
       .cvz-card-label{
@@ -310,7 +310,7 @@
       /* Executive Summary: Score Panel */
       .cvz-exec-panel{
         background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);
-        border-radius:16px;padding:24px 28px;
+        border-radius:0;padding:24px 28px;
         display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px;
       }
       .cvz-ring{flex-shrink:0;text-align:center;animation:cvzRing .75s cubic-bezier(.34,1.56,.64,1) .15s both;}
@@ -326,8 +326,8 @@
       .cvz-br:last-child{margin-bottom:0}
       .cvz-bl{font-size:13px;color:#718096;width:100px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .15s;}
       .cvz-br:hover .cvz-bl{color:#e2e8f0}
-      .cvz-bt{flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;}
-      .cvz-bf{height:100%;border-radius:3px;width:0;background:#4fd1c5;opacity:.75;
+      .cvz-bt{flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:0;overflow:hidden;}
+      .cvz-bf{height:100%;border-radius:0;width:0;background:#4fd1c5;opacity:.75;
               animation:cvzBar 1s cubic-bezier(.4,0,.2,1) .65s forwards;transition:opacity .15s,filter .15s;}
       .cvz-br:hover .cvz-bf{opacity:1;filter:brightness(1.15)}
       .cvz-bv{font-size:14px;font-family:'DM Mono',monospace;width:32px;text-align:right;flex-shrink:0;color:#4fd1c5;}
@@ -358,7 +358,7 @@
       .cvz-badge{
         flex:1;min-width:150px;
         background:rgba(79,209,197,.05);border:1px solid rgba(79,209,197,.18);
-        border-radius:12px;padding:13px 15px;
+        border-radius:0;padding:13px 15px;
         transition:border-color .2s,background .2s,transform .2s;cursor:default;
       }
       .cvz-badge:hover{border-color:rgba(79,209,197,.32);background:rgba(79,209,197,.08);transform:translateY(-1px)}
@@ -371,6 +371,7 @@
       .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:56px 24px 24px;text-align:center;}
       .cvz-heading-wrap.cvz-heading-top{border-top:none!important;}
       .cvz-heading-title{
+        font-family:'Syne',sans-serif;
         font-size:clamp(36px,6vw,80px);font-weight:800;letter-spacing:-.02em;
         color:rgba(148,163,184,.25);text-transform:uppercase;line-height:1!important;margin-bottom:12px;
       }
@@ -426,18 +427,18 @@
       .cvz-ki-btn{
         display:inline-flex;align-items:center;gap:8px;
         background:#4fd1c5;color:#0d1117;
-        font-family:'Geist','DM Sans',sans-serif;
+        font-family:'Syne','Geist',sans-serif;
         font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-        text-decoration:none;padding:14px 32px;border-radius:8px;
+        text-decoration:none;padding:14px 32px;border-radius:0;
         transition:background .2s,transform .2s,box-shadow .2s;cursor:pointer;border:none;
       }
       .cvz-ki-btn:hover{background:#38b2ac;transform:translateY(-2px);box-shadow:0 8px 24px rgba(79,209,197,.25);}
       .cvz-pdf-btn{
         display:inline-flex;align-items:center;gap:8px;
         background:transparent;color:#e2e8f0;
-        font-family:'Geist','DM Sans',sans-serif;
+        font-family:'Syne','Geist',sans-serif;
         font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-        text-decoration:none;padding:14px 32px;border-radius:8px;
+        text-decoration:none;padding:14px 32px;border-radius:0;
         border:1px solid rgba(255,255,255,.15);
         transition:border-color .2s,color .2s,transform .2s;cursor:pointer;
       }
@@ -448,7 +449,7 @@
         position:fixed;z-index:10000;max-width:220px;
         background:#161b22;border:1px solid rgba(255,255,255,.12);color:#e2e8f0;
         font-family:'Geist','DM Sans',sans-serif;font-size:12px;line-height:1.4;
-        padding:8px 12px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.4);
+        padding:8px 12px;border-radius:0;box-shadow:0 4px 16px rgba(0,0,0,.4);
         pointer-events:none;opacity:0;transform:translateY(4px);
         transition:opacity .15s ease,transform .15s ease;
       }
@@ -467,7 +468,7 @@
       .cvz-rm-group{
         background:rgba(255,255,255,.03);
         border:1px solid rgba(255,255,255,.07);
-        border-radius:12px;overflow:hidden;
+        border-radius:0;overflow:hidden;
       }
       .cvz-rm-head{
         padding:12px 18px;font-size:11px;font-weight:700;
@@ -484,7 +485,7 @@
         font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
         color:#4a5568;margin-bottom:4px;
       }
-      .cvz-rm-item-title{font-size:14px;font-weight:600;color:#e8edf5;line-height:1.5;}
+      .cvz-rm-item-title{font-size:14px;font-weight:600;color:#e8edf5;line-height:1.5;font-family:'Syne',sans-serif;}
       .cvz-rm-rea{font-size:13px;color:#c4cdd6;line-height:1.6;margin-top:6px;}
       .cvz-rm-meta{
       font-size:11px;font-weight:600;color:#718096;
@@ -507,14 +508,14 @@
       .cvz-pr-crossref{
         display:flex;align-items:center;gap:8px;
         padding:10px 14px;font-size:13px;color:#718096;
-        background:rgba(255,255,255,.02);border-radius:8px;
+        background:rgba(255,255,255,.02);border-radius:0;
       }
       .cvz-pr-crossref-icon{color:#4a5568;flex-shrink:0;}
       .cvz-pr-crossbadge{
         display:inline-block;margin-left:8px;
         font-size:10px;font-weight:600;letter-spacing:.02em;text-transform:none;
         color:#a78bfa;background:rgba(167,139,250,.1);
-        padding:2px 8px;border-radius:6px;vertical-align:middle;
+        padding:2px 8px;border-radius:0;vertical-align:middle;
       }
 
       /* Responsive */
@@ -530,8 +531,25 @@
         .cvz-info-row:nth-last-child(-n+2){border-bottom:1px solid rgba(255,255,255,.05);}
         .cvz-info-row:last-child{border-bottom:none;}
       }
+
+      /* KI-Disclaimer */
+      .cvz-ki-disclaimer{
+        max-width:1200px;margin:0 auto;padding:20px 24px 40px;
+        color:#4a5568;font-size:12px;line-height:1.6;text-align:center;
+        border-top:1px solid rgba(255,255,255,.06);
+      }
+      @media(max-width:768px){
+        .cvz-ki-disclaimer{padding:16px 16px 32px;}
+      }
     `;
     document.head.appendChild(s);
+    if (!document.getElementById('cvz-report-fonts')) {
+      const fl = document.createElement('link');
+      fl.id = 'cvz-report-fonts';
+      fl.rel = 'stylesheet';
+      fl.href = 'https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Geist:wght@300..900&display=swap';
+      document.head.appendChild(fl);
+    }
   }
 
   // ── Design System Helpers ───────────────────────────────────────────────────
@@ -1099,7 +1117,7 @@
         : `<div style="font-size:12px;color:#4a5568;font-style:italic;">Keine Daten geladen.</div>`;
       return `<div class="cvz-fi ${fadeCls}" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:11px;">
-          <div style="width:22px;height:22px;border-radius:6px;background:${iconBg};color:${color};display:flex;align-items:center;justify-content:center;font-size:11px;">${icon}</div>
+          <div style="width:22px;height:22px;border-radius:0;background:${iconBg};color:${color};display:flex;align-items:center;justify-content:center;font-size:11px;">${icon}</div>
           <div style="font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:${color};">${title}</div>
         </div>
         <div class="cvz-cards">${cards}</div>
@@ -1558,6 +1576,16 @@
       const orig = btn.innerHTML; btn.textContent = msg; btn.classList.add('share-success');
       setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('share-success'); }, 2000);
     }
+
+    // KI-Disclaimer am Ende des Reports einfügen
+    (function injectKiDisclaimer() {
+      const existing = document.querySelector('.cvz-ki-disclaimer');
+      if (existing) return;
+      const d = document.createElement('div');
+      d.className = 'cvz-ki-disclaimer';
+      d.textContent = 'Diese Analyse wurde vollständig durch ein KI-System erstellt. Alle Empfehlungen sollten durch eine qualifizierte Fachperson geprüft werden. Alle Angaben ohne Gewähr.';
+      document.body.appendChild(d);
+    })();
 
     document.body.classList.add('analysis-loaded');
     console.log('🎉 Report vollständig geladen!');
