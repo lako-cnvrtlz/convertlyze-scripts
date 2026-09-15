@@ -299,6 +299,11 @@
             impressions: impressions,
             ctr: impressions > 0 ? clicks / impressions : 0,
             position: q.gsc_position || 0,
+            // NEU (15.09.2026): SERP-Ergebnisse/-Features auch für
+            // GSC-Zeilen durchreichen, siehe renderGscRowExpansion.
+            top_serp_results: q.top_serp_results || null,
+            serp_features: q.serp_features || null,
+            serp_checked_at: q.serp_checked_at || null,
           };
         }),
       prompts: (data.prompts || []).map(function (p) {
@@ -817,6 +822,61 @@
     chat_gpt: 'ChatGPT',
     gemini:   'Gemini',
   };
+
+  // NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026) — Top-
+  // SERP-Ergebnisse + SERP-Feature-Typen bei Keywords/GSC-Keywords, siehe
+  // run_topic.py: check_serp_for_top_keywords/_extract_serp_summary.
+  var SERP_FEATURE_LABELS = {
+    organic: 'Organisch',
+    people_also_ask: '\u00c4hnliche Fragen',
+    featured_snippet: 'Featured Snippet',
+    answer_box: 'Antwortbox',
+    ai_overview: 'AI Overview',
+    knowledge_graph: 'Knowledge Panel',
+    video: 'Video',
+    images: 'Bilder',
+    local_pack: 'Local Pack',
+    top_stories: 'Top Stories',
+    shopping: 'Shopping',
+  };
+  // Feature-Typen, die typischerweise bedeuten "Google beantwortet die
+  // Frage schon direkt, ohne Klick" — nur zur Einordnung, keine
+  // abschließende Liste aller möglichen DataForSEO-Typen.
+  var SERP_ZERO_CLICK_FEATURE_TYPES = ['featured_snippet', 'answer_box', 'ai_overview', 'knowledge_graph'];
+
+  // Gemeinsam genutzt von renderKeywordExpansion (Keywords-Tab) und
+  // renderGscRowExpansion (GSC-Performance-Tab) — dieselbe Datenquelle
+  // (search_queries.top_serp_results/serp_features), zwei Anzeigeorte.
+  function renderSerpSummaryBlock(row) {
+    if (!row.top_serp_results || row.top_serp_results.length === 0) return '';
+
+    var hasZeroClickFeature = (row.serp_features || []).some(function (f) {
+      return SERP_ZERO_CLICK_FEATURE_TYPES.indexOf(f) !== -1;
+    });
+
+    var resultsHtml = row.top_serp_results.map(function (r) {
+      return '<li>' +
+        '<img class="cvz-inline-favicon" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(r.domain || '') + '" alt="">' +
+        '<a href="' + escapeHtml(r.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(r.domain || r.url || '') + '</a>' +
+        (r.rank ? ' <span class="cvz-serp-rank">Position ' + escapeHtml(r.rank) + '</span>' : '') +
+      '</li>';
+    }).join('');
+
+    var featuresHtml = (row.serp_features || []).map(function (f) {
+      var isZeroClick = SERP_ZERO_CLICK_FEATURE_TYPES.indexOf(f) !== -1;
+      return '<span class="cvz-persona-chip' + (isZeroClick ? ' cvz-serp-feature-risk' : '') + '">' +
+        escapeHtml(SERP_FEATURE_LABELS[f] || f) + '</span>';
+    }).join('');
+
+    return (
+      '<p class="cvz-changelog-guided-label">Top-SERP-Ergebnisse' +
+        (hasZeroClickFeature ? ' \u2014 Zero-Click-Risiko (siehe Features unten)' : '') +
+      '</p>' +
+      '<ul class="cvz-serp-results-list">' + resultsHtml + '</ul>' +
+      (featuresHtml ? '<div class="cvz-persona-filter" style="margin-top:6px;">' + featuresHtml + '</div>' : '') +
+      (row.serp_checked_at ? '<p class="cvz-opportunity-topic">SERP gepr\u00fcft: ' + formatRelativeTime(row.serp_checked_at) + '</p>' : '')
+    );
+  }
 
   var TOPIC_TABS = [
     { id: 'uebersicht', label: 'Übersicht' },
@@ -3454,7 +3514,7 @@
       var linkedCount = (changelogEntries || []).filter(function (entry) {
         return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
       }).length;
-      var hasDetail = kw.organic_rank != null || kw.gsc_impressions != null || kw.gsc_position != null || kw.first_seen_at || linkedCount > 0;
+      var hasDetail = kw.organic_rank != null || kw.gsc_impressions != null || kw.gsc_position != null || kw.first_seen_at || linkedCount > 0 || (kw.top_serp_results && kw.top_serp_results.length > 0);
       var canExpand = !!(enableExpansion && hasDetail);
 
       var row = document.createElement('div');
@@ -3522,7 +3582,7 @@
     if (kw.first_seen_at) {
       lines.push('<p class="cvz-opportunity-topic">Erstmals erfasst: ' + formatRelativeTime(kw.first_seen_at) + '</p>');
     }
-    wrap.innerHTML = linkedHtml + lines.join('');
+    wrap.innerHTML = linkedHtml + lines.join('') + renderSerpSummaryBlock(kw);
 
     if (state.loadingKeywordRankHistory[rowId]) {
       var loading = document.createElement('p');
@@ -4021,14 +4081,20 @@
     var wrap = document.createElement('div');
     wrap.className = 'cvz-prompt-expansion';
 
+    // NEU (15.09.2026): SERP-Block zuerst gebaut, nicht direkt angehängt —
+    // die folgenden früh-verlassenden Zustände (lädt/kein Verlauf) setzen
+    // wrap.innerHTML komplett neu, das würde einen bereits angehängten
+    // SERP-Block sonst überschreiben.
+    var serpHtml = renderSerpSummaryBlock(row);
+
     if (state.loadingGscRankHistory[rowId]) {
-      wrap.innerHTML = '<p class="cvz-card-placeholder-text">L\u00e4dt Verlauf...</p>';
+      wrap.innerHTML = serpHtml + '<p class="cvz-card-placeholder-text">L\u00e4dt Verlauf...</p>';
       return wrap;
     }
 
     var snapshots = state.gscRankHistoryCache[rowId];
     if (!snapshots || snapshots.length < 2) {
-      wrap.innerHTML = '<p class="cvz-card-placeholder-text">Noch kein Verlauf verf\u00fcgbar, braucht mindestens zwei Monatsl\u00e4ufe mit Daten f\u00fcr diese Suchanfrage.</p>';
+      wrap.innerHTML = serpHtml + '<p class="cvz-card-placeholder-text">Noch kein Verlauf verf\u00fcgbar, braucht mindestens zwei Monatsl\u00e4ufe mit Daten f\u00fcr diese Suchanfrage.</p>';
       return wrap;
     }
 
@@ -4042,9 +4108,11 @@
     var hasPosition = positionValues.some(function (v) { return v != null; });
 
     if (!hasClicks && !hasImpressions && !hasPosition) {
-      wrap.innerHTML = '<p class="cvz-card-placeholder-text">Keine historisierten GSC-Werte f\u00fcr diese Suchanfrage.</p>';
+      wrap.innerHTML = serpHtml + '<p class="cvz-card-placeholder-text">Keine historisierten GSC-Werte f\u00fcr diese Suchanfrage.</p>';
       return wrap;
     }
+
+    wrap.innerHTML = serpHtml;
 
     var series = [];
     if (hasClicks) series.push({ label: 'Klicks', values: clicksValues, color: 'var(--cvz-teal)' });
@@ -4489,6 +4557,12 @@
       '.cvz-changelog-linked { font-size: 11px; color: var(--cvz-teal); margin: 2px 0; }' +
       '.cvz-changelog-linked-badge { color: var(--cvz-teal); font-size: 12px; }' +
       '.cvz-prompt-linked-changelog { margin: 0 0 12px; }' +
+      '.cvz-serp-results-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }' +
+      '.cvz-serp-results-list li { display: flex; align-items: center; gap: 6px; font-size: 12px; }' +
+      '.cvz-serp-results-list a { color: var(--cvz-text); text-decoration: none; }' +
+      '.cvz-serp-results-list a:hover { color: var(--cvz-teal); }' +
+      '.cvz-serp-rank { color: var(--cvz-text-muted); font-size: 11px; }' +
+      '.cvz-serp-feature-risk { color: var(--cvz-red); border-color: var(--cvz-red); }' +
       '.cvz-changelog-delete-btn {' +
         'background: none; border: none; color: var(--cvz-text-muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; flex-shrink: 0;' +
       '}' +
