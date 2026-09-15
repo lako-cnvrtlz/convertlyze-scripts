@@ -31,7 +31,7 @@
   --cvz-text: #e6edf3;
   --cvz-text-muted: #8b949e;
   --cvz-danger: #f87171;
-  --cvz-radius: 12px;
+  --cvz-radius: 0px;
   /* Zentrale Höhensteuerung für Chat + Vorschau auf dem Desktop. */
   --cvz-panel-height: 78vh;
   --cvz-panel-height-max: 780px;
@@ -74,14 +74,14 @@
 .cvz-dev-bar input {
   width: 100%; margin-top: 8px; padding: 8px 10px;
   background: var(--cvz-bg); border: 1px solid var(--cvz-border);
-  border-radius: 8px; color: var(--cvz-text); font-size: 0.8rem;
+  border-radius: 0px; color: var(--cvz-text); font-size: 0.8rem;
 }
 
 /* ---------- Formular-Karte ---------- */
 .cvz-card {
   background: var(--cvz-bg-elevated);
   border: 1px solid var(--cvz-border);
-  border-radius: 20px;
+  border-radius: 00px;
   padding: 40px;
   color: var(--cvz-text);
 }
@@ -146,7 +146,7 @@
 .cvz-app input[type="file"] { color: var(--cvz-text); font-size: 0.85rem; }
 .cvz-app input[type="file"]::file-selector-button {
   background: var(--cvz-teal); color: var(--cvz-bg); border: none;
-  border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer;
+  border-radius: 0px; padding: 8px 14px; font-weight: 600; cursor: pointer;
   font-family: inherit; margin-right: 10px;
 }
 
@@ -163,7 +163,7 @@
 
 .cvz-choice-row { display: flex; gap: 10px; margin-top: 8px; }
 .cvz-choice {
-  flex: 1; padding: 14px 10px; text-align: center; border-radius: 10px;
+  flex: 1; padding: 14px 10px; text-align: center; border-radius: 0px;
   border: 1px solid var(--cvz-border); background: var(--cvz-bg);
   color: var(--cvz-text); cursor: pointer; font-size: 0.88rem; font-weight: 600;
 }
@@ -172,7 +172,7 @@
 /* ---------- Wettbewerber-Auswahl ---------- */
 .cvz-competitor-item {
   display: flex; align-items: flex-start; gap: 12px;
-  padding: 14px 16px; border: 1px solid var(--cvz-border); border-radius: 10px;
+  padding: 14px 16px; border: 1px solid var(--cvz-border); border-radius: 0px;
   margin-bottom: 10px; cursor: pointer;
 }
 .cvz-competitor-item.selected { border-color: var(--cvz-teal); background: var(--cvz-teal-dim); }
@@ -200,7 +200,7 @@
 /* Ausgefilterte Vorschläge bleiben einklappbar sichtbar, damit der Filter
    nachvollziehbar ist und ein bewusst gewuenschter Treffer nicht verloren geht. */
 .cvz-filtered-box {
-  margin-top: 16px; border: 1px solid var(--cvz-border); border-radius: 10px;
+  margin-top: 16px; border: 1px solid var(--cvz-border); border-radius: 0px;
   padding: 12px 16px; background: var(--cvz-bg);
 }
 .cvz-filtered-box summary {
@@ -215,7 +215,7 @@
 }
 .cvz-filtered-list .reason { color: var(--cvz-text-muted); white-space: nowrap; flex-shrink: 0; }
 .cvz-filtered-list button {
-  background: none; border: 1px solid var(--cvz-border); border-radius: 6px;
+  background: none; border: 1px solid var(--cvz-border); border-radius: 0px;
   color: var(--cvz-text); font-family: inherit; font-size: 0.72rem;
   padding: 4px 10px; cursor: pointer; flex-shrink: 0;
 }
@@ -226,7 +226,7 @@
 .cvz-app button.cvz-btn-primary, .cvz-app button.cvz-btn-secondary,
 .cvz-workspace button.cvz-btn-primary, .cvz-workspace button.cvz-btn-secondary {
   font-family: inherit; font-size: 0.95rem; font-weight: 600;
-  padding: 13px 26px; border-radius: 10px; cursor: pointer; border: none;
+  padding: 13px 26px; border-radius: 0px; cursor: pointer; border: none;
 }
 .cvz-app button.cvz-btn-primary,
 .cvz-workspace button.cvz-btn-primary { background: var(--cvz-teal); color: var(--cvz-bg); }
@@ -240,7 +240,7 @@
 .cvz-hint { font-size: 0.78rem; color: var(--cvz-text-muted); margin-top: 6px; }
 .cvz-error {
   background: rgba(248, 113, 113, 0.1); border: 1px solid var(--cvz-danger);
-  color: var(--cvz-danger); border-radius: 10px; padding: 12px 14px;
+  color: var(--cvz-danger); border-radius: 0px; padding: 12px 14px;
   font-size: 0.85rem; margin-top: 16px;
 }
 
@@ -273,7 +273,7 @@
   padding: 14px 20px;
   background: var(--cvz-bg-elevated);
   border: 1px solid var(--cvz-border);
-  border-radius: 20px;
+  border-radius: 0px;
 }
 .cvz-toolbar .cvz-toolbar-title {
   font-weight: 700; font-size: 1rem; line-height: 1.2; color: var(--cvz-text);
@@ -285,7 +285,7 @@
 .cvz-toolbar button.cvz-btn-secondary,
 .cvz-preview-header button.cvz-btn-secondary {
   padding: 8px 14px; font-size: 0.82rem;
-  border: 1px solid var(--cvz-border); border-radius: 8px;
+  border: 1px solid var(--cvz-border); border-radius: 0px;
   white-space: nowrap;
 }
 .cvz-toolbar button.cvz-btn-secondary:hover,
@@ -321,7 +321,7 @@
   flex: 1 1 0; min-width: 0;
   height: var(--cvz-panel-height); max-height: var(--cvz-panel-height-max);
   display: flex; flex-direction: column;
-  background: var(--cvz-bg-elevated); border: 1px solid var(--cvz-border); border-radius: 20px;
+  background: var(--cvz-bg-elevated); border: 1px solid var(--cvz-border); border-radius: 0px;
   overflow: hidden;
 }
 
@@ -333,17 +333,17 @@
   display: flex; flex-direction: column; gap: 16px;
   background: var(--cvz-bg-elevated);
   border: 1px solid var(--cvz-border); border-bottom: none;
-  border-radius: 20px 20px 0 0;
+  border-radius: 0px 0px 0 0;
   /* Verhindert Scroll-Chaining: am Listenende scrollt nicht ploetzlich die
      ganze Seite weiter. */
   overscroll-behavior: contain;
 }
 /* 85% liess in der schmalen Chat-Spalte unnötig viel Rand stehen. */
-.cvz-msg { max-width: 92%; padding: 12px 16px; border-radius: 14px; font-size: 0.92rem; line-height: 1.5; }
-.cvz-msg.user { align-self: flex-end; background: var(--cvz-teal); color: var(--cvz-bg); border-bottom-right-radius: 4px; white-space: pre-wrap; }
+.cvz-msg { max-width: 92%; padding: 12px 16px; border-radius: 0px; font-size: 0.92rem; line-height: 1.5; }
+.cvz-msg.user { align-self: flex-end; background: var(--cvz-teal); color: var(--cvz-bg); border-bottom-right-radius: 0px; white-space: pre-wrap; }
 .cvz-msg.assistant {
   align-self: flex-start; background: var(--cvz-bg); border: 1px solid var(--cvz-border);
-  border-bottom-left-radius: 4px; color: var(--cvz-text);
+  border-bottom-left-radius: 0px; color: var(--cvz-text);
 }
 
 /* Die allererste Nachricht im Chat ist der automatisch erzeugte Kickoff-
@@ -403,15 +403,15 @@
 .cvz-msg.assistant th { background: var(--cvz-bg-elevated); color: var(--cvz-teal); }
 .cvz-msg.assistant code {
   background: var(--cvz-bg-elevated); border: 1px solid var(--cvz-border);
-  border-radius: 4px; padding: 1px 5px; font-size: 0.85em; color: var(--cvz-teal);
+  border-radius: 0px; padding: 1px 5px; font-size: 0.85em; color: var(--cvz-teal);
 }
 .cvz-chat-input-row {
   display: flex; gap: 10px; padding: 16px 20px;
   border: 1px solid var(--cvz-border); border-top: none;
-  border-radius: 0 0 20px 20px; background: var(--cvz-bg-elevated);
+  border-radius: 0 0 0px 0px; background: var(--cvz-bg-elevated);
 }
 .cvz-chat-input-row textarea {
-  flex: 1; min-width: 0; resize: none; padding: 12px 14px; border-radius: 10px;
+  flex: 1; min-width: 0; resize: none; padding: 12px 14px; border-radius: 0px;
   background: var(--cvz-bg); border: 1px solid var(--cvz-border);
   color: var(--cvz-text); font-family: inherit; font-size: 0.92rem; max-height: 120px;
 }
@@ -421,7 +421,7 @@
 .cvz-chat-input-row button {
   flex: 0 0 auto;
   background: var(--cvz-teal); color: var(--cvz-bg); border: none;
-  border-radius: 10px; padding: 0 22px; font-weight: 600; cursor: pointer; font-family: inherit;
+  border-radius: 0px; padding: 0 22px; font-weight: 600; cursor: pointer; font-family: inherit;
 }
 .cvz-chat-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -436,10 +436,10 @@
 .cvz-preview-header .title { font-weight: 700; font-size: 1rem; line-height: 1.2; color: var(--cvz-text); }
 .cvz-preview-header .version { font-size: 0.8rem; color: var(--cvz-text-muted); }
 .cvz-preview-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
-.cvz-device-toggle { display: flex; gap: 4px; background: var(--cvz-bg); border: 1px solid var(--cvz-border); border-radius: 8px; padding: 3px; }
+.cvz-device-toggle { display: flex; gap: 4px; background: var(--cvz-bg); border: 1px solid var(--cvz-border); border-radius: 0px; padding: 3px; }
 .cvz-device-btn {
   border: none; background: transparent; color: var(--cvz-text-muted);
-  font-size: 0.78rem; font-weight: 600; padding: 5px 12px; border-radius: 6px;
+  font-size: 0.78rem; font-weight: 600; padding: 5px 12px; border-radius: 0px;
   cursor: pointer; font-family: inherit;
 }
 .cvz-device-btn.active { background: var(--cvz-teal-dim); color: var(--cvz-teal); }
@@ -511,7 +511,7 @@
   .cvz-msg.assistant table.cvz-table-cards tr {
     background: var(--cvz-bg);
     border: 1px solid var(--cvz-border);
-    border-radius: 10px;
+    border-radius: 0px;
     padding: 12px 14px;
     margin-bottom: 10px;
   }
