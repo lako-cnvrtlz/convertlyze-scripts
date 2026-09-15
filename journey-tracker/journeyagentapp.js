@@ -413,6 +413,15 @@
   // INIT
   // =========================================================================
   async function init() {
+    // GEÄNDERT (15.09.2026): Styles + Lade-Zustand JETZT sofort setzen,
+    // ganz am Anfang und synchron, bevor irgendein await läuft (Memberstack-
+    // Roundtrip, Projekte/Themen/Nutzungsstand laden). Das reserviert die
+    // Mindesthöhe des Containers sofort, statt erst nachdem alle Daten
+    // durchgeladen sind — genau das hat vorher den Footer nach unten
+    // springen lassen, sobald das Embed fertig war.
+    injectStyles();
+    renderInitialLoadingState();
+
     var memberstackId = null;
 
     try {
@@ -442,7 +451,7 @@
 
     maybeStartPolling();
 
-    injectStyles();
+    // injectStyles() lief bereits ganz am Anfang von init(), siehe oben.
 
     var paramTab = new URLSearchParams(window.location.search).get('cvz_tab');
     if (paramTab) state.activeSubTab = paramTab;
@@ -1294,6 +1303,27 @@
       return;
     }
 
+    // NEU (15.09.2026): Fokus + Cursorposition merken, BEVOR der Container
+    // komplett neu aufgebaut wird. Ohne das flog man z.B. beim Tippen im
+    // "Eigenen Prompt hinzufügen"-Feld nach wenigen Zeichen aus dem
+    // Eingabefeld: das 5-Sekunden-Polling (siehe maybeStartPolling) ruft
+    // render() auf, sobald IRGENDEIN Thema noch 'collecting' ist – auch
+    // ein ganz anderes Thema als das gerade geöffnete –, und jeder
+    // render() ersetzt via innerHTML = '' das komplette DOM, wodurch das
+    // Eingabefeld als neues Element ohne Fokus entsteht. Betrifft jedes
+    // Text-/Textarea-Feld mit eigener id im Container (Changelog-Eintrag,
+    // eigener Prompt, Wettbewerber-Freitext), nicht nur das eine im
+    // Screenshot.
+    var focusedId = null, selectionStart = null, selectionEnd = null;
+    var activeEl = document.activeElement;
+    if (activeEl && activeEl.id && container.contains(activeEl)) {
+      focusedId = activeEl.id;
+      if (typeof activeEl.selectionStart === 'number') {
+        selectionStart = activeEl.selectionStart;
+        selectionEnd = activeEl.selectionEnd;
+      }
+    }
+
     container.innerHTML = '';
     if (state.activeView === 'topic-detail') {
       container.appendChild(renderTopicDetailView());
@@ -1302,6 +1332,16 @@
     }
 
     container.onclick = handleContainerClick;
+
+    if (focusedId) {
+      var toRefocus = document.getElementById(focusedId);
+      if (toRefocus) {
+        toRefocus.focus();
+        if (selectionStart !== null && typeof toRefocus.setSelectionRange === 'function') {
+          try { toRefocus.setSelectionRange(selectionStart, selectionEnd); } catch (e) { /* z.B. bei <select>, egal */ }
+        }
+      }
+    }
   }
 
   function handleContainerClick(event) {
@@ -1341,6 +1381,16 @@
       state.expandedPromptEngine[engineOwner] = engineTab.getAttribute('data-cvz-prompt-engine');
       state.expandedPromptRunIndex[engineOwner] = 0;
       render();
+      return;
+    }
+    // NEU (15.09.2026): Lösch-Button eines manuell hinzugefügten Prompts.
+    // MUSS vor data-cvz-prompt-toggle geprüft werden, der Button sitzt
+    // innerhalb der klickbaren Zeile, die selbst auch data-cvz-prompt-
+    // toggle trägt (gleiches Prinzip wie beim Retry-Button in der Themen-
+    // Tabelle weiter unten).
+    var promptDelete = event.target.closest('[data-cvz-prompt-delete]');
+    if (promptDelete) {
+      deleteManualPrompt(state.activeTopicId, promptDelete.getAttribute('data-cvz-prompt-delete'));
       return;
     }
     var promptToggle = event.target.closest('[data-cvz-prompt-toggle]');
@@ -2059,6 +2109,36 @@
 
     state.isSubmittingManualPrompt = false;
     render();
+  }
+
+  // NEU (15.09.2026): manuell hinzugefügte Prompts wieder löschen können.
+  // Bewusst nur für source==='manual' anbieten (siehe renderPromptsByPhase/
+  // renderManualPromptForm), automatisch generierte Prompts lassen sich
+  // hier nicht entfernen.
+  async function deleteManualPrompt(topicId, promptId) {
+    var confirmed = await showCvzConfirm(
+      'Diesen selbst hinzugefügten Prompt wirklich löschen?',
+      { title: 'Prompt löschen?', confirmLabel: 'Löschen' }
+    );
+    if (!confirmed) return;
+
+    if (CONFIG.useMockData) {
+      await showCvzAlert('Im Mock-Modus nicht verfügbar.');
+      return;
+    }
+
+    try {
+      // Annahme (nicht bestätigt, Backend-Code nie gesehen): DELETE
+      // /topics/{id}/prompts/{promptId}, als Gegenstück zum bestehenden
+      // POST /topics/{id}/prompts (create_manual_prompt_endpoint). Falls
+      // euer Backend eine andere Route/Methode erwartet, hier anpassen.
+      await apiFetch('/topics/' + topicId + '/prompts/' + promptId, { method: 'DELETE' });
+      delete state.topicDetailCache[topicId];
+      await openTopicDetail(topicId, false);
+    } catch (e) {
+      console.error('[CVZ Visibility] Prompt konnte nicht gelöscht werden:', e);
+      await showCvzAlert('Prompt konnte nicht gelöscht werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
   }
 
   // NEU (14.09.2026): Gegenstück zur Deaktivierungs-Vormerkung – nimmt ein
@@ -3825,11 +3905,24 @@
       return section;
     }
 
+    // GEÄNDERT (15.09.2026): zeigt jetzt die leere Chart-Hülle (Achse,
+    // keine Datenpunkte, siehe buildEmptyChartSvg) statt nur eines
+    // Textblocks, analog zu renderDomainTrendChart. Damit ist auf einen
+    // Blick klar, dass hier später eine Grafik erscheint, statt dass der
+    // Bereich einfach leer wirkt.
     if (!months || months.length < 2) {
-      var empty = document.createElement('p');
-      empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Noch kein Monatsverlauf verfügbar, braucht mindestens zwei Kalendermonate mit Daten.';
-      section.appendChild(empty);
+      var emptyNoticeText = 'Noch kein Verlauf verf\u00fcgbar, braucht mindestens zwei Kalendermonate mit ausgewerteten L\u00e4ufen.';
+
+      var emptyCitationCard = document.createElement('div');
+      emptyCitationCard.className = 'cvz-card';
+      emptyCitationCard.innerHTML = buildEmptyChartSvg() + '<p class="cvz-chart-caption">' + emptyNoticeText + '</p>';
+      section.appendChild(emptyCitationCard);
+
+      var emptyGscCard = document.createElement('div');
+      emptyGscCard.className = 'cvz-card';
+      emptyGscCard.innerHTML = buildEmptyChartSvg() + '<p class="cvz-chart-caption">' + emptyNoticeText + '</p>';
+      section.appendChild(emptyGscCard);
+
       return section;
     }
 
@@ -4784,13 +4877,20 @@
           personaBadge +
           aiSearchVolumeBadge +
           '<span class="cvz-prompt-source">' +
-            // GEÄNDERT (13.09.2026): war prompt.source (Herkunft, z.B.
-            // "manual"), gemeint war aber prompt.prompt_type
-            // (stable_core/discovery). Vorher stand hier bei JEDEM Prompt
-            // "Discovery", egal was tatsächlich hinterlegt war.
-            (prompt.prompt_type === 'stable_core' ? 'Stable Core' : 'Discovery') +
+            // GEÄNDERT (15.09.2026): "Stable Core"-Label auf Wunsch
+            // entfernt (interne Kategorisierung, ohne Mehrwert für die
+            // Ansicht). "Discovery" bleibt als Hinweis stehen, damit
+            // erkennbar bleibt, welche Prompts nicht zum festen
+            // Stable-Core-Set gehören.
+            (prompt.prompt_type === 'stable_core' ? '' : 'Discovery') +
             (prompt.topic_name ? ' · ' + escapeHtml(prompt.topic_name) : '') +
           '</span>' +
+          // NEU (15.09.2026): manuell hinzugefügte Prompts wieder löschbar
+          // machen (siehe deleteManualPrompt). Nur für source==='manual',
+          // automatisch generierte Prompts bleiben unlöschbar.
+          (prompt.source === 'manual'
+            ? '<button type="button" class="cvz-prompt-delete-btn" data-cvz-prompt-delete="' + prompt.id + '" aria-label="Prompt l\u00f6schen" title="Prompt l\u00f6schen">\u00d7</button>'
+            : '') +
           (enableCitations ? '<span class="cvz-prompt-expand-chevron">' + (state.expandedPromptId === prompt.id ? '\u25be' : '\u25b8') + '</span>' : '');
         list.appendChild(row);
 
@@ -5016,6 +5116,17 @@
         'animation: cvz-spin 0.8s linear infinite;' +
       '}' +
 
+      // NEU: initialer Lade-Zustand (bevor Projekte/Themen geladen sind),
+      // zentriert einen größeren Spinner in derselben Mindesthöhe wie der
+      // Rest der App, damit nichts springt, sobald echte Inhalte kommen.
+      '.cvz-initial-loading {' +
+        'min-height: 640px; display: flex; align-items: center; justify-content: center;' +
+      '}' +
+      '.cvz-spinner-lg {' +
+        'width: 40px; height: 40px; border: 3px solid var(--cvz-border); border-top-color: var(--cvz-teal);' +
+        'border-radius: 50%; animation: cvz-spin 0.8s linear infinite;' +
+      '}' +
+
       // GEÄNDERT (13.09.2026): ersetzt die alte Such-Combobox (ein
       // Textfeld, Domains+Themen gemischt im Dropdown) durch zwei
       // getrennte, native Selects nebeneinander.
@@ -5194,6 +5305,11 @@
       '.cvz-prompt-text { flex: 1; }' +
       '.cvz-prompt-source { font-size: 11px; color: var(--cvz-text-muted); }' +
       '.cvz-prompt-citation-count { font-size: 11px; color: var(--cvz-teal); white-space: nowrap; }' +
+      '.cvz-prompt-delete-btn {' +
+        'background: none; border: none; color: var(--cvz-text-muted); font-size: 16px; line-height: 1;' +
+        'cursor: pointer; padding: 0 2px; flex-shrink: 0;' +
+      '}' +
+      '.cvz-prompt-delete-btn:hover { color: var(--cvz-red); }' +
 
       // NEU (13.09.2026): aufklappbare Prompt-Zeile + Engine-/Lauf-Tabs +
       // Antwort- und Quellen-Darstellung im Prompts-Tab.
@@ -5348,17 +5464,32 @@
     document.head.appendChild(style);
   }
 
+  // NEU: zentrierter Lade-Zustand direkt beim ersten Rendern, bevor
+  // Memberstack/Projekte/Themen geladen sind. Nutzt dieselbe Mindesthöhe
+  // wie #cvz-visibility-app, damit der Footer darunter nicht springt,
+  // sobald echte Inhalte kommen.
+  function renderInitialLoadingState() {
+    var container = document.getElementById('cvz-visibility-app');
+    if (!container) return;
+    container.innerHTML =
+      '<div class="cvz-initial-loading">' +
+        '<div class="cvz-spinner-lg" role="status" aria-label="Convertlyze Visibility Tracker lädt"></div>' +
+      '</div>';
+  }
+
   function showNoUserMessage() {
     var container = document.getElementById('cvz-visibility-app');
     if (container) {
-      container.innerHTML = '<p>Bitte logge dich ein, um das Dashboard zu sehen.</p>';
+      container.innerHTML =
+        '<div class="cvz-initial-loading"><p class="cvz-card-placeholder-text">Bitte logge dich ein, um das Dashboard zu sehen.</p></div>';
     }
   }
 
   function showErrorMessage(message) {
     var container = document.getElementById('cvz-visibility-app');
     if (container) {
-      container.innerHTML = '<p>' + message + '</p>';
+      container.innerHTML =
+        '<div class="cvz-initial-loading"><p class="cvz-card-placeholder-text">' + escapeHtml(message) + '</p></div>';
     }
   }
 
