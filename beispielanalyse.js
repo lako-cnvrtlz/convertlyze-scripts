@@ -445,7 +445,7 @@
         content:'';position:absolute;left:0;top:25%;
         height:50%;width:1px;background:rgba(255,255,255,.06);
       }
-      .cvz-anchor-nav a:focus-visible{outline:2px solid #4fd1c5;outline-offset:2px;border-radius:2px;}
+      .cvz-anchor-nav a:focus-visible{outline:2px solid #4fd1c5;outline-offset:2px;border-radius:0px;}
       @media(max-width:600px){
         .cvz-anchor-nav-inner{justify-content:flex-start;padding:0;}
         .cvz-anchor-nav a{font-size:12px;padding:12px 16px;}
@@ -455,10 +455,10 @@
       .cvz-cat-name{font-size:18px;font-weight:700;color:#f0f4f8;letter-spacing:-.01em;}
       .cvz-cat-score{font-size:22px;font-weight:700;font-family:'Geist','DM Mono',monospace;color:#e8edf5!important;}
       .cvz-cards{display:flex;flex-direction:column;gap:12px;margin-bottom:8px;}
-      .cvz-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:18px 20px;transition:border-color .2s,background .2s;}
+      .cvz-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:0px;padding:18px 20px;transition:border-color .2s,background .2s;}
       .cvz-card:hover{border-color:rgba(79,209,197,.2);background:rgba(79,209,197,.02);}
       .cvz-card-label{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:7px;}
-      .cvz-card-label-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+      .cvz-card-label-dot{width:5px;height:5px;border-radius:0%;flex-shrink:0;}
       .cvz-card-body{font-size:14px;color:#c4cdd6;line-height:1.65;}
       .cvz-card-body p{margin:0 0 6px}.cvz-card-body p:last-child{margin-bottom:0}
       .cvz-card-body ul,.cvz-card-body ol{padding-left:18px;margin:0}
@@ -490,7 +490,7 @@
       .cvz-rm-group{
         background:rgba(255,255,255,.03);
         border:1px solid rgba(255,255,255,.07);
-        border-radius:12px;overflow:hidden;
+        border-radius:0px;overflow:hidden;
       }
       .cvz-rm-head{
         padding:12px 18px;font-size:11px;font-weight:700;
@@ -514,9 +514,9 @@
       margin-top:4px;letter-spacing:.02em;
       }
 
-      .cvz-exec-panel{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:16px;padding:24px 28px;display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px;}
+      .cvz-exec-panel{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:0px;padding:24px 28px;display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px;}
       .cvz-ring{flex-shrink:0;text-align:center;animation:cvzRing .75s cubic-bezier(.34,1.56,.64,1) .15s both;}
-      .cvz-ring-c{width:96px;height:96px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+      .cvz-ring-c{width:96px;height:96px;border-radius:0%;display:flex;flex-direction:column;align-items:center;justify-content:center;}
       .cvz-ring-n{font-size:30px;font-weight:700;line-height:1;}
       .cvz-ring-d{font-size:11px;color:#718096;margin-top:2px;}
       .cvz-ring-l{font-size:10px;color:#4a5568;margin-top:8px;letter-spacing:.08em;text-transform:uppercase;}
@@ -525,15 +525,15 @@
       .cvz-br:last-child{margin-bottom:0}
       .cvz-bl{font-size:13px;color:#718096;width:100px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .15s;}
       .cvz-br:hover .cvz-bl{color:#e2e8f0}
-      .cvz-bt{flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;}
-      .cvz-bf{height:100%;border-radius:3px;width:0;background:#4fd1c5;opacity:.75;animation:cvzBar 1s cubic-bezier(.4,0,.2,1) .65s forwards;transition:opacity .15s,filter .15s;}
+      .cvz-bt{flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:0px;overflow:hidden;}
+      .cvz-bf{height:100%;border-radius:0px;width:0;background:#4fd1c5;opacity:.75;animation:cvzBar 1s cubic-bezier(.4,0,.2,1) .65s forwards;transition:opacity .15s,filter .15s;}
       .cvz-br:hover .cvz-bf{opacity:1;filter:brightness(1.15)}
       .cvz-bv{font-size:14px;font-family:'Geist','DM Mono',monospace;width:32px;text-align:right;flex-shrink:0;color:#4fd1c5;}
       .cvz-badges{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;}
-      .cvz-badge{flex:1;min-width:150px;background:rgba(79,209,197,.05);border:1px solid rgba(79,209,197,.18);border-radius:12px;padding:13px 15px;transition:border-color .2s,background .2s,transform .2s;cursor:default;}
+      .cvz-badge{flex:1;min-width:150px;background:rgba(79,209,197,.05);border:1px solid rgba(79,209,197,.18);border-radius:0px;padding:13px 15px;transition:border-color .2s,background .2s,transform .2s;cursor:default;}
       .cvz-badge:hover{border-color:rgba(79,209,197,.32);background:rgba(79,209,197,.08);transform:translateY(-1px)}
       .cvz-badge-h{display:flex;align-items:center;gap:7px;margin-bottom:7px;}
-      .cvz-badge-dot{width:6px;height:6px;border-radius:50%;background:#4fd1c5;flex-shrink:0;}
+      .cvz-badge-dot{width:6px;height:6px;border-radius:0%;background:#4fd1c5;flex-shrink:0;}
       .cvz-badge-t{font-size:11px;font-weight:600;color:#4fd1c5;letter-spacing:.05em;text-transform:uppercase;}
       .cvz-badge-tx{font-size:14px;color:#718096;line-height:1.55;}
       .cvz-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;}
@@ -551,7 +551,7 @@
         background:#4fd1c5;color:#0d1117;
         font-family:'Geist','DM Sans',sans-serif;
         font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-        text-decoration:none;padding:14px 32px;border-radius:8px;
+        text-decoration:none;padding:14px 32px;border-radius:0px;
         transition:background .2s,transform .2s,box-shadow .2s;cursor:pointer;border:none;
       }
       .cvz-ki-btn:hover{background:#38b2ac;transform:translateY(-2px);box-shadow:0 8px 24px rgba(79,209,197,.25);}
@@ -560,7 +560,7 @@
         background:transparent;color:#e2e8f0;
         font-family:'Geist','DM Sans',sans-serif;
         font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-        text-decoration:none;padding:14px 32px;border-radius:8px;
+        text-decoration:none;padding:14px 32px;border-radius:0px;
         border:1px solid rgba(255,255,255,.15);
         transition:border-color .2s,color .2s,transform .2s;cursor:pointer;
       }
@@ -859,7 +859,7 @@
       var title = isS?'Stärken':'Größte Hebel';
       var cardCls = isS?'cvz-card-staerken':'cvz-card-schwaechen';
       var fadeCls = isS?'cvz-fi-4':'cvz-fi-5';
-      return '<div class="cvz-fi '+fadeCls+'" style="margin-bottom:16px;"><div style="display:flex;align-items:center;gap:8px;margin-bottom:11px;"><div style="width:22px;height:22px;border-radius:6px;background:'+iconBg+';color:'+color+';display:flex;align-items:center;justify-content:center;font-size:11px;">'+icon+'</div><div style="font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:'+color+';">'+title+'</div></div><div class="cvz-cards"><div class="cvz-card '+cardCls+'"><div class="cvz-card-body">'+items+'</div></div></div></div>';
+      return '<div class="cvz-fi '+fadeCls+'" style="margin-bottom:16px;"><div style="display:flex;align-items:center;gap:8px;margin-bottom:11px;"><div style="width:22px;height:22px;border-radius:0px;background:'+iconBg+';color:'+color+';display:flex;align-items:center;justify-content:center;font-size:11px;">'+icon+'</div><div style="font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:'+color+';">'+title+'</div></div><div class="cvz-cards"><div class="cvz-card '+cardCls+'"><div class="cvz-card-body">'+items+'</div></div></div></div>';
     }
 
     inject('.section-executive-summary',
