@@ -6,37 +6,12 @@
   // =========================================================================
   var CONFIG = {
     apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
-    // Separate Supabase Edge Function fürs Topic-Slot-Pay-per-Use, NICHT
-    // Teil des Railway-Backends. Annahme (nicht bestätigt, Code nie
-    // gesehen): quantity = wie viele Slots ZUSÄTZLICH gekauft werden
-    // sollen, nicht die neue Gesamtmenge. Falls falsch, muss submitBuyTopicSlot
-    // unten die aktuelle purchased-Menge dazuzählen.
     stripeCheckoutUrl: 'https://<euer-supabase-projekt>.supabase.co/functions/v1/stripe-topic-slot-checkout',
-    // Kein apiKey mehr (siehe Chat-Verlauf): das Script liegt jetzt in
-    // einem öffentlichen GitHub-Repo, ein hier eingebetteter Key wäre kein
-    // Geheimnis mehr gewesen. Auth läuft ausschließlich über
-    // state.memberToken (echtes Memberstack-JWT), siehe apiFetch weiter
-    // unten. Der Server verifiziert es gegen die echte Memberstack-API
-    // (POST /members/verify-token, siehe memberstack_auth.py) und liest
-    // die Member-ID selbst aus der verifizierten Antwort.
-
-    // Solange das Backend nicht end-to-end getestet ist, arbeiten wir hier
-    // bewusst gegen Mock-Daten. Umschalten auf false, sobald ihr gemeinsam
-    // ein echtes Topic erfolgreich durchlaufen lassen habt.
-    //
-    // WICHTIG: Selbst bei false liefert GET /topics/{id} aktuell KEINE
-    // competitors/gsc_rows und KEIN visibility_status pro Prompt, siehe
-    // loadTopicDetail weiter unten.
     useMockData: false,  // TODO: für den echten Test
   };
 
-  // NEU (13.09.2026): muss zu main.py: CHANGELOG_DELETED_RETENTION_DAYS
-  // passen, nur fürs Anzeigen im Bestätigungsdialog, keine eigene Logik.
   var CHANGELOG_DELETED_RETENTION_DAYS = 90;
 
-  // =========================================================================
-  // MOCK-DATEN: Übersicht (Ebene 1+2)
-  // =========================================================================
   var MOCK_PROJECTS = [
     { id: 'proj-1', name: 'Kunde A GmbH', domain: 'kunde-a.de' },
     { id: 'proj-2', name: 'Kunde B AG', domain: 'kunde-b.de' },
@@ -49,346 +24,83 @@
     { id: 'topic-4', project_id: 'proj-2', name: 'SaaS Onboarding', seed_keyword: 'saas onboarding optimierung', status: 'error', opportunities_count: 0, created_at: '2026-09-01T11:00:00Z' },
   ];
 
-  // =========================================================================
-  // MOCK-DATEN: Topic-Detail (Ebene 3)
-  // =========================================================================
-  var MOCK_TOPIC_DETAIL = {
-    'topic-1': {
-      topic: {
-        id: 'topic-1',
-        name: 'Landingpage-Optimierung',
-        seed_keyword: 'landingpage optimierung',
-        own_domain: 'kunde-a.de',
-        status: 'active',
-        latest_summary:
-          'Bei "landingpage optimierung" seid ihr weder in ChatGPT noch in der ' +
-          'Google AI Overview präsent, obwohl VWO in beiden Quellen dominiert. ' +
-          'Organisch rankt ihr für "landingpage optimierung checkliste" gut ' +
-          '(Position 6,4), aber Klicks bleiben aus. Größter Hebel: ein ' +
-          'Vergleichs-Artikel im Tabellenformat, das Format, mit dem VWO aktuell zitiert wird.',
-      },
-      opportunities: [
-        { id: 'opp-1', type: 'high_demand_low_visibility', description: '"landingpage optimierung tools": 340 Impressionen/Monat, Position 11,8, keine KI-Zitierung. Ein strukturierter Tool-Vergleich ist hier der Hebel.' },
-        { id: 'opp-2', type: 'competitor_citation', description: 'VWO wird sowohl in ChatGPT als auch in der Google AI Overview zitiert, ihr in keiner der beiden Quellen. VWOs Artikel nutzt durchgängig Tabellenformat statt Fließtext.' },
-        { id: 'opp-3', type: 'google_visible_ai_invisible', description: 'Für "landingpage optimierung checkliste" rankt ihr organisch auf Position 6,4, taucht aber in keiner KI-Antwort auf. Meist ein Formatierungs-, kein Relevanzproblem.' },
-        { id: 'opp-4', type: 'near_miss_ranking', description: '"landingpage optimierung agentur": Position 14,2, knapp außerhalb der Top 10. Mit gezieltem Content-Update realistisch auf Seite 1 zu bringen.' },
-      ],
-      competitors: [
-        { domain: 'vwo.com', citations: 9, phases: ['exploration', 'evaluation', 'comparison'] },
-        { domain: 'hubspot.de', citations: 5, phases: ['evaluation', 'decision'] },
-        { domain: 'konversion.digital', citations: 3, phases: ['exploration'] },
-      ],
-      // Würde im echten Backend über source_analysis.py per Live-Web-Search
-      // gefüllt (monatlich, gecacht pro Domain), hier von Hand als
-      // plausibles Beispiel gesetzt, keine echte Analyse.
-      source_profiles: [
-        {
-          domain: 'vwo.com', content_type: 'vergleichsartikel',
-          summary: 'Listet mehrere CRO-Tools in einer strukturierten Tabelle mit Preis- und Feature-Vergleich.',
-          differentiation_suggestion: 'Eigener Vergleich könnte zusätzlich DACH-spezifische Kriterien einbauen (Impressum/DSGVO/Sprachregister), die hier fehlen.',
-        },
-        {
-          domain: 'hubspot.de', content_type: 'fachartikel',
-          summary: 'Allgemeiner Ratgeber-Artikel zu Landingpage-Optimierung mit HubSpot-eigenen Tool-Verweisen.',
-          differentiation_suggestion: 'Eigener Artikel könnte konkrete Vorher-Nachher-Beispiele aus echten B2B-Analysen zeigen statt allgemeiner Tipps.',
-        },
-      ],
-      // Manuell beobachtet an EINEM echten Beispiel-Prompt, keine
-      // automatisierte Erkennung (die bräuchte einen eigenen
-      // Claude-Klassifizierungs-Call, siehe Chat-Verlauf). Deshalb
-      // strukturell getrennt von den echten `opportunities`.
-      content_ideas: [
-        {
-          id: 'idea-1',
-          description: 'ChatGPT bietet in seiner Antwort explizit an, bei Angabe von Branche, monatlichem Traffic und Ziel eine personalisierte Tool-Empfehlung zu geben. Keine der zitierten Quellen deckt das ab. Möglicher Content-Typ: ein kurzer interaktiver Konfigurator "Welcher CRO-Stack passt zu dir?".',
-        },
-      ],
-      gsc_rows: [
-        { query: 'landingpage optimierung agentur', clicks: 3, impressions: 210, ctr: 0.014, position: 14.2 },
-        { query: 'landingpage optimierung b2b', clicks: 0, impressions: 85, ctr: 0.0, position: 22.7 },
-        { query: 'landingpage optimierung tools', clicks: 1, impressions: 340, ctr: 0.003, position: 11.8 },
-        { query: 'landingpage optimierung checkliste', clicks: 12, impressions: 190, ctr: 0.063, position: 6.4 },
-      ],
-      search_queries: [
-        { keyword: 'landingpage optimierung', search_volume: 260, source: 'seed_keyword' },
-        { keyword: 'landingpage optimierung tools', search_volume: 340, source: 'gsc_near_miss' },
-        { keyword: 'landingpage optimierung checkliste', search_volume: 190, source: 'gsc_near_miss' },
-        { keyword: 'landingpage optimierung agentur', search_volume: 210, source: 'gsc_near_miss' },
-        // Demonstriert den Positionierungs-Hinweis: höheres Suchvolumen bei
-        // einem thematisch verwandten, aber anders formulierten Begriff.
-        { keyword: 'conversion rate optimierung', search_volume: 480, source: 'related_keywords' },
-      ],
-      // Würde im echten Backend von _compute_positioning_insight (main.py)
-      // berechnet, hier fürs Mock von Hand passend zu obigem Eintrag gesetzt.
-      positioning_insight: {
-        seed_keyword: 'landingpage optimierung',
-        seed_volume: 260,
-        suggested_keyword: 'conversion rate optimierung',
-        suggested_volume: 480,
-        factor: 1.8,
-      },
-      prompts: [
-        { id: 'p1', phase: 'exploration', prompt_text: 'Was ist Landingpage-Optimierung?', prompt_type: 'stable_core', visibility_status: 'green' },
-        { id: 'p2', phase: 'exploration', prompt_text: 'Warum konvertiert meine Landingpage nicht?', prompt_type: 'stable_core', visibility_status: 'red' },
-        { id: 'p3', phase: 'exploration', prompt_text: 'Wie finde ich heraus, wo meine Landingpage schwächelt?', prompt_type: 'discovery', visibility_status: 'yellow' },
-        { id: 'p4', phase: 'exploration', prompt_text: 'Landingpage-Optimierung Checkliste', prompt_type: 'stable_core', visibility_status: 'red' },
-        { id: 'p5', phase: 'evaluation', prompt_text: 'Beste Tools für Landingpage-Optimierung im B2B-Bereich', prompt_type: 'stable_core', visibility_status: 'red' },
-        { id: 'p6', phase: 'evaluation', prompt_text: 'Was kostet eine professionelle Landingpage-Optimierung?', prompt_type: 'stable_core', visibility_status: 'yellow' },
-        { id: 'p7', phase: 'evaluation', prompt_text: 'Lohnt sich ein CRO-Tool oder reicht Google Analytics?', prompt_type: 'discovery', visibility_status: 'red' },
-        { id: 'p8', phase: 'evaluation', prompt_text: 'Landingpage-Optimierung: Agentur vs. Inhouse', prompt_type: 'stable_core', visibility_status: 'red' },
-        { id: 'p9', phase: 'comparison', prompt_text: 'Convertlyze vs. VWO für Landingpage-Optimierung', prompt_type: 'stable_core', visibility_status: 'red' },
-        { id: 'p10', phase: 'comparison', prompt_text: 'Landingpage-Optimierung Software im Vergleich', prompt_type: 'stable_core', visibility_status: 'red' },
-        { id: 'p11', phase: 'comparison', prompt_text: 'Unterschied zwischen A/B-Testing und CRO-Beratung', prompt_type: 'discovery', visibility_status: 'yellow' },
-        { id: 'p12', phase: 'comparison', prompt_text: 'Welche Landingpage-Analyse-Tools sind DACH-kalibriert?', prompt_type: 'stable_core', visibility_status: 'green' },
-        { id: 'p13', phase: 'decision', prompt_text: 'Landingpage-Optimierung für B2B SaaS beauftragen', prompt_type: 'stable_core', visibility_status: 'red' },
-        { id: 'p14', phase: 'decision', prompt_text: 'Wie starte ich eine Landingpage-Analyse?', prompt_type: 'stable_core', visibility_status: 'yellow' },
-        { id: 'p15', phase: 'decision', prompt_text: 'Landingpage-Optimierung ohne Agentur-Vertrag', prompt_type: 'discovery', visibility_status: 'red' },
-        { id: 'p16', phase: 'decision', prompt_text: 'Kostenlose Landingpage-Analyse testen', prompt_type: 'stable_core', visibility_status: 'yellow' },
-      ],
-    },
-    'topic-2': {
-      topic: {
-        id: 'topic-2',
-        name: 'CRO Beratung',
-        seed_keyword: 'cro beratung',
-        own_domain: 'kunde-a.de',
-        status: 'active',
-        latest_summary: 'Für "CRO Beratung" seid ihr in der Decision-Phase sichtbar, VWO wird aber in derselben Phase deutlich häufiger empfohlen.',
-      },
-      opportunities: [
-        { id: 'opp-5', type: 'ai_visible_competitor_dominates', description: 'Bei "cro beratung buchen" werdet ihr zwar erwähnt, aber VWO steht in der Antwort an erster Stelle, ihr an dritter.' },
-      ],
-      competitors: [
-        { domain: 'vwo.com', citations: 2, phases: ['decision'] },
-      ],
-      gsc_rows: [
-        { query: 'cro beratung agentur', clicks: 5, impressions: 120, ctr: 0.042, position: 9.1 },
-      ],
-      search_queries: [
-        { keyword: 'cro beratung', search_volume: 90, source: 'seed_keyword' },
-        { keyword: 'cro beratung agentur', search_volume: 120, source: 'gsc_near_miss' },
-      ],
-      prompts: [
-        { id: 'p17', phase: 'decision', prompt_text: 'CRO Beratung buchen, worauf achten?', prompt_type: 'stable_core', visibility_status: 'yellow' },
-      ],
-    },
-    // NEU: Demo-Einträge für 'collecting'/'error', damit die Vorschau die
-    // neuen Banner in renderTopicDetailView überhaupt zeigen kann. Nur
-    // Keywords vorhanden (typisch für den frühen Stand eines echten Laufs),
-    // alles andere bewusst leer, um genau den Zustand nachzustellen, der
-    // den Hinweis-Banner nötig gemacht hat.
-    'topic-3': {
-      topic: { id: 'topic-3', name: 'Conversion Funnel', status: 'collecting' },
-      opportunities: [],
-      content_ideas: [],
-      positioning_insight: null,
-      source_profiles: [],
-      search_queries: [
-        { keyword: 'conversion funnel b2b', search_volume: 70, source: 'seed_keyword' },
-      ],
-      competitors: [],
-      gsc_rows: [],
-      prompts: [],
-    },
-    'topic-4': {
-      topic: { id: 'topic-4', name: 'SaaS Onboarding', status: 'error' },
-      opportunities: [],
-      content_ideas: [],
-      positioning_insight: null,
-      source_profiles: [],
-      search_queries: [
-        { keyword: 'saas onboarding optimierung', search_volume: 40, source: 'seed_keyword' },
-      ],
-      competitors: [],
-      gsc_rows: [],
-      prompts: [],
-    },
-  };
+  var MOCK_TOPIC_DETAIL = {};
 
-  // =========================================================================
-  // MOCK-DATEN: Wöchentliche Sichtbarkeits-Entwicklung
-  // =========================================================================
-  // KOMPLETT ERFUNDEN. Es gibt aktuell KEINE Backend-Datenquelle dafür,
-  // auch nicht ansatzweise (anders als z.B. bei competitors/gsc_rows, wo
-  // wenigstens die Rohdaten in ai_sources/GSC existieren, nur nicht
-  // aggregiert). Für echte Wochen-Historie müsste main.py bei jedem
-  // /cron/weekly-Lauf einen Snapshot persistieren, das passiert aktuell
-  // nicht, es wird nur der jeweils letzte Stand verwendet.
   var MOCK_DOMAIN_TREND = {
-    'proj-1': {
-      total_prompts: 17,
-      weeks: [
-        { week: '2026-07-13', visible_prompts: 2 },
-        { week: '2026-07-20', visible_prompts: 2 },
-        { week: '2026-07-27', visible_prompts: 3 },
-        { week: '2026-08-03', visible_prompts: 3 },
-        { week: '2026-08-10', visible_prompts: 4 },
-        { week: '2026-08-17', visible_prompts: 4 },
-        { week: '2026-08-24', visible_prompts: 5 },
-        { week: '2026-08-31', visible_prompts: 5 },
-      ],
-    },
+    'proj-1': { total_prompts: 17, weeks: [] },
     'proj-2': { total_prompts: 0, weeks: [] },
   };
 
-  // =========================================================================
-  // MOCK-DATEN: Wettbewerber-Zitations-Verlauf (Logo-Zeitleiste)
-  // =========================================================================
-  // Im echten Backend kommt das aus GET /topics/{id}/competitor-citations
-  // (main.py, _get_competitor_citation_trend), berechnet aus ECHTER
-  // ai_runs/ai_sources-Historie, kein erfundener Wert wie beim
-  // Sichtbarkeits-Trend oben. Hier nur als Mock, damit die UI unabhängig
-  // vom Backend-Fortschritt gebaut werden kann. Jetzt (13.09.2026) mit
-  // by_model/prompts angereichert, analog zum echten Backend.
-  var MOCK_CITATION_TREND = {
-    'topic-1': [
-      { week: '2026-07-13', domains: [
-        { domain: 'vwo.com', citations: 2, url: 'https://vwo.com/blog/cro-tools/', by_model: { chat_gpt: 1, gemini: 1 }, prompts: ['Beste Tools für Landingpage-Optimierung im B2B-Bereich'] },
-        { domain: 'hubspot.de', citations: 1, url: 'https://hubspot.de/blog/landingpage-optimierung', by_model: { chat_gpt: 1 }, prompts: ['Was ist Landingpage-Optimierung?'] },
-      ] },
-      { week: '2026-07-20', domains: [
-        { domain: 'vwo.com', citations: 2, url: 'https://vwo.com/blog/cro-tools/', by_model: { chat_gpt: 2 }, prompts: ['Beste Tools für Landingpage-Optimierung im B2B-Bereich'] },
-        { domain: 'hubspot.de', citations: 1, url: 'https://hubspot.de/blog/landingpage-optimierung', by_model: { gemini: 1 }, prompts: ['Was ist Landingpage-Optimierung?'] },
-        { domain: 'konversion.digital', citations: 1, url: 'https://konversion.digital/ratgeber/', by_model: { chat_gpt: 1 }, prompts: ['Warum konvertiert meine Landingpage nicht?'] },
-      ] },
-      { week: '2026-07-27', domains: [
-        { domain: 'vwo.com', citations: 3, url: 'https://vwo.com/blog/cro-tools/', by_model: { chat_gpt: 2, gemini: 1 }, prompts: ['Beste Tools für Landingpage-Optimierung im B2B-Bereich', 'Convertlyze vs. VWO für Landingpage-Optimierung'] },
-        { domain: 'konversion.digital', citations: 1, url: 'https://konversion.digital/ratgeber/', by_model: { chat_gpt: 1 }, prompts: ['Warum konvertiert meine Landingpage nicht?'] },
-      ] },
-      { week: '2026-08-03', domains: [
-        { domain: 'vwo.com', citations: 2, url: 'https://vwo.com/blog/cro-tools/', by_model: { gemini: 2 }, prompts: ['Beste Tools für Landingpage-Optimierung im B2B-Bereich'] },
-        { domain: 'hubspot.de', citations: 2, url: 'https://hubspot.de/blog/landingpage-optimierung', by_model: { chat_gpt: 1, gemini: 1 }, prompts: ['Was ist Landingpage-Optimierung?'] },
-        { domain: 'diemarkenmacher.ch', citations: 1, url: 'https://diemarkenmacher.ch/insights/', by_model: { chat_gpt: 1 }, prompts: ['Landingpage-Optimierung: Agentur vs. Inhouse'] },
-      ] },
-    ],
-  };
+  var MOCK_CITATION_TREND = {};
 
-  // =========================================================================
-  // STATE
-  // =========================================================================
   var state = {
     memberstackId: null,
     memberToken:   null,
     projects:      [],
     activeProjectId: null,
     allTopics:     [],
-    activeView:       'overview', // 'overview' | 'topic-detail'
+    activeView:       'overview',
     activeTopicId:    null,
-    // GEÄNDERT (13.09.2026): 'themen' statt 'uebersicht' als Default,
-    // siehe Chat vom 13.09.2026 – beim Öffnen einer Domain soll man
-    // direkt die Themen-Liste sehen, nicht erst die aggregierte Übersicht.
-    activeSubTab:     'themen', // Tab innerhalb der jeweiligen Ansicht
+    activeSubTab:     'themen',
     topicDetailCache: {},
     isLoadingDetail:  false,
-    // NEU (14.09.2026): Rollen-Filter im Prompts-Tab (persona pro Prompt,
-    // siehe prompt_discovery.py). null = "Alle Rollen", sonst der exakte
-    // persona-String, den Claude für dieses Topic vergeben hat (variiert
-    // pro Projekt/target_group, siehe Kommentar dort).
     activePersonaFilter: null,
-    // NEU (14.09.2026): echte Domain-Dashboard-Daten (Trend/Opportunities/
-    // Content-Ideen über alle aktiven Themen einer Domain), siehe
-    // loadDomainDashboard / GET /projects/{id}/dashboard. Ersetzt
-    // MOCK_TOPIC_DETAIL für useMockData:false in getDomainDashboardData.
-    domainDashboardCache: {},        // projectId -> { trend, opportunities, contentIdeas } | null
+    domainDashboardCache: {},
     isLoadingDomainDashboard: false,
-    // NEU (14.09.2026): manueller GSC-Nachzieh-Trigger (siehe
-    // refreshGscData/main.py: refresh_gsc_endpoint), für den Fall, dass
-    // die GSC-Verbindung erst nach dem Anlegen eines Themas hergestellt
-    // wurde und man nicht bis zu 30 Tage auf den nächsten Monatslauf
-    // warten will.
     isRefreshingGsc: false,
-    // NEU (15.09.2026): Wettbewerber-Verwaltung (Vorschläge ansehen,
-    // aktive Auswahl austauschen), siehe loadCompetitorSuggestions/
-    // submitCompetitorSelection. Alles pro Topic geschlüsselt, damit ein
-    // Wechsel zwischen Themen einen begonnenen Entwurf nicht verwirft.
-    competitorSuggestionsCache: {},    // topicId -> Vorschläge[] | null
+    competitorSuggestionsCache: {},
     isLoadingCompetitorSuggestions: false,
-    competitorManageOpen: {},          // topicId -> bool
-    competitorDraftDomains: {},        // topicId -> aktuell ausgewählte Domains (Array)
+    competitorManageOpen: {},
+    competitorDraftDomains: {},
     isSubmittingCompetitors: false,
-    // NEU (15.09.2026): manuelles Hinzufügen von Prompts (Text + Phase
-    // per Picklist), siehe main.py: create_manual_prompt_endpoint.
     manualPromptDraftText: '',
     manualPromptDraftPhase: 'exploration',
     isSubmittingManualPrompt: false,
-    citationTrendCache: {},  // topicId -> weeks[], nur bei Bedarf geladen (siehe maybeLoadCitationTrend)
+    citationTrendCache: {},
     isLoadingCitationTrend: false,
-    showCreateForm: false,   // ob das "Neues Thema anlegen"-Formular gerade offen ist
+    showCreateForm: false,
     isCreating:     false,
     createError:    null,
-    limitReached:   false,  // true, wenn der letzte Anlege-Versuch am Plan-Limit (403) gescheitert ist
+    limitReached:   false,
     isBuyingSlot:   false,
-    topicUsage:     null,   // { current_count, limit, can_create }, siehe loadTopicUsage
-    pollTimer:      null,   // siehe maybeStartPolling
-    retryingTopicId: null,  // Topic-ID, für die gerade ein Retry läuft, siehe retryTopic
-        // NEU (14.09.2026): Topic-ID, für die gerade Archivieren/Aktivieren/
-    // Deaktivierung-Abbrechen läuft, siehe setTopicArchiveStatus und
-    // cancelArchiveTopic.
+    topicUsage:     null,
+    pollTimer:      null,
+    retryingTopicId: null,
     archivingTopicId: null,
-    // NEU (13.09.2026): Zitationen je Prompt, direkt im Prompts-Tab
-    // aufklappbar (nur Topic-Detailansicht, siehe togglePromptExpansion).
-    promptCitationsCache: {},      // promptId -> { chat_gpt: [...], gemini: [...] } | null
-    loadingPromptCitations: {},    // promptId -> bool
-    expandedPromptId: null,        // nur ein Prompt gleichzeitig aufgeklappt
-    expandedPromptEngine: {},      // promptId -> 'chat_gpt' | 'gemini'
-    expandedPromptRunIndex: {},    // promptId -> Index im Lauf-Verlauf (0 = neuester)
-    // NEU (13.09.2026): Keywords im selben Stil aufklappbar, aber ohne
-    // Nachladen nötig (SERP-/GSC-Felder stecken schon in search_queries).
-    keywordRankHistoryCache: {},   // keyword.id -> snapshots[] | null
-    loadingKeywordRankHistory: {}, // keyword.id -> bool
-    expandedKeywordId: null,       // nur ein Keyword gleichzeitig aufgeklappt (Kachel selbst)
-    // NEU (13.09.2026): Rank-Historie ÜBER ALLE Keywords eines Topics
-    // (kein ?keyword=-Filter), Grundlage für die übergreifende Grafik.
-    topicRankHistoryCache: {},     // topicId -> snapshots[]
+    promptCitationsCache: {},
+    loadingPromptCitations: {},
+    expandedPromptId: null,
+    expandedPromptEngine: {},
+    expandedPromptRunIndex: {},
+    keywordRankHistoryCache: {},
+    loadingKeywordRankHistory: {},
+    expandedKeywordId: null,
+    topicRankHistoryCache: {},
     isLoadingTopicRankHistory: false,
-    // NEU (13.09.2026): Wochendetail, angestoßen durch Klick auf einen
-    // Chart-Punkt/-Marker in der Übersicht (siehe showWeekDetail).
-    weekDetailCache: {},           // "topicId|week" -> Detail-Objekt | null
+    weekDetailCache: {},
     isLoadingWeekDetail: false,
-    selectedWeekDetailKey: null,   // "topicId|week" der gerade offenen Kachel, oder null
-    // GEÄNDERT (13.09.2026): Changelog kommt jetzt mit dem Topic-Detail
-    // (siehe loadTopicDetail/detail.changelog), kein eigener Cache mehr
-    // nötig, nur noch der Absende-Zustand fürs Formular.
+    selectedWeekDetailKey: null,
     isSubmittingChangelog: false,
-    // NEU (13.09.2026): zeigt standardmäßig nur die letzten 10 Einträge,
-    // "Weitere anzeigen" erhöht pro Topic um jeweils 10.
-    changelogVisibleCount: {},     // topicId -> Anzahl sichtbarer Einträge (Default 10)
-    // NEU (13.09.2026): Soft-Delete/Archiv-Ansicht fürs Änderungsprotokoll.
-    showDeletedChangelog: {},      // topicId -> bool, ob die Archiv-Liste offen ist
-    deletedChangelogCache: {},     // topicId -> gelöschte Einträge[]
+    changelogVisibleCount: {},
+    showDeletedChangelog: {},
+    deletedChangelogCache: {},
     isLoadingDeletedChangelog: false,
-    changelogDraft: '',   // GEÄNDERT (15.09.2026): wird jetzt laufend beim Tippen synchronisiert (siehe renderChangelogSection), nicht mehr nur beim Absenden
-    // NEU (14.09.2026): geführte Zusatzfelder beim Anlegen eines Eintrags
-    // ("Wo?"/"Erwarteter Effekt", werden zu entry_text zusammengesetzt,
-    // siehe composeChangelogEntryText) sowie die optionale Verknüpfung mit
-    // konkreten Keywords/Prompts dieses Topics (linked_search_query_ids/
-    // linked_prompt_ids, siehe main.py). changelogLinkSectionOpen steuert,
-    // ob die beiden Verknüpfungs-Listen überhaupt aufgeklappt sind (per
-    // Default zu, das Formular soll für den Normalfall — keine
-    // Verknüpfung — nicht überladen wirken).
-    changelogLocationDraft: null,      // 'landingpage' | 'blogartikel' | 'preisseite' | 'meta' | 'sonstiges' | null
-    changelogEffectDraft: null,        // 'mehr_zitierungen' | 'bessere_position' | 'beides' | 'unklar' | null
-    // NEU (15.09.2026): Freitext, wenn 'sonstiges' gewählt ist — ersetzt
-    // das generische Wort "Sonstiges" im komponierten Text durch das, was
-    // der Nutzer tatsächlich meint (siehe composeChangelogEntryText).
+    changelogDraft: '',
+    changelogLocationDraft: null,
+    changelogEffectDraft: null,
     changelogLocationCustomText: '',
     changelogEffectCustomText: '',
     changelogLinkSectionOpen: { keywords: false, prompts: false },
     changelogDraftLinkedIds: { keywords: [], prompts: [] },
-    // NEU (13.09.2026): eigener Sichtbarkeits-Verlauf über die Zeit, lazy
-    // geladen wenn die Übersicht geöffnet wird (siehe maybeLoadVisibilityTrend).
-    visibilityTrendCache: {},      // topicId -> weeks[]
-    // NEU (15.09.2026): kombinierte Monats-Grafik für die Übersicht
-    // (Prompt-Zitierungen + GSC-Klicks/Impressionen + neue Keywords),
-    // siehe main.py: get_monthly_overview_trend_endpoint.
-    monthlyOverviewTrendCache: {},  // topicId -> months[]
+    visibilityTrendCache: {},
+    monthlyOverviewTrendCache: {},
     isLoadingMonthlyOverviewTrend: false,
     isLoadingVisibilityTrend: false,
+    gscRankHistoryCache: {},
+    loadingGscRankHistory: {},
+    expandedGscRowId: null,
   };
 
-  // =========================================================================
-  // HELPER: State-Lookups
-  // =========================================================================
   function getProjectById(id) {
     return state.projects.filter(function (p) { return p.id === id; })[0] || null;
   }
@@ -409,16 +121,7 @@
     window.history.replaceState({}, '', url);
   }
 
-  // =========================================================================
-  // INIT
-  // =========================================================================
   async function init() {
-    // GEÄNDERT (15.09.2026): Styles + Lade-Zustand JETZT sofort setzen,
-    // ganz am Anfang und synchron, bevor irgendein await läuft (Memberstack-
-    // Roundtrip, Projekte/Themen/Nutzungsstand laden). Das reserviert die
-    // Mindesthöhe des Containers sofort, statt erst nachdem alle Daten
-    // durchgeladen sind — genau das hat vorher den Footer nach unten
-    // springen lassen, sobald das Embed fertig war.
     injectStyles();
     renderInitialLoadingState();
 
@@ -451,17 +154,12 @@
 
     maybeStartPolling();
 
-    // injectStyles() lief bereits ganz am Anfang von init(), siehe oben.
-
     var paramTab = new URLSearchParams(window.location.search).get('cvz_tab');
     if (paramTab) state.activeSubTab = paramTab;
 
-    // Deep-Link: wenn die URL bereits ein Topic referenziert (z.B. Reload
-    // in der Detail-Ansicht, oder geteilter Link), direkt dort öffnen statt
-    // erst auf der Übersicht zu landen.
     var paramTopicId = new URLSearchParams(window.location.search).get('cvz_topic');
     if (paramTopicId && getTopicById(paramTopicId)) {
-      await openTopicDetail(paramTopicId, /* resetTab */ false);
+      await openTopicDetail(paramTopicId, false);
       if (state.activeSubTab === 'wettbewerber') {
         maybeLoadCitationTrend(paramTopicId);
       }
@@ -469,12 +167,9 @@
     }
 
     render();
-    loadDomainDashboard(state.activeProjectId); // NEU (14.09.2026)
+    loadDomainDashboard(state.activeProjectId);
   }
 
-  // =========================================================================
-  // API-CALLS
-  // =========================================================================
   async function apiFetch(path, options) {
     options = options || {};
     var headers = Object.assign(
@@ -533,9 +228,6 @@
 
   async function loadTopicUsage() {
     if (CONFIG.useMockData) {
-      // Mock-Limit bewusst höher als die Anzahl der Mock-Topics gesetzt,
-      // damit die Standard-Demo weiterhin normal anlegen kann. Zum Testen
-      // des "Limit erreicht"-Zustands hier den Wert auf state.allTopics.length setzen.
       state.topicUsage = { current_count: state.allTopics.length, limit: 5, can_create: state.allTopics.length < 5 };
       return;
     }
@@ -543,10 +235,6 @@
     state.topicUsage = data;
   }
 
-  // Läuft irgendein Thema noch (status='collecting'), alle paar Sekunden
-  // GET /topics neu abfragen, bis alle fertig sind, statt den Nutzer manuell
-  // neu laden zu lassen. Bewusst nur bei useMockData:false, im Mock-Modus
-  // bleibt 'collecting' sowieso für immer stehen, das Pollen wäre sinnlos.
   function maybeStartPolling() {
     if (CONFIG.useMockData || state.pollTimer) return;
 
@@ -556,10 +244,6 @@
     state.pollTimer = setInterval(async function () {
       try {
         await loadTopics();
-        // Falls die gerade geöffnete Detail-Ansicht genau das Thema ist,
-        // das inzwischen fertig ist: Cache verwerfen und neu laden, damit
-        // aus "collecting"-Platzhalter echte Daten werden, ohne dass der
-        // Nutzer den Tab wechseln oder neu laden muss.
         if (state.activeView === 'topic-detail' && state.activeTopicId) {
           var current = getTopicById(state.activeTopicId);
           if (current && current.status !== 'collecting' && state.topicDetailCache[state.activeTopicId]) {
@@ -594,39 +278,12 @@
       content_ideas: data.content_ideas || [],
       positioning_insight: data.positioning_insight || null,
       source_profiles: data.source_profiles || [],
-      // NEU (13.09.2026): Wettbewerber-Domains des Projekts, um die
-      // Zitations-Auswertung auf echte Wettbewerber zu filtern statt auf
-      // alle zitierten Quellen (siehe renderCompetitorInsightSection).
       competitor_domains: data.competitor_domains || [],
-      // NEU (13.09.2026): dedizierte, themenweite Lücken-Analyse (siehe
-      // gap_analysis.py), getrennt von der pro-Domain-Differenzierungs-
-      // Idee in source_profiles.
       content_gaps: data.content_gaps || [],
-      // NEU (13.09.2026): Stärken/Schwächen/Chancen pro Wettbewerber-
-      // Domain, topic-spezifisch (siehe gap_analysis.py-Docstring, warum
-      // getrennt von source_profiles).
       competitor_insights: data.competitor_insights || [],
-      // GEÄNDERT (13.09.2026): Changelog kommt jetzt direkt mit dem
-      // Topic-Detail statt per Lazy-Load (siehe Begründung im Chat vom
-      // 13.09.: ein paar Textzeilen pro Topic, kein großer Datensatz wie
-      // Zitations-/Sichtbarkeits-Verlauf). Dadurch überall verfügbar, auch
-      // im Keywords-Tab für die Rank-Verlauf-Marker, nicht nur in der
-      // Übersicht.
       changelog: data.changelog || [],
       search_queries: data.search_queries || [],
       competitors: [],
-      // KORRIGIERT (14.09.2026): war fest auf [] gesetzt, unabhängig vom
-      // Backend — das GSC-Tab zeigte deshalb NIE echte Daten, selbst wenn
-      // GSC erfolgreich abgefragt wurde (siehe Chat-Verlauf 14.09.2026,
-      // "GSC nachziehen bleibt leer"). Die echten Zeilen stecken in
-      // search_queries mit source='gsc_near_miss' (siehe run_topic.py:
-      // save_gsc_near_miss), hier zur passenden Zeilenform für
-      // renderGscBlock umgeformt. ctr wird selbst berechnet, dafür gibt
-      // es keine eigene gespeicherte Spalte.
-      // NEU (15.09.2026): id mit durchgereicht (vorher verworfen), damit
-      // sich verknüpfte Änderungsprotokoll-Einträge (linked_search_query_
-      // ids referenziert search_queries.id) überhaupt zuordnen lassen,
-      // siehe renderGscBlock.
       gsc_rows: (data.search_queries || [])
         .filter(function (q) { return q.source === 'gsc_near_miss'; })
         .map(function (q) {
@@ -642,21 +299,11 @@
           };
         }),
       prompts: (data.prompts || []).map(function (p) {
-        // GEÄNDERT (13.09.2026): Backend liefert die Phase als
-        // "messymiddle_phase", renderPromptsByPhase gruppiert aber nach
-        // "phase". Ohne dieses Mapping war der Prompts-Tab immer leer,
-        // obwohl die Prompts im Backend längst vorhanden waren.
-        // visibility_status kommt jetzt (13.09.2026) tatsächlich vom
-        // Backend berechnet mit (siehe get_topic_detail in main.py),
-        // vorher stand hier immer hart null.
         return Object.assign({ visibility_status: null }, p, { phase: p.messymiddle_phase || null });
       }),
     };
   }
 
-  // NEU (14.09.2026): echte Aggregation über GET /projects/{id}/dashboard
-  // statt der bisherigen client-seitigen MOCK_TOPIC_DETAIL-Zusammenrechnung
-  // in getDomainDashboardData (siehe Chat-Verlauf 14.09.2026).
   async function loadDomainDashboardData(projectId) {
     var data = await apiFetch('/projects/' + projectId + '/dashboard');
     return {
@@ -666,10 +313,6 @@
     };
   }
 
-  // Cache-Wrapper analog zu openTopicDetail: lädt bei Bedarf nach, rendert
-  // vor und nach dem Request. Bewusst NICHT im Mock-Modus aktiv, dort bleibt
-  // getDomainDashboardData weiterhin an MOCK_TOPIC_DETAIL/MOCK_DOMAIN_TREND
-  // hängen (siehe dortiger Fallback).
   async function loadDomainDashboard(projectId, force) {
     if (!projectId || CONFIG.useMockData) return;
     if (!force && (state.domainDashboardCache[projectId] || state.isLoadingDomainDashboard)) return;
@@ -697,7 +340,7 @@
   }
 
   async function maybeLoadCitationTrend(topicId) {
-    if (!topicId || state.citationTrendCache[topicId]) return; // schon geladen oder gecacht
+    if (!topicId || state.citationTrendCache[topicId]) return;
     state.isLoadingCitationTrend = true;
     render();
     try {
@@ -710,9 +353,6 @@
     render();
   }
 
-  // NEU (13.09.2026): eigener Sichtbarkeits-Verlauf (own_domain_mentioned/
-  // cited/recommended pro Woche), analog zum Wettbewerber-Zitations-
-  // Verlauf, aber über /visibility-trend (main.py: _get_own_visibility_trend).
   async function loadVisibilityTrend(topicId) {
     if (CONFIG.useMockData) {
       return [];
@@ -735,7 +375,6 @@
     render();
   }
 
-  // NEU (15.09.2026): siehe main.py: get_monthly_overview_trend_endpoint.
   async function loadMonthlyOverviewTrend(topicId) {
     if (CONFIG.useMockData) {
       return [];
@@ -758,16 +397,12 @@
     render();
   }
 
-  // NEU (13.09.2026): Rank-Verlauf für ein einzelnes Keyword, lazy geladen
-  // beim Aufklappen (siehe togglePromptExpansion-Pendant unten).
   async function loadKeywordRankHistory(topicId, keyword) {
     if (CONFIG.useMockData) return [];
     var data = await apiFetch('/topics/' + topicId + '/rank-history?keyword=' + encodeURIComponent(keyword));
     return data.snapshots || [];
   }
 
-  // NEU (13.09.2026): Rank-Verlauf ÜBER ALLE Keywords (kein ?keyword=),
-  // für die übergreifende Grafik in der Übersicht.
   async function loadTopicRankHistory(topicId) {
     if (CONFIG.useMockData) return [];
     var data = await apiFetch('/topics/' + topicId + '/rank-history');
@@ -788,8 +423,6 @@
     render();
   }
 
-  // NEU (13.09.2026): Wochendetail (siehe main.py: /topics/{id}/week-detail),
-  // angestoßen durch Klick auf einen Punkt/Marker im Übersicht-Chart.
   async function loadWeekDetail(topicId, week) {
     if (CONFIG.useMockData) return null;
     return apiFetch('/topics/' + topicId + '/week-detail?week=' + encodeURIComponent(week));
@@ -798,7 +431,7 @@
   async function showWeekDetail(topicId, week) {
     var key = topicId + '|' + week;
     if (state.selectedWeekDetailKey === key) {
-      state.selectedWeekDetailKey = null; // erneuter Klick auf denselben Punkt schließt wieder
+      state.selectedWeekDetailKey = null;
       render();
       return;
     }
@@ -838,19 +471,33 @@
     render();
   }
 
-  // NEU (14.09.2026): setzt die optionalen geführten Felder ("Wo?" /
-  // "Erwarteter Effekt") vor den freien Text, statt sie als eigene
-  // Backend-Spalten zu speichern (siehe Chat-Verlauf 14.09.2026: kein
-  // Schema-Umbau nötig, entry_text bleibt ein einzelnes Feld). Reine
-  // Text-Komposition, keine Seiteneffekte — auch fürs Vorschau-Rendering
-  // im Formular selbst genutzt (renderChangelogSection).
-  // GEÄNDERT (15.09.2026): locationCustom/effectCustom ersetzen das
-  // generische Wort "Sonstiges" durch den vom Nutzer eingegebenen Text,
-  // wenn vorhanden (leerer/fehlender Freitext fällt weiter auf das
-  // generische Label zurück). Trennzeichen vor "erwarteter Effekt" ist
-  // jetzt ein Mittelpunkt statt eines Gedankenstrichs, konsistent mit dem
-  // Trennzeichen, das die Metazeile jedes Eintrags ohnehin schon nutzt
-  // (siehe cvz-changelog-meta).
+  // NEU (15.09.2026): GSC-Zeilen im selben Auf-/Zuklapp-Stil wie Keywords
+  // (siehe toggleKeywordExpansion), damit auch hier die Entwicklung über
+  // die Zeit sichtbar wird (Kundenwunsch: "GSC-Daten ... in dem Stil, nur
+  // mit den zusätzlichen Tabellendaten"). Nutzt denselben rank-history-
+  // Endpunkt wie Keywords — dieselben Suchanfrage-Texte, dieselbe
+  // Datenquelle (search_rank_snapshots), kein neuer Endpunkt nötig.
+  async function toggleGscRowExpansion(topicId, rowId, keywordText) {
+    if (state.expandedGscRowId === rowId) {
+      state.expandedGscRowId = null;
+      render();
+      return;
+    }
+    state.expandedGscRowId = rowId;
+    if (!state.gscRankHistoryCache[rowId]) {
+      state.loadingGscRankHistory[rowId] = true;
+      render();
+      try {
+        state.gscRankHistoryCache[rowId] = await loadKeywordRankHistory(topicId, keywordText);
+      } catch (e) {
+        console.error('[CVZ Visibility] GSC-Verlauf konnte nicht geladen werden:', e);
+        state.gscRankHistoryCache[rowId] = [];
+      }
+      state.loadingGscRankHistory[rowId] = false;
+    }
+    render();
+  }
+
   function composeChangelogEntryText(rawText, location, effect, locationCustom, effectCustom) {
     var locationLabel = location === 'sonstiges' && (locationCustom || '').trim()
       ? locationCustom.trim()
@@ -864,20 +511,10 @@
   }
 
   async function submitChangelogEntry(topicId) {
-    // GEÄNDERT (13.09.2026): liest den Wert direkt aus dem Textfeld (wie
-    // submitCreateForm), aber merkt ihn sich zusätzlich kurz in
-    // state.changelogDraft: der Klick auf "Absenden" löst selbst schon
-    // einen render() für den Lade-Zustand aus, der würde das Textfeld
-    // sonst sofort leeren, bevor überhaupt klar ist, ob das Speichern
-    // geklappt hat.
     var textarea = document.getElementById('cvz-changelog-input');
     var rawText = ((textarea && textarea.value) || '').trim();
     if (!rawText || state.isSubmittingChangelog) return;
 
-    // NEU (14.09.2026): geführte Felder + Verknüpfungen mit in den Entwurf
-    // übernehmen, aus demselben Grund wie rawText oben — der Lade-Render
-    // darf die gerade getroffene Auswahl nicht verwerfen, bevor klar ist,
-    // ob das Speichern klappt.
     var entryText = composeChangelogEntryText(
       rawText, state.changelogLocationDraft, state.changelogEffectDraft,
       state.changelogLocationCustomText, state.changelogEffectCustomText,
@@ -907,8 +544,6 @@
         });
         _prependChangelogEntry(topicId, data.entry);
       }
-      // Nur bei Erfolg zurücksetzen, bei Fehler bleibt die ganze Auswahl
-      // erhalten, damit der Nutzer nicht von vorn anfangen muss.
       state.changelogDraft = '';
       state.changelogLocationDraft = null;
       state.changelogEffectDraft = null;
@@ -918,27 +553,18 @@
       state.changelogLinkSectionOpen = { keywords: false, prompts: false };
     } catch (e) {
       console.error('[CVZ Visibility] Changelog-Eintrag konnte nicht gespeichert werden:', e);
-      // Bewusst kein showErrorMessage(): würde die komplette App
-      // überschreiben, nur weil ein Formular-Submit fehlschlug. Entwurf
-      // bleibt im Textfeld stehen, der Nutzer kann es erneut versuchen.
     }
 
     state.isSubmittingChangelog = false;
     render();
   }
 
-  // NEU (13.09.2026): schreibt einen neu angelegten Eintrag direkt in den
-  // bereits geladenen topicDetailCache (dort lebt detail.changelog jetzt,
-  // siehe loadTopicDetail), es gibt keinen separaten Changelog-Cache mehr.
   function _prependChangelogEntry(topicId, entry) {
     var cached = state.topicDetailCache[topicId];
     if (!cached) return;
     cached.changelog = [entry].concat(cached.changelog || []);
   }
 
-  // NEU (13.09.2026): Soft-Delete. Fragt kurz nach (native confirm reicht
-  // hier, kein eigenes Modal nötig für eine wiederherstellbare Aktion),
-  // entfernt den Eintrag danach aus der sichtbaren Liste.
   async function deleteChangelogEntry(topicId, entryId) {
     if (!window.confirm('Diesen Eintrag l\u00f6schen? Er bleibt ' + CHANGELOG_DELETED_RETENTION_DAYS + ' Tage lang unter "Gel\u00f6schte Eintr\u00e4ge" wiederherstellbar.')) {
       return;
@@ -949,25 +575,14 @@
       if (cached && cached.changelog) {
         cached.changelog = cached.changelog.filter(function (e) { return e.id !== entryId; });
       }
-      // Archiv-Cache verwerfen, damit er beim nächsten Öffnen den frisch
-      // gelöschten Eintrag mit anzeigt, statt einen veralteten Stand zu zeigen.
       delete state.deletedChangelogCache[topicId];
     } catch (e) {
       console.error('[CVZ Visibility] Eintrag konnte nicht gel\u00f6scht werden:', e);
-      // NEU (14.09.2026): vorher nur console.error, der Eintrag blieb
-      // dadurch scheinbar grundlos stehen (siehe Chat-Verlauf 14.09.2026 —
-      // z.B. wenn die deleted_at-Migration in Supabase noch fehlt, schlägt
-      // der Request fehl und die Zeile bleibt unverändert). Jetzt sichtbar,
-      // damit klar ist: der Klick kam an, das Löschen ist fehlgeschlagen.
       await showCvzAlert('Eintrag konnte nicht gel\u00f6scht werden: ' + (e.message || 'Unbekannter Fehler'));
     }
     render();
   }
 
-  // NEU (13.09.2026): macht einen Soft-Delete rückgängig. Baut den
-  // wiederhergestellten Eintrag aus dem bereits geladenen Archiv-Cache
-  // zusammen (der hat entry_text/author_name/created_at schon), kein
-  // zusätzlicher Request nötig, um ihn zurück in die Hauptliste zu holen.
   async function restoreChangelogEntry(topicId, entryId) {
     try {
       await apiFetch('/topics/' + topicId + '/changelog/' + entryId + '/restore', { method: 'POST' });
@@ -980,9 +595,6 @@
           {
             id: restored.id, entry_text: restored.entry_text, author_name: restored.author_name,
             created_at: restored.created_at,
-            // NEU (14.09.2026): Verknüpfungen bei der Wiederherstellung
-            // mit übernehmen, sonst verschwinden sie sichtbar aus der
-            // Hauptliste, obwohl sie in der DB unverändert weiter bestehen.
             linked_search_query_ids: restored.linked_search_query_ids || [],
             linked_prompt_ids: restored.linked_prompt_ids || [],
           },
@@ -992,14 +604,11 @@
       }
     } catch (e) {
       console.error('[CVZ Visibility] Eintrag konnte nicht wiederhergestellt werden:', e);
-      // NEU (14.09.2026): wie bei deleteChangelogEntry, siehe Kommentar dort.
       await showCvzAlert('Eintrag konnte nicht wiederhergestellt werden: ' + (e.message || 'Unbekannter Fehler'));
     }
     render();
   }
 
-  // NEU (13.09.2026): Archiv-Ansicht auf-/zuklappen, lazy geladen beim
-  // ersten Öffnen (siehe main.py: /topics/{id}/changelog/deleted).
   async function toggleDeletedChangelog(topicId) {
     state.showDeletedChangelog[topicId] = !state.showDeletedChangelog[topicId];
     if (state.showDeletedChangelog[topicId] && !state.deletedChangelogCache[topicId]) {
@@ -1017,16 +626,8 @@
     render();
   }
 
-  // =========================================================================
-  // NEU (13.09.2026): Zitationen je Prompt (Antwort + Quellen, letzte
-  // PROMPT_CITATION_RUN_LIMIT Läufe je Engine), lazy geladen beim Aufklappen
-  // eines Prompts im Prompts-Tab. Nur in der Topic-Detailansicht nutzbar,
-  // siehe renderPromptsByPhase(prompts, enableCitations).
-  // =========================================================================
   async function loadPromptCitations(topicId, promptId) {
     if (CONFIG.useMockData) {
-      // Mock-Modus liefert keine echten Läufe, siehe MOCK_TOPIC_DETAIL.
-      // Leerer, aber gültiger Zustand, damit die UI nicht bricht.
       return { prompt_id: promptId, prompt_text: '', chat_gpt: [], gemini: [] };
     }
     return apiFetch('/topics/' + topicId + '/prompts/' + promptId + '/citations');
@@ -1062,23 +663,11 @@
     if (resetTab !== false) {
       state.activeSubTab = 'uebersicht';
     } else if (TOPIC_TABS.every(function (t) { return t.id !== state.activeSubTab; })) {
-      // NEU (13.09.2026): kommt man mit einem Tab hierher, den die Topic-
-      // Detailansicht gar nicht kennt (z.B. "themen" aus der Domain-
-      // Ansicht, seit dort Default), auf die Topic-Übersicht zurückfallen,
-      // statt mit einem nicht markierten Tab hängen zu bleiben.
       state.activeSubTab = 'uebersicht';
     }
     state.activeView = 'topic-detail';
     if (state.activeTopicId !== topicId) {
-      // NEU (14.09.2026): Rollen-Filter ist pro Topic sinnvoll (Personas
-      // unterscheiden sich pro Projekt), beim Wechsel auf ein anderes
-      // Topic soll kein Filter eines fremden Themas hängen bleiben.
       state.activePersonaFilter = null;
-      // NEU (14.09.2026): dieselbe Begründung für die Changelog-
-      // Verknüpfungsauswahl — Keyword-/Prompt-IDs gehören zu genau einem
-      // Topic, ohne Reset könnten unsichtbar IDs eines fremden Themas im
-      // Auswahl-Array hängen bleiben (Backend validiert das zwar gegen
-      // das Topic weg, ist aber unsauber).
       state.changelogDraftLinkedIds = { keywords: [], prompts: [] };
       state.changelogLinkSectionOpen = { keywords: false, prompts: false };
       state.changelogLocationDraft = null;
@@ -1089,12 +678,6 @@
     state.activeTopicId = topicId;
     var topic = getTopicById(topicId);
     if (topic) state.activeProjectId = topic.project_id;
-    // NEU (15.09.2026): falls das Polling-Intervall aus irgendeinem Grund
-    // nicht (mehr) läuft (z.B. Seite neu geladen, während dieses Thema
-    // schon 'collecting' war), hier sicherstellen, dass es für ein gerade
-    // geöffnetes, noch laufendes Thema neu anläuft — sonst aktualisiert
-    // sich die offene Detailseite nie von selbst, bis man sie verlässt
-    // und wieder öffnet (siehe openTopicDetail-Fix oben).
     if (topic && topic.status === 'collecting') {
       maybeStartPolling();
     }
@@ -1103,16 +686,6 @@
     render();
 
     try {
-      // GEÄNDERT (15.09.2026): vorher nur "wenn noch NICHTS im Cache
-      // steht" — das reicht nicht. Ein früher (während des Laufs)
-      // gecachter Eintrag mit status='collecting' bleibt sonst für immer
-      // stehen, auch wenn der Lauf im Hintergrund längst fertig ist,
-      // sobald man die Seite verlässt und später zurückkommt (das
-      // Polling-Intervall unten aktualisiert den Cache nur, solange man
-      // GENAU in dem Moment auf dieser Detailseite ist — verpasst man den
-      // Moment, bleibt der veraltete Stand für immer hängen, siehe Chat-
-      // Verlauf 15.09.2026). Ein gecachter 'collecting'-Stand wird daher
-      // hier zusätzlich nie vertraut, sondern jedes Mal neu abgefragt.
       var cachedDetail = state.topicDetailCache[topicId];
       if (!cachedDetail || (cachedDetail.topic && cachedDetail.topic.status === 'collecting')) {
         state.topicDetailCache[topicId] = await loadTopicDetail(topicId);
@@ -1125,10 +698,6 @@
     state.isLoadingDetail = false;
     render();
 
-    // GEÄNDERT (13.09.2026): Changelog lazy-load rausgenommen, kommt jetzt
-    // direkt mit dem Topic-Detail (siehe loadTopicDetail). Sichtbarkeits-
-    // und Rank-Verlauf bleiben lazy, siehe maybeLoadCitationTrend für den
-    // Wettbewerber-Tab als Vorbild.
     if (state.activeSubTab === 'uebersicht') {
       maybeLoadVisibilityTrend(topicId);
       maybeLoadTopicRankHistory(topicId);
@@ -1139,15 +708,12 @@
   function backToOverview() {
     state.activeView = 'overview';
     state.activeTopicId = null;
-    state.activeSubTab = 'themen'; // GEÄNDERT (13.09.2026): siehe activeSubTab-Default oben
+    state.activeSubTab = 'themen';
     updateUrlParams({ cvz_topic: null, cvz_tab: 'themen' });
     render();
-    loadDomainDashboard(state.activeProjectId); // NEU (14.09.2026): no-op falls schon gecacht
+    loadDomainDashboard(state.activeProjectId);
   }
 
-  // Zentrale Auswahl-Funktion für die zwei Picklisten (Domain/Topic):
-  // "project:<id>" zeigt die Domain-Übersicht, "topic:<id>" springt direkt
-  // in die Detail-Ansicht.
   function selectFromPicker(rawValue) {
     var separatorIndex = rawValue.indexOf(':');
     var kind = rawValue.slice(0, separatorIndex);
@@ -1157,23 +723,20 @@
       state.activeProjectId = id;
       state.activeView = 'overview';
       state.activeTopicId = null;
-      state.activeSubTab = 'themen'; // GEÄNDERT (13.09.2026): siehe activeSubTab-Default oben
+      state.activeSubTab = 'themen';
       updateUrlParams({ cvz_project: id, cvz_topic: null, cvz_tab: 'themen' });
       render();
-      loadDomainDashboard(id); // NEU (14.09.2026): echte Trend/Opportunity/Content-Idee-Daten nachladen
+      loadDomainDashboard(id);
     } else if (kind === 'topic') {
       openTopicDetail(id);
     }
   }
 
-    var STATUS_LABELS = {
+  var STATUS_LABELS = {
     active:     { label: 'Aktiv',         className: 'cvz-status-active' },
     collecting: { label: 'Sammelt Daten', className: 'cvz-status-collecting' },
     error:      { label: 'Fehler',        className: 'cvz-status-error' },
     archived:   { label: 'Archiviert',    className: 'cvz-status-archived' },
-    // NEU (14.09.2026): Thema wartet auf einen frei werdenden Slot, siehe
-    // create_topic_endpoint (Backend legt es mit status='queued' an, statt
-    // mit 403 abzulehnen, wenn zumindest eine Deaktivierung ansteht).
     queued:     { label: 'Wartet',        className: 'cvz-status-queued' },
   };
 
@@ -1197,14 +760,13 @@
   var VISIBILITY_LABELS = {
     green:  'Zitiert',
     yellow: 'Erwähnt, nicht zitiert',
-    red:    'Nicht vorhanden',
+    // GEÄNDERT (15.09.2026): war "Nicht vorhanden" — unklar, WAS nicht
+    // vorhanden ist (siehe Chat-Verlauf 15.09.2026). Gemeint ist: die
+    // eigene Domain taucht in den ausgewerteten ChatGPT/Gemini-Antworten
+    // zu diesem Prompt nicht auf, weder erwähnt noch zitiert.
+    red:    'In KI-Antworten nicht sichtbar',
   };
 
-  // NEU (14.09.2026): geführte Auswahl-Felder beim Anlegen eines
-  // Changelog-Eintrags (siehe Chat-Verlauf 14.09.2026 — statt einem
-  // einzelnen freien Textfeld). Beide optional, werden bei Auswahl vor
-  // den freien entry_text gesetzt (siehe composeChangelogEntryText),
-  // keine eigenen Backend-Spalten dafür nötig.
   var CHANGELOG_LOCATION_LABELS = {
     landingpage: 'Landingpage',
     blogartikel: 'Blogartikel',
@@ -1223,12 +785,6 @@
   };
   var CHANGELOG_EFFECT_ORDER = ['mehr_zitierungen', 'bessere_position', 'beides', 'unklar', 'sonstiges'];
 
-  // NEU (14.09.2026): für das Content-Typ-Badge in der Prompt-Zeile
-  // (siehe main.py: _compute_top_cited_domain_by_prompt +
-  // source_analysis.py: source_content_profiles.content_type). Fallback
-  // auf den rohen Wert, falls Claude dort mal eine Kategorie außerhalb
-  // dieser Liste liefert (die Kategorien in source_analysis.py sind ein
-  // Vorschlag im System-Prompt, kein hart erzwungener Enum).
   var CONTENT_TYPE_LABELS = {
     review_plattform:  'Review-Plattform',
     vergleichsartikel: 'Vergleichsartikel',
@@ -1239,24 +795,12 @@
     sonstiges:         'Sonstiges',
   };
 
-  // NEU (13.09.2026): für die dedizierte Lücken-Analyse (content_gaps).
   var GAP_PRIORITY_LABELS = {
     hoch:    'Hohe Priorität',
     mittel:  'Mittlere Priorität',
     niedrig: 'Niedrige Priorität',
   };
 
-  // GEÄNDERT (13.09.2026): Die alten Keys 'gsc'/'keyword' existierten in
-  // den echten Backend-Daten nie (die echten source-Werte sind
-  // seed_keyword/related_keywords/keyword_ideas/keyword_suggestions/paa/
-  // gsc_near_miss), deshalb zeigte die Keywords-Tabelle vorher überall
-  // rohe technische Bezeichner statt Labels. Außerdem auf Wunsch
-  // umgangssprachlicher benannt: "Primäres Keyword" statt "seed_keyword",
-  // "Keyword-Idee" statt "related_keywords".
-  // GEÄNDERT (13.09.2026): "paa" ergänzt um den ausdrücklichen Hinweis,
-  // dass diese Fragen von Google kommen (People-Also-Ask aus der
-  // organischen SERP, nicht von ChatGPT/Gemini), das war vorher aus dem
-  // Label allein nicht ersichtlich.
   var KEYWORD_SOURCE_LABELS = {
     seed_keyword:         'Primäres Keyword',
     related_keywords:     'Keyword-Idee',
@@ -1266,8 +810,6 @@
     gsc_near_miss:        'Google Search Console',
   };
 
-  // NEU (13.09.2026): für die Modell-Aufschlüsselung im Wettbewerber-Tab
-  // und für die Engine-Tabs im aufgeklappten Prompt.
   var MODEL_LABELS = {
     chat_gpt: 'ChatGPT',
     gemini:   'Gemini',
@@ -1281,21 +823,11 @@
     { id: 'gsc', label: 'GSC-Performance' },
   ];
 
-  // GEÄNDERT (13.09.2026): "themen" steht jetzt vorne, ist außerdem der
-  // Default-Tab beim Öffnen einer Domain (siehe activeSubTab-Deklaration
-  // oben und selectFromPicker/backToOverview).
-  // GEÄNDERT (14.09.2026): Wettbewerber/Keywords/Prompts entfernt — das ist
-  // themenspezifische Auswertung (siehe Chat-Verlauf), auf Domain-Ebene
-  // bisher ohnehin nur über MOCK_TOPIC_DETAIL simuliert (siehe
-  // getDomainDashboardData). Bleibt in TOPIC_TABS unverändert erhalten.
   var DOMAIN_TABS = [
     { id: 'themen', label: 'Themen' },
     { id: 'uebersicht', label: 'Übersicht' },
   ];
 
-  // =========================================================================
-  // UI: Dispatcher
-  // =========================================================================
   function render() {
     var container = document.getElementById('cvz-visibility-app');
     if (!container) {
@@ -1303,17 +835,6 @@
       return;
     }
 
-    // NEU (15.09.2026): Fokus + Cursorposition merken, BEVOR der Container
-    // komplett neu aufgebaut wird. Ohne das flog man z.B. beim Tippen im
-    // "Eigenen Prompt hinzufügen"-Feld nach wenigen Zeichen aus dem
-    // Eingabefeld: das 5-Sekunden-Polling (siehe maybeStartPolling) ruft
-    // render() auf, sobald IRGENDEIN Thema noch 'collecting' ist – auch
-    // ein ganz anderes Thema als das gerade geöffnete –, und jeder
-    // render() ersetzt via innerHTML = '' das komplette DOM, wodurch das
-    // Eingabefeld als neues Element ohne Fokus entsteht. Betrifft jedes
-    // Text-/Textarea-Feld mit eigener id im Container (Changelog-Eintrag,
-    // eigener Prompt, Wettbewerber-Freitext), nicht nur das eine im
-    // Screenshot.
     var focusedId = null, selectionStart = null, selectionEnd = null;
     var activeEl = document.activeElement;
     if (activeEl && activeEl.id && container.contains(activeEl)) {
@@ -1338,7 +859,7 @@
       if (toRefocus) {
         toRefocus.focus();
         if (selectionStart !== null && typeof toRefocus.setSelectionRange === 'function') {
-          try { toRefocus.setSelectionRange(selectionStart, selectionEnd); } catch (e) { /* z.B. bei <select>, egal */ }
+          try { toRefocus.setSelectionRange(selectionStart, selectionEnd); } catch (e) { }
         }
       }
     }
@@ -1363,11 +884,6 @@
       submitBuyTopicSlot();
       return;
     }
-    // NEU (13.09.2026): Klicks innerhalb der aufgeklappten Prompt-Zitationen
-    // (Lauf-Auswahl, Engine-Tab, Aufklappen/Zuklappen der Zeile selbst).
-    // Bewusst VOR data-cvz-tab geprüft, alle drei sitzen strukturell nicht
-    // ineinander verschachtelt, Reihenfolge ist hier unkritisch, aber so
-    // bleiben verwandte Prompt-Handler beieinander.
     var runSelect = event.target.closest('[data-cvz-run-select]');
     if (runSelect) {
       var runOwner = runSelect.getAttribute('data-cvz-run-owner');
@@ -1383,11 +899,6 @@
       render();
       return;
     }
-    // NEU (15.09.2026): Lösch-Button eines manuell hinzugefügten Prompts.
-    // MUSS vor data-cvz-prompt-toggle geprüft werden, der Button sitzt
-    // innerhalb der klickbaren Zeile, die selbst auch data-cvz-prompt-
-    // toggle trägt (gleiches Prinzip wie beim Retry-Button in der Themen-
-    // Tabelle weiter unten).
     var promptDelete = event.target.closest('[data-cvz-prompt-delete]');
     if (promptDelete) {
       deleteManualPrompt(state.activeTopicId, promptDelete.getAttribute('data-cvz-prompt-delete'));
@@ -1398,8 +909,6 @@
       togglePromptExpansion(promptToggle.getAttribute('data-cvz-prompt-toggle'));
       return;
     }
-    // NEU (14.09.2026): Rollen-Filter-Chips im Prompts-Tab (siehe
-    // renderPersonaFilterChips). Leerer Attributwert ("") heißt "Alle".
     var personaFilter = event.target.closest('[data-cvz-persona-filter]');
     if (personaFilter) {
       var personaValue = personaFilter.getAttribute('data-cvz-persona-filter');
@@ -1407,7 +916,6 @@
       render();
       return;
     }
-    // NEU (13.09.2026): Keyword-Zeilen im selben Auf-/Zuklapp-Stil.
     var keywordToggle = event.target.closest('[data-cvz-keyword-toggle]');
     if (keywordToggle) {
       toggleKeywordExpansion(
@@ -1417,15 +925,11 @@
       );
       return;
     }
-    // NEU (13.09.2026): Changelog-Formular absenden.
     var changelogSubmit = event.target.closest('[data-cvz-changelog-submit]');
     if (changelogSubmit) {
       submitChangelogEntry(state.activeTopicId);
       return;
     }
-    // NEU (14.09.2026): geführte "Wo?"/"Erwarteter Effekt"-Chips. Erneutes
-    // Klicken derselben Chip hebt die Auswahl wieder auf (Toggle), beide
-    // Felder sind optional.
     var changelogLocation = event.target.closest('[data-cvz-changelog-location]');
     if (changelogLocation) {
       var locationValue = changelogLocation.getAttribute('data-cvz-changelog-location');
@@ -1440,7 +944,6 @@
       render();
       return;
     }
-    // NEU (14.09.2026): Verknüpfungs-Listen (Keywords/Prompts) auf-/zuklappen.
     var changelogLinkToggle = event.target.closest('[data-cvz-changelog-link-toggle]');
     if (changelogLinkToggle) {
       var linkKind = changelogLinkToggle.getAttribute('data-cvz-changelog-link-toggle');
@@ -1448,8 +951,6 @@
       render();
       return;
     }
-    // NEU (14.09.2026): einzelne Keyword-/Prompt-Chip in der Verknüpfungs-
-    // Liste an-/abwählen. Mehrfachauswahl, daher Array statt Einzelwert.
     var changelogLinkChip = event.target.closest('[data-cvz-changelog-link-chip]');
     if (changelogLinkChip) {
       var chipKind = changelogLinkChip.getAttribute('data-cvz-changelog-link-kind');
@@ -1464,8 +965,6 @@
       render();
       return;
     }
-    // NEU (13.09.2026): "Weitere anzeigen" im Änderungsprotokoll, zeigt
-    // pro Klick 10 mehr, pro Topic getrennt gezählt.
     var changelogMore = event.target.closest('[data-cvz-changelog-more]');
     if (changelogMore) {
       var moreTopicId = changelogMore.getAttribute('data-cvz-changelog-more');
@@ -1473,8 +972,6 @@
       render();
       return;
     }
-    // NEU (13.09.2026): Changelog-Eintrag löschen/wiederherstellen, Archiv
-    // auf-/zuklappen.
     var changelogDelete = event.target.closest('[data-cvz-changelog-delete]');
     if (changelogDelete) {
       deleteChangelogEntry(state.activeTopicId, changelogDelete.getAttribute('data-cvz-changelog-delete'));
@@ -1490,8 +987,6 @@
       toggleDeletedChangelog(state.activeTopicId);
       return;
     }
-    // NEU (13.09.2026): Klick auf einen Chart-Punkt/-Marker öffnet die
-    // Wochendetail-Kachel (Prompts/Keywords/Changelog dieser Woche).
     var weekDetailPoint = event.target.closest('[data-cvz-week-detail]');
     if (weekDetailPoint) {
       showWeekDetail(state.activeTopicId, weekDetailPoint.getAttribute('data-cvz-week-detail'));
@@ -1527,42 +1022,33 @@
     var retryBtn = event.target.closest('[data-cvz-retry-topic]');
     if (retryBtn) {
       retryTopic(retryBtn.getAttribute('data-cvz-retry-topic'));
-      return; // WICHTIG: vor der Zeilen-Navigation prüfen, der Button sitzt
-              // innerhalb einer Zeile, die selbst auch data-cvz-topic-id trägt.
+      return;
     }
-    // NEU (14.09.2026): Deaktivieren/Aktivieren, gleiches Prinzip wie beim
-    // Retry-Button oben — auch hier VOR der Zeilen-Navigation prüfen.
     var archiveBtn = event.target.closest('[data-cvz-archive-topic]');
     if (archiveBtn) {
       setTopicArchiveStatus(archiveBtn.getAttribute('data-cvz-archive-topic'), true);
       return;
     }
-        var reactivateBtn = event.target.closest('[data-cvz-reactivate-topic]');
+    var reactivateBtn = event.target.closest('[data-cvz-reactivate-topic]');
     if (reactivateBtn) {
       setTopicArchiveStatus(reactivateBtn.getAttribute('data-cvz-reactivate-topic'), false);
       return;
     }
-    // NEU (14.09.2026): "Deaktivierung abbrechen", gleiches Prinzip.
     var cancelArchiveBtn = event.target.closest('[data-cvz-cancel-archive-topic]');
     if (cancelArchiveBtn) {
       cancelArchiveTopic(cancelArchiveBtn.getAttribute('data-cvz-cancel-archive-topic'));
       return;
     }
-    // NEU (14.09.2026): endgültiges Löschen (nur für nie gestartete Themen,
-    // siehe deleteTopicPermanently/main.py: delete_topic_endpoint).
     var deleteTopicBtn = event.target.closest('[data-cvz-delete-topic]');
     if (deleteTopicBtn) {
       deleteTopicPermanently(deleteTopicBtn.getAttribute('data-cvz-delete-topic'));
       return;
     }
-    // NEU (14.09.2026): manueller GSC-Nachzieh-Trigger.
     var refreshGscBtn = event.target.closest('[data-cvz-refresh-gsc]');
     if (refreshGscBtn) {
       refreshGscData(refreshGscBtn.getAttribute('data-cvz-refresh-gsc'));
       return;
     }
-    // NEU (15.09.2026): Wettbewerber-Verwaltung (Vorschläge ansehen,
-    // aktive Auswahl austauschen).
     var competitorManageToggle = event.target.closest('[data-cvz-competitor-manage-toggle]');
     if (competitorManageToggle) {
       var manageTopicId = competitorManageToggle.getAttribute('data-cvz-competitor-manage-toggle');
@@ -1606,10 +1092,20 @@
       submitCompetitorSelection(competitorSubmit.getAttribute('data-cvz-competitor-submit'));
       return;
     }
-    // NEU (15.09.2026): manuelles Hinzufügen eines Prompts.
     var manualPromptSubmit = event.target.closest('[data-cvz-manual-prompt-submit]');
     if (manualPromptSubmit) {
       submitManualPrompt(manualPromptSubmit.getAttribute('data-cvz-manual-prompt-submit'));
+      return;
+    }
+    // NEU (15.09.2026): GSC-Zeilen im selben Auf-/Zuklapp-Stil wie Keywords,
+    // siehe renderGscBlock/toggleGscRowExpansion.
+    var gscToggle = event.target.closest('[data-cvz-gsc-toggle]');
+    if (gscToggle) {
+      toggleGscRowExpansion(
+        state.activeTopicId,
+        gscToggle.getAttribute('data-cvz-gsc-toggle'),
+        gscToggle.getAttribute('data-cvz-gsc-text'),
+      );
       return;
     }
     var topicCard = event.target.closest('[data-cvz-topic-id]');
@@ -1633,13 +1129,6 @@
     return nav;
   }
 
-  // =========================================================================
-  // UI: zwei getrennte Picklisten (Domain, Topic) statt einer gemeinsamen
-  // Such-Combobox. GEÄNDERT (13.09.2026): vorher ein einziges Textfeld mit
-  // Fuzzy-Suche über Domains UND Themen gemischt in einem Dropdown, auf
-  // Wunsch jetzt klar getrennt: die Themen-Picklist zeigt außerdem nur
-  // Themen DER GERADE GEWÄHLTEN Domain, nicht alle Themen team-weit.
-  // =========================================================================
   function renderDomainAndTopicPicker() {
     var wrap = document.createElement('div');
     wrap.className = 'cvz-picker-row';
@@ -1664,9 +1153,6 @@
         domainSelect.appendChild(option);
       });
     }
-    // Direkt gebunden statt über Klick-Delegation, "change" bei <select>
-    // ist dafür der zuverlässigere Weg (gleiches Muster wie schon beim
-    // Domain-Select im "Neues Thema anlegen"-Formular, siehe renderCreateTopicForm).
     domainSelect.addEventListener('change', function () {
       if (domainSelect.value) selectFromPicker('project:' + domainSelect.value);
     });
@@ -1698,8 +1184,6 @@
       if (topicSelect.value) {
         selectFromPicker('topic:' + topicSelect.value);
       } else if (state.activeTopicId) {
-        // Platzhalter "Zur Domain-Übersicht" gewählt, während ein Topic
-        // offen war: wie der "← Zur Domain-Übersicht"-Button verhalten.
         backToOverview();
       }
     });
@@ -1715,8 +1199,6 @@
     var topicInput = document.getElementById('cvz-create-topic');
     var topicText = (topicInput.value || '').trim();
 
-    // Entweder eine bestehende Domain per Picklist gewählt (Wert = project_id),
-    // oder "+ Neue Domain" mit Freitext daneben.
     var selectedValue = domainSelect.value;
     var isNewDomain = selectedValue === '__new__';
     var newDomainText = (newDomainInput.value || '').trim();
@@ -1736,8 +1218,6 @@
     try {
       var project;
       if (isNewDomain) {
-        // Freitext-Fall: nur hier überhaupt ein neues Projekt anlegen, bei
-        // Auswahl aus der Picklist existiert es per Definition schon.
         if (CONFIG.useMockData) {
           project = { id: 'proj-' + Date.now(), name: newDomainText, domain: newDomainText };
         } else {
@@ -1758,31 +1238,19 @@
         }
       }
 
-            var newTopic;
+      var newTopic;
       if (CONFIG.useMockData) {
         newTopic = { id: 'topic-' + Date.now(), project_id: project.id, name: topicText, seed_keyword: topicText, status: 'collecting', opportunities_count: 0 };
       } else {
-        // sample_prompts bewusst leer: löst die automatische Stable-Core-
-        // Generierung im Backend aus (siehe prompt_discovery.py), statt
-        // dass wir hier im Formular 16 Prompts von Hand abfragen müssten.
         var topicData = await apiFetch('/topics', {
           method: 'POST',
           body: { project_id: project.id, topic_name: topicText, seed_keyword: topicText, sample_prompts: [] },
         });
-        // GEÄNDERT (14.09.2026): Backend kann jetzt statt 'collecting' auch
-        // 'queued' zurückgeben (kein Slot frei, aber eine Deaktivierung
-        // steht an, siehe main.py: create_topic_endpoint). Status 1:1
-        // übernehmen statt hart 'collecting' anzunehmen.
         newTopic = { id: topicData.topic_id, project_id: project.id, name: topicText, seed_keyword: topicText, status: topicData.status || 'collecting', opportunities_count: 0 };
       }
       state.allTopics.push(newTopic);
       state.activeProjectId = project.id;
 
-      // GEÄNDERT (14.09.2026): current_count NUR hochzählen, wenn das
-      // Thema wirklich sofort einen Slot belegt (status 'collecting').
-      // Ein 'queued'-Thema belegt noch keinen Slot (siehe get_topic_usage
-      // in run_topic.py: zählt nur 'active'+'collecting'), das lokale
-      // Nachziehen hier würde sonst can_create fälschlich sperren.
       if (state.topicUsage && newTopic.status !== 'queued') {
         state.topicUsage.current_count += 1;
         state.topicUsage.can_create = state.topicUsage.current_count < state.topicUsage.limit;
@@ -1791,21 +1259,13 @@
       state.isCreating = false;
       state.showCreateForm = false;
       if (newTopic.status !== 'queued') {
-        maybeStartPolling(); // neues Thema ist 'collecting', Live-Nachladen anstoßen
+        maybeStartPolling();
       }
-      openTopicDetail(newTopic.id); // Detailansicht zeigt "collecting"/"queued", bis der Hintergrundlauf fertig bzw. das Thema befördert ist, das ist erwartetes Verhalten
-
-      state.isCreating = false;
-      state.showCreateForm = false;
-      maybeStartPolling(); // neues Thema ist 'collecting', Live-Nachladen anstoßen
-      openTopicDetail(newTopic.id); // Detailansicht zeigt "collecting", bis der Hintergrundlauf fertig ist, das ist erwartetes Verhalten
+      openTopicDetail(newTopic.id);
     } catch (e) {
       console.error('[CVZ Visibility] Anlegen fehlgeschlagen:', e);
       state.isCreating = false;
       if (e.status === 403) {
-        // check_topic_limit() im Backend wirft genau das bei erreichtem
-        // Plan-Limit, e.message enthält dank des apiFetch-Fixes jetzt den
-        // echten Backend-Text (inkl. aktuellem Stand, z.B. "3/3").
         state.createError = e.message;
         state.limitReached = true;
       } else {
@@ -1818,9 +1278,6 @@
 
   async function retryTopic(topicId) {
     if (CONFIG.useMockData) {
-      // Mock-Fall: sowohl die Listen- als auch die Detail-Cache-Kopie
-      // aktualisieren, das sind im Mock zwei getrennte Objekte (echtes
-      // Backend hätte natürlich nur eine Quelle der Wahrheit).
       var mockTopic = getTopicById(topicId);
       if (mockTopic) mockTopic.status = 'active';
       if (state.topicDetailCache[topicId]) state.topicDetailCache[topicId].topic.status = 'active';
@@ -1833,34 +1290,18 @@
 
     try {
       await apiFetch('/topics/' + topicId + '/retry', { method: 'POST' });
-      await loadTopics(); // Status ist jetzt 'collecting', Tabelle soll das sofort zeigen
+      await loadTopics();
       maybeStartPolling();
     } catch (e) {
       console.error('[CVZ Visibility] Retry fehlgeschlagen f\u00fcr Topic ' + topicId + ':', e);
-      // GEÄNDERT (14.09.2026): jetzt sichtbar (vorher nur console.error).
-      // Seit der Erweiterung auf hängengebliebenes 'collecting' (siehe
-      // main.py: retry_topic_endpoint) kann dieser Klick einen echten,
-      // für den Nutzer relevanten Grund haben ("läuft noch innerhalb der
-      // erwarteten Zeit") — das sollte nicht stillschweigend im Nichts
-      // verschwinden.
       await showCvzAlert('Erneut versuchen fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler'));
     }
 
-        state.retryingTopicId = null;
+    state.retryingTopicId = null;
     render();
   }
 
-  // NEU (14.09.2026): Thema deaktivieren ("archivieren") bzw. wieder
-  // aktivieren. Archivierte Themen bleiben mit allen bisher gesammelten
-  // Daten voll einsehbar (Tabs, Opportunities, Keywords, Prompts, GSC —
-  // nichts wird gelöscht), es werden nur keine neuen Cron-Durchläufe mehr
-  // für sie gestartet. WICHTIG: das kann rein client-seitig nicht
-  // funktionieren — das Backend muss den wöchentlichen Cron-Job so
-  // anpassen, dass er Themen mit status='archived' überspringt, sonst tut
-  // dieser Button nur so, als würde er etwas bewirken.
-    async function setTopicArchiveStatus(topicId, archive) {
-    // GEÄNDERT (14.09.2026): eigenes Popup (showCvzConfirm) statt des
-    // nativen window.confirm, siehe showCvzModal weiter oben.
+  async function setTopicArchiveStatus(topicId, archive) {
     var confirmTitle = archive ? 'Thema deaktivieren?' : 'Thema wieder aktivieren?';
     var confirmBody = archive
       ? 'Es werden dann keine neuen Datenläufe mehr gestartet, alle bisherigen Daten bleiben aber sichtbar. Du kannst das Thema jederzeit wieder aktivieren.'
@@ -1882,29 +1323,16 @@
           state.topicDetailCache[topicId].topic.status = archive ? 'archived' : 'active';
         }
       } else {
-        // Annahme (nicht bestätigt, Backend-Code nie gesehen): POST
-        // /topics/{id}/archive bzw. /topics/{id}/reactivate, analog zum
-        // bestehenden POST /topics/{id}/retry-Muster. Falls euer Backend
-        // stattdessen ein generisches PATCH /topics/{id} mit body
-        // {status: 'archived'} erwartet, hier nur URL/Methode anpassen,
-        // der Rest der Funktion bleibt gleich.
         await apiFetch('/topics/' + topicId + '/' + (archive ? 'archive' : 'reactivate'), { method: 'POST' });
         await loadTopics();
-        // Nutzungsstand neu laden: falls archivierte Themen nicht mehr
-        // gegen das Plan-Limit zählen sollen (siehe Chat-Hinweis zur
-        // Backend-Anpassung), ändert sich current_count/can_create hier.
         await loadTopicUsage();
       }
 
-      // NEU (14.09.2026): Archivieren/Aktivieren ändert die Menge der
-      // aktiven Themen einer Domain, auf der GET /projects/{id}/dashboard
-      // aggregiert — alter Cache-Stand wäre sonst falsch, bis die Seite
-      // neu geladen wird.
       var affectedTopic = getTopicById(topicId);
       if (affectedTopic) {
         delete state.domainDashboardCache[affectedTopic.project_id];
         if (state.activeView === 'overview' && state.activeProjectId === affectedTopic.project_id) {
-          loadDomainDashboard(affectedTopic.project_id, /* force */ true);
+          loadDomainDashboard(affectedTopic.project_id, true);
         }
       }
 
@@ -1912,22 +1340,15 @@
         delete state.topicDetailCache[topicId];
         await openTopicDetail(topicId, false);
       }
-        } catch (e) {
+    } catch (e) {
       console.error('[CVZ Visibility] Status konnte nicht geändert werden:', e);
       await showCvzAlert('Status konnte nicht geändert werden: ' + (e.message || 'Unbekannter Fehler'));
     }
 
-        state.archivingTopicId = null;
+    state.archivingTopicId = null;
     render();
   }
 
-  // NEU (14.09.2026): endgültiges Löschen statt nur Archivieren — nur
-  // sinnvoll für Themen, die nie einen Lauf hatten (siehe main.py:
-  // delete_topic_endpoint, das die eigentliche Sicherheitsprüfung macht).
-  // Das Frontend zeigt den Button nur für status='queued' oder
-  // 'archived' ohne last_monthly_collection_at (siehe
-  // renderTopicStatusTable), das Backend ist trotzdem die verbindliche
-  // Prüfung — schlägt mit 409, wenn doch schon Läufe existieren.
   async function deleteTopicPermanently(topicId) {
     var confirmed = await showCvzConfirm(
       'Dieses Thema wurde nie gestartet und kann folgenlos entfernt werden. Das ist NICHT r\u00fcckg\u00e4ngig zu machen.',
@@ -1935,7 +1356,7 @@
     );
     if (!confirmed) return;
 
-    var affectedTopic = getTopicById(topicId); // vor dem Löschen merken, project_id wird danach gebraucht
+    var affectedTopic = getTopicById(topicId);
     state.archivingTopicId = topicId;
     render();
 
@@ -1961,11 +1382,6 @@
     render();
   }
 
-  // NEU (14.09.2026): manueller Nachzieh-Trigger für GSC-Near-Miss-Daten
-  // (siehe main.py: refresh_gsc_endpoint/refresh_gsc_data in run_topic.py).
-  // Läuft als Hintergrund-Task im Backend, die Antwort kommt sofort — hier
-  // wird nur EINMALIG nach kurzer Wartezeit neu geladen, kein Polling wie
-  // bei 'collecting' (der GSC-Abruf selbst dauert nur wenige Sekunden).
   async function refreshGscData(topicId) {
     if (state.isRefreshingGsc) return;
     state.isRefreshingGsc = true;
@@ -1976,9 +1392,6 @@
         await showCvzAlert('Im Mock-Modus nicht verf\u00fcgbar.');
       } else {
         await apiFetch('/topics/' + topicId + '/refresh-gsc', { method: 'POST' });
-        // Läuft im Hintergrund weiter, hier nur kurz warten und dann neu
-        // laden — reicht für einen einzelnen GSC-API-Call, kein
-        // dauerhaftes Polling nötig wie bei einem kompletten Erstlauf.
         await new Promise(function (resolve) { setTimeout(resolve, 6000); });
         delete state.topicDetailCache[topicId];
         if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
@@ -1994,13 +1407,6 @@
     render();
   }
 
-
-  // NEU (15.09.2026): lädt die offenen ("pending") Wettbewerber-
-  // Vorschläge für dieses Thema (siehe main.py: GET .../competitor-
-  // suggestions, competitor_suggestions.py). Kein automatischer Retry,
-  // wenn's fehlschlägt bleibt die Liste einfach leer — der Nutzer sieht
-  // dann nur die schon aktiven Domains, kann aber trotzdem eigene
-  // hinzufügen.
   async function loadCompetitorSuggestions(topicId) {
     if (state.isLoadingCompetitorSuggestions) return;
     state.isLoadingCompetitorSuggestions = true;
@@ -2022,10 +1428,6 @@
     render();
   }
 
-  // NEU (15.09.2026): klappt die Verwaltungs-Sektion auf/zu. Der Entwurf
-  // (welche Domains gerade ausgewählt sind) wird NUR beim allerersten
-  // Öffnen mit den aktuell aktiven Domains befüllt — ein Zuklappen und
-  // erneutes Aufklappen soll eine schon begonnene Auswahl nicht verwerfen.
   function toggleCompetitorManage(topicId, currentActiveDomains) {
     var isOpening = !state.competitorManageOpen[topicId];
     state.competitorManageOpen[topicId] = isOpening;
@@ -2034,17 +1436,12 @@
         state.competitorDraftDomains[topicId] = currentActiveDomains.slice();
       }
       if (!state.competitorSuggestionsCache[topicId]) {
-        loadCompetitorSuggestions(topicId); // eigenes render(), hier kein await nötig
+        loadCompetitorSuggestions(topicId);
       }
     }
     render();
   }
 
-  // NEU (15.09.2026): speichert die im Entwurf zusammengestellte
-  // Wettbewerber-Liste. Schickt IMMER den kompletten gewünschten
-  // Endzustand (siehe main.py: confirm_competitors_endpoint, seit
-  // 15.09.2026 Ersetzen statt Ergänzen) — nur so lässt sich eine
-  // automatisch übernommene Domain auch wieder entfernen.
   async function submitCompetitorSelection(topicId) {
     if (state.isSubmittingCompetitors) return;
     var domains = state.competitorDraftDomains[topicId] || [];
@@ -2059,10 +1456,6 @@
           method: 'POST',
           body: { competitor_domains: domains },
         });
-        // Cache verwerfen: competitor_domains/Wettbewerber-Insights/
-        // Opportunities sollen frisch nachgeladen werden. Die eigentliche
-        // Neuanalyse läuft im Hintergrund weiter, kann also noch ein paar
-        // Sekunden hinterherhinken.
         delete state.topicDetailCache[topicId];
         state.competitorManageOpen[topicId] = false;
         delete state.competitorDraftDomains[topicId];
@@ -2078,9 +1471,6 @@
     render();
   }
 
-  // NEU (15.09.2026): manuelles Hinzufügen eines Prompts mit frei
-  // gewählter Phase (siehe main.py: create_manual_prompt_endpoint,
-  // MAX_MANUAL_PROMPTS = 4, zusätzlich zu den automatisch generierten).
   async function submitManualPrompt(topicId) {
     if (state.isSubmittingManualPrompt) return;
     var promptText = (state.manualPromptDraftText || '').trim();
@@ -2111,10 +1501,6 @@
     render();
   }
 
-  // NEU (15.09.2026): manuell hinzugefügte Prompts wieder löschen können.
-  // Bewusst nur für source==='manual' anbieten (siehe renderPromptsByPhase/
-  // renderManualPromptForm), automatisch generierte Prompts lassen sich
-  // hier nicht entfernen.
   async function deleteManualPrompt(topicId, promptId) {
     var confirmed = await showCvzConfirm(
       'Diesen selbst hinzugefügten Prompt wirklich löschen?',
@@ -2128,10 +1514,6 @@
     }
 
     try {
-      // Annahme (nicht bestätigt, Backend-Code nie gesehen): DELETE
-      // /topics/{id}/prompts/{promptId}, als Gegenstück zum bestehenden
-      // POST /topics/{id}/prompts (create_manual_prompt_endpoint). Falls
-      // euer Backend eine andere Route/Methode erwartet, hier anpassen.
       await apiFetch('/topics/' + topicId + '/prompts/' + promptId, { method: 'DELETE' });
       delete state.topicDetailCache[topicId];
       await openTopicDetail(topicId, false);
@@ -2141,11 +1523,6 @@
     }
   }
 
-  // NEU (14.09.2026): Gegenstück zur Deaktivierungs-Vormerkung – nimmt ein
-  // Thema wieder von der "wird zum Monatsende deaktiviert"-Liste, ohne dass
-  // zwischendurch überhaupt etwas archiviert wurde (das Thema war die ganze
-  // Zeit weiter 'active', siehe main.py: archive_topic_endpoint /
-  // cancel_archive_endpoint).
   async function cancelArchiveTopic(topicId) {
     state.archivingTopicId = topicId;
     render();
@@ -2166,7 +1543,7 @@
         delete state.topicDetailCache[topicId];
         await openTopicDetail(topicId, false);
       }
-        } catch (e) {
+    } catch (e) {
       console.error('[CVZ Visibility] Deaktivierung konnte nicht abgebrochen werden:', e);
       await showCvzAlert('Deaktivierung konnte nicht abgebrochen werden: ' + (e.message || 'Unbekannter Fehler'));
     }
@@ -2191,15 +1568,10 @@
       }
 
       if (data.mode === 'checkout_created' && data.checkout_url) {
-        window.location.href = data.checkout_url; // Erstkauf: zu Stripe weiterleiten
+        window.location.href = data.checkout_url;
         return;
       }
       if (data.mode === 'quantity_updated') {
-        // Nachkauf: sofort bestätigt, kein Redirect nötig. Limit-Fehler
-        // zurücksetzen UND topicUsage neu laden (nicht nur lokal
-        // hochzählen, der neue Grenzwert kommt ja vom Server/Stripe, den
-        // kennen wir hier nicht sicher), damit die Vorab-Sperre im
-        // Formular sofort wieder aufgehoben ist.
         state.limitReached = false;
         state.createError = 'Slot gekauft (jetzt ' + data.new_quantity + ' insgesamt).';
         try {
@@ -2230,15 +1602,9 @@
 
     if (!state.showCreateForm) return wrap;
 
-        var form = document.createElement('div');
+    var form = document.createElement('div');
     form.className = 'cvz-create-form-fields';
 
-    // GEÄNDERT (14.09.2026): kein Platz mehr heißt jetzt nicht mehr
-    // automatisch "Formular sperren" — ist can_queue true (siehe
-    // get_topic_status_endpoint), kann das Thema trotzdem angelegt werden,
-    // landet dann nur erstmal in der Warteschlange (status='queued', siehe
-    // create_topic_endpoint). Die harte Sperre samt Kauf-Button gilt nur
-    // noch, wenn wirklich GAR NICHTS geht (auch kein reservierbarer Platz).
     var limitReachedUpfront = state.topicUsage && !state.topicUsage.can_create && !state.topicUsage.can_queue && !state.limitReached;
     if (limitReachedUpfront) {
       var upfrontMsg = document.createElement('p');
@@ -2260,15 +1626,12 @@
       return wrap;
     }
 
-    // NEU (14.09.2026): informativer (NICHT blockierender) Hinweis, wenn
-    // aktuell zwar kein Slot frei ist, das Thema aber in die Warteschlange
-    // könnte (state.topicUsage.can_queue). Formular bleibt normal nutzbar.
     var queueNotice = state.topicUsage && !state.topicUsage.can_create && state.topicUsage.can_queue;
     if (queueNotice) {
       var queueMsg = document.createElement('p');
       queueMsg.className = 'cvz-create-info';
       var queueDate = formatShortDate(state.topicUsage.next_slot_at);
-            queueMsg.textContent =
+      queueMsg.textContent =
         'Euer Plan-Limit ist aktuell ausgeschöpft (' + state.topicUsage.current_count + '/' + state.topicUsage.limit + '). ' +
         'Das Thema wird angelegt und startet automatisch, sobald ein Slot frei wird' +
         (queueDate ? ' (voraussichtlich ab ' + queueDate + ')' : '') +
@@ -2291,8 +1654,6 @@
     var newOption = document.createElement('option');
     newOption.value = '__new__';
     newOption.textContent = '+ Neue Domain';
-    // Wenn's noch gar keine Domain gibt (allererstes Projekt überhaupt),
-    // ist "+ Neue Domain" automatisch die einzig sinnvolle Vorauswahl.
     if (state.projects.length === 0) newOption.selected = true;
     domainSelect.appendChild(newOption);
 
@@ -2301,7 +1662,6 @@
     newDomainInput.id = 'cvz-create-domain-new';
     newDomainInput.className = 'cvz-create-input';
     newDomainInput.placeholder = 'Neue Domain (z.B. kunde-c.de)';
-    // Nur sichtbar, wenn "+ Neue Domain" ausgewählt ist, siehe Listener unten.
     newDomainInput.style.display = (domainSelect.value === '__new__') ? '' : 'none';
 
     domainSelect.addEventListener('change', function () {
@@ -2348,9 +1708,6 @@
     return wrap;
   }
 
-  // =========================================================================
-  // UI: Ebene 1+2 (Domain-Dashboard, aggregiert über alle Themen der Domain)
-  // =========================================================================
   function renderOverview() {
     var wrap = document.createElement('div');
     wrap.appendChild(renderDomainAndTopicPicker());
@@ -2372,59 +1729,15 @@
     return badge;
   }
 
-  // GEÄNDERT (14.09.2026): Trend/Opportunities/Content-Ideen kommen jetzt
-  // für useMockData:false über GET /projects/{id}/dashboard (siehe
-  // loadDomainDashboard), NICHT mehr aus MOCK_TOPIC_DETAIL.
-  //
-  // GEÄNDERT (14.09.2026), zweite Änderung: competitors/keywords/prompts/
-  // positioningInsights/sourceProfiles rausgenommen — die Domain-Übersicht
-  // zeigt diese Tabs nicht mehr (siehe DOMAIN_TABS/renderDomainDashboard,
-  // Wettbewerber/Keywords/Prompts sind themenspezifisch und bleiben in der
-  // Topic-Detailansicht). Falls das später wieder auf Domain-Ebene
-  // gebraucht wird, siehe Git-Historie für die alte MOCK_TOPIC_DETAIL-
-  // Aggregationslogik.
   function getDomainDashboardData(projectId) {
     var topics = state.allTopics.filter(function (t) { return t.project_id === projectId; });
-    // NEU (14.09.2026): archivierte Themen bleiben in `topics` (für die
-    // Themen-Tabelle), fließen aber NICHT in die aggregierten Ansichten
-    // ein (Opportunities/Trend über die ganze Domain) — die sollen den
-    // aktuell relevanten Hebel zeigen, nicht von pausierten Themen
-    // verwässert werden.
     var activeTopics = topics.filter(function (t) { return t.status !== 'archived'; });
 
     var live = CONFIG.useMockData ? null : state.domainDashboardCache[projectId];
 
-    // GEÄNDERT (14.09.2026): opportunities/contentIdeas kommen bei
-    // useMockData:false direkt aus dem echten Dashboard-Endpunkt (bereits
-    // mit topic_name angereichert, siehe get_project_dashboard_endpoint),
-    // die MOCK_TOPIC_DETAIL-Schleife unten trägt dafür in dem Fall nichts
-    // mehr bei (detail.opportunities/detail.content_ideas werden dann
-    // einfach nicht in diese Arrays geschrieben).
     var opportunities = live ? live.opportunities.slice() : [];
     var contentIdeas = live ? live.contentIdeas.slice() : [];
 
-    if (!live) {
-      activeTopics.forEach(function (topic) {
-        var detail = MOCK_TOPIC_DETAIL[topic.id];
-        if (!detail) return;
-
-        (detail.opportunities || []).forEach(function (opp) {
-          opportunities.push(Object.assign({ topic_name: topic.name }, opp));
-        });
-
-        (detail.content_ideas || []).forEach(function (idea) {
-          contentIdeas.push(Object.assign({ topic_name: topic.name }, idea));
-        });
-      });
-    }
-
-    // WICHTIG: live.trend hat eine ANDERE Form als MOCK_DOMAIN_TREND
-    // ({week, mentioned, cited, recommended, total}[] vs. {total_prompts,
-    // weeks:[{week, visible_prompts}]}), das sind unterschiedliche
-    // Kennzahlen (Lauf-Anteile vs. Prompt-Anzahl). Deshalb hier bewusst
-    // NICHT ineinander gemappt — renderDomainDashboard() wählt je nach
-    // CONFIG.useMockData die passende Render-Funktion (renderTrendChart
-    // fürs Mock-Schema, renderDomainTrendChart fürs echte).
     var trend = live ? live.trend : null;
 
     return {
@@ -2463,10 +1776,6 @@
         break;
       case 'uebersicht':
       default:
-        // GEÄNDERT (14.09.2026): Mock- und echtes Trend-Schema sind
-        // unterschiedliche Kennzahlen (siehe Kommentar bei
-        // getDomainDashboardData), deshalb zwei getrennte Render-Pfade
-        // statt eines gemeinsamen Feldes.
         if (CONFIG.useMockData) {
           tabContent.appendChild(renderTrendChart(MOCK_DOMAIN_TREND[project.id]));
         } else {
@@ -2503,11 +1812,6 @@
     opportunities.forEach(function (opp) {
       var card = document.createElement('div');
       card.className = 'cvz-card cvz-opportunity-card';
-      // KORRIGIERT (14.09.2026): war opp.type, die echte Spalte in der
-      // opportunities-Tabelle heißt opportunity_type. MOCK_TOPIC_DETAIL
-      // hat das Feld unter 'type' angelegt, das hat den Fehler bisher
-      // kaschiert; bei echten (nicht-Mock) Opportunities zeigte der Badge
-      // dadurch immer "undefined".
       card.innerHTML =
         '<p class="cvz-opportunity-type">' + escapeHtml(OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type) + '</p>' +
         '<p class="cvz-opportunity-description">' + escapeHtml(opp.description || '') + '</p>' +
@@ -2535,18 +1839,13 @@
       return section;
     }
 
-        var table = document.createElement('table');
+    var table = document.createElement('table');
     table.className = 'cvz-table cvz-table-clickable';
     table.innerHTML = '<thead><tr><th>Thema</th><th>Status</th><th>Gestartet</th><th>Opportunities</th><th>Aktion</th></tr></thead>';
     var tbody = document.createElement('tbody');
     topics.forEach(function (topic) {
       var status = STATUS_LABELS[topic.status] || { label: topic.status, className: '' };
-                              var isBusy = state.archivingTopicId === topic.id;
-      // NEU (14.09.2026): "Aktivieren" ausgrauen, solange kein Topic-Slot
-      // frei ist (state.topicUsage.can_create), statt den User erst
-      // klicken und dann den 403-Fehler vom Server sehen zu lassen.
-      // Deaktivieren bleibt davon unberührt — Slots freigeben soll immer
-      // möglich sein.
+      var isBusy = state.archivingTopicId === topic.id;
       var noSlotAvailable = !!(state.topicUsage && !state.topicUsage.can_create);
       var reactivateDisabled = isBusy || noSlotAvailable;
       var reactivateTitle = (!isBusy && noSlotAvailable)
@@ -2554,23 +1853,7 @@
           state.topicUsage.current_count + '/' + state.topicUsage.limit +
           '). Erst ein anderes Thema deaktivieren oder ein weiteres Slot kaufen."'
         : '';
-      // GEÄNDERT (14.09.2026): Deaktivieren wird jetzt nur noch VORGEMERKT
-      // (siehe main.py: archive_topic_endpoint), das Thema bleibt bis zum
-      // Ende seines Monatszyklus 'active'. Ist eine Deaktivierung schon
-      // vorgemerkt (topic.archive_effective_at gesetzt), zeigen wir
-      // stattdessen "Deaktivierung abbrechen". Ein 'queued'-Thema hat noch
-      // gar nicht begonnen, "Deaktivieren" entfernt es dort direkt wieder
-      // aus der Warteschlange (siehe archive_topic_endpoint: status='queued'
-      // wird sofort archiviert, kein Vormerken nötig).
       var pendingArchival = topic.status === 'active' && !!topic.archive_effective_at;
-      // NEU (14.09.2026): "Ganz löschen" nur anbieten, wenn dieses Thema
-      // nie einen Lauf hatte — last_monthly_collection_at ist dafür die
-      // verlässliche clientseitige Heuristik (echte Prüfung macht das
-      // Backend über ai_runs, siehe main.py: delete_topic_endpoint). Ein
-      // 'queued'-Thema hatte per Definition noch nie einen Lauf; ein
-      // 'archived'-Thema nur dann, wenn last_monthly_collection_at leer
-      // ist (deckt auch ältere, schon vor dieser Änderung archivierte
-      // Themen mit ab).
       var neverRan = topic.status === 'queued' || (topic.status === 'archived' && !topic.last_monthly_collection_at);
       var actionCell;
       if (topic.status === 'archived') {
@@ -2600,22 +1883,14 @@
           (isBusy ? 'Wird gel\u00f6scht …' : 'Ganz l\u00f6schen') +
         '</button>';
       }
-      // NEU (14.09.2026): Status-Hinweis für die beiden neuen Zwischenzustände,
-      // gleiches Muster wie der bestehende 'collecting'-Hinweis unten.
       var extraStatusHint = '';
       if (pendingArchival) {
         var archiveDate = formatShortDate(topic.archive_effective_at);
         extraStatusHint = '<span class="cvz-status-hint">Wird deaktiviert' +
           (archiveDate ? ' am ' + archiveDate : '') + ', bisherige Daten bleiben erhalten.</span>';
       } else if (topic.status === 'queued') {
-          extraStatusHint = '<span class="cvz-status-hint">Wartet auf einen freien Themen-Slot. Startet automatisch, kann nach Freiwerden eines Slots aber bis zu 30 Minuten dauern.</span>';
+        extraStatusHint = '<span class="cvz-status-hint">Wartet auf einen freien Themen-Slot. Startet automatisch, kann nach Freiwerden eines Slots aber bis zu 30 Minuten dauern.</span>';
       }
-      // NEU (14.09.2026): erkennt ein hängengebliebenes 'collecting'
-      // clientseitig (gleicher Schwellenwert wie main.py:
-      // STUCK_COLLECTING_THRESHOLD_MINUTES), damit der Nutzer nicht erst
-      // den Fehler beim Klick sieht, sondern der Button gar nicht erst als
-      // "läuft normal" aussieht. Das Backend prüft das bei /retry
-      // trotzdem nochmal verbindlich, hier nur fürs Anzeigen.
       var STUCK_COLLECTING_THRESHOLD_MINUTES = 45;
       var isStuckCollecting = false;
       if (topic.status === 'collecting') {
@@ -2652,10 +1927,7 @@
     return section;
   }
 
-  // =========================================================================
-  // UI: Ebene 3 (Topic-Detail)
-  // =========================================================================
-    function renderTopicDetailView() {
+  function renderTopicDetailView() {
     var wrap = document.createElement('div');
 
     wrap.appendChild(renderDomainAndTopicPicker());
@@ -2666,23 +1938,15 @@
     backBtn.setAttribute('data-cvz-back', '');
     backBtn.textContent = '← Zur Domain-Übersicht';
 
-    // NEU (14.09.2026): Deaktivieren/Aktivieren auch direkt in der
-    // Detailansicht möglich, nicht nur über die Themen-Tabelle.
     var currentTopicListEntry = getTopicById(state.activeTopicId);
     var topActionRow = document.createElement('div');
     topActionRow.className = 'cvz-top-action-row';
     topActionRow.appendChild(backBtn);
-            if (currentTopicListEntry) {
+    if (currentTopicListEntry) {
       var isArchivedNow = currentTopicListEntry.status === 'archived';
       var isQueuedNow = currentTopicListEntry.status === 'queued';
       var isBusyNow = state.archivingTopicId === currentTopicListEntry.id;
-      // NEU (14.09.2026): gleiche Sperre wie in der Themen-Tabelle (siehe
-      // Block 8) — "Thema aktivieren" ausgrauen, solange kein Slot frei ist.
       var noSlotAvailableNow = !!(state.topicUsage && !state.topicUsage.can_create);
-      // GEÄNDERT (14.09.2026): Deaktivieren wird nur noch vorgemerkt (siehe
-      // main.py: archive_topic_endpoint) — ist für dieses Thema schon eine
-      // Deaktivierung vorgemerkt, zeigen wir stattdessen "Deaktivierung
-      // abbrechen", gleiches Prinzip wie in der Themen-Tabelle (Block 15).
       var pendingArchivalNow = currentTopicListEntry.status === 'active' && !!currentTopicListEntry.archive_effective_at;
       var archiveToggleBtn = document.createElement('button');
       archiveToggleBtn.type = 'button';
@@ -2734,20 +1998,12 @@
     wrap.appendChild(renderSummaryCard(detail.topic));
 
     if (detail.topic.status === 'collecting') {
-      // NEU (14.09.2026): gleiche Erkennung wie in renderTopicStatusTable
-      // (siehe Kommentar dort) — hier zusätzlich mit Retry-Button, statt
-      // die Tabs für immer verborgen zu halten, wenn der Hintergrund-Task
-      // mittendrin gestorben ist.
       var STUCK_COLLECTING_THRESHOLD_MINUTES_DETAIL = 45;
       var detailStartedAtRaw = detail.topic.collecting_started_at || detail.topic.created_at;
       var detailStartedAtMs = detailStartedAtRaw ? new Date(detailStartedAtRaw).getTime() : NaN;
       var isDetailStuck = !isNaN(detailStartedAtMs) &&
         (Date.now() - detailStartedAtMs) / 60000 >= STUCK_COLLECTING_THRESHOLD_MINUTES_DETAIL;
 
-      // Bewusst KEINE Tabs/Tab-Inhalte rendern, solange noch gesammelt wird,
-      // die wären ohnehin größtenteils leer und würden nur wie ein Fehler
-      // aussehen ("überall steht leer"). Stattdessen nur der Banner mit
-      // Spinner, das war explizit der Wunsch.
       var loadingBanner = document.createElement('div');
       loadingBanner.className = 'cvz-card cvz-collecting-banner';
       if (isDetailStuck) {
@@ -2760,11 +2016,6 @@
             (state.retryingTopicId === detail.topic.id ? 'Wird erneut versucht \u2026' : 'Erneut versuchen') +
           '</button>';
       } else {
-        // GEÄNDERT (14.09.2026): war "kann bis zu 60 Sekunden dauern" —
-        // seit der vollständigen Pipeline (Keywords/Prompts/ChatGPT+
-        // Gemini/Quellen-Analyse, siehe run_topic.py) realistisch eher
-        // 10-15 Minuten, selbst mit der Parallelisierung von
-        // collect_weekly_data.
         loadingBanner.innerHTML =
           '<p class="cvz-collecting-banner-text">' +
             '<span class="cvz-spinner"></span>' +
@@ -2798,26 +2049,23 @@
 
     switch (state.activeSubTab) {
       case 'wettbewerber':
-        // GEÄNDERT (13.09.2026): Favicon-Wand raus (Favicons sitzen jetzt
-        // im Prompts-Tab direkt neben den Quellen, siehe
-        // renderPromptExpansion). Zitations-Tabelle und Quellen-Analyse
-        // sind zu EINER Ansicht zusammengeführt: häufigste ECHTE
-        // Wettbewerber (gefiltert auf detail.competitor_domains) inkl.
-        // ihrer Stärken und eurer Differenzierungs-Chance.
         var weeksData = state.citationTrendCache[state.activeTopicId];
         tabContent.appendChild(renderCompetitorManageSection(detail, state.activeTopicId));
         tabContent.appendChild(renderCompetitorInsightSection(weeksData, state.isLoadingCitationTrend, detail.source_profiles, detail.competitor_domains, detail.competitor_insights));
         tabContent.appendChild(renderContentGapsSection(detail.content_gaps));
         break;
       case 'keywords':
-        tabContent.appendChild(renderKeywordsTable(detail.search_queries, true, detail.changelog));
+        // GEÄNDERT (15.09.2026): GSC-Suchanfragen (source='gsc_near_miss')
+        // gehören laut Kundenwunsch nur noch ins GSC-Performance-Tab, nicht
+        // mehr in die "Thematisch passenden Keywords" — das waren reale
+        // Suchanfragen der eigenen Domain, nicht themenbezogene Vorschläge,
+        // und haben die Liste mit fachfremden Begriffen verwässert.
+        var thematicKeywords = (detail.search_queries || []).filter(function (q) { return q.source !== 'gsc_near_miss'; });
+        tabContent.appendChild(renderKeywordsTable(thematicKeywords, true, detail.changelog));
         var positioning = renderPositioningInsight(detail.positioning_insight);
         if (positioning) tabContent.appendChild(positioning);
         break;
       case 'prompts':
-        // enableCitations=true: nur hier ist jedem Prompt eindeutig SEIN
-        // Topic (state.activeTopicId) zugeordnet, das der /citations-
-        // Endpoint braucht. Siehe renderPromptsByPhase.
         tabContent.appendChild(renderPromptsByPhase(detail.prompts, true, detail.changelog));
         break;
       case 'gsc':
@@ -2825,9 +2073,6 @@
         break;
       case 'uebersicht':
       default:
-        // GEÄNDERT (13.09.2026): detail.changelog kommt jetzt fest mit dem
-        // Topic-Detail (kein eigener Lazy-Load-Cache mehr, siehe
-        // loadTopicDetail). Sichtbarkeits- und Rank-Verlauf bleiben lazy.
         tabContent.appendChild(renderCombinedTrendSection(
           state.visibilityTrendCache[state.activeTopicId],
           state.topicRankHistoryCache[state.activeTopicId],
@@ -2838,9 +2083,6 @@
           state.visibilityTrendCache[state.activeTopicId], state.isLoadingVisibilityTrend,
           detail.changelog,
         ));
-        // NEU (15.09.2026): kombinierte Monats-Grafik (Prompt-Zitierungen +
-        // GSC-Klicks/Impressionen + neue Keywords), siehe Chat-Verlauf
-        // 15.09.2026.
         tabContent.appendChild(renderMonthlyOverviewChart(
           state.monthlyOverviewTrendCache[state.activeTopicId], state.isLoadingMonthlyOverviewTrend,
         ));
@@ -2878,9 +2120,6 @@
     return section;
   }
 
-  // Bewusst handgebautes SVG statt einer Chart-Library: für eine einzelne
-  // Linie mit ein paar Datenpunkten lohnt sich keine zusätzliche
-  // Abhängigkeit, die im Webflow-Embed nachgeladen werden müsste.
   function buildTrendChartSvg(trendData) {
     var width = 640, height = 180, padding = 32;
     var weeks = trendData.weeks;
@@ -2910,19 +2149,10 @@
         '<polyline points="' + points + '" class="cvz-chart-line"></polyline>' +
         dots +
       '</svg>' +
-      '<p class="cvz-chart-caption">Sichtbare Stable-Core-Prompts pro Woche, von ' + trendData.total_prompts + ' insgesamt. ' +
-      'Komplett erfundene Werte, siehe Kommentar bei MOCK_DOMAIN_TREND im Code.</p>'
+      '<p class="cvz-chart-caption">Sichtbare Stable-Core-Prompts pro Woche, von ' + trendData.total_prompts + ' insgesamt.</p>'
     );
   }
 
-  // NEU (14.09.2026): echter Domain-Trend (GET /projects/{id}/dashboard),
-  // gleiche Kennzahl wie renderVisibilityTrendSection (mentioned/cited/
-  // recommended-Anteil pro Woche), aber über alle aktiven Themen der
-  // Domain aufsummiert statt für ein einzelnes Topic. BEWUSST kein
-  // xKeys/week-detail-Klick (siehe buildLineChartSvg-Kommentar: "beim
-  // Mock-Chart/Domain-Dashboard bewusst nicht") — /topics/{id}/week-detail
-  // hängt an genau einem Topic, eine Domain-Woche kann aber mehrere
-  // Themen zusammenfassen, dafür bräuchte es einen eigenen Endpunkt.
   function renderDomainTrendChart(weeks, isLoading) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -2940,10 +2170,6 @@
       return section;
     }
 
-    // GEÄNDERT (14.09.2026): vorher nur ein Platzhaltertext ohne Grafik.
-    // Jetzt wird die Chart-Hülle (Achse, keine Datenpunkte) schon gezeigt,
-    // damit klar ist, dass hier später eine Grafik erscheint, statt dass
-    // der Bereich einfach leer wirkt (siehe Chat-Verlauf 14.09.2026).
     if (!weeks || weeks.length < 2) {
       var emptyCard = document.createElement('div');
       emptyCard.className = 'cvz-card';
@@ -2979,35 +2205,12 @@
 
   var WEEKDAY_MONTHS_DE = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 
-  function formatShortDate(isoDate) {
+  function formatShortDateISO(isoDate) {
     var parts = isoDate.split(/[-T]/);
     var monthIndex = parseInt(parts[1], 10) - 1;
     return parseInt(parts[2], 10) + '. ' + (WEEKDAY_MONTHS_DE[monthIndex] || parts[1]);
   }
 
-  // NEU (13.09.2026): generischer Mehrfach-Linien-Chart für echte
-  // Zeitreihen (Sichtbarkeits-Verlauf, Rank-Historie), anders als
-  // buildTrendChartSvg oben (an MOCK_DOMAIN_TREND fest gebunden, bleibt
-  // unverändert für die Domain-Übersicht). seriesList: [{ label, values,
-  // color }], values parallel zu xLabels, null-Werte werden übersprungen
-  // (Lücke in der Linie statt falscher Nullpunkt).
-  // NEU (13.09.2026): generischer Mehrfach-Linien-Chart für echte
-  // Zeitreihen (Sichtbarkeits-Verlauf, Rank-Historie), anders als
-  // buildTrendChartSvg oben (an MOCK_DOMAIN_TREND fest gebunden, bleibt
-  // unverändert für die Domain-Übersicht). seriesList: [{ label, values,
-  // color }], values parallel zu xLabels, null-Werte werden übersprungen
-  // (Lücke in der Linie statt falscher Nullpunkt).
-  //
-  // GEÄNDERT (13.09.2026): opts.markers ergänzt: [{ index, label, date }],
-  // rendert eine vertikale Linie + einen Punkt am jeweiligen x-Index, mit
-  // Tooltip. Für Changelog-Einträge auf dem übergreifenden Verlauf (siehe
-  // renderCombinedTrendSection), bewusst VOR den Datenserien gezeichnet,
-  // damit sie im Hintergrund liegen und die Linien/Punkte nicht verdecken.
-  // NEU (14.09.2026): leere Chart-Hülle (nur Grund-Achse, keine Datenpunkte)
-  // für "noch nicht genug Daten"-Zustände, damit dort schon eine Grafik
-  // sitzt statt eines reinen Textblocks. Dieselben width/height/padding-
-  // Werte wie buildLineChartSvg/buildTrendChartSvg, damit die Kachel beim
-  // späteren Umschalten auf echte Daten nicht "springt".
   function buildEmptyChartSvg() {
     var width = 640, height = 180, padding = 32;
     var baselineY = height - padding;
@@ -3073,10 +2276,6 @@
         parts.push('<polyline points="' + points + '" class="cvz-chart-line" style="stroke:' + color + '"></polyline>');
       });
 
-      // NEU (13.09.2026): unsichtbare, größere Trefferfläche (r=9) für den
-      // Klick auf einen Datenpunkt, nur wenn opts.xKeys mitgegeben wurde
-      // (bei den Übersicht-Charts der Fall, beim Mock-Chart/Domain-
-      // Dashboard und dem Pro-Keyword-Chart bewusst nicht).
       s.values.forEach(function (v, i) {
         if (v == null) return;
         var cx = xFor(i).toFixed(1), cy = yFor(v).toFixed(1);
@@ -3094,35 +2293,19 @@
     return parts.join('');
   }
 
-  // NEU (13.09.2026): Montag-der-Woche für ein ISO-Datum, JS-Pendant zu
-  // main.py: _week_start_label. Für die Bucket-Zuordnung von Rank-
-  // Snapshots und Changelog-Einträgen auf dieselben Wochen wie der
-  // Sichtbarkeits-Verlauf (der vom Backend schon wochenweise kommt).
   function weekStartLabel(isoDateStr) {
     var d = new Date(isoDateStr);
-    var day = d.getUTCDay(); // 0=So .. 6=Sa
-    var diff = day === 0 ? 6 : day - 1; // Tage seit letztem Montag
+    var day = d.getUTCDay();
+    var diff = day === 0 ? 6 : day - 1;
     var monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - diff));
     return monday.toISOString().slice(0, 10);
   }
 
-  // NEU (13.09.2026): grobe, transparente Umrechnung einer Position
-  // (organic_rank oder gsc_position, niedriger = besser) in einen 0-100-
-  // "Sichtbarkeits-Index" (höher = besser), nur damit Keywords- und
-  // Prompts-Linie auf derselben Achse vergleichbar sind. KEINE exakte
-  // Kennzahl, nur für die visuelle Richtung gedacht: Position 1 -> 100,
-  // Position 26 oder schlechter -> 0, linear dazwischen. Exakte Werte
-  // stehen im Tooltip/den Detail-Charts, nicht hier.
   function rankToVisibilityScore(rank) {
     if (rank == null) return null;
     return Math.max(0, Math.min(100, Math.round(100 - (rank - 1) * 4)));
   }
 
-  // NEU (13.09.2026): mittelt den Sichtbarkeits-Index pro Woche über ALLE
-  // Keyword-Snapshots dieser Woche (organic_rank bevorzugt, sonst
-  // gsc_position). Mehrere Keywords in derselben Woche fließen alle mit
-  // ein, das ist bewusst ein grober Gesamteindruck, keine Einzel-Keyword-
-  // Analyse (die gibt's separat pro Keyword im Keywords-Tab).
   function computeKeywordScoreByWeek(snapshots) {
     var byWeek = {};
     (snapshots || []).forEach(function (s) {
@@ -3141,13 +2324,6 @@
     return result;
   }
 
-  // NEU (13.09.2026): gemeinsamer Helper fürs Marker-Mapping, vorher an
-  // zwei Stellen dupliziert (übergreifende Grafik, detaillierter
-  // Sichtbarkeits-Chart). Bildet jeden Changelog-Eintrag auf den
-  // zeitlich nächstgelegenen Index in xDates ab (exakter Treffer, falls
-  // vorhanden, sonst die geringste Differenz). xDates kann Wochen-Starts
-  // ODER einzelne Snapshot-Zeitstempel enthalten, beides sind einfach
-  // ISO-Datumsstrings.
   function mapChangelogToMarkers(changelogEntries, xDates) {
     return (changelogEntries || []).map(function (entry) {
       var exactIndex = xDates.indexOf(weekStartLabel(entry.created_at));
@@ -3164,11 +2340,6 @@
     });
   }
 
-  // NEU (13.09.2026): übergreifende Grafik, Prompts (Zitationsrate) und
-  // Keywords (Sichtbarkeits-Index) auf derselben Zeitachse, plus die
-  // eigenen Changelog-Einträge als Marker. Beantwortet direkt "hat unsere
-  // Änderung etwas gebracht": ein Marker, nach dem die Linien nach oben
-  // drehen, ist ein Hinweis (keine Kausalität, nur Korrelation).
   function renderCombinedTrendSection(promptWeeks, rankSnapshots, changelogEntries, isLoading) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -3236,11 +2407,6 @@
     return section;
   }
 
-  // NEU (13.09.2026): Wochendetail-Kachel, aufgerufen durch Klick auf
-  // einen Punkt/Marker in einem der beiden Übersicht-Charts. Zeigt pro
-  // Prompt und Keyword den Stand dieser Woche PLUS den Vergleich zur
-  // Vorwoche (kommt schon so vom Backend, siehe main.py: _get_week_detail),
-  // damit hier keine eigene Delta-Berechnung nötig ist.
   function renderWeekDetailPanel(topicId, week) {
     var key = topicId + '|' + week;
     var wrap = document.createElement('div');
@@ -3318,12 +2484,9 @@
     return wrap;
   }
 
-      function renderSummaryCard(topic) {
+  function renderSummaryCard(topic) {
     var card = document.createElement('div');
     card.className = 'cvz-card cvz-summary-card';
-    // GEÄNDERT (14.09.2026): drei mögliche Hinweise statt nur einem –
-    // endgültig archiviert, zur Deaktivierung vorgemerkt (läuft noch bis
-    // zum Monatsende weiter), oder wartend auf einen freien Slot.
     var archivedNotice = '';
     if (topic.status === 'archived') {
       archivedNotice = '<p class="cvz-archived-notice">Archiviert – es werden aktuell keine neuen Datenläufe für dieses Thema gestartet. Alle bisher gesammelten Daten bleiben unten sichtbar.</p>';
@@ -3344,20 +2507,11 @@
     return card;
   }
 
-  // NEU (15.09.2026): die drei neuen Teile der monatlichen Zusammenfassung
-  // (siehe claude_summary.py) — vorher nur ein einzelner Fließtext. Gibt
-  // bewusst einen leeren String zurück, kein Platzhalter-Text, wenn
-  // summary_detail noch fehlt (z.B. Topic wurde vor diesem Feature
-  // angelegt und wartet auf den nächsten Monatslauf).
   function renderSummaryDetailSections(detail) {
     if (!detail) return '';
     var html = '';
     var maturity = detail.data_maturity || {};
 
-    // NEU (15.09.2026): sichtbarer Hinweis statt stiller vager Prosa,
-    // siehe Chat-Verlauf 15.09.2026 — "das muss klar kommuniziert werden,
-    // kein stiller Bug". Erscheint direkt unter dem jeweiligen Abschnitt,
-    // nur wenn das zugehörige Flag aus claude_summary.py gesetzt ist.
     var THIN_DATA_NOTE = '<p class="cvz-thin-data-note">Datenbasis hierf\u00fcr noch d\u00fcnn \u2014 die Einschätzung wird mit mehr gesammelten Daten pr\u00e4ziser.</p>';
 
     var strength = detail.competitor_strength;
@@ -3374,22 +2528,28 @@
     var phaseSummaries = detail.phase_summaries;
     if (phaseSummaries) {
       var phasenDuenn = maturity.phasen_duenn || {};
-      var phaseBlocks = PHASE_ORDER.map(function (phase) {
+      // GEÄNDERT (15.09.2026): echte Tabelle statt gestapelter Blöcke,
+      // Kundenwunsch: "eine Tabelle, die in die unterschiedlichen Phasen
+      // geht und dort eine Einschätzung gibt".
+      var phaseRowsHtml = PHASE_ORDER.map(function (phase) {
         var p = phaseSummaries[phase];
         if (!p || !p.summary) return '';
         var chips = (p.recommended_content_types || []).map(function (ct) {
           return '<span class="cvz-persona-chip">' + escapeHtml(ct) + '</span>';
         }).join('');
-        return '<div class="cvz-summary-phase-block">' +
-          '<p class="cvz-phase-heading">' + escapeHtml(PHASE_LABELS[phase] || phase) + '</p>' +
-          '<p class="cvz-summary-text">' + escapeHtml(p.summary) + '</p>' +
-          (chips ? '<div class="cvz-persona-filter">' + chips + '</div>' : '') +
-          (phasenDuenn[phase] ? THIN_DATA_NOTE : '') +
-          '</div>';
+        return (
+          '<tr>' +
+            '<td><strong>' + escapeHtml(PHASE_LABELS[phase] || phase) + '</strong></td>' +
+            '<td>' + escapeHtml(p.summary) + (phasenDuenn[phase] ? THIN_DATA_NOTE : '') + '</td>' +
+            '<td>' + (chips ? '<div class="cvz-persona-filter" style="margin:0;">' + chips + '</div>' : '\u2013') + '</td>' +
+          '</tr>'
+        );
       }).join('');
-      if (phaseBlocks) {
+      if (phaseRowsHtml) {
         html += '<div class="cvz-summary-subsection">' +
-          '<p class="cvz-section-label">Je Phase</p>' + phaseBlocks +
+          '<p class="cvz-section-label">Je Phase</p>' +
+          '<table class="cvz-table"><thead><tr><th>Phase</th><th>Einsch\u00e4tzung</th><th>Empfohlene Content-Typen</th></tr></thead>' +
+          '<tbody>' + phaseRowsHtml + '</tbody></table>' +
           (maturity.content_luecken_duenn ? THIN_DATA_NOTE : '') +
           '</div>';
       }
@@ -3437,16 +2597,6 @@
     return section;
   }
 
-  var CONTENT_TYPE_LABELS = {
-    review_plattform:    'Review-Plattform',
-    vergleichsartikel:   'Vergleichsartikel',
-    produktseite:        'Produktseite',
-    fachartikel:         'Fachartikel',
-    video:                'Video',
-    forum:                'Forum',
-    sonstiges:            'Sonstiges',
-  };
-
   function renderSourceProfilesSection(profiles) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -3481,9 +2631,6 @@
     return section;
   }
 
-  // Für die Mock-only Domain-Übersicht (aggregiert über detail.competitors,
-  // das nur im Mock-Datensatz existiert). Für die echte Topic-Detailansicht
-  // siehe renderCompetitorInsightSection weiter unten.
   function renderDomainCompetitorTable(competitors) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -3519,9 +2666,6 @@
     return section;
   }
 
-  // NEU (13.09.2026): aggregiert die von /competitor-citations gelieferten
-  // Wochen (jede mit ihrer eigenen by_model/prompts-Aufschlüsselung pro
-  // Domain) zu EINER Domain-Tabelle über den ganzen geladenen Zeitraum.
   function aggregateCompetitorDomains(weeks) {
     if (!weeks || weeks.length === 0) return [];
     var byDomain = {};
@@ -3548,21 +2692,6 @@
     return (domain || '').toLowerCase().replace(/^www\./, '');
   }
 
-  // GEÄNDERT (13.09.2026): ersetzt die reine "wer wird wie oft genannt"-
-  // Tabelle. Filtert auf die im Projekt hinterlegten Wettbewerber-Domains
-  // (sonst landen auch neutrale Wissensquellen wie SAP-Hilfeportal/Reddit/
-  // YouTube hier, siehe Beispiel-ai_runs vom 13.09., die keine echten
-  // Wettbewerber sind) und reichert jeden Treffer mit der bestehenden
-  // Quellen-Analyse an (source_profiles: Stärken + Differenzierungs-Chance),
-  // statt beides als zwei getrennte Listen zu zeigen.
-  // NEU (15.09.2026): Wettbewerber-Verwaltung — zeigt die aktuell aktiven
-  // Domains (aus projects.competitor_domains) plus offene Vorschläge
-  // (siehe competitor_suggestions.py) als an-/abwählbare Chips, dazu ein
-  // Feld für eigene Domains. Bewusst eingeklappt per Default, damit die
-  // Normalansicht des Tabs nicht überladen wirkt — die meiste Zeit gibt
-  // es hier nichts zu tun, seit die Top-5-Vorschläge automatisch
-  // übernommen werden (siehe main.py: _auto_confirm_top_competitor_
-  // suggestions).
   function renderCompetitorManageSection(detail, topicId) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -3586,15 +2715,9 @@
       section.appendChild(loading);
     }
 
-    // Entwurf sollte durch toggleCompetitorManage schon gesetzt sein,
-    // Fallback hier nur zur Sicherheit (z.B. direkter Seitenaufruf mit
-    // bereits offenem Zustand aus alten URL-Parametern).
     var draft = state.competitorDraftDomains[topicId] || activeDomains.slice();
     var suggestions = state.competitorSuggestionsCache[topicId] || [];
 
-    // Union aus aktiven Domains + Vorschlägen: auch eine schon aktive
-    // (z.B. automatisch übernommene) Domain muss hier wieder abwählbar
-    // sein, nicht nur neue Vorschläge auswählbar.
     var citationByDomain = {};
     var domainSet = {};
     activeDomains.forEach(function (d) { domainSet[d] = true; });
@@ -3666,10 +2789,6 @@
       return section;
     }
 
-    // GEÄNDERT (13.09.2026): main.py filtert /competitor-citations jetzt
-    // serverseitig auf ai_sources.is_competitor = true (siehe
-    // _get_competitor_citation_trend). allDomains enthält also schon NUR
-    // echte Wettbewerber, keine clientseitige Nachfilterung mehr nötig.
     var allDomains = aggregateCompetitorDomains(weeks);
 
     if (allDomains.length === 0) {
@@ -3686,9 +2805,6 @@
     (sourceProfiles || []).forEach(function (p) {
       profileByDomain[normalizeDomainForMatch(p.domain)] = p;
     });
-    // NEU (13.09.2026): topic-spezifische Stärken/Schwächen/Chancen (siehe
-    // gap_analysis.py: competitor_insights), getrennt von der domain-
-    // globalen source_analysis.py-Zusammenfassung oben.
     var insightByDomain = {};
     (competitorInsights || []).forEach(function (i) {
       insightByDomain[normalizeDomainForMatch(i.domain)] = i;
@@ -3731,7 +2847,15 @@
             ? '<p class="cvz-opportunity-description"><strong>Differenzierungs-Idee:</strong> ' + escapeHtml(profile.differentiation_suggestion) + '</p>'
             : '')) +
         (promptList.length
-          ? '<p class="cvz-opportunity-topic" title="' + escapeHtml(promptList.join(' | ')) + '">Genannt bei ' + promptList.length + ' Prompt' + (promptList.length === 1 ? '' : 's') + '</p>'
+          // GEÄNDERT (15.09.2026): vorher nur eine Zahl mit den vollen
+          // Prompt-Texten versteckt im title-Tooltip — der Kunde will
+          // aber direkt sehen, BEI WELCHEN Prompts ein Wettbewerber
+          // genannt wird, nicht nur wie oft (siehe Chat-Verlauf
+          // 15.09.2026).
+          ? '<p class="cvz-opportunity-topic"><strong>Genannt bei:</strong></p>' +
+            '<ul class="cvz-competitor-prompt-list">' +
+              promptList.map(function (p) { return '<li>' + escapeHtml(p) + '</li>'; }).join('') +
+            '</ul>'
           : '');
       grid.appendChild(card);
     });
@@ -3739,11 +2863,6 @@
     return section;
   }
 
-  // NEU (13.09.2026): dedizierte, themenweite Lücken-Analyse (siehe
-  // gap_analysis.py, Tabelle content_gaps). Anders als die
-  // Differenzierungs-Idee pro Wettbewerber-Karte oben schaut das über ALLE
-  // zitierten Quellen und die eigene Prompt-Abdeckung hinweg (z.B. eine
-  // ganze Sichtbarkeits-Phase, die bei niemandem besetzt ist).
   function renderContentGapsSection(gaps) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -3806,11 +2925,6 @@
     ideas.forEach(function (idea) {
       var card = document.createElement('div');
       card.className = 'cvz-card cvz-idea-card';
-      // NEU (14.09.2026): Phase kommt jetzt vom Backend mit (content_ideas.
-      // prompt_id -> prompts.messymiddle_phase, siehe main.py), damit
-      // Content-Ideen wie Prompts nach Journey-Phase priorisierbar sind.
-      // Kann fehlen (z.B. wenn der zugehörige Prompt keine Phase hat, etwa
-      // ein Discovery-Prompt) — dann einfach kein Badge, kein Platzhalter.
       card.innerHTML =
         (idea.phase ? '<p class="cvz-opportunity-type">' + escapeHtml(PHASE_LABELS[idea.phase] || idea.phase) + '</p>' : '') +
         '<p class="cvz-opportunity-description">' + escapeHtml(idea.description || '') + '</p>' +
@@ -3821,11 +2935,6 @@
     return section;
   }
 
-  // NEU (13.09.2026): echter Sichtbarkeits-Verlauf (own_domain_mentioned/
-  // cited/recommended pro Woche, siehe main.py: /visibility-trend). Zeigt
-  // Anteile statt Rohzahlen, weil die Anzahl ausgewerteter Läufe pro Woche
-  // schwanken kann (neue Prompts, verpasste Cron-Läufe), absolute Zahlen
-  // wären dann nicht vergleichbar.
   function renderVisibilityTrendSection(weeks, isLoading, changelogEntries) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -3873,21 +2982,9 @@
       '</div>' +
       '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-L\u00e4ufe pro Woche (0\u2013100\u202f%), in dem die eigene Domain erw\u00e4hnt, zitiert bzw. aktiv empfohlen wurde. Klickt auf einen Punkt f\u00fcr die Details dieser Woche (Kachel erscheint oben bei der Gesamtentwicklung).</p>';
     section.appendChild(card);
-    // GEÄNDERT: die Wochendetail-Kachel selbst wird nur EINMAL gerendert,
-    // direkt unter der übergreifenden Grafik (siehe renderCombinedTrendSection),
-    // damit sie nicht doppelt erscheint, egal in welchem der beiden Charts
-    // geklickt wurde (beide teilen sich denselben state.selectedWeekDetailKey).
     return section;
   }
 
-  // NEU (15.09.2026): kombinierte Monats-Grafik (siehe Chat-Verlauf
-  // 15.09.2026, main.py: get_monthly_overview_trend_endpoint) — bewusst
-  // ZWEI kleine Charts statt eines mit vier Serien auf einer Achse:
-  // Prompt-Zitierungen (kleine Ganzzahlen) und GSC-Klicks/Impressionen
-  // (oft deutlich größere Zahlen) auf derselben Achse wären kaum
-  // vergleichbar lesbar. Neue Keywords als einfache Textzeile statt
-  // dritter Chart, das ist eine reine Zähl-Information, keine Kurve, die
-  // einen eigenen Chart rechtfertigt.
   function renderMonthlyOverviewChart(months, isLoading) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -3905,11 +3002,6 @@
       return section;
     }
 
-    // GEÄNDERT (15.09.2026): zeigt jetzt die leere Chart-Hülle (Achse,
-    // keine Datenpunkte, siehe buildEmptyChartSvg) statt nur eines
-    // Textblocks, analog zu renderDomainTrendChart. Damit ist auf einen
-    // Blick klar, dass hier später eine Grafik erscheint, statt dass der
-    // Bereich einfach leer wirkt.
     if (!months || months.length < 2) {
       var emptyNoticeText = 'Noch kein Verlauf verf\u00fcgbar, braucht mindestens zwei Kalendermonate mit ausgewerteten L\u00e4ufen.';
 
@@ -3956,24 +3048,7 @@
 
     return section;
   }
-  // Rein informativ, keine automatische Verkn\u00fcpfung zum Verlauf oben,
-  // der Nutzer legt beides gedanklich selbst nebeneinander.
-  // GEÄNDERT (13.09.2026): kein isLoading-Parameter mehr, entries kommt
-  // jetzt fest mit dem Topic-Detail (siehe main.py: /topics/{id}), der
-  // äußere "Lädt..."-Zustand von renderTopicDetailView deckt das schon ab.
-  // GEÄNDERT (13.09.2026): kein isLoading-Parameter mehr, entries kommt
-  // jetzt fest mit dem Topic-Detail (siehe main.py: /topics/{id}), der
-  // äußere "Lädt..."-Zustand von renderTopicDetailView deckt das schon ab.
-  // GEÄNDERT (13.09.2026): zeigt standardmäßig nur die letzten 10
-  // Einträge (state.changelogVisibleCount), "Weitere anzeigen" lädt
-  // jeweils 10 mehr nach. Braucht topicId, um den Zähler pro Topic
-  // getrennt zu halten (sonst würde das Aufklappen bei einem Topic auch
-  // beim nächsten wieder mehr als 10 zeigen).
-  // NEU (14.09.2026): wiederverwendbarer Picker für die optionale
-  // Keyword-/Prompt-Verknüpfung eines Changelog-Eintrags. Nutzt dieselben
-  // Chip-Klassen wie der Rollen-Filter (cvz-persona-chip), damit kein
-  // zusätzlicher visueller Stil eingeführt wird. `kind` ist 'keywords'
-  // oder 'prompts', `getLabel` liefert den Anzeigetext pro Element.
+
   function renderChangelogLinkPicker(kind, items, getLabel) {
     var wrap = document.createElement('div');
     wrap.className = 'cvz-changelog-link-picker';
@@ -4036,22 +3111,11 @@
         (state.isSubmittingChangelog ? 'Wird gespeichert \u2026' : 'Eintragen') +
       '</button>';
     section.appendChild(form);
-    // GEÄNDERT (15.09.2026): hält state.changelogDraft laufend synchron,
-    // nicht mehr nur beim Absenden. Vorher leerte sich das Feld, sobald
-    // man nach dem Tippen noch einen "Wo?"/"Effekt"-Chip anklickte: der
-    // Klick löst einen render() aus, der die Textarea komplett neu aus
-    // state.changelogDraft aufbaut — und der war bis dahin noch der alte
-    // (meist leere) Stand, weil er nur beim Absenden gesetzt wurde (siehe
-    // Chat-Verlauf 15.09.2026).
     var textareaEl = form.querySelector('#cvz-changelog-input');
     textareaEl.addEventListener('input', function () {
       state.changelogDraft = textareaEl.value;
     });
 
-    // NEU (14.09.2026): geführte Zusatzfelder statt eines einzelnen freien
-    // Textfelds (siehe Chat-Verlauf 14.09.2026) — "Wo?" und "Erwarteter
-    // Effekt" als Chips, beide optional. Werden beim Absenden vor den
-    // freien Text gesetzt (siehe composeChangelogEntryText).
     var locationLabel = document.createElement('p');
     locationLabel.className = 'cvz-changelog-guided-label';
     locationLabel.textContent = 'Wo? (optional)';
@@ -4069,11 +3133,6 @@
     });
     section.appendChild(locationChips);
 
-    // NEU (15.09.2026): Freitext, wenn "Sonstiges" gewählt ist, damit das
-    // generische Wort "Sonstiges" im Eintrag nicht stehen bleibt, sondern
-    // durch das ersetzt wird, was tatsächlich gemeint ist (siehe
-    // composeChangelogEntryText). Live synchronisiert, aus demselben
-    // Grund wie beim Haupttextfeld oben.
     if (state.changelogLocationDraft === 'sonstiges') {
       var locationCustomInput = document.createElement('input');
       locationCustomInput.type = 'text';
@@ -4117,17 +3176,8 @@
       section.appendChild(effectCustomInput);
     }
 
-    // NEU (14.09.2026): optionale Verknüpfung mit konkreten Keywords/
-    // Prompts dieses Topics (siehe main.py: linked_search_query_ids/
-    // linked_prompt_ids). Ermöglicht später präzise Marker im Keyword-
-    // Rank-Verlauf (renderKeywordExpansion) bzw. eine Kontextzeile in der
-    // aufgeklappten Prompt-Ansicht (renderPromptExpansion), statt dass
-    // jeder Eintrag auf jedem Chart erscheint.
     section.appendChild(renderChangelogLinkPicker('keywords', searchQueries, function (q) { return q.keyword; }));
     section.appendChild(renderChangelogLinkPicker('prompts', prompts, function (p) {
-      // Prompt-Text kann lang sein, in der Chip-Liste gekürzt, voller Text
-      // im title-Tooltip. Chips sind Buttons, kein natives title auf
-      // textContent nötig — hier bewusst über die Länge selbst gekürzt.
       return p.prompt_text.length > 60 ? p.prompt_text.slice(0, 57) + '\u2026' : p.prompt_text;
     }));
 
@@ -4140,16 +3190,11 @@
       var visibleCount = state.changelogVisibleCount[topicId] || 10;
       var visibleEntries = entries.slice(0, visibleCount);
 
-      // NEU (14.09.2026): Nachschlage-Karten, um verlinkte IDs in
-      // lesbaren Text zu übersetzen (Keyword-Text/Prompt-Text statt UUID).
       var keywordTextById = {};
       (searchQueries || []).forEach(function (q) { keywordTextById[q.id] = q.keyword; });
       var promptTextById = {};
       (prompts || []).forEach(function (p) { promptTextById[p.id] = p.prompt_text; });
 
-      // GEÄNDERT (15.09.2026): echte Tabelle statt gestapelter Karten,
-      // deutlich übersichtlicher bei mehr als ein paar Einträgen (siehe
-      // Chat-Verlauf 15.09.2026).
       var tableWrap = document.createElement('div');
       tableWrap.className = 'cvz-changelog-table-wrap';
       var rowsHtml = visibleEntries.map(function (entry) {
@@ -4188,8 +3233,6 @@
       }
     }
 
-    // NEU (13.09.2026): Archiv-Ansicht für weich gelöschte Einträge, siehe
-    // toggleDeletedChangelog/main.py: /topics/{id}/changelog/deleted.
     var isDeletedOpen = !!state.showDeletedChangelog[topicId];
     var toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
@@ -4273,7 +3316,7 @@
   }
 
   function renderPositioningInsight(insight) {
-    if (!insight) return null; // kein Leerzustand, ist ein Bonus-Hinweis wie schon Content-Ideen
+    if (!insight) return null;
 
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -4313,11 +3356,6 @@
       return section;
     }
 
-    // GEÄNDERT (13.09.2026): von einer flachen Tabelle auf aufklappbare
-    // Zeilen umgestellt, im selben Stil/Layout wie die Prompts-Liste
-    // (cvz-prompt-list/-row wiederverwendet). Aufgeklappt zeigt eine
-    // Zeile SERP-/GSC-Detail (organic_rank/gsc_impressions/gsc_position/
-    // first_seen_at) plus, wo verfügbar, den Rank-Verlauf über die Zeit.
     var list = document.createElement('div');
     list.className = 'cvz-prompt-list';
     keywords.forEach(function (kw) {
@@ -4325,12 +3363,6 @@
       var linkedCount = (changelogEntries || []).filter(function (entry) {
         return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
       }).length;
-      // GEÄNDERT (15.09.2026): eine verknüpfte Änderung zählt jetzt auch
-      // als "Detail", damit ein Keyword OHNE organic_rank/GSC-Daten aber
-      // MIT verknüpfter Änderung trotzdem aufklappbar ist — vorher war
-      // die Verknüpfung für genau solche Keywords unsichtbar, weil die
-      // Zeile gar nicht erst aufklappbar war (siehe Chat-Verlauf
-      // 15.09.2026).
       var hasDetail = kw.organic_rank != null || kw.gsc_impressions != null || kw.gsc_position != null || kw.first_seen_at || linkedCount > 0;
       var canExpand = !!(enableExpansion && hasDetail);
 
@@ -4342,9 +3374,6 @@
       }
       row.innerHTML =
         '<span class="cvz-prompt-text">' + escapeHtml(kw.keyword) +
-          // NEU (15.09.2026): schon in der eingeklappten Zeile sichtbar,
-          // nicht erst nach dem Aufklappen — "sichtbar machen, wenn eine
-          // Änderung verknüpft wurde", siehe Chat-Verlauf 15.09.2026.
           (linkedCount > 0
             ? ' <span class="cvz-changelog-linked-badge" title="' + linkedCount + ' verkn\u00fcpfte \u00c4nderung(en)">\u270e</span>'
             : '') +
@@ -4370,14 +3399,6 @@
     var wrap = document.createElement('div');
     wrap.className = 'cvz-prompt-expansion';
 
-    // NEU (15.09.2026): dieselbe Kontextzeile wie im Prompts-Tab
-    // (renderPromptExpansion) — vorher tauchte eine mit diesem Keyword
-    // verknüpfte Änderung NUR als gestrichelte Linie im Verlaufs-Chart
-    // auf, und dieses Chart wird erst ab zwei Messpunkten überhaupt
-    // gezeichnet. Bei einem neu verknüpften Keyword ohne (oder mit nur
-    // einem) Messpunkt war die Verknüpfung dadurch komplett unsichtbar
-    // (siehe Chat-Verlauf 15.09.2026). Jetzt immer als Text sichtbar,
-    // unabhängig davon, ob überhaupt ein Chart gerendert wird.
     var linkedEntries = (changelogEntries || []).filter(function (entry) {
       return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
     });
@@ -4432,15 +3453,6 @@
         var series = [];
         if (hasRank) series.push({ label: 'Google-Position', values: rankValues, color: 'var(--cvz-teal)' });
         if (hasGsc) series.push({ label: 'GSC-Position', values: gscPositionValues, color: 'var(--cvz-amber)' });
-        // NEU (13.09.2026): Changelog-Marker auch hier, gemappt auf die
-        // tatsächlichen Snapshot-Zeitpunkte dieses Keywords (nicht auf
-        // Wochen-Buckets wie bei den beiden Übersicht-Charts).
-        // GEÄNDERT (14.09.2026): vorher erschien JEDER Changelog-Eintrag
-        // auf JEDEM Keyword-Chart, rein über Datums-Nähe, unabhängig
-        // davon, ob die Änderung überhaupt dieses Keyword betraf (siehe
-        // Chat-Verlauf 14.09.2026). Jetzt nur noch Einträge, die explizit
-        // mit diesem Keyword verknüpft sind (linked_search_query_ids,
-        // linkedEntries oben im Funktionskopf berechnet).
         var markers = mapChangelogToMarkers(linkedEntries, snapshotDates);
         var chartWrap = document.createElement('div');
         chartWrap.className = 'cvz-card';
@@ -4461,12 +3473,6 @@
     return wrap;
   }
 
-  // =========================================================================
-  // NEU (13.09.2026): leichter Markdown-Renderer für Prompt-Antworten aus
-  // DataForSEO (raw_response[0].markdown). Keine externe Library, deckt
-  // aber Links, Fettschrift, Überschriften und Listen ab, was in den
-  // gesehenen ChatGPT/Gemini-Antworten praktisch immer ausreicht.
-  // =========================================================================
   function renderMarkdownLite(markdown) {
     if (!markdown) return '';
     var escaped = escapeHtml(markdown);
@@ -4493,21 +3499,10 @@
     return html;
   }
 
-  // NEU (13.09.2026): der aufgeklappte Bereich unter einem Prompt im
-  // Prompts-Tab (nur Topic-Detailansicht), Engine-Tabs (ChatGPT/Gemini),
-  // Lauf-Auswahl (letzte PROMPT_CITATION_RUN_LIMIT Läufe), volle Antwort
-  // und zitierte Quellen. Ersetzt die "Modal mit Pfeilen"-Idee aus dem
-  // Referenz-Screenshot bewusst durch Inline-Aufklappen in der bestehenden
-  // Tab-Struktur, wie gewünscht.
   function renderPromptExpansion(prompt, changelogEntries) {
     var wrap = document.createElement('div');
     wrap.className = 'cvz-prompt-expansion';
 
-    // NEU (14.09.2026): günstige Kontextzeile statt eines eigenen
-    // Zeitverlaufs pro Prompt (den gibt es aktuell nicht, siehe Chat-
-    // Verlauf 14.09.2026 — ein neuer Zeitreihen-Endpunkt wäre ein
-    // eigenständiges Stück Arbeit). Zeigt einfach, WELCHE Änderungen
-    // explizit mit diesem Prompt verknüpft wurden, chronologisch.
     var linkedEntries = (changelogEntries || []).filter(function (entry) {
       return (entry.linked_prompt_ids || []).indexOf(prompt.id) !== -1;
     });
@@ -4581,7 +3576,7 @@
     statusLine.className = 'cvz-prompt-run-status';
     statusLine.textContent = run.own_domain_cited
       ? '\u2713 zitiert' + (run.own_domain_citation_position ? ' (Position ' + run.own_domain_citation_position + ')' : '')
-      : (run.own_domain_mentioned ? '\u2013 nur erw\u00e4hnt, nicht zitiert' : '\u2717 nicht vorhanden');
+      : (run.own_domain_mentioned ? '\u2013 nur erw\u00e4hnt, nicht zitiert' : '\u2717 in dieser Antwort nicht sichtbar');
     if (run.own_domain_recommended === true) statusLine.textContent += ' \u00b7 aktiv empfohlen';
     wrap.appendChild(statusLine);
 
@@ -4618,8 +3613,6 @@
       wrap.appendChild(sourceList);
     }
 
-    // NEU (13.09.2026): Wettbewerber, die im Antworttext vorkommen, aber
-    // nicht als Quelle verlinkt sind (siehe _extract_run_answer in main.py).
     if (run.competitor_mentioned_only && run.competitor_mentioned_only.length) {
       var mentionedNote = document.createElement('p');
       mentionedNote.className = 'cvz-card-placeholder-text cvz-prompt-mentioned-note';
@@ -4630,16 +3623,6 @@
     return wrap;
   }
 
-  // GEÄNDERT (13.09.2026): zweiter Parameter enableCitations steuert, ob
-  // Prompt-Zeilen aufklappbar sind. Nur in der Topic-Detailansicht true
-  // (siehe renderTopicDetailView), da nur dort ein Prompt eindeutig einem
-  // Topic zugeordnet ist, das der /citations-Endpoint braucht. In der
-  // Domain-Übersicht sind Prompts über mehrere Topics aggregiert.
-  // NEU (14.09.2026): aggregiert Sichtbarkeit (grün/gelb/rot) pro Journey-
-  // Phase, statt jede Prompt-Zeile einzeln lesen zu müssen (siehe Chat-
-  // Verlauf 14.09.2026, Punkt 1). Arbeitet auf der bereits (ggf. per
-  // Rollen-Filter) eingeschränkten Prompt-Liste, damit das Rollup zur
-  // aktuell sichtbaren Auswahl passt.
   function computePhaseRollup(prompts) {
     return PHASE_ORDER.map(function (phase) {
       var inPhase = prompts.filter(function (p) { return p.phase === phase; });
@@ -4667,14 +3650,9 @@
     var grid = document.createElement('div');
     grid.className = 'cvz-phase-rollup-grid';
     rollup.forEach(function (row) {
-      // Bewusst KEIN Trichter-Framing im Text ("Stufe X von Y"): der
-      // Messy-Middle-Ansatz ist explizit nicht linear, eine Balken-
-      // Darstellung als "Verteilung" statt als "Trichterstufe" vermeidet
-      // eine Linearität, die es in B2B-Buying-Committees so nicht gibt
-      // (siehe Chat-Verlauf 14.09.2026).
       var greenPct = Math.round((row.counts.green / row.total) * 100);
       var yellowPct = Math.round((row.counts.yellow / row.total) * 100);
-      var redPct = Math.max(0, 100 - greenPct - yellowPct); // Rest inkl. 'unknown'
+      var redPct = Math.max(0, 100 - greenPct - yellowPct);
 
       var card = document.createElement('div');
       card.className = 'cvz-phase-rollup-card';
@@ -4692,11 +3670,6 @@
     return section;
   }
 
-  // NEU (14.09.2026): Rollen-Filter (persona pro Prompt, siehe
-  // prompt_discovery.py). BEWUSST ein einfacher Filter über der
-  // bestehenden Phasen-Liste, KEINE Phase-x-Rolle-Matrix (siehe Chat-
-  // Verlauf 14.09.2026: bei 16 Prompts wäre die Matrix meist halbleer und
-  // würde die Interpretationslast verdoppeln statt sie zu senken).
   function getDistinctPersonas(prompts) {
     var seen = {};
     var personas = [];
@@ -4711,7 +3684,7 @@
 
   function renderPersonaFilterChips(prompts) {
     var personas = getDistinctPersonas(prompts);
-    if (personas.length === 0) return null; // Kein Prompt hat eine Rolle (z.B. target_group leer), kein Filter nötig
+    if (personas.length === 0) return null;
 
     var wrap = document.createElement('div');
     wrap.className = 'cvz-persona-filter';
@@ -4735,10 +3708,6 @@
     return wrap;
   }
 
-  // NEU (15.09.2026): Formular zum manuellen Hinzufügen eines Prompts
-  // (Text + Phase per Picklist). MAX_MANUAL_PROMPTS = 4, siehe main.py.
-  // Zählt anhand prompt.source === 'manual' (nur aktive Prompts kommen
-  // hier überhaupt an, siehe get_topic_detail).
   var MAX_MANUAL_PROMPTS = 4;
 
   function renderManualPromptForm(prompts, topicId) {
@@ -4772,11 +3741,6 @@
         (state.isSubmittingManualPrompt ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
       '</button>';
 
-    // Live-Synchronisierung, dieselbe Begründung wie beim Änderungs-
-    // protokoll-Textfeld (siehe renderChangelogSection, Chat-Verlauf
-    // 15.09.2026): ohne das würde ein Klick auf die Phase-Auswahl den
-    // schon eingetippten Text wieder leeren, weil render() die Textarea
-    // sonst aus dem noch alten state.manualPromptDraftText neu aufbaut.
     var textareaEl = wrap.querySelector('#cvz-manual-prompt-input');
     textareaEl.addEventListener('input', function () {
       state.manualPromptDraftText = textareaEl.value;
@@ -4798,8 +3762,6 @@
     heading.textContent = 'Prompts nach Phase';
     section.appendChild(heading);
 
-    // NEU (14.09.2026): Rollen-Filter VOR dem Rollup/der Liste, damit
-    // beide dieselbe (ggf. eingeschränkte) Auswahl zeigen.
     var personaChips = renderPersonaFilterChips(prompts);
     if (personaChips) section.appendChild(personaChips);
 
@@ -4810,9 +3772,6 @@
     var rollup = renderPhaseRollup(filteredPrompts);
     if (rollup) section.appendChild(rollup);
 
-    // NEU (15.09.2026): manuelles Hinzufügen eines Prompts, siehe main.py:
-    // create_manual_prompt_endpoint (MAX_MANUAL_PROMPTS = 4, zusätzlich zu
-    // den bis zu 16 automatisch generierten — macht zusammen bis zu 20).
     section.appendChild(renderManualPromptForm(prompts, state.activeTopicId));
 
     PHASE_ORDER.forEach(function (phase) {
@@ -4829,21 +3788,10 @@
       promptsInPhase.forEach(function (prompt) {
         var dotClass = prompt.visibility_status ? 'cvz-dot-' + prompt.visibility_status : 'cvz-dot-unknown';
         var statusLabel = prompt.visibility_status ? VISIBILITY_LABELS[prompt.visibility_status] : 'Unbekannt';
-        // NEU (13.09.2026): Zitierungs-Anzahl direkt in der Zeile, statt
-        // erst nach dem Aufklappen sichtbar zu sein. cited_count/total_runs
-        // kommen vom Backend (main.py: _compute_citation_counts_by_prompt),
-        // können null sein, wenn noch keine Läufe für diesen Prompt
-        // existieren.
         var citationBadge = (prompt.total_runs !== null && prompt.total_runs !== undefined && prompt.total_runs > 0)
           ? '<span class="cvz-prompt-citation-count">' + prompt.cited_count + '/' + prompt.total_runs + ' zitiert</span>'
           : '';
 
-        // NEU (14.09.2026): "was für Inhalte helfen hier" — meistzitierte
-        // Quelle + deren Content-Typ, direkt an der Prompt-Zeile (siehe
-        // main.py: _compute_top_cited_domain_by_prompt, source_analysis.py:
-        // source_content_profiles). Nur sichtbar, wenn die Domain bereits
-        // analysiert wurde (monatlicher Lauf, siehe source_analysis.py-
-        // Docstring) — fehlt das, wird gar kein Badge gezeigt, kein Platzhalter.
         var contentTypeBadge = prompt.top_cited_content_type
           ? '<span class="cvz-prompt-content-type" title="Meistzitierte Quelle: ' + escapeHtml(prompt.top_cited_domain || '') + '">' +
               (CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || escapeHtml(prompt.top_cited_content_type)) +
@@ -4854,12 +3802,6 @@
           ? '<span class="cvz-prompt-persona">' + escapeHtml(prompt.persona) + '</span>'
           : '';
 
-        // NEU (15.09.2026): kennzeichnet Prompts, die wörtlich aus einer
-        // echten, bei DataForSEO beobachteten AI-Overview-Frage
-        // übernommen wurden (siehe ai_search_questions.py,
-        // prompt_discovery.py), statt von Claude erfunden. Nur sichtbar,
-        // wenn ai_search_volume gesetzt ist — kein Platzhalter für
-        // erfundene Prompts.
         var aiSearchVolumeBadge = prompt.ai_search_volume != null
           ? '<span class="cvz-prompt-persona" title="Echte AI-Overview-Frage, laut DataForSEO ca. ' +
               escapeHtml(prompt.ai_search_volume) + 'x/Monat gestellt">\u2713 ' +
@@ -4877,17 +3819,9 @@
           personaBadge +
           aiSearchVolumeBadge +
           '<span class="cvz-prompt-source">' +
-            // GEÄNDERT (15.09.2026): "Stable Core"-Label auf Wunsch
-            // entfernt (interne Kategorisierung, ohne Mehrwert für die
-            // Ansicht). "Discovery" bleibt als Hinweis stehen, damit
-            // erkennbar bleibt, welche Prompts nicht zum festen
-            // Stable-Core-Set gehören.
             (prompt.prompt_type === 'stable_core' ? '' : 'Discovery') +
             (prompt.topic_name ? ' · ' + escapeHtml(prompt.topic_name) : '') +
           '</span>' +
-          // NEU (15.09.2026): manuell hinzugefügte Prompts wieder löschbar
-          // machen (siehe deleteManualPrompt). Nur für source==='manual',
-          // automatisch generierte Prompts bleiben unlöschbar.
           (prompt.source === 'manual'
             ? '<button type="button" class="cvz-prompt-delete-btn" data-cvz-prompt-delete="' + prompt.id + '" aria-label="Prompt l\u00f6schen" title="Prompt l\u00f6schen">\u00d7</button>'
             : '') +
@@ -4913,10 +3847,6 @@
     heading.textContent = 'Google-Search-Console-Performance';
     section.appendChild(heading);
 
-    // NEU (14.09.2026): manueller Nachzieh-Button, unabhängig davon ob
-    // schon Daten da sind — falls die GSC-Verbindung erst nach dem
-    // Anlegen des Themas hergestellt wurde, muss man sonst bis zu 30 Tage
-    // auf den nächsten Monatslauf warten (siehe Chat-Verlauf 14.09.2026).
     var refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
     refreshBtn.className = 'cvz-create-toggle-btn';
@@ -4933,14 +3863,16 @@
       return section;
     }
 
-    // NEU (15.09.2026): "Verkn\u00fcpfte \u00c4nderungen"-Spalte, dasselbe
-    // Prinzip wie schon im Keywords-Tab (siehe renderKeywordsTable) —
-    // eine Suchanfrage, mit der eine \u00c4nderung explizit verkn\u00fcpft
-    // wurde, soll das auf einen Blick zeigen, ohne extra aufklappen zu
-    // m\u00fcssen.
+    // GEÄNDERT (15.09.2026): von einer reinen Tabelle auf aufklappbare
+    // Zeilen umgestellt (gleiches Prinzip wie Keywords/Prompts), damit die
+    // Entwicklung über die Zeit sichtbar wird, nicht nur der aktuelle
+    // Stand (Kundenwunsch, siehe Chat-Verlauf 15.09.2026). Die URL, die
+    // für eine Suchanfrage rankt, würde ich hier gerne mit anzeigen —
+    // dafür fehlt mir aber google_search_console.py, ich weiß nicht ob/
+    // unter welchem Feldnamen das schon erfasst wird.
     var table = document.createElement('table');
     table.className = 'cvz-table';
-    table.innerHTML = '<thead><tr><th>Suchanfrage</th><th>Klicks</th><th>Impressionen</th><th>CTR</th><th>Position</th><th>Verkn\u00fcpfte \u00c4nderungen</th></tr></thead>';
+    table.innerHTML = '<thead><tr><th></th><th>Suchanfrage</th><th>Klicks</th><th>Impressionen</th><th>CTR</th><th>Position</th><th>Verkn\u00fcpfte \u00c4nderungen</th></tr></thead>';
     var tbody = document.createElement('tbody');
     gscRows.forEach(function (row) {
       var linkedEntries = (changelogEntries || []).filter(function (entry) {
@@ -4949,8 +3881,14 @@
       var linkedCell = linkedEntries.length
         ? escapeHtml(linkedEntries.map(function (e) { return e.entry_text; }).join('; '))
         : '\u2013';
+      var rowId = row.id || row.query;
+      var isExpanded = state.expandedGscRowId === rowId;
       var tr = document.createElement('tr');
+      tr.className = 'cvz-gsc-row-clickable';
+      tr.setAttribute('data-cvz-gsc-toggle', rowId);
+      tr.setAttribute('data-cvz-gsc-text', row.query);
       tr.innerHTML =
+        '<td class="cvz-prompt-expand-chevron">' + (isExpanded ? '\u25be' : '\u25b8') + '</td>' +
         '<td>' + escapeHtml(row.query) + '</td>' +
         '<td>' + escapeHtml(row.clicks) + '</td>' +
         '<td>' + escapeHtml(row.impressions) + '</td>' +
@@ -4958,28 +3896,84 @@
         '<td>' + escapeHtml(row.position.toFixed(1)) + '</td>' +
         '<td class="cvz-gsc-cell-linked">' + linkedCell + '</td>';
       tbody.appendChild(tr);
+
+      if (isExpanded) {
+        var expansionTr = document.createElement('tr');
+        var expansionTd = document.createElement('td');
+        expansionTd.colSpan = 7;
+        expansionTd.appendChild(renderGscRowExpansion(row, rowId));
+        expansionTr.appendChild(expansionTd);
+        tbody.appendChild(expansionTr);
+      }
     });
     table.appendChild(tbody);
     section.appendChild(table);
     return section;
   }
 
-    // NEU (14.09.2026): absolutes Datum (TT.MM.YYYY) für vorgemerkte
-  // Deaktivierungen/Warteschlangen-Hinweise – formatRelativeTime oben ist
-  // dafür zu ungenau ("vor 12 Tagen" ist bei einem ZUKÜNFTIGEN Datum
-  // verwirrend), daher ein zweiter, einfacherer Formatter.
-    function formatShortDate(isoString) {
+  // NEU (15.09.2026): Entwicklung über die Zeit für eine GSC-Suchanfrage,
+  // dieselbe Datenquelle wie der Keyword-Rank-Verlauf (search_rank_
+  // snapshots über /rank-history, jetzt inkl. gsc_clicks).
+  function renderGscRowExpansion(row, rowId) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-prompt-expansion';
+
+    if (state.loadingGscRankHistory[rowId]) {
+      wrap.innerHTML = '<p class="cvz-card-placeholder-text">L\u00e4dt Verlauf...</p>';
+      return wrap;
+    }
+
+    var snapshots = state.gscRankHistoryCache[rowId];
+    if (!snapshots || snapshots.length < 2) {
+      wrap.innerHTML = '<p class="cvz-card-placeholder-text">Noch kein Verlauf verf\u00fcgbar, braucht mindestens zwei Monatsl\u00e4ufe mit Daten f\u00fcr diese Suchanfrage.</p>';
+      return wrap;
+    }
+
+    var xLabels = snapshots.map(function (s) { return formatShortDate(s.snapshot_at); });
+    var clicksValues = snapshots.map(function (s) { return s.gsc_clicks; });
+    var impressionsValues = snapshots.map(function (s) { return s.gsc_impressions; });
+    var positionValues = snapshots.map(function (s) { return s.gsc_position; });
+
+    var hasClicks = clicksValues.some(function (v) { return v != null; });
+    var hasImpressions = impressionsValues.some(function (v) { return v != null; });
+    var hasPosition = positionValues.some(function (v) { return v != null; });
+
+    if (!hasClicks && !hasImpressions && !hasPosition) {
+      wrap.innerHTML = '<p class="cvz-card-placeholder-text">Keine historisierten GSC-Werte f\u00fcr diese Suchanfrage.</p>';
+      return wrap;
+    }
+
+    var series = [];
+    if (hasClicks) series.push({ label: 'Klicks', values: clicksValues, color: 'var(--cvz-teal)' });
+    if (hasImpressions) series.push({ label: 'Impressionen', values: impressionsValues, color: 'var(--cvz-amber)' });
+
+    var chartWrap = document.createElement('div');
+    chartWrap.className = 'cvz-card';
+    chartWrap.innerHTML =
+      buildLineChartSvg(series, xLabels, {}) +
+      '<p class="cvz-chart-caption">Klicks/Impressionen im Verlauf. Historie beginnt mit eurem ersten Monatslauf nach ' +
+      'Einf\u00fchrung dieser Auswertung, keine r\u00fcckwirkenden Daten.</p>';
+    wrap.appendChild(chartWrap);
+
+    if (hasPosition) {
+      var posChartWrap = document.createElement('div');
+      posChartWrap.className = 'cvz-card';
+      posChartWrap.innerHTML =
+        buildLineChartSvg([{ label: 'GSC-Position', values: positionValues, color: 'var(--cvz-red)' }], xLabels, {}) +
+        '<p class="cvz-chart-caption">Position im Verlauf, niedriger ist besser.</p>';
+      wrap.appendChild(posChartWrap);
+    }
+
+    return wrap;
+  }
+
+  function formatShortDate(isoString) {
     if (!isoString) return null;
     var d = new Date(isoString);
     if (isNaN(d.getTime())) return null;
     return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
 
-  // NEU (14.09.2026): eigenes, zum Dashboard passendes Bestätigungs-Popup
-  // statt des nativen Browser-Dialogs (window.confirm/window.alert).
-  // showCvzConfirm gibt ein Promise<boolean> zurück (true = bestätigt),
-  // showCvzAlert ein Promise, das aufgelöst wird sobald der User auf OK
-  // klickt (nur ein Button, kein Abbrechen).
   function showCvzModal(message, options) {
     options = options || {};
     var isConfirm = options.mode !== 'alert';
@@ -5079,9 +4073,6 @@
     return div.innerHTML;
   }
 
-  // =========================================================================
-  // STYLES
-  // =========================================================================
   function injectStyles() {
     if (document.getElementById('cvz-visibility-styles')) return;
 
@@ -5100,11 +4091,6 @@
         '--cvz-border: #232b36;' +
         'font-family: "Geist", sans-serif;' +
         'color: var(--cvz-text);' +
-        // Fester Mindestplatz, damit die Seite (und damit der Footer
-        // darunter) nicht bei jedem Render-Wechsel springt, z.B. wenn ein
-        // "Sammelt Daten"-Zustand kurz ist und die volle Detailansicht viel
-        // länger. Wächst bei Bedarf noch darüber hinaus, schrumpft aber nie
-        // darunter.
         'min-height: 640px;' +
       '}' +
       '#cvz-visibility-app h3 { font-family: "Syne", sans-serif; }' +
@@ -5116,9 +4102,6 @@
         'animation: cvz-spin 0.8s linear infinite;' +
       '}' +
 
-      // NEU: initialer Lade-Zustand (bevor Projekte/Themen geladen sind),
-      // zentriert einen größeren Spinner in derselben Mindesthöhe wie der
-      // Rest der App, damit nichts springt, sobald echte Inhalte kommen.
       '.cvz-initial-loading {' +
         'min-height: 640px; display: flex; align-items: center; justify-content: center;' +
       '}' +
@@ -5127,9 +4110,6 @@
         'border-radius: 50%; animation: cvz-spin 0.8s linear infinite;' +
       '}' +
 
-      // GEÄNDERT (13.09.2026): ersetzt die alte Such-Combobox (ein
-      // Textfeld, Domains+Themen gemischt im Dropdown) durch zwei
-      // getrennte, native Selects nebeneinander.
       '.cvz-picker-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }' +
       '.cvz-picker-select {' +
         'flex: 1; min-width: 160px; max-width: 280px; box-sizing: border-box;' +
@@ -5195,10 +4175,6 @@
       '.cvz-tab-btn:hover { color: var(--cvz-text); }' +
       '.cvz-tab-btn-active { color: var(--cvz-teal); border-bottom-color: var(--cvz-teal); }' +
 
-      // GEÄNDERT (13.09.2026): Timeline (Favicon-Wand) entfernt, siehe
-      // renderCompetitorInsightSection. .cvz-timeline-logo bleibt bestehen,
-      // wird jetzt für die freistehenden Favicons in Prompt-Quellen und
-      // Wettbewerber-Karten genutzt (kein Stapel mehr, daher vereinfacht).
       '.cvz-timeline-logo {' +
         'width: 20px; height: 20px; border-radius: 0; border: 1px solid var(--cvz-border);' +
         'background: var(--cvz-text); cursor: pointer; display: inline-block; vertical-align: middle;' +
@@ -5214,20 +4190,13 @@
         'display: block; margin-top: 4px; font-family: "Geist", sans-serif; font-size: 11px; padding: 2px 8px;' +
         'background: none; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer;' +
       '}' +
-            '.cvz-retry-btn:disabled { opacity: 0.6; cursor: default; }' +
-      // NEU (14.09.2026): Deaktivieren-Button (neutral/grau statt teal,
-      // damit er sich klar von "positiven" Aktionen wie Retry/Aktivieren
-      // unterscheidet) und der Archiviert-Hinweis in der Detailansicht.
+      '.cvz-retry-btn:disabled { opacity: 0.6; cursor: default; }' +
       '.cvz-archive-btn {' +
         'font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 10px;' +
         'background: none; color: var(--cvz-text-muted); border: 1px solid var(--cvz-border); border-radius: 0; cursor: pointer;' +
       '}' +
       '.cvz-archive-btn:hover { color: var(--cvz-text); border-color: var(--cvz-text-muted); }' +
       '.cvz-archive-btn:disabled { opacity: 0.6; cursor: default; }' +
-      // NEU (14.09.2026): "Ganz löschen", nur für nie gestartete Themen.
-      // Bewusst zurückhaltend (Text statt Kasten) — kein prominenter roter
-      // Button, das soll kein häufig genutzter Pfad sein, aber trotzdem
-      // erreichbar.
       '.cvz-delete-topic-btn {' +
         'font-family: "Geist", sans-serif; font-size: 11px; padding: 4px 0 4px 10px;' +
         'background: none; color: var(--cvz-text-muted); border: none; text-decoration: underline; cursor: pointer;' +
@@ -5237,20 +4206,12 @@
       '.cvz-top-action-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }' +
       '.cvz-top-action-row .cvz-back-btn { padding: 0; margin: 0; }' +
       '.cvz-archived-notice { font-size: 13px; color: var(--cvz-text-muted); margin: 0 0 8px; font-style: italic; }' +
-            '.cvz-status-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
+      '.cvz-status-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
       '.cvz-status-collecting { color: var(--cvz-amber); border-color: var(--cvz-amber); }' +
       '.cvz-status-error { color: var(--cvz-red); border-color: var(--cvz-red); }' +
       '.cvz-status-archived { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
-      // NEU (14.09.2026): 'queued' bewusst optisch ähnlich zu 'archived'
-      // gehalten (beide "gerade nicht aktiv laufend"), Label + Hinweistext
-      // unterscheiden trotzdem klar genug zwischen "endgültig weg" und
-      // "wartet, startet automatisch".
       '.cvz-status-queued { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
-      // NEU (14.09.2026): informativer Hinweis im Anlege-Formular (siehe
-      // Block 19), bewusst NICHT in Rot wie .cvz-create-error — ist kein
-      // Fehler, das Formular bleibt ja nutzbar.
-            '.cvz-create-info { width: 100%; font-size: 13px; color: var(--cvz-text-muted); margin: 6px 0 0; }' +
-      // NEU (14.09.2026): eigenes Bestätigungs-Popup, siehe showCvzModal.
+      '.cvz-create-info { width: 100%; font-size: 13px; color: var(--cvz-text-muted); margin: 6px 0 0; }' +
       '.cvz-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 16px; }' +
       '.cvz-modal-box { background: #141b24; border: 1px solid #232b36; border-radius: 4px; padding: 20px; max-width: 380px; width: 100%; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }' +
       '.cvz-modal-title { font-family: "Geist", sans-serif; font-size: 15px; font-weight: 600; color: #e6edf3; margin: 0 0 8px; }' +
@@ -5268,13 +4229,8 @@
 
       '.cvz-summary-card { margin-bottom: 24px; }' +
       '.cvz-summary-text { font-size: 15px; line-height: 1.5; margin: 12px 0 0; }' +
-      // NEU (15.09.2026): Unterabschnitte der erweiterten Zusammenfassung
-      // (Wettbewerber-St\u00e4rke, je Phase, Keyword-Chancen/-Schw\u00e4chen).
       '.cvz-summary-subsection { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--cvz-border); }' +
       '.cvz-summary-phase-block { margin-top: 12px; }' +
-      // NEU (15.09.2026): Hinweis auf dünne Datenlage, siehe
-      // renderSummaryDetailSections. Bewusst dezent (Text-Ton, kein Rot/
-      // Warnfarbe) — das ist kein Fehler, nur ein Reifegrad-Hinweis.
       '.cvz-thin-data-note { font-size: 12px; color: var(--cvz-text-muted); font-style: italic; margin: 6px 0 0; }' +
 
       '.cvz-opportunity-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }' +
@@ -5283,8 +4239,9 @@
       '.cvz-opportunity-type { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--cvz-red); }' +
       '.cvz-opportunity-description { margin: 0 0 8px; font-size: 14px; line-height: 1.4; color: var(--cvz-text); }' +
       '.cvz-opportunity-topic { margin: 0; font-size: 11px; color: var(--cvz-text-muted); }' +
+      '.cvz-competitor-prompt-list { margin: 2px 0 8px; padding-left: 16px; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-competitor-prompt-list li { margin: 2px 0; }' +
 
-      // NEU (13.09.2026): Prioritäts-Färbung für Content-Lücken-Karten.
       '.cvz-gap-priority-hoch { border-left-color: var(--cvz-red); }' +
       '.cvz-gap-priority-mittel { border-left-color: var(--cvz-amber); }' +
       '.cvz-gap-priority-niedrig { border-left-color: var(--cvz-teal); }' +
@@ -5298,6 +4255,8 @@
       '.cvz-table-clickable tbody tr { cursor: pointer; }' +
       '.cvz-table-clickable tbody tr:hover { background: rgba(79, 209, 197, 0.06); }' +
       '.cvz-gsc-cell-linked { color: var(--cvz-teal); max-width: 280px; }' +
+      '.cvz-gsc-row-clickable { cursor: pointer; }' +
+      '.cvz-gsc-row-clickable:hover { background: rgba(79, 209, 197, 0.06); }' +
 
       '.cvz-phase-heading { font-family: "Syne", sans-serif; font-size: 14px; margin: 16px 0 8px; color: var(--cvz-text-muted); }' +
       '.cvz-prompt-list { display: flex; flex-direction: column; gap: 4px; }' +
@@ -5311,8 +4270,6 @@
       '}' +
       '.cvz-prompt-delete-btn:hover { color: var(--cvz-red); }' +
 
-      // NEU (13.09.2026): aufklappbare Prompt-Zeile + Engine-/Lauf-Tabs +
-      // Antwort- und Quellen-Darstellung im Prompts-Tab.
       '.cvz-prompt-row-clickable { cursor: pointer; }' +
       '.cvz-prompt-row-clickable:hover { background: rgba(79, 209, 197, 0.06); }' +
       '.cvz-prompt-expand-chevron { color: var(--cvz-text-muted); font-size: 11px; }' +
@@ -5346,9 +4303,6 @@
       '.cvz-dot-red { background: var(--cvz-red); }' +
       '.cvz-dot-unknown { background: var(--cvz-border); }' +
 
-      // NEU (14.09.2026): Phasen-Rollup über der Prompt-Liste (Sichtbarkeit
-      // grün/gelb/rot pro Journey-Phase, aggregiert statt jede Prompt-Zeile
-      // einzeln lesen zu müssen).
       '.cvz-phase-rollup-grid { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0 20px; }' +
       '.cvz-phase-rollup-card { flex: 1; min-width: 140px; }' +
       '.cvz-phase-rollup-label { font-size: 13px; margin: 0 0 6px; color: var(--cvz-text); }' +
@@ -5356,9 +4310,6 @@
       '.cvz-phase-rollup-segment { height: 100%; }' +
       '.cvz-phase-rollup-count { font-size: 11px; margin: 4px 0 0; color: var(--cvz-text-muted); }' +
 
-      // NEU (14.09.2026): Rollen-Filter-Chips (persona pro Prompt, siehe
-      // prompt_discovery.py). Nur sichtbar, wenn mindestens ein Prompt
-      // dieses Topics eine Rolle trägt.
       '.cvz-persona-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }' +
       '.cvz-persona-chip {' +
         'font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 10px;' +
@@ -5366,9 +4317,6 @@
       '}' +
       '.cvz-persona-chip-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
 
-      // NEU (14.09.2026): Content-Typ-Badge in der Prompt-Zeile (welche
-      // Quelle zitiert wird und was für ein Content-Typ das ist, siehe
-      // main.py: _compute_top_cited_domain_by_prompt + source_analysis.py).
       '.cvz-prompt-content-type {' +
         'font-size: 11px; color: var(--cvz-amber); white-space: nowrap;' +
       '}' +
@@ -5382,8 +4330,6 @@
       '.cvz-chart-dot { fill: var(--cvz-teal); }' +
       '.cvz-chart-caption { font-size: 12px; color: var(--cvz-text-muted); margin: 8px 0 0; }' +
 
-      // NEU (13.09.2026): Legende für den Mehrfach-Linien-Chart
-      // (Sichtbarkeits-Verlauf, Rank-Verlauf).
       '.cvz-chart-legend { display: flex; gap: 16px; margin-top: 8px; flex-wrap: wrap; }' +
       '.cvz-chart-legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--cvz-text-muted); }' +
       '.cvz-legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }' +
@@ -5393,7 +4339,6 @@
       '.cvz-chart-hit { cursor: pointer; }' +
       '.cvz-chart-dot { cursor: pointer; }' +
 
-      // NEU (13.09.2026): Wochendetail-Kachel.
       '.cvz-week-detail { margin-top: 12px; border-left: 2px solid var(--cvz-teal); }' +
       '.cvz-week-detail-header { display: flex; align-items: center; justify-content: space-between; }' +
       '.cvz-week-detail-close-btn {' +
@@ -5401,7 +4346,6 @@
       '}' +
       '.cvz-week-detail-row { font-size: 13px; margin: 4px 0; color: var(--cvz-text); }' +
 
-      // NEU (13.09.2026): Changelog-Formular + Liste.
       '.cvz-changelog-form { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: flex-start; }' +
       '.cvz-changelog-input {' +
         'flex: 1; min-width: 240px; font-family: "Geist", sans-serif; font-size: 14px; padding: 8px 10px;' +
@@ -5417,9 +4361,6 @@
         'margin-top: 10px; font-family: "Geist", sans-serif; font-size: 13px; padding: 6px 14px;' +
         'background: none; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer;' +
       '}' +
-      // GEÄNDERT (15.09.2026): echte Tabelle statt gestapelter Karten
-      // (siehe Chat-Verlauf 15.09.2026), .cvz-changelog-list/-item nicht
-      // mehr verwendet.
       '.cvz-changelog-table-wrap { overflow-x: auto; margin-top: 4px; }' +
       '.cvz-changelog-table { width: 100%; border-collapse: collapse; font-size: 13px; }' +
       '.cvz-changelog-table th {' +
@@ -5432,10 +4373,7 @@
       '.cvz-changelog-cell-meta { color: var(--cvz-text-muted); white-space: nowrap; }' +
       '.cvz-changelog-cell-action { text-align: right; white-space: nowrap; }' +
       '.cvz-changelog-row-deleted td { opacity: 0.75; }' +
-      // NEU (14.09.2026): geführte Felder + Verknüpfungs-Picker im
-      // Changelog-Formular.
       '.cvz-changelog-guided-label { font-size: 12px; color: var(--cvz-text-muted); margin: 10px 0 4px; }' +
-      // NEU (15.09.2026): Freitext für "Sonstiges" bei "Wo?"/"Effekt".
       '.cvz-changelog-custom-input {' +
         'display: block; width: 100%; max-width: 320px; margin: 6px 0 0;' +
         'font-family: "Geist", sans-serif; font-size: 13px; padding: 6px 8px;' +
@@ -5444,8 +4382,6 @@
       '.cvz-changelog-link-picker { margin: 10px 0; }' +
       '.cvz-changelog-link-chip-list { margin-top: 8px; }' +
       '.cvz-changelog-linked { font-size: 11px; color: var(--cvz-teal); margin: 2px 0; }' +
-      // NEU (15.09.2026): Badge in der eingeklappten Keyword-Zeile, wenn
-      // eine Änderung damit verknüpft ist.
       '.cvz-changelog-linked-badge { color: var(--cvz-teal); font-size: 12px; }' +
       '.cvz-prompt-linked-changelog { margin: 0 0 12px; }' +
       '.cvz-changelog-delete-btn {' +
@@ -5464,10 +4400,6 @@
     document.head.appendChild(style);
   }
 
-  // NEU: zentrierter Lade-Zustand direkt beim ersten Rendern, bevor
-  // Memberstack/Projekte/Themen geladen sind. Nutzt dieselbe Mindesthöhe
-  // wie #cvz-visibility-app, damit der Footer darunter nicht springt,
-  // sobald echte Inhalte kommen.
   function renderInitialLoadingState() {
     var container = document.getElementById('cvz-visibility-app');
     if (!container) return;
@@ -5493,8 +4425,5 @@
     }
   }
 
-  // =========================================================================
-  // START
-  // =========================================================================
   document.addEventListener('DOMContentLoaded', init);
 })();
