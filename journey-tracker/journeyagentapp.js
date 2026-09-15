@@ -582,7 +582,27 @@
       changelog: data.changelog || [],
       search_queries: data.search_queries || [],
       competitors: [],
-      gsc_rows: [],
+      // KORRIGIERT (14.09.2026): war fest auf [] gesetzt, unabhängig vom
+      // Backend — das GSC-Tab zeigte deshalb NIE echte Daten, selbst wenn
+      // GSC erfolgreich abgefragt wurde (siehe Chat-Verlauf 14.09.2026,
+      // "GSC nachziehen bleibt leer"). Die echten Zeilen stecken in
+      // search_queries mit source='gsc_near_miss' (siehe run_topic.py:
+      // save_gsc_near_miss), hier zur passenden Zeilenform für
+      // renderGscBlock umgeformt. ctr wird selbst berechnet, dafür gibt
+      // es keine eigene gespeicherte Spalte.
+      gsc_rows: (data.search_queries || [])
+        .filter(function (q) { return q.source === 'gsc_near_miss'; })
+        .map(function (q) {
+          var impressions = q.gsc_impressions || 0;
+          var clicks = q.gsc_clicks || 0;
+          return {
+            query: q.keyword,
+            clicks: clicks,
+            impressions: impressions,
+            ctr: impressions > 0 ? clicks / impressions : 0,
+            position: q.gsc_position || 0,
+          };
+        }),
       prompts: (data.prompts || []).map(function (p) {
         // GEÄNDERT (13.09.2026): Backend liefert die Phase als
         // "messymiddle_phase", renderPromptsByPhase gruppiert aber nach
