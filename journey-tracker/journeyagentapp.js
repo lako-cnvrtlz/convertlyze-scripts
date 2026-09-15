@@ -2073,6 +2073,14 @@
         break;
       case 'uebersicht':
       default:
+        // NEU (15.09.2026): Phasen-Übersicht auch auf der Hauptseite,
+        // nicht mehr nur im Prompts-Tab — Kundenwunsch, auf einen Blick
+        // zu sehen, wie die Sichtbarkeit über die Journey-Phasen verteilt
+        // ist, ohne erst in einen anderen Tab wechseln zu müssen.
+        // Wiederverwendet renderPhaseRollup 1:1 (siehe Prompts-Tab), gibt
+        // bewusst null zurück, wenn keine Prompts eine Phase haben.
+        var overviewRollup = renderPhaseRollup(detail.prompts);
+        if (overviewRollup) tabContent.appendChild(overviewRollup);
         tabContent.appendChild(renderCombinedTrendSection(
           state.visibilityTrendCache[state.activeTopicId],
           state.topicRankHistoryCache[state.activeTopicId],
@@ -2672,10 +2680,16 @@
     weeks.forEach(function (week) {
       (week.domains || []).forEach(function (d) {
         if (!byDomain[d.domain]) {
-          byDomain[d.domain] = { domain: d.domain, citations: 0, by_model: {}, prompts: {} };
+          byDomain[d.domain] = { domain: d.domain, citations: 0, by_model: {}, prompts: {}, url: d.url };
         }
         var entry = byDomain[d.domain];
         entry.citations += d.citations;
+        // GEÄNDERT (15.09.2026): url wird jetzt mit durchgereicht (kam vom
+        // Backend schon immer mit, siehe main.py: _get_competitor_
+        // citation_trend, wurde hier aber bisher verworfen) — Kundenwunsch:
+        // "genaue URLs, die zitiert werden, sichtbar machen". Neuere Woche
+        // gewinnt, falls sich die zitierte URL über die Zeit geändert hat.
+        if (d.url) entry.url = d.url;
         Object.keys(d.by_model || {}).forEach(function (model) {
           entry.by_model[model] = (entry.by_model[model] || 0) + d.by_model[model];
         });
@@ -2684,7 +2698,7 @@
     });
     return Object.keys(byDomain).map(function (domain) {
       var e = byDomain[domain];
-      return { domain: e.domain, citations: e.citations, by_model: e.by_model, prompts: Object.keys(e.prompts) };
+      return { domain: e.domain, citations: e.citations, by_model: e.by_model, prompts: Object.keys(e.prompts), url: e.url };
     }).sort(function (a, b) { return b.citations - a.citations; });
   }
 
@@ -2829,6 +2843,15 @@
           '<img class="cvz-inline-favicon" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(comp.domain) + '" alt="">' +
           escapeHtml(comp.domain) + ' \u00b7 ' + comp.citations + ' Zitationen' +
         '</p>' +
+        // NEU (15.09.2026): tatsächlich zitierte URL, nicht nur die
+        // Domain — Kundenwunsch: "damit man sich gleich informieren kann,
+        // wie die zitierten Inhalte aufgebaut sind". Nur die zuletzt
+        // gesehene URL (siehe aggregateCompetitorDomains), eine Domain
+        // kann über mehrere Wochen mit unterschiedlichen URLs zitiert
+        // worden sein, hier bewusst keine vollständige Liste.
+        (comp.url
+          ? '<p class="cvz-opportunity-topic"><a href="' + escapeHtml(comp.url) + '" target="_blank" rel="noopener">' + escapeHtml(comp.url) + '</a></p>'
+          : '') +
         (modelParts.length ? '<p class="cvz-opportunity-topic">' + escapeHtml(modelParts.join(' \u00b7 ')) + '</p>' : '') +
         (profile && profile.content_type
           ? '<p class="cvz-opportunity-topic">' + escapeHtml(CONTENT_TYPE_LABELS[profile.content_type] || profile.content_type) + '</p>'
@@ -2925,9 +2948,17 @@
     ideas.forEach(function (idea) {
       var card = document.createElement('div');
       card.className = 'cvz-card cvz-idea-card';
+      // GEÄNDERT (15.09.2026): zeigt jetzt, WELCHE KI das Angebot gemacht
+      // hat (idea.provider, siehe content_ideas.py — fehlte bisher im
+      // main.py-Select, "Welche KI?" ließ sich vorher gar nicht
+      // beantworten, siehe Chat-Verlauf 15.09.2026).
+      var providerLabel = idea.provider ? (MODEL_LABELS[idea.provider] || idea.provider) : null;
       card.innerHTML =
         (idea.phase ? '<p class="cvz-opportunity-type">' + escapeHtml(PHASE_LABELS[idea.phase] || idea.phase) + '</p>' : '') +
-        '<p class="cvz-opportunity-description">' + escapeHtml(idea.description || '') + '</p>' +
+        '<p class="cvz-opportunity-description">' +
+          (providerLabel ? '<strong>' + escapeHtml(providerLabel) + ':</strong> ' : '') +
+          escapeHtml(idea.description || '') +
+        '</p>' +
         (idea.topic_name ? '<p class="cvz-opportunity-topic">' + escapeHtml(idea.topic_name) + '</p>' : '');
       grid.appendChild(card);
     });
@@ -3646,6 +3677,18 @@
     heading.className = 'cvz-section-label';
     heading.textContent = 'Sichtbarkeit über die Journey-Phasen';
     section.appendChild(heading);
+
+    // NEU (15.09.2026): Klarstellung, siehe Chat-Verlauf 15.09.2026 — die
+    // Balken hier messen AUSSCHLIESSLICH, ob die EIGENE Domain zitiert
+    // wurde, nicht ob überhaupt irgendeine Zitierung stattfand. Ein
+    // Wettbewerber kann im selben Prompt zitiert werden, ohne dass sich
+    // das hier niederschlägt — beides sind bewusst getrennte Kennzahlen
+    // (siehe Wettbewerber-Tab für die andere Seite).
+    var clarification = document.createElement('p');
+    clarification.className = 'cvz-card-placeholder-text';
+    clarification.style.marginBottom = '8px';
+    clarification.textContent = 'Zeigt, ob eure eigene Domain zitiert wurde \u2014 ein zitierter Wettbewerber im selben Prompt z\u00e4hlt hier nicht mit (siehe Wettbewerber-Tab).';
+    section.appendChild(clarification);
 
     var grid = document.createElement('div');
     grid.className = 'cvz-phase-rollup-grid';
