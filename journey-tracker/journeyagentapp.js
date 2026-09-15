@@ -297,6 +297,20 @@
     // wurde und man nicht bis zu 30 Tage auf den nächsten Monatslauf
     // warten will.
     isRefreshingGsc: false,
+    // NEU (15.09.2026): Wettbewerber-Verwaltung (Vorschläge ansehen,
+    // aktive Auswahl austauschen), siehe loadCompetitorSuggestions/
+    // submitCompetitorSelection. Alles pro Topic geschlüsselt, damit ein
+    // Wechsel zwischen Themen einen begonnenen Entwurf nicht verwirft.
+    competitorSuggestionsCache: {},    // topicId -> Vorschläge[] | null
+    isLoadingCompetitorSuggestions: false,
+    competitorManageOpen: {},          // topicId -> bool
+    competitorDraftDomains: {},        // topicId -> aktuell ausgewählte Domains (Array)
+    isSubmittingCompetitors: false,
+    // NEU (15.09.2026): manuelles Hinzufügen von Prompts (Text + Phase
+    // per Picklist), siehe main.py: create_manual_prompt_endpoint.
+    manualPromptDraftText: '',
+    manualPromptDraftPhase: 'exploration',
+    isSubmittingManualPrompt: false,
     citationTrendCache: {},  // topicId -> weeks[], nur bei Bedarf geladen (siehe maybeLoadCitationTrend)
     isLoadingCitationTrend: false,
     showCreateForm: false,   // ob das "Neues Thema anlegen"-Formular gerade offen ist
@@ -343,7 +357,7 @@
     showDeletedChangelog: {},      // topicId -> bool, ob die Archiv-Liste offen ist
     deletedChangelogCache: {},     // topicId -> gelöschte Einträge[]
     isLoadingDeletedChangelog: false,
-    changelogDraft: '',   // nur zum Überleben des Lade-Renders beim Absenden, siehe submitChangelogEntry
+    changelogDraft: '',   // GEÄNDERT (15.09.2026): wird jetzt laufend beim Tippen synchronisiert (siehe renderChangelogSection), nicht mehr nur beim Absenden
     // NEU (14.09.2026): geführte Zusatzfelder beim Anlegen eines Eintrags
     // ("Wo?"/"Erwarteter Effekt", werden zu entry_text zusammengesetzt,
     // siehe composeChangelogEntryText) sowie die optionale Verknüpfung mit
@@ -354,11 +368,21 @@
     // Verknüpfung — nicht überladen wirken).
     changelogLocationDraft: null,      // 'landingpage' | 'blogartikel' | 'preisseite' | 'meta' | 'sonstiges' | null
     changelogEffectDraft: null,        // 'mehr_zitierungen' | 'bessere_position' | 'beides' | 'unklar' | null
+    // NEU (15.09.2026): Freitext, wenn 'sonstiges' gewählt ist — ersetzt
+    // das generische Wort "Sonstiges" im komponierten Text durch das, was
+    // der Nutzer tatsächlich meint (siehe composeChangelogEntryText).
+    changelogLocationCustomText: '',
+    changelogEffectCustomText: '',
     changelogLinkSectionOpen: { keywords: false, prompts: false },
     changelogDraftLinkedIds: { keywords: [], prompts: [] },
     // NEU (13.09.2026): eigener Sichtbarkeits-Verlauf über die Zeit, lazy
     // geladen wenn die Übersicht geöffnet wird (siehe maybeLoadVisibilityTrend).
     visibilityTrendCache: {},      // topicId -> weeks[]
+    // NEU (15.09.2026): kombinierte Monats-Grafik für die Übersicht
+    // (Prompt-Zitierungen + GSC-Klicks/Impressionen + neue Keywords),
+    // siehe main.py: get_monthly_overview_trend_endpoint.
+    monthlyOverviewTrendCache: {},  // topicId -> months[]
+    isLoadingMonthlyOverviewTrend: false,
     isLoadingVisibilityTrend: false,
   };
 
@@ -590,12 +614,17 @@
       // save_gsc_near_miss), hier zur passenden Zeilenform für
       // renderGscBlock umgeformt. ctr wird selbst berechnet, dafür gibt
       // es keine eigene gespeicherte Spalte.
+      // NEU (15.09.2026): id mit durchgereicht (vorher verworfen), damit
+      // sich verknüpfte Änderungsprotokoll-Einträge (linked_search_query_
+      // ids referenziert search_queries.id) überhaupt zuordnen lassen,
+      // siehe renderGscBlock.
       gsc_rows: (data.search_queries || [])
         .filter(function (q) { return q.source === 'gsc_near_miss'; })
         .map(function (q) {
           var impressions = q.gsc_impressions || 0;
           var clicks = q.gsc_clicks || 0;
           return {
+            id: q.id,
             query: q.keyword,
             clicks: clicks,
             impressions: impressions,
@@ -697,6 +726,29 @@
     render();
   }
 
+  // NEU (15.09.2026): siehe main.py: get_monthly_overview_trend_endpoint.
+  async function loadMonthlyOverviewTrend(topicId) {
+    if (CONFIG.useMockData) {
+      return [];
+    }
+    var data = await apiFetch('/topics/' + topicId + '/monthly-overview-trend');
+    return data.months || [];
+  }
+
+  async function maybeLoadMonthlyOverviewTrend(topicId) {
+    if (!topicId || state.monthlyOverviewTrendCache[topicId]) return;
+    state.isLoadingMonthlyOverviewTrend = true;
+    render();
+    try {
+      state.monthlyOverviewTrendCache[topicId] = await loadMonthlyOverviewTrend(topicId);
+    } catch (e) {
+      console.error('[CVZ Visibility] Monatsübersicht konnte nicht geladen werden:', e);
+      state.monthlyOverviewTrendCache[topicId] = [];
+    }
+    state.isLoadingMonthlyOverviewTrend = false;
+    render();
+  }
+
   // NEU (13.09.2026): Rank-Verlauf für ein einzelnes Keyword, lazy geladen
   // beim Aufklappen (siehe togglePromptExpansion-Pendant unten).
   async function loadKeywordRankHistory(topicId, keyword) {
@@ -783,9 +835,22 @@
   // Schema-Umbau nötig, entry_text bleibt ein einzelnes Feld). Reine
   // Text-Komposition, keine Seiteneffekte — auch fürs Vorschau-Rendering
   // im Formular selbst genutzt (renderChangelogSection).
-  function composeChangelogEntryText(rawText, location, effect) {
-    var prefix = location ? '[' + (CHANGELOG_LOCATION_LABELS[location] || location) + '] ' : '';
-    var suffix = effect ? ' — erwarteter Effekt: ' + (CHANGELOG_EFFECT_LABELS[effect] || effect) : '';
+  // GEÄNDERT (15.09.2026): locationCustom/effectCustom ersetzen das
+  // generische Wort "Sonstiges" durch den vom Nutzer eingegebenen Text,
+  // wenn vorhanden (leerer/fehlender Freitext fällt weiter auf das
+  // generische Label zurück). Trennzeichen vor "erwarteter Effekt" ist
+  // jetzt ein Mittelpunkt statt eines Gedankenstrichs, konsistent mit dem
+  // Trennzeichen, das die Metazeile jedes Eintrags ohnehin schon nutzt
+  // (siehe cvz-changelog-meta).
+  function composeChangelogEntryText(rawText, location, effect, locationCustom, effectCustom) {
+    var locationLabel = location === 'sonstiges' && (locationCustom || '').trim()
+      ? locationCustom.trim()
+      : (CHANGELOG_LOCATION_LABELS[location] || location);
+    var effectLabel = effect === 'sonstiges' && (effectCustom || '').trim()
+      ? effectCustom.trim()
+      : (CHANGELOG_EFFECT_LABELS[effect] || effect);
+    var prefix = location ? '[' + locationLabel + '] ' : '';
+    var suffix = effect ? ' \u00b7 Erwarteter Effekt: ' + effectLabel : '';
     return prefix + rawText + suffix;
   }
 
@@ -804,7 +869,10 @@
     // übernehmen, aus demselben Grund wie rawText oben — der Lade-Render
     // darf die gerade getroffene Auswahl nicht verwerfen, bevor klar ist,
     // ob das Speichern klappt.
-    var entryText = composeChangelogEntryText(rawText, state.changelogLocationDraft, state.changelogEffectDraft);
+    var entryText = composeChangelogEntryText(
+      rawText, state.changelogLocationDraft, state.changelogEffectDraft,
+      state.changelogLocationCustomText, state.changelogEffectCustomText,
+    );
     var linkedKeywordIds = state.changelogDraftLinkedIds.keywords.slice();
     var linkedPromptIds = state.changelogDraftLinkedIds.prompts.slice();
 
@@ -835,6 +903,8 @@
       state.changelogDraft = '';
       state.changelogLocationDraft = null;
       state.changelogEffectDraft = null;
+      state.changelogLocationCustomText = '';
+      state.changelogEffectCustomText = '';
       state.changelogDraftLinkedIds = { keywords: [], prompts: [] };
       state.changelogLinkSectionOpen = { keywords: false, prompts: false };
     } catch (e) {
@@ -1004,6 +1074,8 @@
       state.changelogLinkSectionOpen = { keywords: false, prompts: false };
       state.changelogLocationDraft = null;
       state.changelogEffectDraft = null;
+      state.changelogLocationCustomText = '';
+      state.changelogEffectCustomText = '';
     }
     state.activeTopicId = topicId;
     var topic = getTopicById(topicId);
@@ -1051,6 +1123,7 @@
     if (state.activeSubTab === 'uebersicht') {
       maybeLoadVisibilityTrend(topicId);
       maybeLoadTopicRankHistory(topicId);
+      maybeLoadMonthlyOverviewTrend(topicId);
     }
   }
 
@@ -1137,8 +1210,9 @@
     bessere_position: 'Bessere Google-Position',
     beides:           'Beides',
     unklar:           'Unklar',
+    sonstiges:        'Sonstiges',
   };
-  var CHANGELOG_EFFECT_ORDER = ['mehr_zitierungen', 'bessere_position', 'beides', 'unklar'];
+  var CHANGELOG_EFFECT_ORDER = ['mehr_zitierungen', 'bessere_position', 'beides', 'unklar', 'sonstiges'];
 
   // NEU (14.09.2026): für das Content-Typ-Badge in der Prompt-Zeile
   // (siehe main.py: _compute_top_cited_domain_by_prompt +
@@ -1390,6 +1464,7 @@
       if (newTab === 'uebersicht' && state.activeView === 'topic-detail') {
         maybeLoadVisibilityTrend(state.activeTopicId);
         maybeLoadTopicRankHistory(state.activeTopicId);
+        maybeLoadMonthlyOverviewTrend(state.activeTopicId);
       }
       render();
       return;
@@ -1434,6 +1509,57 @@
     var refreshGscBtn = event.target.closest('[data-cvz-refresh-gsc]');
     if (refreshGscBtn) {
       refreshGscData(refreshGscBtn.getAttribute('data-cvz-refresh-gsc'));
+      return;
+    }
+    // NEU (15.09.2026): Wettbewerber-Verwaltung (Vorschläge ansehen,
+    // aktive Auswahl austauschen).
+    var competitorManageToggle = event.target.closest('[data-cvz-competitor-manage-toggle]');
+    if (competitorManageToggle) {
+      var manageTopicId = competitorManageToggle.getAttribute('data-cvz-competitor-manage-toggle');
+      var cachedForManage = state.topicDetailCache[manageTopicId];
+      toggleCompetitorManage(manageTopicId, (cachedForManage && cachedForManage.competitor_domains) || []);
+      return;
+    }
+    var competitorChip = event.target.closest('[data-cvz-competitor-chip]');
+    if (competitorChip) {
+      var chipTopicId = competitorChip.getAttribute('data-cvz-competitor-topic');
+      var chipDomain = competitorChip.getAttribute('data-cvz-competitor-chip');
+      var draftDomains = state.competitorDraftDomains[chipTopicId] || [];
+      var chipIndex = draftDomains.indexOf(chipDomain);
+      if (chipIndex === -1) {
+        draftDomains.push(chipDomain);
+      } else {
+        draftDomains.splice(chipIndex, 1);
+      }
+      state.competitorDraftDomains[chipTopicId] = draftDomains;
+      render();
+      return;
+    }
+    var competitorManualAdd = event.target.closest('[data-cvz-competitor-manual-add]');
+    if (competitorManualAdd) {
+      var manualAddTopicId = competitorManualAdd.getAttribute('data-cvz-competitor-manual-add');
+      var manualInput = document.getElementById('cvz-competitor-manual-input');
+      var manualDomain = ((manualInput && manualInput.value) || '').trim();
+      if (manualDomain) {
+        var currentDraft = state.competitorDraftDomains[manualAddTopicId] || [];
+        if (currentDraft.indexOf(manualDomain) === -1) {
+          currentDraft.push(manualDomain);
+        }
+        state.competitorDraftDomains[manualAddTopicId] = currentDraft;
+        if (manualInput) manualInput.value = '';
+        render();
+      }
+      return;
+    }
+    var competitorSubmit = event.target.closest('[data-cvz-competitor-submit]');
+    if (competitorSubmit) {
+      submitCompetitorSelection(competitorSubmit.getAttribute('data-cvz-competitor-submit'));
+      return;
+    }
+    // NEU (15.09.2026): manuelles Hinzufügen eines Prompts.
+    var manualPromptSubmit = event.target.closest('[data-cvz-manual-prompt-submit]');
+    if (manualPromptSubmit) {
+      submitManualPrompt(manualPromptSubmit.getAttribute('data-cvz-manual-prompt-submit'));
       return;
     }
     var topicCard = event.target.closest('[data-cvz-topic-id]');
@@ -1815,6 +1941,123 @@
     }
 
     state.isRefreshingGsc = false;
+    render();
+  }
+
+
+  // NEU (15.09.2026): lädt die offenen ("pending") Wettbewerber-
+  // Vorschläge für dieses Thema (siehe main.py: GET .../competitor-
+  // suggestions, competitor_suggestions.py). Kein automatischer Retry,
+  // wenn's fehlschlägt bleibt die Liste einfach leer — der Nutzer sieht
+  // dann nur die schon aktiven Domains, kann aber trotzdem eigene
+  // hinzufügen.
+  async function loadCompetitorSuggestions(topicId) {
+    if (state.isLoadingCompetitorSuggestions) return;
+    state.isLoadingCompetitorSuggestions = true;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        state.competitorSuggestionsCache[topicId] = [];
+      } else {
+        var data = await apiFetch('/topics/' + topicId + '/competitor-suggestions');
+        state.competitorSuggestionsCache[topicId] = data.suggestions || [];
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Wettbewerber-Vorschl\u00e4ge konnten nicht geladen werden:', e);
+      state.competitorSuggestionsCache[topicId] = [];
+    }
+
+    state.isLoadingCompetitorSuggestions = false;
+    render();
+  }
+
+  // NEU (15.09.2026): klappt die Verwaltungs-Sektion auf/zu. Der Entwurf
+  // (welche Domains gerade ausgewählt sind) wird NUR beim allerersten
+  // Öffnen mit den aktuell aktiven Domains befüllt — ein Zuklappen und
+  // erneutes Aufklappen soll eine schon begonnene Auswahl nicht verwerfen.
+  function toggleCompetitorManage(topicId, currentActiveDomains) {
+    var isOpening = !state.competitorManageOpen[topicId];
+    state.competitorManageOpen[topicId] = isOpening;
+    if (isOpening) {
+      if (!state.competitorDraftDomains[topicId]) {
+        state.competitorDraftDomains[topicId] = currentActiveDomains.slice();
+      }
+      if (!state.competitorSuggestionsCache[topicId]) {
+        loadCompetitorSuggestions(topicId); // eigenes render(), hier kein await nötig
+      }
+    }
+    render();
+  }
+
+  // NEU (15.09.2026): speichert die im Entwurf zusammengestellte
+  // Wettbewerber-Liste. Schickt IMMER den kompletten gewünschten
+  // Endzustand (siehe main.py: confirm_competitors_endpoint, seit
+  // 15.09.2026 Ersetzen statt Ergänzen) — nur so lässt sich eine
+  // automatisch übernommene Domain auch wieder entfernen.
+  async function submitCompetitorSelection(topicId) {
+    if (state.isSubmittingCompetitors) return;
+    var domains = state.competitorDraftDomains[topicId] || [];
+    state.isSubmittingCompetitors = true;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        await showCvzAlert('Im Mock-Modus nicht verf\u00fcgbar.');
+      } else {
+        await apiFetch('/topics/' + topicId + '/confirm-competitors', {
+          method: 'POST',
+          body: { competitor_domains: domains },
+        });
+        // Cache verwerfen: competitor_domains/Wettbewerber-Insights/
+        // Opportunities sollen frisch nachgeladen werden. Die eigentliche
+        // Neuanalyse läuft im Hintergrund weiter, kann also noch ein paar
+        // Sekunden hinterherhinken.
+        delete state.topicDetailCache[topicId];
+        state.competitorManageOpen[topicId] = false;
+        delete state.competitorDraftDomains[topicId];
+        delete state.competitorSuggestionsCache[topicId];
+        await openTopicDetail(topicId, false);
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Wettbewerber konnten nicht gespeichert werden:', e);
+      await showCvzAlert('Wettbewerber konnten nicht gespeichert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.isSubmittingCompetitors = false;
+    render();
+  }
+
+  // NEU (15.09.2026): manuelles Hinzufügen eines Prompts mit frei
+  // gewählter Phase (siehe main.py: create_manual_prompt_endpoint,
+  // MAX_MANUAL_PROMPTS = 4, zusätzlich zu den automatisch generierten).
+  async function submitManualPrompt(topicId) {
+    if (state.isSubmittingManualPrompt) return;
+    var promptText = (state.manualPromptDraftText || '').trim();
+    if (!promptText) return;
+    var phase = state.manualPromptDraftPhase || 'exploration';
+
+    state.isSubmittingManualPrompt = true;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        await showCvzAlert('Im Mock-Modus nicht verf\u00fcgbar.');
+      } else {
+        await apiFetch('/topics/' + topicId + '/prompts', {
+          method: 'POST',
+          body: { prompt_text: promptText, messymiddle_phase: phase },
+        });
+        state.manualPromptDraftText = '';
+        delete state.topicDetailCache[topicId];
+        await openTopicDetail(topicId, false);
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Prompt konnte nicht angelegt werden:', e);
+      await showCvzAlert('Prompt konnte nicht angelegt werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.isSubmittingManualPrompt = false;
     render();
   }
 
@@ -2482,6 +2725,7 @@
         // Wettbewerber (gefiltert auf detail.competitor_domains) inkl.
         // ihrer Stärken und eurer Differenzierungs-Chance.
         var weeksData = state.citationTrendCache[state.activeTopicId];
+        tabContent.appendChild(renderCompetitorManageSection(detail, state.activeTopicId));
         tabContent.appendChild(renderCompetitorInsightSection(weeksData, state.isLoadingCitationTrend, detail.source_profiles, detail.competitor_domains, detail.competitor_insights));
         tabContent.appendChild(renderContentGapsSection(detail.content_gaps));
         break;
@@ -2497,7 +2741,7 @@
         tabContent.appendChild(renderPromptsByPhase(detail.prompts, true, detail.changelog));
         break;
       case 'gsc':
-        tabContent.appendChild(renderGscBlock(detail.gsc_rows, state.activeTopicId));
+        tabContent.appendChild(renderGscBlock(detail.gsc_rows, state.activeTopicId, detail.changelog));
         break;
       case 'uebersicht':
       default:
@@ -2513,6 +2757,12 @@
         tabContent.appendChild(renderVisibilityTrendSection(
           state.visibilityTrendCache[state.activeTopicId], state.isLoadingVisibilityTrend,
           detail.changelog,
+        ));
+        // NEU (15.09.2026): kombinierte Monats-Grafik (Prompt-Zitierungen +
+        // GSC-Klicks/Impressionen + neue Keywords), siehe Chat-Verlauf
+        // 15.09.2026.
+        tabContent.appendChild(renderMonthlyOverviewChart(
+          state.monthlyOverviewTrendCache[state.activeTopicId], state.isLoadingMonthlyOverviewTrend,
         ));
         tabContent.appendChild(renderOpportunitySection(detail.opportunities));
         tabContent.appendChild(renderContentIdeasSection(detail.content_ideas));
@@ -3009,8 +3259,71 @@
       '<h3 class="cvz-section-title">' + escapeHtml(topic.name) + '</h3>' +
       '<p class="cvz-card-eyebrow">' + escapeHtml(topic.seed_keyword) + ' · ' + escapeHtml(topic.own_domain) + '</p>' +
       archivedNotice +
-      '<p class="cvz-summary-text">' + escapeHtml(topic.latest_summary || 'Noch keine Zusammenfassung vorhanden.') + '</p>';
+      '<p class="cvz-summary-text">' + escapeHtml(topic.latest_summary || 'Noch keine Zusammenfassung vorhanden.') + '</p>' +
+      renderSummaryDetailSections(topic.summary_detail);
     return card;
+  }
+
+  // NEU (15.09.2026): die drei neuen Teile der monatlichen Zusammenfassung
+  // (siehe claude_summary.py) — vorher nur ein einzelner Fließtext. Gibt
+  // bewusst einen leeren String zurück, kein Platzhalter-Text, wenn
+  // summary_detail noch fehlt (z.B. Topic wurde vor diesem Feature
+  // angelegt und wartet auf den nächsten Monatslauf).
+  function renderSummaryDetailSections(detail) {
+    if (!detail) return '';
+    var html = '';
+    var maturity = detail.data_maturity || {};
+
+    // NEU (15.09.2026): sichtbarer Hinweis statt stiller vager Prosa,
+    // siehe Chat-Verlauf 15.09.2026 — "das muss klar kommuniziert werden,
+    // kein stiller Bug". Erscheint direkt unter dem jeweiligen Abschnitt,
+    // nur wenn das zugehörige Flag aus claude_summary.py gesetzt ist.
+    var THIN_DATA_NOTE = '<p class="cvz-thin-data-note">Datenbasis hierf\u00fcr noch d\u00fcnn \u2014 die Einschätzung wird mit mehr gesammelten Daten pr\u00e4ziser.</p>';
+
+    var strength = detail.competitor_strength;
+    if (strength && strength.strongest_domain) {
+      html += '<div class="cvz-summary-subsection">' +
+        '<p class="cvz-section-label">St\u00e4rkster Wettbewerber</p>' +
+        '<p class="cvz-summary-text"><strong>' + escapeHtml(strength.strongest_domain) + '</strong>' +
+        (strength.reasoning ? ' \u2014 ' + escapeHtml(strength.reasoning) : '') +
+        '</p>' +
+        (maturity.wettbewerber_duenn ? THIN_DATA_NOTE : '') +
+        '</div>';
+    }
+
+    var phaseSummaries = detail.phase_summaries;
+    if (phaseSummaries) {
+      var phasenDuenn = maturity.phasen_duenn || {};
+      var phaseBlocks = PHASE_ORDER.map(function (phase) {
+        var p = phaseSummaries[phase];
+        if (!p || !p.summary) return '';
+        var chips = (p.recommended_content_types || []).map(function (ct) {
+          return '<span class="cvz-persona-chip">' + escapeHtml(ct) + '</span>';
+        }).join('');
+        return '<div class="cvz-summary-phase-block">' +
+          '<p class="cvz-phase-heading">' + escapeHtml(PHASE_LABELS[phase] || phase) + '</p>' +
+          '<p class="cvz-summary-text">' + escapeHtml(p.summary) + '</p>' +
+          (chips ? '<div class="cvz-persona-filter">' + chips + '</div>' : '') +
+          (phasenDuenn[phase] ? THIN_DATA_NOTE : '') +
+          '</div>';
+      }).join('');
+      if (phaseBlocks) {
+        html += '<div class="cvz-summary-subsection">' +
+          '<p class="cvz-section-label">Je Phase</p>' + phaseBlocks +
+          (maturity.content_luecken_duenn ? THIN_DATA_NOTE : '') +
+          '</div>';
+      }
+    }
+
+    if (detail.keyword_opportunities) {
+      html += '<div class="cvz-summary-subsection">' +
+        '<p class="cvz-section-label">Keyword-Chancen &amp; -Schw\u00e4chen</p>' +
+        '<p class="cvz-summary-text">' + escapeHtml(detail.keyword_opportunities) + '</p>' +
+        (maturity.keyword_chancen_duenn ? THIN_DATA_NOTE : '') +
+        '</div>';
+    }
+
+    return html;
   }
 
   function renderOpportunitySection(opportunities) {
@@ -3162,6 +3475,100 @@
   // Wettbewerber sind) und reichert jeden Treffer mit der bestehenden
   // Quellen-Analyse an (source_profiles: Stärken + Differenzierungs-Chance),
   // statt beides als zwei getrennte Listen zu zeigen.
+  // NEU (15.09.2026): Wettbewerber-Verwaltung — zeigt die aktuell aktiven
+  // Domains (aus projects.competitor_domains) plus offene Vorschläge
+  // (siehe competitor_suggestions.py) als an-/abwählbare Chips, dazu ein
+  // Feld für eigene Domains. Bewusst eingeklappt per Default, damit die
+  // Normalansicht des Tabs nicht überladen wirkt — die meiste Zeit gibt
+  // es hier nichts zu tun, seit die Top-5-Vorschläge automatisch
+  // übernommen werden (siehe main.py: _auto_confirm_top_competitor_
+  // suggestions).
+  function renderCompetitorManageSection(detail, topicId) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var activeDomains = detail.competitor_domains || [];
+    var isOpen = !!state.competitorManageOpen[topicId];
+
+    var toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'cvz-create-toggle-btn';
+    toggleBtn.setAttribute('data-cvz-competitor-manage-toggle', topicId);
+    toggleBtn.textContent = (isOpen ? '\u2212 ' : '+ ') + 'Wettbewerber bearbeiten (' + activeDomains.length + ' aktiv)';
+    section.appendChild(toggleBtn);
+
+    if (!isOpen) return section;
+
+    if (state.isLoadingCompetitorSuggestions) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.textContent = 'L\u00e4dt Vorschl\u00e4ge \u2026';
+      section.appendChild(loading);
+    }
+
+    // Entwurf sollte durch toggleCompetitorManage schon gesetzt sein,
+    // Fallback hier nur zur Sicherheit (z.B. direkter Seitenaufruf mit
+    // bereits offenem Zustand aus alten URL-Parametern).
+    var draft = state.competitorDraftDomains[topicId] || activeDomains.slice();
+    var suggestions = state.competitorSuggestionsCache[topicId] || [];
+
+    // Union aus aktiven Domains + Vorschlägen: auch eine schon aktive
+    // (z.B. automatisch übernommene) Domain muss hier wieder abwählbar
+    // sein, nicht nur neue Vorschläge auswählbar.
+    var citationByDomain = {};
+    var domainSet = {};
+    activeDomains.forEach(function (d) { domainSet[d] = true; });
+    suggestions.forEach(function (s) {
+      if (s.domain) {
+        domainSet[s.domain] = true;
+        citationByDomain[s.domain] = s.citation_count;
+      }
+    });
+    var allDomains = Object.keys(domainSet).sort(function (a, b) {
+      return (citationByDomain[b] || 0) - (citationByDomain[a] || 0);
+    });
+
+    if (allDomains.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine Vorschl\u00e4ge und keine aktiven Wettbewerber. F\u00fcge unten eine eigene Domain hinzu.';
+      section.appendChild(empty);
+    } else {
+      var chipList = document.createElement('div');
+      chipList.className = 'cvz-persona-filter';
+      allDomains.forEach(function (domain) {
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'cvz-persona-chip' + (draft.indexOf(domain) !== -1 ? ' cvz-persona-chip-active' : '');
+        chip.setAttribute('data-cvz-competitor-chip', domain);
+        chip.setAttribute('data-cvz-competitor-topic', topicId);
+        var hint = citationByDomain[domain] ? ' (' + citationByDomain[domain] + '\u00d7 zitiert)' : '';
+        chip.textContent = domain + hint;
+        chipList.appendChild(chip);
+      });
+      section.appendChild(chipList);
+    }
+
+    var manualRow = document.createElement('div');
+    manualRow.className = 'cvz-changelog-form';
+    manualRow.innerHTML =
+      '<input type="text" id="cvz-competitor-manual-input" class="cvz-changelog-input" placeholder="eigene-domain.de">' +
+      '<button type="button" class="cvz-create-toggle-btn" data-cvz-competitor-manual-add="' + topicId + '">Hinzuf\u00fcgen</button>';
+    section.appendChild(manualRow);
+
+    var submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.className = 'cvz-changelog-submit-btn';
+    submitBtn.setAttribute('data-cvz-competitor-submit', topicId);
+    submitBtn.disabled = state.isSubmittingCompetitors;
+    submitBtn.textContent = state.isSubmittingCompetitors
+      ? 'Wird gespeichert \u2026'
+      : 'Speichern (' + draft.length + ' ausgew\u00e4hlt)';
+    section.appendChild(submitBtn);
+
+    return section;
+  }
+
   function renderCompetitorInsightSection(weeks, isLoading, sourceProfiles, competitorDomains, competitorInsights) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -3393,7 +3800,69 @@
     return section;
   }
 
-  // NEU (13.09.2026): Changelog (siehe main.py: /topics/{id}/changelog).
+  // NEU (15.09.2026): kombinierte Monats-Grafik (siehe Chat-Verlauf
+  // 15.09.2026, main.py: get_monthly_overview_trend_endpoint) — bewusst
+  // ZWEI kleine Charts statt eines mit vier Serien auf einer Achse:
+  // Prompt-Zitierungen (kleine Ganzzahlen) und GSC-Klicks/Impressionen
+  // (oft deutlich größere Zahlen) auf derselben Achse wären kaum
+  // vergleichbar lesbar. Neue Keywords als einfache Textzeile statt
+  // dritter Chart, das ist eine reine Zähl-Information, keine Kurve, die
+  // einen eigenen Chart rechtfertigt.
+  function renderMonthlyOverviewChart(months, isLoading) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Prompt-Zitierungen & GSC-Performance im Zeitverlauf';
+    section.appendChild(heading);
+
+    if (isLoading) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.textContent = 'Lädt...';
+      section.appendChild(loading);
+      return section;
+    }
+
+    if (!months || months.length < 2) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch kein Monatsverlauf verfügbar, braucht mindestens zwei Kalendermonate mit Daten.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    var xLabels = months.map(function (m) { return m.month; });
+
+    var citationCard = document.createElement('div');
+    citationCard.className = 'cvz-card';
+    citationCard.innerHTML =
+      buildLineChartSvg([
+        { label: 'Zitiert', values: months.map(function (m) { return m.own_domain_cited; }), color: 'var(--cvz-teal)' },
+        { label: 'Ausgewertete L\u00e4ufe', values: months.map(function (m) { return m.total_runs; }), color: 'var(--cvz-border)' },
+      ], xLabels, {}) +
+      '<p class="cvz-chart-caption">Wie viele ausgewertete ChatGPT/Gemini-L\u00e4ufe pro Kalendermonat die eigene Domain zitiert haben, gegen die Gesamtzahl ausgewerteter L\u00e4ufe.</p>';
+    section.appendChild(citationCard);
+
+    var gscCard = document.createElement('div');
+    gscCard.className = 'cvz-card';
+    gscCard.innerHTML =
+      buildLineChartSvg([
+        { label: 'Klicks', values: months.map(function (m) { return m.gsc_clicks; }), color: 'var(--cvz-teal)' },
+        { label: 'Impressionen', values: months.map(function (m) { return m.gsc_impressions; }), color: 'var(--cvz-amber)' },
+      ], xLabels, {}) +
+      '<p class="cvz-chart-caption">Google-Search-Console-Klicks/Impressionen pro Kalendermonat, summiert \u00fcber alle GSC-Near-Miss-Keywords dieses Themas.</p>';
+    section.appendChild(gscCard);
+
+    var newKeywordsLine = document.createElement('p');
+    newKeywordsLine.className = 'cvz-chart-caption';
+    newKeywordsLine.textContent = 'Neue Keywords je Monat: ' +
+      months.map(function (m) { return m.month + ': ' + m.new_keywords; }).join(' \u00b7 ');
+    section.appendChild(newKeywordsLine);
+
+    return section;
+  }
   // Rein informativ, keine automatische Verkn\u00fcpfung zum Verlauf oben,
   // der Nutzer legt beides gedanklich selbst nebeneinander.
   // GEÄNDERT (13.09.2026): kein isLoading-Parameter mehr, entries kommt
@@ -3474,6 +3943,17 @@
         (state.isSubmittingChangelog ? 'Wird gespeichert \u2026' : 'Eintragen') +
       '</button>';
     section.appendChild(form);
+    // GEÄNDERT (15.09.2026): hält state.changelogDraft laufend synchron,
+    // nicht mehr nur beim Absenden. Vorher leerte sich das Feld, sobald
+    // man nach dem Tippen noch einen "Wo?"/"Effekt"-Chip anklickte: der
+    // Klick löst einen render() aus, der die Textarea komplett neu aus
+    // state.changelogDraft aufbaut — und der war bis dahin noch der alte
+    // (meist leere) Stand, weil er nur beim Absenden gesetzt wurde (siehe
+    // Chat-Verlauf 15.09.2026).
+    var textareaEl = form.querySelector('#cvz-changelog-input');
+    textareaEl.addEventListener('input', function () {
+      state.changelogDraft = textareaEl.value;
+    });
 
     // NEU (14.09.2026): geführte Zusatzfelder statt eines einzelnen freien
     // Textfelds (siehe Chat-Verlauf 14.09.2026) — "Wo?" und "Erwarteter
@@ -3496,6 +3976,24 @@
     });
     section.appendChild(locationChips);
 
+    // NEU (15.09.2026): Freitext, wenn "Sonstiges" gewählt ist, damit das
+    // generische Wort "Sonstiges" im Eintrag nicht stehen bleibt, sondern
+    // durch das ersetzt wird, was tatsächlich gemeint ist (siehe
+    // composeChangelogEntryText). Live synchronisiert, aus demselben
+    // Grund wie beim Haupttextfeld oben.
+    if (state.changelogLocationDraft === 'sonstiges') {
+      var locationCustomInput = document.createElement('input');
+      locationCustomInput.type = 'text';
+      locationCustomInput.id = 'cvz-changelog-location-custom';
+      locationCustomInput.className = 'cvz-changelog-custom-input';
+      locationCustomInput.placeholder = 'Wo genau? (z.B. FAQ-Seite)';
+      locationCustomInput.value = state.changelogLocationCustomText || '';
+      locationCustomInput.addEventListener('input', function () {
+        state.changelogLocationCustomText = locationCustomInput.value;
+      });
+      section.appendChild(locationCustomInput);
+    }
+
     var effectLabel = document.createElement('p');
     effectLabel.className = 'cvz-changelog-guided-label';
     effectLabel.textContent = 'Erwarteter Effekt (optional)';
@@ -3512,6 +4010,19 @@
       effectChips.appendChild(chip);
     });
     section.appendChild(effectChips);
+
+    if (state.changelogEffectDraft === 'sonstiges') {
+      var effectCustomInput = document.createElement('input');
+      effectCustomInput.type = 'text';
+      effectCustomInput.id = 'cvz-changelog-effect-custom';
+      effectCustomInput.className = 'cvz-changelog-custom-input';
+      effectCustomInput.placeholder = 'Welcher Effekt genau?';
+      effectCustomInput.value = state.changelogEffectCustomText || '';
+      effectCustomInput.addEventListener('input', function () {
+        state.changelogEffectCustomText = effectCustomInput.value;
+      });
+      section.appendChild(effectCustomInput);
+    }
 
     // NEU (14.09.2026): optionale Verknüpfung mit konkreten Keywords/
     // Prompts dieses Topics (siehe main.py: linked_search_query_ids/
@@ -3543,33 +4054,36 @@
       var promptTextById = {};
       (prompts || []).forEach(function (p) { promptTextById[p.id] = p.prompt_text; });
 
-      var list = document.createElement('div');
-      list.className = 'cvz-changelog-list';
-      visibleEntries.forEach(function (entry) {
-        var item = document.createElement('div');
-        item.className = 'cvz-changelog-item';
-
+      // GEÄNDERT (15.09.2026): echte Tabelle statt gestapelter Karten,
+      // deutlich übersichtlicher bei mehr als ein paar Einträgen (siehe
+      // Chat-Verlauf 15.09.2026).
+      var tableWrap = document.createElement('div');
+      tableWrap.className = 'cvz-changelog-table-wrap';
+      var rowsHtml = visibleEntries.map(function (entry) {
         var linkedLabels = []
           .concat((entry.linked_search_query_ids || []).map(function (id) { return keywordTextById[id]; }))
           .concat((entry.linked_prompt_ids || []).map(function (id) { return promptTextById[id]; }))
           .filter(Boolean);
-        var linkedLine = linkedLabels.length
-          ? '<p class="cvz-changelog-linked">verkn\u00fcpft mit: ' + escapeHtml(linkedLabels.join(', ')) + '</p>'
-          : '';
-
-        item.innerHTML =
-          '<div class="cvz-changelog-item-row">' +
-            '<p class="cvz-changelog-text">' + escapeHtml(entry.entry_text) + '</p>' +
-            '<button type="button" class="cvz-changelog-delete-btn" data-cvz-changelog-delete="' + escapeHtml(entry.id) + '" aria-label="L\u00f6schen">\u00d7</button>' +
-          '</div>' +
-          linkedLine +
-          '<p class="cvz-changelog-meta">' +
-            formatRelativeTime(entry.created_at) +
-            (entry.author_name ? ' \u00b7 ' + escapeHtml(entry.author_name) : '') +
-          '</p>';
-        list.appendChild(item);
-      });
-      section.appendChild(list);
+        return (
+          '<tr>' +
+            '<td class="cvz-changelog-cell-text">' + escapeHtml(entry.entry_text) + '</td>' +
+            '<td class="cvz-changelog-cell-linked">' + (linkedLabels.length ? escapeHtml(linkedLabels.join(', ')) : '\u2013') + '</td>' +
+            '<td class="cvz-changelog-cell-meta">' + formatRelativeTime(entry.created_at) + '</td>' +
+            '<td class="cvz-changelog-cell-meta">' + (entry.author_name ? escapeHtml(entry.author_name) : '\u2013') + '</td>' +
+            '<td class="cvz-changelog-cell-action">' +
+              '<button type="button" class="cvz-changelog-delete-btn" data-cvz-changelog-delete="' + escapeHtml(entry.id) + '" aria-label="L\u00f6schen">\u00d7</button>' +
+            '</td>' +
+          '</tr>'
+        );
+      }).join('');
+      tableWrap.innerHTML =
+        '<table class="cvz-changelog-table">' +
+          '<thead><tr>' +
+            '<th>\u00c4nderung</th><th>Verkn\u00fcpft mit</th><th>Wann</th><th>Von</th><th></th>' +
+          '</tr></thead>' +
+          '<tbody>' + rowsHtml + '</tbody>' +
+        '</table>';
+      section.appendChild(tableWrap);
 
       if (entries.length > visibleCount) {
         var moreBtn = document.createElement('button');
@@ -3605,25 +4119,32 @@
           noneDeleted.textContent = 'Keine gel\u00f6schten Eintr\u00e4ge der letzten ' + CHANGELOG_DELETED_RETENTION_DAYS + ' Tage.';
           section.appendChild(noneDeleted);
         } else {
-          var deletedList = document.createElement('div');
-          deletedList.className = 'cvz-changelog-list';
-          deletedEntries.forEach(function (entry) {
-            var item = document.createElement('div');
-            item.className = 'cvz-changelog-item cvz-changelog-item-deleted';
-            item.innerHTML =
-              '<div class="cvz-changelog-item-row">' +
-                '<p class="cvz-changelog-text">' + escapeHtml(entry.entry_text) + '</p>' +
-                '<button type="button" class="cvz-changelog-restore-btn" data-cvz-changelog-restore="' + escapeHtml(entry.id) + '">Wiederherstellen</button>' +
-              '</div>' +
-              '<p class="cvz-changelog-meta">' +
-                'Erstellt ' + formatRelativeTime(entry.created_at) +
-                (entry.author_name ? ' von ' + escapeHtml(entry.author_name) : '') +
-                ' \u00b7 gel\u00f6scht ' + formatRelativeTime(entry.deleted_at) +
-                (entry.deleted_by_name ? ' von ' + escapeHtml(entry.deleted_by_name) : '') +
-              '</p>';
-            deletedList.appendChild(item);
-          });
-          section.appendChild(deletedList);
+          var deletedTableWrap = document.createElement('div');
+          deletedTableWrap.className = 'cvz-changelog-table-wrap';
+          var deletedRowsHtml = deletedEntries.map(function (entry) {
+            return (
+              '<tr class="cvz-changelog-row-deleted">' +
+                '<td class="cvz-changelog-cell-text">' + escapeHtml(entry.entry_text) + '</td>' +
+                '<td class="cvz-changelog-cell-meta">' +
+                  'Erstellt ' + formatRelativeTime(entry.created_at) +
+                  (entry.author_name ? ' von ' + escapeHtml(entry.author_name) : '') +
+                '</td>' +
+                '<td class="cvz-changelog-cell-meta">' +
+                  'Gel\u00f6scht ' + formatRelativeTime(entry.deleted_at) +
+                  (entry.deleted_by_name ? ' von ' + escapeHtml(entry.deleted_by_name) : '') +
+                '</td>' +
+                '<td class="cvz-changelog-cell-action">' +
+                  '<button type="button" class="cvz-changelog-restore-btn" data-cvz-changelog-restore="' + escapeHtml(entry.id) + '">Wiederherstellen</button>' +
+                '</td>' +
+              '</tr>'
+            );
+          }).join('');
+          deletedTableWrap.innerHTML =
+            '<table class="cvz-changelog-table">' +
+              '<thead><tr><th>\u00c4nderung</th><th>Erstellt</th><th>Gel\u00f6scht</th><th></th></tr></thead>' +
+              '<tbody>' + deletedRowsHtml + '</tbody>' +
+            '</table>';
+          section.appendChild(deletedTableWrap);
         }
       }
     }
@@ -3708,7 +4229,16 @@
     list.className = 'cvz-prompt-list';
     keywords.forEach(function (kw) {
       var rowId = kw.id || (kw.keyword + '|' + kw.source);
-      var hasDetail = kw.organic_rank != null || kw.gsc_impressions != null || kw.gsc_position != null || kw.first_seen_at;
+      var linkedCount = (changelogEntries || []).filter(function (entry) {
+        return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
+      }).length;
+      // GEÄNDERT (15.09.2026): eine verknüpfte Änderung zählt jetzt auch
+      // als "Detail", damit ein Keyword OHNE organic_rank/GSC-Daten aber
+      // MIT verknüpfter Änderung trotzdem aufklappbar ist — vorher war
+      // die Verknüpfung für genau solche Keywords unsichtbar, weil die
+      // Zeile gar nicht erst aufklappbar war (siehe Chat-Verlauf
+      // 15.09.2026).
+      var hasDetail = kw.organic_rank != null || kw.gsc_impressions != null || kw.gsc_position != null || kw.first_seen_at || linkedCount > 0;
       var canExpand = !!(enableExpansion && hasDetail);
 
       var row = document.createElement('div');
@@ -3718,7 +4248,14 @@
         row.setAttribute('data-cvz-keyword-text', kw.keyword);
       }
       row.innerHTML =
-        '<span class="cvz-prompt-text">' + escapeHtml(kw.keyword) + '</span>' +
+        '<span class="cvz-prompt-text">' + escapeHtml(kw.keyword) +
+          // NEU (15.09.2026): schon in der eingeklappten Zeile sichtbar,
+          // nicht erst nach dem Aufklappen — "sichtbar machen, wenn eine
+          // Änderung verknüpft wurde", siehe Chat-Verlauf 15.09.2026.
+          (linkedCount > 0
+            ? ' <span class="cvz-changelog-linked-badge" title="' + linkedCount + ' verkn\u00fcpfte \u00c4nderung(en)">\u270e</span>'
+            : '') +
+        '</span>' +
         '<span class="cvz-prompt-citation-count">' +
           (kw.search_volume == null ? '\u2013' : escapeHtml(kw.search_volume) + '/Monat') +
         '</span>' +
@@ -3740,6 +4277,27 @@
     var wrap = document.createElement('div');
     wrap.className = 'cvz-prompt-expansion';
 
+    // NEU (15.09.2026): dieselbe Kontextzeile wie im Prompts-Tab
+    // (renderPromptExpansion) — vorher tauchte eine mit diesem Keyword
+    // verknüpfte Änderung NUR als gestrichelte Linie im Verlaufs-Chart
+    // auf, und dieses Chart wird erst ab zwei Messpunkten überhaupt
+    // gezeichnet. Bei einem neu verknüpften Keyword ohne (oder mit nur
+    // einem) Messpunkt war die Verknüpfung dadurch komplett unsichtbar
+    // (siehe Chat-Verlauf 15.09.2026). Jetzt immer als Text sichtbar,
+    // unabhängig davon, ob überhaupt ein Chart gerendert wird.
+    var linkedEntries = (changelogEntries || []).filter(function (entry) {
+      return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
+    });
+    var linkedHtml = '';
+    if (linkedEntries.length > 0) {
+      linkedHtml = '<div class="cvz-prompt-linked-changelog">' +
+        '<p class="cvz-changelog-guided-label">Verkn\u00fcpfte \u00c4nderungen</p>' +
+        linkedEntries.map(function (entry) {
+          return '<p class="cvz-changelog-linked">' + formatRelativeTime(entry.created_at) + ': ' + escapeHtml(entry.entry_text) + '</p>';
+        }).join('') +
+      '</div>';
+    }
+
     var lines = [];
     if (kw.organic_rank != null) {
       lines.push(
@@ -3759,7 +4317,7 @@
     if (kw.first_seen_at) {
       lines.push('<p class="cvz-opportunity-topic">Erstmals erfasst: ' + formatRelativeTime(kw.first_seen_at) + '</p>');
     }
-    wrap.innerHTML = lines.join('');
+    wrap.innerHTML = linkedHtml + lines.join('');
 
     if (state.loadingKeywordRankHistory[rowId]) {
       var loading = document.createElement('p');
@@ -3788,10 +4346,8 @@
         // auf JEDEM Keyword-Chart, rein über Datums-Nähe, unabhängig
         // davon, ob die Änderung überhaupt dieses Keyword betraf (siehe
         // Chat-Verlauf 14.09.2026). Jetzt nur noch Einträge, die explizit
-        // mit diesem Keyword verknüpft sind (linked_search_query_ids).
-        var linkedEntries = (changelogEntries || []).filter(function (entry) {
-          return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
-        });
+        // mit diesem Keyword verknüpft sind (linked_search_query_ids,
+        // linkedEntries oben im Funktionskopf berechnet).
         var markers = mapChangelogToMarkers(linkedEntries, snapshotDates);
         var chartWrap = document.createElement('div');
         chartWrap.className = 'cvz-card';
@@ -4086,6 +4642,60 @@
     return wrap;
   }
 
+  // NEU (15.09.2026): Formular zum manuellen Hinzufügen eines Prompts
+  // (Text + Phase per Picklist). MAX_MANUAL_PROMPTS = 4, siehe main.py.
+  // Zählt anhand prompt.source === 'manual' (nur aktive Prompts kommen
+  // hier überhaupt an, siehe get_topic_detail).
+  var MAX_MANUAL_PROMPTS = 4;
+
+  function renderManualPromptForm(prompts, topicId) {
+    var manualCount = (prompts || []).filter(function (p) { return p.source === 'manual'; }).length;
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-changelog-form';
+    wrap.style.marginBottom = '16px';
+
+    if (manualCount >= MAX_MANUAL_PROMPTS) {
+      wrap.innerHTML =
+        '<p class="cvz-card-placeholder-text">Maximal ' + MAX_MANUAL_PROMPTS + ' manuell hinzugef\u00fcgte Prompts erreicht ' +
+        '(' + manualCount + '/' + MAX_MANUAL_PROMPTS + '). Erst einen bestehenden manuellen Prompt deaktivieren.</p>';
+      return wrap;
+    }
+
+    var phaseOptionsHtml = PHASE_ORDER.map(function (phase) {
+      return '<option value="' + phase + '"' + (state.manualPromptDraftPhase === phase ? ' selected' : '') + '>' +
+        escapeHtml(PHASE_LABELS[phase] || phase) + '</option>';
+    }).join('');
+
+    wrap.innerHTML =
+      '<textarea id="cvz-manual-prompt-input" class="cvz-changelog-input" rows="1" ' +
+        'placeholder="Eigenen Prompt hinzuf\u00fcgen (' + manualCount + '/' + MAX_MANUAL_PROMPTS + ')">' +
+        escapeHtml(state.manualPromptDraftText || '') +
+      '</textarea>' +
+      '<select id="cvz-manual-prompt-phase" class="cvz-changelog-custom-input" style="max-width:160px;">' +
+        phaseOptionsHtml +
+      '</select>' +
+      '<button type="button" class="cvz-changelog-submit-btn" data-cvz-manual-prompt-submit="' + topicId + '" ' +
+        (state.isSubmittingManualPrompt ? 'disabled' : '') + '>' +
+        (state.isSubmittingManualPrompt ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
+      '</button>';
+
+    // Live-Synchronisierung, dieselbe Begründung wie beim Änderungs-
+    // protokoll-Textfeld (siehe renderChangelogSection, Chat-Verlauf
+    // 15.09.2026): ohne das würde ein Klick auf die Phase-Auswahl den
+    // schon eingetippten Text wieder leeren, weil render() die Textarea
+    // sonst aus dem noch alten state.manualPromptDraftText neu aufbaut.
+    var textareaEl = wrap.querySelector('#cvz-manual-prompt-input');
+    textareaEl.addEventListener('input', function () {
+      state.manualPromptDraftText = textareaEl.value;
+    });
+    var selectEl = wrap.querySelector('#cvz-manual-prompt-phase');
+    selectEl.addEventListener('change', function () {
+      state.manualPromptDraftPhase = selectEl.value;
+    });
+
+    return wrap;
+  }
+
   function renderPromptsByPhase(prompts, enableCitations, changelogEntries) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -4106,6 +4716,11 @@
 
     var rollup = renderPhaseRollup(filteredPrompts);
     if (rollup) section.appendChild(rollup);
+
+    // NEU (15.09.2026): manuelles Hinzufügen eines Prompts, siehe main.py:
+    // create_manual_prompt_endpoint (MAX_MANUAL_PROMPTS = 4, zusätzlich zu
+    // den bis zu 16 automatisch generierten — macht zusammen bis zu 20).
+    section.appendChild(renderManualPromptForm(prompts, state.activeTopicId));
 
     PHASE_ORDER.forEach(function (phase) {
       var promptsInPhase = filteredPrompts.filter(function (p) { return p.phase === phase; });
@@ -4146,6 +4761,18 @@
           ? '<span class="cvz-prompt-persona">' + escapeHtml(prompt.persona) + '</span>'
           : '';
 
+        // NEU (15.09.2026): kennzeichnet Prompts, die wörtlich aus einer
+        // echten, bei DataForSEO beobachteten AI-Overview-Frage
+        // übernommen wurden (siehe ai_search_questions.py,
+        // prompt_discovery.py), statt von Claude erfunden. Nur sichtbar,
+        // wenn ai_search_volume gesetzt ist — kein Platzhalter für
+        // erfundene Prompts.
+        var aiSearchVolumeBadge = prompt.ai_search_volume != null
+          ? '<span class="cvz-prompt-persona" title="Echte AI-Overview-Frage, laut DataForSEO ca. ' +
+              escapeHtml(prompt.ai_search_volume) + 'x/Monat gestellt">\u2713 ' +
+              escapeHtml(prompt.ai_search_volume) + '/Monat</span>'
+          : '';
+
         var row = document.createElement('div');
         row.className = 'cvz-prompt-row' + (enableCitations ? ' cvz-prompt-row-clickable' : '');
         if (enableCitations) row.setAttribute('data-cvz-prompt-toggle', prompt.id);
@@ -4155,6 +4782,7 @@
           citationBadge +
           contentTypeBadge +
           personaBadge +
+          aiSearchVolumeBadge +
           '<span class="cvz-prompt-source">' +
             // GEÄNDERT (13.09.2026): war prompt.source (Herkunft, z.B.
             // "manual"), gemeint war aber prompt.prompt_type
@@ -4176,7 +4804,7 @@
     return section;
   }
 
-  function renderGscBlock(gscRows, topicId) {
+  function renderGscBlock(gscRows, topicId, changelogEntries) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
@@ -4205,18 +4833,30 @@
       return section;
     }
 
+    // NEU (15.09.2026): "Verkn\u00fcpfte \u00c4nderungen"-Spalte, dasselbe
+    // Prinzip wie schon im Keywords-Tab (siehe renderKeywordsTable) —
+    // eine Suchanfrage, mit der eine \u00c4nderung explizit verkn\u00fcpft
+    // wurde, soll das auf einen Blick zeigen, ohne extra aufklappen zu
+    // m\u00fcssen.
     var table = document.createElement('table');
     table.className = 'cvz-table';
-    table.innerHTML = '<thead><tr><th>Suchanfrage</th><th>Klicks</th><th>Impressionen</th><th>CTR</th><th>Position</th></tr></thead>';
+    table.innerHTML = '<thead><tr><th>Suchanfrage</th><th>Klicks</th><th>Impressionen</th><th>CTR</th><th>Position</th><th>Verkn\u00fcpfte \u00c4nderungen</th></tr></thead>';
     var tbody = document.createElement('tbody');
     gscRows.forEach(function (row) {
+      var linkedEntries = (changelogEntries || []).filter(function (entry) {
+        return row.id && (entry.linked_search_query_ids || []).indexOf(row.id) !== -1;
+      });
+      var linkedCell = linkedEntries.length
+        ? escapeHtml(linkedEntries.map(function (e) { return e.entry_text; }).join('; '))
+        : '\u2013';
       var tr = document.createElement('tr');
       tr.innerHTML =
         '<td>' + escapeHtml(row.query) + '</td>' +
         '<td>' + escapeHtml(row.clicks) + '</td>' +
         '<td>' + escapeHtml(row.impressions) + '</td>' +
         '<td>' + escapeHtml((row.ctr * 100).toFixed(1)) + '%</td>' +
-        '<td>' + escapeHtml(row.position.toFixed(1)) + '</td>';
+        '<td>' + escapeHtml(row.position.toFixed(1)) + '</td>' +
+        '<td class="cvz-gsc-cell-linked">' + linkedCell + '</td>';
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
@@ -4517,6 +5157,14 @@
 
       '.cvz-summary-card { margin-bottom: 24px; }' +
       '.cvz-summary-text { font-size: 15px; line-height: 1.5; margin: 12px 0 0; }' +
+      // NEU (15.09.2026): Unterabschnitte der erweiterten Zusammenfassung
+      // (Wettbewerber-St\u00e4rke, je Phase, Keyword-Chancen/-Schw\u00e4chen).
+      '.cvz-summary-subsection { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-summary-phase-block { margin-top: 12px; }' +
+      // NEU (15.09.2026): Hinweis auf dünne Datenlage, siehe
+      // renderSummaryDetailSections. Bewusst dezent (Text-Ton, kein Rot/
+      // Warnfarbe) — das ist kein Fehler, nur ein Reifegrad-Hinweis.
+      '.cvz-thin-data-note { font-size: 12px; color: var(--cvz-text-muted); font-style: italic; margin: 6px 0 0; }' +
 
       '.cvz-opportunity-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }' +
       '.cvz-opportunity-card { border-left: 3px solid var(--cvz-red); padding: 16px; }' +
@@ -4538,6 +5186,7 @@
       '.cvz-table td { padding: 8px 12px; border-bottom: 1px solid var(--cvz-border); }' +
       '.cvz-table-clickable tbody tr { cursor: pointer; }' +
       '.cvz-table-clickable tbody tr:hover { background: rgba(79, 209, 197, 0.06); }' +
+      '.cvz-gsc-cell-linked { color: var(--cvz-teal); max-width: 280px; }' +
 
       '.cvz-phase-heading { font-family: "Syne", sans-serif; font-size: 14px; margin: 16px 0 8px; color: var(--cvz-text-muted); }' +
       '.cvz-prompt-list { display: flex; flex-direction: column; gap: 4px; }' +
@@ -4652,17 +5301,36 @@
         'margin-top: 10px; font-family: "Geist", sans-serif; font-size: 13px; padding: 6px 14px;' +
         'background: none; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer;' +
       '}' +
-      '.cvz-changelog-list { display: flex; flex-direction: column; gap: 10px; }' +
-      '.cvz-changelog-item { border-left: 2px solid var(--cvz-border); padding: 4px 0 4px 12px; }' +
-      '.cvz-changelog-item-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }' +
-      '.cvz-changelog-text { font-size: 14px; margin: 0 0 2px; flex: 1; }' +
-      '.cvz-changelog-meta { font-size: 11px; color: var(--cvz-text-muted); margin: 0; }' +
+      // GEÄNDERT (15.09.2026): echte Tabelle statt gestapelter Karten
+      // (siehe Chat-Verlauf 15.09.2026), .cvz-changelog-list/-item nicht
+      // mehr verwendet.
+      '.cvz-changelog-table-wrap { overflow-x: auto; margin-top: 4px; }' +
+      '.cvz-changelog-table { width: 100%; border-collapse: collapse; font-size: 13px; }' +
+      '.cvz-changelog-table th {' +
+        'text-align: left; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em;' +
+        'color: var(--cvz-text-muted); padding: 6px 10px; border-bottom: 1px solid var(--cvz-border); white-space: nowrap;' +
+      '}' +
+      '.cvz-changelog-table td { padding: 8px 10px; border-bottom: 1px solid var(--cvz-border); vertical-align: top; }' +
+      '.cvz-changelog-cell-text { min-width: 220px; }' +
+      '.cvz-changelog-cell-linked { color: var(--cvz-teal); white-space: nowrap; }' +
+      '.cvz-changelog-cell-meta { color: var(--cvz-text-muted); white-space: nowrap; }' +
+      '.cvz-changelog-cell-action { text-align: right; white-space: nowrap; }' +
+      '.cvz-changelog-row-deleted td { opacity: 0.75; }' +
       // NEU (14.09.2026): geführte Felder + Verknüpfungs-Picker im
       // Changelog-Formular.
       '.cvz-changelog-guided-label { font-size: 12px; color: var(--cvz-text-muted); margin: 10px 0 4px; }' +
+      // NEU (15.09.2026): Freitext für "Sonstiges" bei "Wo?"/"Effekt".
+      '.cvz-changelog-custom-input {' +
+        'display: block; width: 100%; max-width: 320px; margin: 6px 0 0;' +
+        'font-family: "Geist", sans-serif; font-size: 13px; padding: 6px 8px;' +
+        'background: var(--cvz-navy-raised); color: var(--cvz-text); border: 1px solid var(--cvz-border); border-radius: 0;' +
+      '}' +
       '.cvz-changelog-link-picker { margin: 10px 0; }' +
       '.cvz-changelog-link-chip-list { margin-top: 8px; }' +
       '.cvz-changelog-linked { font-size: 11px; color: var(--cvz-teal); margin: 2px 0; }' +
+      // NEU (15.09.2026): Badge in der eingeklappten Keyword-Zeile, wenn
+      // eine Änderung damit verknüpft ist.
+      '.cvz-changelog-linked-badge { color: var(--cvz-teal); font-size: 12px; }' +
       '.cvz-prompt-linked-changelog { margin: 0 0 12px; }' +
       '.cvz-changelog-delete-btn {' +
         'background: none; border: none; color: var(--cvz-text-muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; flex-shrink: 0;' +
@@ -4672,7 +5340,6 @@
         'margin-top: 14px; font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 0;' +
         'background: none; color: var(--cvz-text-muted); border: none; text-decoration: underline; cursor: pointer;' +
       '}' +
-      '.cvz-changelog-item-deleted { border-left-color: var(--cvz-border); opacity: 0.75; }' +
       '.cvz-changelog-restore-btn {' +
         'font-family: "Geist", sans-serif; font-size: 11px; padding: 3px 10px; flex-shrink: 0;' +
         'background: none; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer;' +
