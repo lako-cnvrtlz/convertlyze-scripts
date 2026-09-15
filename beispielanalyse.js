@@ -953,7 +953,6 @@
       var aiNotice = document.createElement('div');
       aiNotice.style.cssText = 'max-width:1200px;margin:0 auto;padding:16px 24px 32px;text-align:center;font-family:Geist,DM Sans,sans-serif;';
       aiNotice.innerHTML = '<p style="font-size:12px;color:#4a5568;line-height:1.6;margin:0;">'+
-        'KI-generierter Bericht · Erstellt mit Claude (Anthropic) · '+
         'Diese Analyse wurde vollständig durch ein KI-System erstellt. '+
         'Alle Empfehlungen sollten durch eine qualifizierte Fachperson geprüft werden. '+
         'Alle Angaben ohne Gewähr.'+
