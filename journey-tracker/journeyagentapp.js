@@ -3234,7 +3234,7 @@
         // kann über mehrere Wochen mit unterschiedlichen URLs zitiert
         // worden sein, hier bewusst keine vollständige Liste.
         (comp.url
-          ? '<p class="cvz-opportunity-topic"><a href="' + escapeHtml(comp.url) + '" target="_blank" rel="noopener">' + escapeHtml(comp.url) + '</a></p>'
+          ? '<p class="cvz-opportunity-topic cvz-competitor-url-row"><a class="cvz-competitor-url" href="' + escapeHtml(comp.url) + '" target="_blank" rel="noopener" title="' + escapeHtml(comp.url) + '">' + escapeHtml(comp.url.replace(/^https?:\/\//, '')) + '</a></p>'
           : '') +
         (modelParts.length ? '<p class="cvz-opportunity-topic">' + escapeHtml(modelParts.join(' \u00b7 ')) + '</p>' : '') +
         (profile && profile.content_type
@@ -3865,23 +3865,14 @@
       return section;
     }
 
-    var list = document.createElement('div');
-    list.className = 'cvz-prompt-list';
-    keywords.forEach(function (kw) {
+    // Helper: render one keyword row + optional expansion
+    function _renderKwRow(kw, list) {
       var rowId = kw.id || (kw.keyword + '|' + kw.source);
       var linkedCount = (changelogEntries || []).filter(function (entry) {
         return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
       }).length;
       var hasDetail = kw.organic_rank != null || kw.gsc_impressions != null || kw.gsc_position != null || kw.first_seen_at || linkedCount > 0 || (kw.top_serp_results && kw.top_serp_results.length > 0) || !!kw.messymiddle_phase;
       var canExpand = !!(enableExpansion && hasDetail);
-
-      // NEU (15.09.2026): Messy-Middle-Phase, siehe Chat-Verlauf
-      // 15.09.2026 — Badge in der eingeklappten Zeile, Korrektur-Chips
-      // erst nach dem Aufklappen (siehe renderKeywordExpansion), damit
-      // die Zeile selbst nicht überladen wirkt.
-      var phaseBadge = kw.messymiddle_phase
-        ? '<span class="cvz-prompt-persona">' + escapeHtml(PHASE_LABELS[kw.messymiddle_phase] || kw.messymiddle_phase) + '</span>'
-        : '';
 
       var row = document.createElement('div');
       row.className = 'cvz-prompt-row' + (canExpand ? ' cvz-prompt-row-clickable' : '');
@@ -3892,24 +3883,79 @@
       row.innerHTML =
         '<span class="cvz-prompt-text">' + escapeHtml(kw.keyword) +
           (linkedCount > 0
-            ? ' <span class="cvz-changelog-linked-badge" title="' + linkedCount + ' verkn\u00fcpfte \u00c4nderung(en)">\u270e</span>'
+            ? ' <span class="cvz-changelog-linked-badge" title="' + linkedCount + ' verknüpfte Änderung(en)">✎</span>'
             : '') +
         '</span>' +
         '<span class="cvz-prompt-citation-count">' +
-          (kw.search_volume == null ? '\u2013' : escapeHtml(kw.search_volume) + '/Monat') +
+          (kw.search_volume == null ? '–' : escapeHtml(kw.search_volume) + '/Monat') +
         '</span>' +
         '<span class="cvz-prompt-source">' + escapeHtml(KEYWORD_SOURCE_LABELS[kw.source] || kw.source) + '</span>' +
-        phaseBadge +
         (canExpand
-          ? '<span class="cvz-prompt-expand-chevron">' + (state.expandedKeywordId === rowId ? '\u25be' : '\u25b8') + '</span>'
+          ? '<span class="cvz-prompt-expand-chevron">' + (state.expandedKeywordId === rowId ? '▾' : '▸') + '</span>'
           : '');
       list.appendChild(row);
 
       if (canExpand && state.expandedKeywordId === rowId) {
         list.appendChild(renderKeywordExpansion(kw, rowId, changelogEntries));
       }
+    }
+
+    // Group keywords by messymiddle_phase
+    var grouped = {};
+    PHASE_ORDER.forEach(function (p) { grouped[p] = []; });
+    grouped['__none__'] = [];
+    keywords.forEach(function (kw) {
+      var p = kw.messymiddle_phase;
+      if (p && grouped[p]) {
+        grouped[p].push(kw);
+      } else {
+        grouped['__none__'].push(kw);
+      }
     });
-    section.appendChild(list);
+
+    // Check if any keywords have a phase assigned
+    var hasAnyPhase = PHASE_ORDER.some(function (p) { return grouped[p].length > 0; });
+
+    if (!hasAnyPhase) {
+      // No phase data yet — render flat list as before
+      var flatList = document.createElement('div');
+      flatList.className = 'cvz-prompt-list';
+      keywords.forEach(function (kw) { _renderKwRow(kw, flatList); });
+      section.appendChild(flatList);
+      return section;
+    }
+
+    // Render phase groups
+    PHASE_ORDER.forEach(function (phase) {
+      if (grouped[phase].length === 0) return;
+      var phaseColor = PHASE_COLORS[phase] || '#94a3b8';
+
+      var groupHeading = document.createElement('p');
+      groupHeading.className = 'cvz-prompt-phase-heading';
+      groupHeading.style.borderLeftColor = phaseColor;
+      groupHeading.textContent = PHASE_LABELS[phase] || phase;
+      section.appendChild(groupHeading);
+
+      var phaseList = document.createElement('div');
+      phaseList.className = 'cvz-prompt-list';
+      grouped[phase].forEach(function (kw) { _renderKwRow(kw, phaseList); });
+      section.appendChild(phaseList);
+    });
+
+    // "Nicht zugeordnet" group
+    if (grouped['__none__'].length > 0) {
+      var noneHeading = document.createElement('p');
+      noneHeading.className = 'cvz-prompt-phase-heading';
+      noneHeading.style.borderLeftColor = '#94a3b8';
+      noneHeading.textContent = 'Nicht zugeordnet';
+      section.appendChild(noneHeading);
+
+      var noneList = document.createElement('div');
+      noneList.className = 'cvz-prompt-list';
+      grouped['__none__'].forEach(function (kw) { _renderKwRow(kw, noneList); });
+      section.appendChild(noneList);
+    }
+
     return section;
   }
 
@@ -4083,6 +4129,22 @@
       return wrap;
     }
     if (linkedHtml) wrap.innerHTML = linkedHtml;
+
+    // Quellen-Zusammenfassung: wie viele Quellen wurden pro Engine zitiert?
+    // Hilft dem User einzuschätzen, welche Prompts priorisiert werden sollten.
+    var cptRuns = data.chat_gpt || [];
+    var gemRuns = data.gemini || [];
+    var cptSources = cptRuns.length > 0 && cptRuns[0].sources ? cptRuns[0].sources.length : null;
+    var gemSources = gemRuns.length > 0 && gemRuns[0].sources ? gemRuns[0].sources.length : null;
+    if (cptSources !== null || gemSources !== null) {
+      var sourceSummary = document.createElement('p');
+      sourceSummary.className = 'cvz-prompt-source-summary';
+      var parts = [];
+      if (cptSources !== null) parts.push(MODEL_LABELS.chat_gpt + ': ' + cptSources + ' Quellen');
+      if (gemSources !== null) parts.push(MODEL_LABELS.gemini + ': ' + gemSources + ' Quellen');
+      sourceSummary.textContent = parts.join(' · ');
+      wrap.appendChild(sourceSummary);
+    }
 
     var engines = [
       { id: 'chat_gpt', label: MODEL_LABELS.chat_gpt, runs: data.chat_gpt || [] },
@@ -5356,7 +5418,12 @@
       '.cvz-content-change-url {' +
         'color: var(--cvz-teal); font-size: 12px; text-decoration: none; white-space: nowrap;' +
       '}' +
-      '.cvz-content-change-url:hover { text-decoration: underline; }';
+      '.cvz-content-change-url:hover { text-decoration: underline; }' +
+      '.cvz-prompt-phase-heading {font-family: "Syne", sans-serif; font-size: 13px; margin: 16px 0 6px; padding-left: 8px; border-left: 3px solid var(--cvz-teal); color: var(--cvz-text-muted); }' +
+      '.cvz-prompt-source-summary {font-size: 12px; color: var(--cvz-text-muted); margin-bottom: 8px; padding: 5px 8px; background: var(--cvz-navy-raised); border-radius: 4px; font-variant-numeric: tabular-nums; }' +
+      '.cvz-competitor-url-row { overflow: hidden; white-space: nowrap; max-width: 100%; }' +
+      '.cvz-competitor-url {display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cvz-teal); font-size: 12px; text-decoration: none; max-width: 100%; }' +
+      '.cvz-competitor-url:hover { text-decoration: underline; }';
 
     document.head.appendChild(style);
   }
