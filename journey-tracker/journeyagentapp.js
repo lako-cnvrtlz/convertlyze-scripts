@@ -4667,7 +4667,7 @@
     var clarification = document.createElement('p');
     clarification.className = 'cvz-card-placeholder-text';
     clarification.style.marginBottom = '8px';
-    clarification.textContent = 'Zeigt, ob eure eigene Domain zitiert wurde \u2014 ein zitierter Wettbewerber im selben Prompt z\u00e4hlt hier nicht mit (siehe Wettbewerber-Tab).';
+    clarification.textContent = 'Zeigt, in welchen Phasen der Customer Journey ihr erwähnt werdet.';
     section.appendChild(clarification);
 
     var grid = document.createElement('div');
