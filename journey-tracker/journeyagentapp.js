@@ -6031,11 +6031,11 @@
       alle_phasen: 'Alle Phasen',
     };
     var PHASE_COLOR_MAP = {
-      exploration: '#7c3aed',
-      evaluation:  '#2563eb',
-      comparison:  '#0891b2',
-      decision:    '#059669',
-      alle_phasen: '#6b7280',
+      exploration: '#a78bfa',
+      evaluation:  '#60a5fa',
+      comparison:  '#22d3ee',
+      decision:    '#34d399',
+      alle_phasen: '#8b98a5',
     };
     var CAT_LABEL_MAP = {
       ki_sichtbarkeit: 'KI-Sichtbarkeit',
@@ -6043,7 +6043,7 @@
       wettbewerb:      'Wettbewerb',
       content_luecke:  'Content-Luecke',
     };
-    var IMPACT_COLOR_MAP = { hoch: '#dc2626', mittel: '#d97706', niedrig: '#6b7280' };
+    var IMPACT_COLOR_MAP = { hoch: '#e5484d', mittel: '#f2b13d', niedrig: '#8b98a5' };
     var IMPACT_LABEL_MAP = { hoch: 'Hoch', mittel: 'Mittel', niedrig: 'Niedrig' };
 
     var ap = detail.action_plan || {};
@@ -6114,10 +6114,10 @@
 
           // ---- Header ----
           var hdr = document.createElement('div');
-          hdr.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--cvz-border,#e5e7eb);background:var(--cvz-surface,#f9fafb);flex-wrap:wrap;';
+          hdr.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--cvz-border,#232b36);background:var(--cvz-navy,#0d1117);flex-wrap:wrap;';
 
           var numSp = document.createElement('span');
-          numSp.style.cssText = 'font-size:11px;font-weight:700;color:var(--cvz-text-muted,#9ca3af);min-width:24px;flex-shrink:0;';
+          numSp.style.cssText = 'font-size:11px;font-weight:700;color:var(--cvz-text-muted,#8b98a5);min-width:24px;flex-shrink:0;';
           numSp.textContent = '#' + (item.priority || (cardIdx + 1));
           hdr.appendChild(numSp);
 
@@ -6127,7 +6127,7 @@
           hdr.appendChild(impBadge);
 
           var catSp = document.createElement('span');
-          catSp.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#6b7280);';
+          catSp.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#8b98a5);';
           catSp.textContent = catLabel;
           hdr.appendChild(catSp);
           card.appendChild(hdr);
@@ -6139,7 +6139,7 @@
           // Title
           if (item.title) {
             var titleEl = document.createElement('p');
-            titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:700;line-height:1.4;';
+            titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:700;line-height:1.4;color:var(--cvz-text,#e6edf3);';
             titleEl.textContent = item.title;
             body.appendChild(titleEl);
           }
@@ -6148,10 +6148,10 @@
           if (item.situation) {
             var sitDiv = document.createElement('div');
             var sitLbl = document.createElement('p');
-            sitLbl.style.cssText = 'margin:0 0 5px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;';
+            sitLbl.style.cssText = 'margin:0 0 5px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--cvz-text-muted,#8b98a5);';
             sitLbl.textContent = 'Situation';
             var sitTxt = document.createElement('p');
-            sitTxt.style.cssText = 'margin:0;font-size:13px;color:var(--cvz-text,#374151);line-height:1.55;';
+            sitTxt.style.cssText = 'margin:0;font-size:13px;color:var(--cvz-text,#e6edf3);line-height:1.55;';
             sitTxt.textContent = item.situation;
             sitDiv.appendChild(sitLbl);
             sitDiv.appendChild(sitTxt);
@@ -6162,7 +6162,7 @@
           if (Object.keys(ev).length > 0) {
             var evDiv = document.createElement('div');
             var evSectionLbl = document.createElement('p');
-            evSectionLbl.style.cssText = 'margin:0 0 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;';
+            evSectionLbl.style.cssText = 'margin:0 0 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--cvz-text-muted,#8b98a5);';
             evSectionLbl.textContent =
               catKey === 'google_ranking' ? 'Ranking-Daten' :
               catKey === 'content_luecke' ? 'Beispiel-Frage' :
@@ -6175,20 +6175,20 @@
               rateRow.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;';
               if (ev.own_citation_rate_pct != null) {
                 var ownBox = document.createElement('div');
-                ownBox.style.cssText = 'background:rgba(20,184,166,.08);border:1px solid rgba(20,184,166,.3);border-radius:6px;padding:6px 12px;min-width:90px;';
-                ownBox.innerHTML = '<div style="font-size:10px;font-weight:700;color:#0f766e;text-transform:uppercase;margin-bottom:2px;">Eure Rate</div><div style="font-size:22px;font-weight:800;color:#0f766e;">' + ev.own_citation_rate_pct + '%</div>';
+                ownBox.style.cssText = 'background:rgba(79,209,197,.1);border:1px solid rgba(79,209,197,.35);border-radius:6px;padding:6px 12px;min-width:90px;';
+                ownBox.innerHTML = '<div style="font-size:10px;font-weight:700;color:#4fd1c5;text-transform:uppercase;margin-bottom:2px;">Eure Rate</div><div style="font-size:22px;font-weight:800;color:#4fd1c5;">' + ev.own_citation_rate_pct + '%</div>';
                 rateRow.appendChild(ownBox);
               }
               if (ev.top_competitor && ev.competitor_citation_rate_pct != null) {
                 var compBox = document.createElement('div');
-                compBox.style.cssText = 'background:rgba(220,38,38,.05);border:1px solid rgba(220,38,38,.2);border-radius:6px;padding:6px 12px;min-width:90px;';
-                compBox.innerHTML = '<div style="font-size:10px;font-weight:700;color:#b91c1c;text-transform:uppercase;margin-bottom:2px;">' + escapeHtml(ev.top_competitor) + '</div><div style="font-size:22px;font-weight:800;color:#b91c1c;">' + ev.competitor_citation_rate_pct + '%</div>';
+                compBox.style.cssText = 'background:rgba(229,72,77,.1);border:1px solid rgba(229,72,77,.35);border-radius:6px;padding:6px 12px;min-width:90px;';
+                compBox.innerHTML = '<div style="font-size:10px;font-weight:700;color:#f87171;text-transform:uppercase;margin-bottom:2px;">' + escapeHtml(ev.top_competitor) + '</div><div style="font-size:22px;font-weight:800;color:#f87171;">' + ev.competitor_citation_rate_pct + '%</div>';
                 rateRow.appendChild(compBox);
               }
               evDiv.appendChild(rateRow);
               if (ev.example_prompt) {
                 var epBox = document.createElement('div');
-                epBox.style.cssText = 'background:var(--cvz-surface,#f9fafb);border:1px solid var(--cvz-border,#e5e7eb);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--cvz-text-muted,#6b7280);font-style:italic;line-height:1.5;';
+                epBox.style.cssText = 'background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--cvz-text-muted,#8b98a5);font-style:italic;line-height:1.5;';
                 epBox.textContent = '"' + ev.example_prompt + '"';
                 evDiv.appendChild(epBox);
               }
@@ -6198,14 +6198,14 @@
               statsRow.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;';
               if (ev.position != null) {
                 var posStat = document.createElement('div');
-                posStat.style.cssText = 'background:rgba(37,99,235,.07);border:1px solid rgba(37,99,235,.2);border-radius:6px;padding:6px 12px;';
-                posStat.innerHTML = '<div style="font-size:10px;font-weight:700;color:#1d4ed8;text-transform:uppercase;margin-bottom:2px;">Position</div><div style="font-size:22px;font-weight:800;color:#1d4ed8;">' + (Math.round(ev.position * 10) / 10) + '</div>';
+                posStat.style.cssText = 'background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.35);border-radius:6px;padding:6px 12px;';
+                posStat.innerHTML = '<div style="font-size:10px;font-weight:700;color:#60a5fa;text-transform:uppercase;margin-bottom:2px;">Position</div><div style="font-size:22px;font-weight:800;color:#60a5fa;">' + (Math.round(ev.position * 10) / 10) + '</div>';
                 statsRow.appendChild(posStat);
               }
               if (ev.impressions != null) {
                 var impStat = document.createElement('div');
-                impStat.style.cssText = 'background:var(--cvz-surface,#f9fafb);border:1px solid var(--cvz-border,#e5e7eb);border-radius:6px;padding:6px 12px;';
-                impStat.innerHTML = '<div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Impressionen</div><div style="font-size:22px;font-weight:800;color:#374151;">' + Number(ev.impressions).toLocaleString('de-DE') + '</div>';
+                impStat.style.cssText = 'background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:6px;padding:6px 12px;';
+                impStat.innerHTML = '<div style="font-size:10px;font-weight:700;color:var(--cvz-text-muted,#8b98a5);text-transform:uppercase;margin-bottom:2px;">Impressionen</div><div style="font-size:22px;font-weight:800;color:var(--cvz-text,#e6edf3);">' + Number(ev.impressions).toLocaleString('de-DE') + '</div>';
                 statsRow.appendChild(impStat);
               }
               evDiv.appendChild(statsRow);
@@ -6213,10 +6213,10 @@
                 var pgUrlRow = document.createElement('div');
                 pgUrlRow.style.cssText = 'display:flex;align-items:baseline;gap:6px;margin-bottom:8px;flex-wrap:wrap;';
                 var pgUrlLbl = document.createElement('span');
-                pgUrlLbl.style.cssText = 'font-size:11px;font-weight:600;color:#6b7280;flex-shrink:0;';
+                pgUrlLbl.style.cssText = 'font-size:11px;font-weight:600;color:var(--cvz-text-muted,#8b98a5);flex-shrink:0;';
                 pgUrlLbl.textContent = 'Rankende Seite:';
                 var pgUrlVal = document.createElement('span');
-                pgUrlVal.style.cssText = 'font-size:12px;font-family:monospace;color:#2563eb;word-break:break-all;';
+                pgUrlVal.style.cssText = 'font-size:12px;font-family:monospace;color:#60a5fa;word-break:break-all;';
                 pgUrlVal.textContent = ev.page_url;
                 pgUrlRow.appendChild(pgUrlLbl);
                 pgUrlRow.appendChild(pgUrlVal);
@@ -6224,14 +6224,14 @@
               }
               if (ev.serp_top3 && ev.serp_top3.length > 0) {
                 var serpRowLbl = document.createElement('p');
-                serpRowLbl.style.cssText = 'margin:0 0 5px;font-size:11px;font-weight:600;color:#6b7280;';
+                serpRowLbl.style.cssText = 'margin:0 0 5px;font-size:11px;font-weight:600;color:var(--cvz-text-muted,#8b98a5);';
                 serpRowLbl.textContent = 'Top-Ergebnisse auf der SERP:';
                 evDiv.appendChild(serpRowLbl);
                 var serpChips = document.createElement('div');
                 serpChips.style.cssText = 'display:flex;flex-wrap:wrap;gap:5px;';
                 ev.serp_top3.forEach(function (dom) {
                   var chip = document.createElement('span');
-                  chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;background:var(--cvz-bg,#fff);border:1px solid var(--cvz-border,#e5e7eb);border-radius:6px;color:var(--cvz-text,#374151);';
+                  chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:6px;color:var(--cvz-text,#e6edf3);';
                   chip.innerHTML = '<img src="https://www.google.com/s2/favicons?sz=12&domain=' + encodeURIComponent(dom) + '" style="width:12px;height:12px;flex-shrink:0;" onerror="this.style.display=\'none\'">' + escapeHtml(dom);
                   serpChips.appendChild(chip);
                 });
@@ -6240,7 +6240,7 @@
             } else if (catKey === 'content_luecke') {
               if (ev.example_prompt) {
                 var gapQ = document.createElement('div');
-                gapQ.style.cssText = 'background:rgba(124,58,237,.05);border:1px solid rgba(124,58,237,.2);border-radius:6px;padding:10px 12px;font-size:13px;color:#5b21b6;font-style:italic;line-height:1.55;';
+                gapQ.style.cssText = 'background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.35);border-radius:6px;padding:10px 12px;font-size:13px;color:#a78bfa;font-style:italic;line-height:1.55;';
                 gapQ.textContent = '"' + ev.example_prompt + '"';
                 evDiv.appendChild(gapQ);
               }
@@ -6251,12 +6251,12 @@
           // ---- EMPFEHLUNG ----
           if (item.recommendation) {
             var recDiv = document.createElement('div');
-            recDiv.style.cssText = 'background:rgba(20,184,166,.08);border-left:3px solid #14b8a6;border-radius:0 4px 4px 0;padding:10px 12px;';
+            recDiv.style.cssText = 'background:rgba(79,209,197,.1);border-left:3px solid #4fd1c5;border-radius:0 4px 4px 0;padding:10px 12px;';
             var recLbl = document.createElement('p');
-            recLbl.style.cssText = 'margin:0 0 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#0f766e;';
+            recLbl.style.cssText = 'margin:0 0 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4fd1c5;';
             recLbl.textContent = 'Empfehlung';
             var recTxt = document.createElement('p');
-            recTxt.style.cssText = 'margin:0;font-size:13px;color:#0f766e;line-height:1.55;';
+            recTxt.style.cssText = 'margin:0;font-size:13px;color:#4fd1c5;line-height:1.55;';
             recTxt.textContent = item.recommendation;
             recDiv.appendChild(recLbl);
             recDiv.appendChild(recTxt);
