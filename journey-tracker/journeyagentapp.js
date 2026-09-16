@@ -2946,6 +2946,26 @@
       platIntro.style.marginBottom = '12px';
       platIntro.textContent = 'Diese Plattformen werden in KI-Antworten zitiert und erlauben dir, eigene Inhalte zu veröffentlichen.';
       wrap.appendChild(platIntro);
+            var platGrid = document.createElement('div');
+      platGrid.className = 'cvz-opportunity-grid';
+      publishable.forEach(function (p) {
+        var card = document.createElement('div');
+        card.className = 'cvz-card cvz-idea-card';
+        card.innerHTML =
+          '<p class="cvz-opportunity-type">' +
+            '<img class="cvz-inline-favicon" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(p.domain) + '" alt="">' +
+            escapeHtml(p.domain) +
+            (p.content_type ? ' \u00b7 ' + escapeHtml(CONTENT_TYPE_LABELS[p.content_type] || p.content_type) : '') +
+          '</p>' +
+          (p.summary ? '<p class="cvz-opportunity-description">' + escapeHtml(p.summary) + '</p>' : '') +
+          (p.differentiation_suggestion ? '<p class="cvz-opportunity-description"><strong>Deine Chance:</strong> ' + escapeHtml(p.differentiation_suggestion) + '</p>' : '');
+        platGrid.appendChild(card);
+      });
+      wrap.appendChild(platGrid);
+    }
+
+    return wrap;
+  }
 
       var platGrid = document.createElement('div');
       platGrid.className = 'cvz-opportunity-grid';
