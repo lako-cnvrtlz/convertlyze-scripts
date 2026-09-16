@@ -499,6 +499,8 @@
             change_type: d.change_type,
             description: d.description.trim(),
             url: d.url ? d.url.trim() : null,
+            linked_search_query_ids: state.changelogDraftLinkedIds.keywords.slice(),
+            linked_prompt_ids: state.changelogDraftLinkedIds.prompts.slice(),
           },
         });
         var existing = state.contentChangesCache[topicId] || [];
@@ -511,10 +513,16 @@
           description: d.description.trim(),
           url: d.url ? d.url.trim() : null,
           created_at: new Date().toISOString(),
+          linked_search_query_ids: state.changelogDraftLinkedIds.keywords.slice(),
+          linked_prompt_ids: state.changelogDraftLinkedIds.prompts.slice(),
         };
+        state.changelogDraftLinkedIds = { keywords: [], prompts: [] };
+        state.changelogLinkSectionOpen = { keywords: false, prompts: false };
         state.contentChangesCache[topicId] = [mockChange].concat(state.contentChangesCache[topicId] || []);
       }
       state.contentChangeDraft = { changed_at: '', change_type: 'neue_seite', description: '', url: '' };
+      state.changelogDraftLinkedIds = { keywords: [], prompts: [] };
+      state.changelogLinkSectionOpen = { keywords: false, prompts: false };
     } catch (e) {
       console.error('[CVZ Visibility] Content-Änderung konnte nicht gespeichert werden:', e);
     }
@@ -2459,15 +2467,27 @@
         tabContent.appendChild(renderVerlaufTab(state.activeTopicId, detail));
         break;
       case 'daten': {
+        // Content-Änderungen (mit verlinkten Keywords/Prompts) als Marker aufbereiten
+        var _ccMarkers = (state.contentChangesCache[state.activeTopicId] || []).map(function (ch) {
+          return {
+            linked_search_query_ids: ch.linked_search_query_ids || [],
+            linked_prompt_ids: ch.linked_prompt_ids || [],
+            entry_text: ch.description,
+            created_at: ch.changed_at,
+            keyword_deltas: {},
+          };
+        });
+        var _allEntries = (detail.changelog || []).concat(_ccMarkers);
         // Keywords (thematische, ohne GSC near-miss)
         var thematicKws = (detail.search_queries || []).filter(function (q) { return q.source !== 'gsc_near_miss'; });
-        tabContent.appendChild(renderKeywordsTable(thematicKws, true, detail.changelog));
+        tabContent.appendChild(renderKeywordsTable(thematicKws, true, _allEntries));
         var posInsight = renderPositioningInsight(detail.positioning_insight);
         if (posInsight) tabContent.appendChild(posInsight);
         // Prompts nach Phase
-        tabContent.appendChild(renderPromptsByPhase(detail.prompts, true, detail.changelog));
-        // GSC-Performance
-        tabContent.appendChild(renderGscBlock(detail.gsc_rows, state.activeTopicId, detail.changelog));
+        tabContent.appendChild(renderPromptsByPhase(detail.prompts, true, _allEntries));
+        // GSC-Performance (mit Relevanzfilter)
+        var _gscFiltered = filterGscByTopicRelevance(detail.gsc_rows, detail);
+        tabContent.appendChild(renderGscBlock(_gscFiltered, state.activeTopicId, _allEntries));
         break;
       }
       case 'situation':
@@ -4630,7 +4650,7 @@
 
   function computePhaseRollup(prompts) {
     return PHASE_ORDER.map(function (phase) {
-      var inPhase = prompts.filter(function (p) { return p.phase === phase; });
+      var inPhase = prompts.filter(function (p) { return (p.messymiddle_phase || p.phase) === phase; });
       var counts = { green: 0, yellow: 0, red: 0, unknown: 0 };
       inPhase.forEach(function (p) {
         var key = (p.total_runs == null || p.total_runs === 0)
@@ -4931,6 +4951,35 @@
     });
 
     return section;
+  }
+
+  // GSC-Keywords auf Themen-Relevanz filtern.
+  // Deutsches Compound-Matching: Topic-Term als Teilstring der Suchanfrage ODER
+  // ein Wort der Suchanfrage als Teilstring eines Topic-Terms.
+  function filterGscByTopicRelevance(gscRows, detail) {
+    if (!gscRows || gscRows.length === 0) return gscRows;
+    var STOP = ['und', 'der', 'die', 'das', 'von', 'mit', 'bei', 'zur', 'zum', 'ein', 'eine',
+                'ist', 'sind', 'oder', 'wie', 'was', 'als', 'for', 'the', 'and', 'of', 'vs'];
+    var terms = [];
+    function addTerms(str) {
+      (str || '').toLowerCase().split(/[\s\-_\/\.,]+/).forEach(function (w) {
+        if (w.length > 4 && STOP.indexOf(w) === -1 && terms.indexOf(w) === -1) terms.push(w);
+      });
+    }
+    addTerms((detail.topic && detail.topic.name) || '');
+    (detail.search_queries || []).forEach(function (q) {
+      if (q.source !== 'gsc_near_miss') addTerms(q.keyword || '');
+    });
+    if (terms.length === 0) return gscRows;
+    return gscRows.filter(function (row) {
+      var q = (row.query || '').toLowerCase();
+      return terms.some(function (term) {
+        if (q.indexOf(term) !== -1) return true;
+        return q.split(/[\s\-_\/\.,]+/).some(function (qw) {
+          return qw.length > 4 && term.indexOf(qw) !== -1;
+        });
+      });
+    });
   }
 
   function renderGscBlock(gscRows, topicId, changelogEntries) {
@@ -5390,7 +5439,7 @@
     return section;
   }
 
-  function renderContentChangesSection(topicId) {
+  function renderContentChangesSection(topicId, searchQueries, prompts) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
@@ -5468,6 +5517,19 @@
     formCard.appendChild(formRow);
     section.appendChild(formCard);
 
+    // Link-Picker: Keywords und Prompts mit dieser Änderung verknüpfen
+    var _thKws = (searchQueries || []).filter(function (q) { return q.source !== 'gsc_near_miss'; });
+    section.appendChild(renderChangelogLinkPicker('keywords', _thKws, function (q) { return q.keyword; }));
+    section.appendChild(renderChangelogLinkPicker('prompts', prompts || [], function (p) {
+      return p.prompt_text && p.prompt_text.length > 60 ? p.prompt_text.slice(0, 57) + '…' : (p.prompt_text || '');
+    }));
+
+    // Lookup-Maps für die Anzeige verknüpfter Items in der Liste
+    var _kwById = {};
+    _thKws.forEach(function (q) { if (q.id) _kwById[q.id] = q.keyword; });
+    var _promptById = {};
+    (prompts || []).forEach(function (p) { if (p.id) _promptById[p.id] = p.prompt_text; });
+
     // List
     var changes = state.contentChangesCache[topicId] || [];
     if (state.isLoadingContentChanges) {
@@ -5494,7 +5556,14 @@
           '<span class="cvz-content-change-date">' + escapeHtml(dateStr) + '</span>' +
           '<span class="cvz-opportunity-type">' + escapeHtml(typeLabel) + '</span>' +
           '<span class="cvz-content-change-desc">' + escapeHtml(ch.description || '') + '</span>' +
-          (ch.url ? '<a class="cvz-content-change-url" href="' + escapeHtml(ch.url) + '" target="_blank" rel="noopener">Link ↗</a>' : '');
+          (ch.url ? '<a class="cvz-content-change-url" href="' + escapeHtml(ch.url) + '" target="_blank" rel="noopener">Link ↗</a>' : '') +
+          (function () {
+            var linked = (ch.linked_search_query_ids || []).map(function (id) { return _kwById[id]; }).filter(Boolean)
+              .concat((ch.linked_prompt_ids || []).map(function (id) {
+                var t = _promptById[id]; return t ? (t.length > 40 ? t.slice(0, 37) + '…' : t) : null;
+              }).filter(Boolean));
+            return linked.length ? '<span class="cvz-content-change-linked">Verknüpft: ' + escapeHtml(linked.join(', ')) + '</span>' : '';
+          })();
         list.appendChild(item);
       });
       section.appendChild(list);
@@ -5906,6 +5975,7 @@
         'flex: 0 0 160px; min-width: 140px; max-width: 160px;' +
       '}' +
       '.cvz-content-change-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }' +
+      '.cvz-content-change-linked { display:block;margin-top:3px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);font-style:italic; }' +
       '.cvz-content-change-item {' +
         'display: flex; align-items: baseline; gap: 10px; padding: 10px 0;' +
         'border-bottom: 1px solid var(--cvz-border); flex-wrap: wrap; font-size: 13px;' +
@@ -6093,10 +6163,31 @@
 
     // Datenpunkte aufbauen
     var SVG_W = 580, SVG_P = 32;
-    var xLabels = ['Exploration', 'Evaluation', 'Vergleich', 'Entscheidung'];
 
-    // Eigene Zitierrate: Durchschnitt ueber Kanaele mit Daten
-    var ownValues = PHASE_ORDER.map(function (phase) {
+    // Nur Phasen mit tatsaechlichen Daten als X-Achse zeigen.
+    // Phasen ohne Laeufe (total=0 fuer alle Kanaele UND kein Wettbewerber) werden ausgeblendet.
+    var PHASE_LABEL_MAP = { exploration: 'Exploration', evaluation: 'Evaluation', comparison: 'Vergleich', decision: 'Entscheidung' };
+    var activePhases = PHASE_ORDER.filter(function (phase) {
+      var scores = dashData.phase_scores[phase] || {};
+      var hasOwnData = CHANNEL_ORDER.some(function (ch) { var s = scores[ch]; return s && s.total > 0; });
+      var hasCompData = (sov[phase] || []).length > 0;
+      return hasOwnData || hasCompData;
+    });
+
+    // Wenn keine Phase Daten hat: Platzhalter statt leerem Chart
+    if (activePhases.length === 0) {
+      var noDataMsg = document.createElement('p');
+      noDataMsg.className = 'cvz-card-placeholder-text';
+      noDataMsg.style.cssText = 'margin-top:8px;font-style:italic;';
+      noDataMsg.textContent = 'Noch keine Vergleichsdaten vorhanden. Der Chart erscheint, sobald die erste Analyse abgeschlossen ist.';
+      section.appendChild(noDataMsg);
+      return section;
+    }
+
+    var xLabels = activePhases.map(function (p) { return PHASE_LABEL_MAP[p] || p; });
+
+    // Eigene Zitierrate: Durchschnitt ueber Kanaele mit Daten (null fuer inaktive Phasen)
+    var ownValues = activePhases.map(function (phase) {
       var scores = dashData.phase_scores[phase] || {};
       var total = 0, count = 0;
       CHANNEL_ORDER.forEach(function (ch) {
@@ -6108,9 +6199,9 @@
 
     var seriesList = [{ label: ownDomain, color: '#4fd1c5', values: ownValues }];
 
-    // Wettbewerber-Zitierraten pro Phase
+    // Wettbewerber-Zitierraten pro aktiver Phase
     topComps.forEach(function (domain, i) {
-      var values = PHASE_ORDER.map(function (phase) {
+      var values = activePhases.map(function (phase) {
         var entry = (sov[phase] || []).filter(function (c) { return c.domain === domain; })[0];
         return entry ? Math.round(entry.citation_rate || 0) : 0;
       });
@@ -6136,7 +6227,7 @@
     // X-Achsen-Labels: als absolut positionierte Spans unter dem SVG
     // Die Chart-Punkte liegen bei x = SVG_P + i * stepX (in SVG-Koordinaten)
     // => als % von SVG_W gibt das die korrekte Position im responsiven SVG.
-    var stepX = (SVG_W - SVG_P * 2) / (xLabels.length - 1);
+    var stepX = xLabels.length > 1 ? (SVG_W - SVG_P * 2) / (xLabels.length - 1) : 0;
     var labelRow = document.createElement('div');
     labelRow.style.cssText = 'position:relative;height:18px;margin-top:3px;';
     xLabels.forEach(function (lbl, i) {
@@ -6209,10 +6300,18 @@
         var avgScore = channelCount > 0 ? Math.round(totalScore / channelCount) : 0;
         var ownRow = document.createElement('div');
         ownRow.className = 'cvz-journey-channel-row';
-        ownRow.innerHTML =
-          '<span class="cvz-journey-channel-label" style="font-weight:600;">Eure Domain</span>' +
-          '<div class="cvz-journey-bar-wrap"><div class="cvz-journey-bar-fill" style="width:' + avgScore + '%;background:' + color + '"></div></div>' +
-          '<span class="cvz-journey-channel-num" style="font-weight:600;">' + avgScore + '%</span>';
+        if (channelCount === 0) {
+          // Phase hatte in diesem Zeitraum keine KI-Laeufe - "Noch keine Daten" zeigen
+          ownRow.innerHTML =
+            '<span class="cvz-journey-channel-label" style="font-weight:600;color:var(--cvz-text-muted,#8b98a5);">Noch keine Daten</span>' +
+            '<div class="cvz-journey-bar-wrap"><div class="cvz-journey-bar-fill" style="width:0%;background:' + color + ';opacity:.3;"></div></div>' +
+            '<span class="cvz-journey-channel-num" style="color:var(--cvz-text-muted,#8b98a5);">–</span>';
+        } else {
+          ownRow.innerHTML =
+            '<span class="cvz-journey-channel-label" style="font-weight:600;">Eure Domain</span>' +
+            '<div class="cvz-journey-bar-wrap"><div class="cvz-journey-bar-fill" style="width:' + avgScore + '%;background:' + color + '"></div></div>' +
+            '<span class="cvz-journey-channel-num" style="font-weight:600;">' + avgScore + '%</span>';
+        }
         card.appendChild(ownRow);
         // Top competitor bar
         if (topComp) {
@@ -7202,7 +7301,7 @@
     }
 
     // Form to add new content change
-    wrap.appendChild(renderContentChangesSection(topicId));
+    wrap.appendChild(renderContentChangesSection(topicId, detail.search_queries, detail.prompts));
 
     // Visibility trend from prompt data (weekly cite/mention rates)
     var visWeeks = state.visibilityTrendCache[topicId];
