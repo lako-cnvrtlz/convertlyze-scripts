@@ -6016,285 +6016,263 @@
   // ─── AKTIONSPLAN ──────────────────────────────────────────────────────────
   // Strukturierte Aktions-Karten: Situation / Was rankt & wird zitiert / Empfehlung.
   // Priorisiert nach Impact; near-miss Keywords mit URL, Position und SERP-Kontext.
+  // NEU (16.09.2026): Aktionsplan-Tab liest jetzt detail.action_plan statt
+  // detail.opportunities + detail.content_ideas. Claude generiert die Items
+  // phasengerecht mit typisierten Evidence-Bloecken.
   function renderAktionsplanTab(detail) {
     var wrap = document.createElement('div');
 
-    var intro = document.createElement('p');
-    intro.className = 'cvz-card-placeholder-text';
-    intro.style.marginBottom = '20px';
-    intro.textContent = 'Alle Aktionen nach Impact priorisiert. Jede Karte erklaert die Situation, was dort rankt oder zitiert wird, und gibt eine konkrete Empfehlung.';
-    wrap.appendChild(intro);
-
-    var PRIORITY_ORDER = [
-      'near_miss_ranking', 'high_demand_low_visibility',
-      'google_visible_ai_invisible', 'competitor_citation',
-      'ai_visible_competitor_dominates', 'new_question',
-    ];
-    var PRIORITY_IMPACT = {
-      near_miss_ranking:               { label: 'Hoch',    color: '#dc2626' },
-      high_demand_low_visibility:      { label: 'Hoch',    color: '#dc2626' },
-      google_visible_ai_invisible:     { label: 'Mittel',  color: '#d97706' },
-      competitor_citation:             { label: 'Mittel',  color: '#d97706' },
-      ai_visible_competitor_dominates: { label: 'Mittel',  color: '#d97706' },
-      new_question:                    { label: 'Niedrig', color: '#6b7280' },
+    var PHASE_ORDER = ['alle_phasen', 'exploration', 'evaluation', 'comparison', 'decision'];
+    var PHASE_LABEL_MAP = {
+      exploration: 'Exploration',
+      evaluation:  'Bewertung',
+      comparison:  'Vergleich',
+      decision:    'Entscheidung',
+      alle_phasen: 'Alle Phasen',
     };
-    // Erklaerende Situation-Texte je Opportunity-Typ
-    var SITUATION_TEXT = {
-      near_miss_ranking:
-        'Laut eurer Search Console erzeugen diese Keywords bereits reale Impressionen, ranken aber noch ausserhalb der Top 5. Mit gezielten On-Page-Anpassungen ist Seite 1 realistisch.',
-      high_demand_low_visibility:
-        'Dieses Thema wird haeufig gesucht, aber in KI-Antworten seid ihr kaum vertreten. Fruehzeitige Praesenz sichert langfristige Sichtbarkeit in AI-Kanaelen.',
-      google_visible_ai_invisible:
-        'Eure Seite rankt organisch bei Google, wird von KI-Assistenten wie ChatGPT oder Gemini aber noch nicht zitiert. Eine typische Luecke, die mit gezielten Anpassungen zu schliessen ist.',
-      competitor_citation:
-        'Ein Wettbewerber wird von KI-Modellen zu diesem Thema bevorzugt zitiert. Mit besser strukturiertem, klarer abgegrenztem Inhalt koennt ihr die Position uebernehmen.',
-      ai_visible_competitor_dominates:
-        'Ihr seid in KI-Antworten praesent, aber Mitbewerber erhalten deutlich mehr Erwaehungen. Ziel ist, die Zitierfrequenz und thematische Tiefe zu erhoehen.',
-      new_question:
-        'KI-Modelle beantworten diese Frage bereits, aber kein Anbieter aus eurem Markt ist prominent vertreten. Wer zuerst guten Inhalt dazu liefert, besetzt das Feld.',
+    var PHASE_COLOR_MAP = {
+      exploration: '#7c3aed',
+      evaluation:  '#2563eb',
+      comparison:  '#0891b2',
+      decision:    '#059669',
+      alle_phasen: '#6b7280',
     };
+    var CAT_LABEL_MAP = {
+      ki_sichtbarkeit: 'KI-Sichtbarkeit',
+      google_ranking:  'Google-Ranking',
+      wettbewerb:      'Wettbewerb',
+      content_luecke:  'Content-Luecke',
+    };
+    var IMPACT_COLOR_MAP = { hoch: '#dc2626', mittel: '#d97706', niedrig: '#6b7280' };
+    var IMPACT_LABEL_MAP = { hoch: 'Hoch', mittel: 'Mittel', niedrig: 'Niedrig' };
 
-    // Unified Action List aufbauen
-    var items = [];
+    var ap = detail.action_plan || {};
+    var items = ap.items || [];
 
-    // 1. Opportunities (nur offene)
-    var openOpps = (detail.opportunities || []).filter(function (o) {
-      return o.status === 'new' || o.status === 'reviewed';
-    });
-    openOpps.forEach(function (opp) {
-      var impact = PRIORITY_IMPACT[opp.opportunity_type] || { label: 'Mittel', color: '#d97706' };
-      var pIdx = PRIORITY_ORDER.indexOf(opp.opportunity_type);
-      items.push({
-        type: 'opportunity',
-        priority: pIdx >= 0 ? pIdx : 5,
-        impactLabel: impact.label,
-        impactColor: impact.color,
-        category: OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type,
-        titleText: opp.description || opp.content_recommendation || '',
-        situationText: SITUATION_TEXT[opp.opportunity_type] || (opp.description || ''),
-        recommendation: opp.content_recommendation || '',
-        opp: opp,
-      });
-    });
-
-    // 2. Near-miss Keywords (organischer Rang 6-20)
-    var nearMissKws = (detail.search_queries || []).filter(function (kw) {
-      var rank = kw.organic_rank != null ? kw.organic_rank : kw.gsc_position;
-      return rank != null && rank >= 6 && rank <= 20;
-    }).sort(function (a, b) {
-      return (b.search_volume || 0) - (a.search_volume || 0);
-    }).slice(0, 8);
-
-    // Gruppierung nach page_url fuer Content-Strategie-Hinweis
-    var urlGroupMap = {};
-    nearMissKws.forEach(function (kw) {
-      var key = kw.page_url || '__none__';
-      if (!urlGroupMap[key]) urlGroupMap[key] = [];
-      urlGroupMap[key].push(kw.keyword);
-    });
-
-    nearMissKws.forEach(function (kw) {
-      var rank = kw.organic_rank != null ? kw.organic_rank : kw.gsc_position;
-      var roundedRank = Math.round((rank || 0) * 10) / 10;
-      var sitParts = ['Laut eurer Search Console rankt "' + kw.keyword + '" auf Position ' + roundedRank + '.'];
-      if (kw.search_volume) sitParts.push(Number(kw.search_volume).toLocaleString('de-DE') + ' Suchen pro Monat.');
-      if (kw.gsc_impressions) sitParts.push(Number(kw.gsc_impressions).toLocaleString('de-DE') + ' Impressionen im Messzeitraum.');
-      var urlKey = kw.page_url || '__none__';
-      var urlGroup = (urlGroupMap[urlKey] && urlGroupMap[urlKey].length > 1) ? urlGroupMap[urlKey] : null;
-      items.push({
-        type: 'near_miss_kw',
-        priority: 0.5,
-        impactLabel: 'Hoch',
-        impactColor: '#dc2626',
-        category: 'Organisches Ranking ausbauen',
-        titleText: 'Seite 1 in Reichweite: "' + kw.keyword + '"',
-        situationText: sitParts.join(' '),
-        recommendation: 'Optimiert die rankende Seite gezielt: Keyword in Titel, H1 und ersten Absatz aufnehmen. Interne Verlinkung von verwandten Seiten ausbauen. Falls die Seite nur eine Produktseite ist, kann ein ergaenzendes Ratgeber-Stueck die thematische Tiefe und damit die Ranking-Chance erhoehen.',
-        kw: kw,
-        urlGroup: urlGroup,
-        urlKey: urlKey,
-      });
-    });
-
-    // 3. Content-Ideen
-    (detail.content_ideas || []).forEach(function (idea) {
-      var colonIdx = (idea.description || '').indexOf(': ');
-      var title = colonIdx >= 0 ? idea.description.substring(0, colonIdx) : (idea.description || '');
-      var reason = colonIdx >= 0 ? idea.description.substring(colonIdx + 2) : '';
-      items.push({
-        type: 'content_idea',
-        priority: 10,
-        impactLabel: 'Niedrig',
-        impactColor: '#6b7280',
-        category: (idea.phase ? PHASE_LABELS[idea.phase] + ' | ' : '') + (MODEL_LABELS[idea.provider] || idea.provider || 'KI-Idee'),
-        titleText: title,
-        situationText: reason,
-        recommendation: '',
-      });
-    });
-
-    items.sort(function (a, b) { return a.priority - b.priority; });
-
+    // ----- Empty / waiting state -----
     if (items.length === 0) {
-      var emptyEl = document.createElement('p');
-      emptyEl.className = 'cvz-card-placeholder-text';
-      emptyEl.textContent = 'Noch keine Aktionen verfuegbar. Warte auf den naechsten Analyse-Lauf.';
-      wrap.appendChild(emptyEl);
-      return wrap;
+      var emptyWrap = document.createElement('div');
+      emptyWrap.style.cssText = 'text-align:center;padding:48px 24px;';
+      var emptyTxt = document.createElement('p');
+      emptyTxt.className = 'cvz-card-placeholder-text';
+      emptyTxt.textContent = 'Der Aktionsplan wird beim naechsten Analyse-Lauf automatisch generiert. Noch keine Daten vorhanden.';
+      emptyWrap.appendChild(emptyTxt);
+      wrap.appendChild(emptyWrap);
+    } else {
+      // Intro line with generation timestamp
+      if (ap.generated_at) {
+        var introEl = document.createElement('p');
+        introEl.className = 'cvz-card-placeholder-text';
+        introEl.style.cssText = 'margin-bottom:20px;font-size:12px;';
+        var genDate = new Date(ap.generated_at);
+        introEl.textContent = 'Zuletzt generiert: ' + genDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ', ' + genDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr. ' + items.length + ' Massnahmen priorisiert nach Phase und Impact.';
+        wrap.appendChild(introEl);
+      }
+
+      // Group by phase
+      var groups = {};
+      items.forEach(function (item) {
+        var ph = item.phase || 'alle_phasen';
+        if (!groups[ph]) groups[ph] = [];
+        groups[ph].push(item);
+      });
+
+      PHASE_ORDER.forEach(function (ph) {
+        if (!groups[ph] || groups[ph].length === 0) return;
+        var phItems = groups[ph].slice().sort(function (a, b) { return (a.priority || 99) - (b.priority || 99); });
+        var phColor = PHASE_COLOR_MAP[ph] || '#6b7280';
+
+        var phSection = document.createElement('div');
+        phSection.style.marginBottom = '32px';
+
+        // Phase section heading
+        var phHdr = document.createElement('div');
+        phHdr.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid ' + phColor + ';';
+        var phDot = document.createElement('span');
+        phDot.style.cssText = 'width:10px;height:10px;border-radius:50%;background:' + phColor + ';flex-shrink:0;display:inline-block;';
+        var phLbl = document.createElement('span');
+        phLbl.style.cssText = 'font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:' + phColor + ';';
+        phLbl.textContent = (PHASE_LABEL_MAP[ph] || ph) + ' (' + phItems.length + ')';
+        phHdr.appendChild(phDot);
+        phHdr.appendChild(phLbl);
+        phSection.appendChild(phHdr);
+
+        var phList = document.createElement('div');
+        phList.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+
+        phItems.forEach(function (item, cardIdx) {
+          var card = document.createElement('div');
+          card.className = 'cvz-card';
+          card.style.cssText = 'padding:0;overflow:hidden;';
+
+          var impactLvl = (item.impact || 'mittel').toLowerCase();
+          var impColor  = IMPACT_COLOR_MAP[impactLvl] || '#d97706';
+          var impLabel  = IMPACT_LABEL_MAP[impactLvl] || 'Mittel';
+          var catKey    = item.category || 'ki_sichtbarkeit';
+          var catLabel  = CAT_LABEL_MAP[catKey] || catKey;
+          var ev        = item.evidence || {};
+
+          // ---- Header ----
+          var hdr = document.createElement('div');
+          hdr.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--cvz-border,#e5e7eb);background:var(--cvz-surface,#f9fafb);flex-wrap:wrap;';
+
+          var numSp = document.createElement('span');
+          numSp.style.cssText = 'font-size:11px;font-weight:700;color:var(--cvz-text-muted,#9ca3af);min-width:24px;flex-shrink:0;';
+          numSp.textContent = '#' + (item.priority || (cardIdx + 1));
+          hdr.appendChild(numSp);
+
+          var impBadge = document.createElement('span');
+          impBadge.style.cssText = 'display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;color:#fff;background:' + impColor + ';flex-shrink:0;';
+          impBadge.textContent = impLabel;
+          hdr.appendChild(impBadge);
+
+          var catSp = document.createElement('span');
+          catSp.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#6b7280);';
+          catSp.textContent = catLabel;
+          hdr.appendChild(catSp);
+          card.appendChild(hdr);
+
+          // ---- Body ----
+          var body = document.createElement('div');
+          body.style.cssText = 'padding:14px 16px;display:flex;flex-direction:column;gap:14px;';
+
+          // Title
+          if (item.title) {
+            var titleEl = document.createElement('p');
+            titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:700;line-height:1.4;';
+            titleEl.textContent = item.title;
+            body.appendChild(titleEl);
+          }
+
+          // ---- SITUATION ----
+          if (item.situation) {
+            var sitDiv = document.createElement('div');
+            var sitLbl = document.createElement('p');
+            sitLbl.style.cssText = 'margin:0 0 5px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;';
+            sitLbl.textContent = 'Situation';
+            var sitTxt = document.createElement('p');
+            sitTxt.style.cssText = 'margin:0;font-size:13px;color:var(--cvz-text,#374151);line-height:1.55;';
+            sitTxt.textContent = item.situation;
+            sitDiv.appendChild(sitLbl);
+            sitDiv.appendChild(sitTxt);
+            body.appendChild(sitDiv);
+          }
+
+          // ---- EVIDENCE (kategorie-spezifisch) ----
+          if (Object.keys(ev).length > 0) {
+            var evDiv = document.createElement('div');
+            var evSectionLbl = document.createElement('p');
+            evSectionLbl.style.cssText = 'margin:0 0 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;';
+            evSectionLbl.textContent =
+              catKey === 'google_ranking' ? 'Ranking-Daten' :
+              catKey === 'content_luecke' ? 'Beispiel-Frage' :
+              'Zitierungsrate';
+            evDiv.appendChild(evSectionLbl);
+
+            if (catKey === 'ki_sichtbarkeit' || catKey === 'wettbewerb') {
+              // Citation rate comparison boxes
+              var rateRow = document.createElement('div');
+              rateRow.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;';
+              if (ev.own_citation_rate_pct != null) {
+                var ownBox = document.createElement('div');
+                ownBox.style.cssText = 'background:rgba(20,184,166,.08);border:1px solid rgba(20,184,166,.3);border-radius:6px;padding:6px 12px;min-width:90px;';
+                ownBox.innerHTML = '<div style="font-size:10px;font-weight:700;color:#0f766e;text-transform:uppercase;margin-bottom:2px;">Eure Rate</div><div style="font-size:22px;font-weight:800;color:#0f766e;">' + ev.own_citation_rate_pct + '%</div>';
+                rateRow.appendChild(ownBox);
+              }
+              if (ev.top_competitor && ev.competitor_citation_rate_pct != null) {
+                var compBox = document.createElement('div');
+                compBox.style.cssText = 'background:rgba(220,38,38,.05);border:1px solid rgba(220,38,38,.2);border-radius:6px;padding:6px 12px;min-width:90px;';
+                compBox.innerHTML = '<div style="font-size:10px;font-weight:700;color:#b91c1c;text-transform:uppercase;margin-bottom:2px;">' + escapeHtml(ev.top_competitor) + '</div><div style="font-size:22px;font-weight:800;color:#b91c1c;">' + ev.competitor_citation_rate_pct + '%</div>';
+                rateRow.appendChild(compBox);
+              }
+              evDiv.appendChild(rateRow);
+              if (ev.example_prompt) {
+                var epBox = document.createElement('div');
+                epBox.style.cssText = 'background:var(--cvz-surface,#f9fafb);border:1px solid var(--cvz-border,#e5e7eb);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--cvz-text-muted,#6b7280);font-style:italic;line-height:1.5;';
+                epBox.textContent = '"' + ev.example_prompt + '"';
+                evDiv.appendChild(epBox);
+              }
+            } else if (catKey === 'google_ranking') {
+              // Position + impressions stats
+              var statsRow = document.createElement('div');
+              statsRow.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;';
+              if (ev.position != null) {
+                var posStat = document.createElement('div');
+                posStat.style.cssText = 'background:rgba(37,99,235,.07);border:1px solid rgba(37,99,235,.2);border-radius:6px;padding:6px 12px;';
+                posStat.innerHTML = '<div style="font-size:10px;font-weight:700;color:#1d4ed8;text-transform:uppercase;margin-bottom:2px;">Position</div><div style="font-size:22px;font-weight:800;color:#1d4ed8;">' + (Math.round(ev.position * 10) / 10) + '</div>';
+                statsRow.appendChild(posStat);
+              }
+              if (ev.impressions != null) {
+                var impStat = document.createElement('div');
+                impStat.style.cssText = 'background:var(--cvz-surface,#f9fafb);border:1px solid var(--cvz-border,#e5e7eb);border-radius:6px;padding:6px 12px;';
+                impStat.innerHTML = '<div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Impressionen</div><div style="font-size:22px;font-weight:800;color:#374151;">' + Number(ev.impressions).toLocaleString('de-DE') + '</div>';
+                statsRow.appendChild(impStat);
+              }
+              evDiv.appendChild(statsRow);
+              if (ev.page_url) {
+                var pgUrlRow = document.createElement('div');
+                pgUrlRow.style.cssText = 'display:flex;align-items:baseline;gap:6px;margin-bottom:8px;flex-wrap:wrap;';
+                var pgUrlLbl = document.createElement('span');
+                pgUrlLbl.style.cssText = 'font-size:11px;font-weight:600;color:#6b7280;flex-shrink:0;';
+                pgUrlLbl.textContent = 'Rankende Seite:';
+                var pgUrlVal = document.createElement('span');
+                pgUrlVal.style.cssText = 'font-size:12px;font-family:monospace;color:#2563eb;word-break:break-all;';
+                pgUrlVal.textContent = ev.page_url;
+                pgUrlRow.appendChild(pgUrlLbl);
+                pgUrlRow.appendChild(pgUrlVal);
+                evDiv.appendChild(pgUrlRow);
+              }
+              if (ev.serp_top3 && ev.serp_top3.length > 0) {
+                var serpRowLbl = document.createElement('p');
+                serpRowLbl.style.cssText = 'margin:0 0 5px;font-size:11px;font-weight:600;color:#6b7280;';
+                serpRowLbl.textContent = 'Top-Ergebnisse auf der SERP:';
+                evDiv.appendChild(serpRowLbl);
+                var serpChips = document.createElement('div');
+                serpChips.style.cssText = 'display:flex;flex-wrap:wrap;gap:5px;';
+                ev.serp_top3.forEach(function (dom) {
+                  var chip = document.createElement('span');
+                  chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;background:var(--cvz-bg,#fff);border:1px solid var(--cvz-border,#e5e7eb);border-radius:6px;color:var(--cvz-text,#374151);';
+                  chip.innerHTML = '<img src="https://www.google.com/s2/favicons?sz=12&domain=' + encodeURIComponent(dom) + '" style="width:12px;height:12px;flex-shrink:0;" onerror="this.style.display=\'none\'">' + escapeHtml(dom);
+                  serpChips.appendChild(chip);
+                });
+                evDiv.appendChild(serpChips);
+              }
+            } else if (catKey === 'content_luecke') {
+              if (ev.example_prompt) {
+                var gapQ = document.createElement('div');
+                gapQ.style.cssText = 'background:rgba(124,58,237,.05);border:1px solid rgba(124,58,237,.2);border-radius:6px;padding:10px 12px;font-size:13px;color:#5b21b6;font-style:italic;line-height:1.55;';
+                gapQ.textContent = '"' + ev.example_prompt + '"';
+                evDiv.appendChild(gapQ);
+              }
+            }
+            body.appendChild(evDiv);
+          }
+
+          // ---- EMPFEHLUNG ----
+          if (item.recommendation) {
+            var recDiv = document.createElement('div');
+            recDiv.style.cssText = 'background:rgba(20,184,166,.08);border-left:3px solid #14b8a6;border-radius:0 4px 4px 0;padding:10px 12px;';
+            var recLbl = document.createElement('p');
+            recLbl.style.cssText = 'margin:0 0 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#0f766e;';
+            recLbl.textContent = 'Empfehlung';
+            var recTxt = document.createElement('p');
+            recTxt.style.cssText = 'margin:0;font-size:13px;color:#0f766e;line-height:1.55;';
+            recTxt.textContent = item.recommendation;
+            recDiv.appendChild(recLbl);
+            recDiv.appendChild(recTxt);
+            body.appendChild(recDiv);
+          }
+
+          card.appendChild(body);
+          phList.appendChild(card);
+        });
+
+        phSection.appendChild(phList);
+        wrap.appendChild(phSection);
+      });
     }
 
-    // Tracking: Content-Strategie-Hinweis nur einmal pro URL zeigen
-    var shownStrategyUrls = {};
-
-    var list = document.createElement('div');
-    list.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
-
-    items.forEach(function (item, idx) {
-      var card = document.createElement('div');
-      card.className = 'cvz-card';
-      card.style.cssText = 'padding:0;overflow:hidden;';
-
-      // --- Header-Leiste ---
-      var hdr = document.createElement('div');
-      hdr.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--cvz-border,#e5e7eb);background:var(--cvz-surface,#f9fafb);';
-
-      var numSp = document.createElement('span');
-      numSp.style.cssText = 'font-size:11px;font-weight:700;color:var(--cvz-text-muted,#9ca3af);min-width:24px;flex-shrink:0;';
-      numSp.textContent = '#' + (idx + 1);
-      hdr.appendChild(numSp);
-
-      var impBadge = document.createElement('span');
-      impBadge.style.cssText = 'display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;color:#fff;background:' + item.impactColor + ';flex-shrink:0;';
-      impBadge.textContent = item.impactLabel;
-      hdr.appendChild(impBadge);
-
-      var catSp = document.createElement('span');
-      catSp.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#6b7280);';
-      catSp.textContent = item.category;
-      hdr.appendChild(catSp);
-      card.appendChild(hdr);
-
-      // --- Body ---
-      var body = document.createElement('div');
-      body.style.cssText = 'padding:14px 16px;display:flex;flex-direction:column;gap:14px;';
-
-      // Titel
-      if (item.titleText) {
-        var titleEl = document.createElement('p');
-        titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:700;line-height:1.4;';
-        titleEl.textContent = item.titleText;
-        body.appendChild(titleEl);
-      }
-
-      // ---- SITUATION ----
-      var sitDiv = document.createElement('div');
-      var sitLbl = document.createElement('p');
-      sitLbl.style.cssText = 'margin:0 0 5px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;';
-      sitLbl.textContent = 'Situation';
-      sitDiv.appendChild(sitLbl);
-
-      if (item.situationText) {
-        var sitTxt = document.createElement('p');
-        sitTxt.style.cssText = 'margin:0;font-size:13px;color:var(--cvz-text,#374151);line-height:1.55;';
-        sitTxt.textContent = item.situationText;
-        sitDiv.appendChild(sitTxt);
-      }
-
-      // Rankende URL fuer near_miss_kw
-      if (item.type === 'near_miss_kw' && item.kw && item.kw.page_url) {
-        var urlRow = document.createElement('div');
-        urlRow.style.cssText = 'display:flex;align-items:baseline;gap:6px;margin-top:6px;flex-wrap:wrap;';
-        var urlLbl = document.createElement('span');
-        urlLbl.style.cssText = 'font-size:11px;font-weight:600;color:#6b7280;flex-shrink:0;';
-        urlLbl.textContent = 'Rankende Seite:';
-        var urlVal = document.createElement('span');
-        urlVal.style.cssText = 'font-size:12px;font-family:monospace;color:#2563eb;word-break:break-all;';
-        urlVal.textContent = item.kw.page_url;
-        urlRow.appendChild(urlLbl);
-        urlRow.appendChild(urlVal);
-        sitDiv.appendChild(urlRow);
-      }
-      body.appendChild(sitDiv);
-
-      // ---- WAS RANKT / WIRD ZITIERT ----
-      var hasCompetitors = item.type === 'opportunity' && item.opp && item.opp.supporting_data;
-      var hasSerp = item.type === 'near_miss_kw' && item.kw && item.kw.top_serp_results && item.kw.top_serp_results.length > 0;
-
-      if (hasCompetitors || hasSerp) {
-        var rankDiv = document.createElement('div');
-        var rankLbl = document.createElement('p');
-        rankLbl.style.cssText = 'margin:0 0 6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;';
-        rankLbl.textContent = item.type === 'near_miss_kw' ? 'Was rankt dort' : 'Wer wird zitiert';
-        rankDiv.appendChild(rankLbl);
-
-        if (hasCompetitors) {
-          var sd = item.opp.supporting_data;
-          var comps = sd.cited_domains || sd.competitor_domains_cited || [];
-          if (comps.length > 0) {
-            var chipRow = document.createElement('div');
-            chipRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
-            comps.slice(0, 6).forEach(function (dom) {
-              var chip = document.createElement('span');
-              chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;background:var(--cvz-bg,#fff);border:1px solid var(--cvz-border,#e5e7eb);border-radius:6px;color:var(--cvz-text,#374151);';
-              chip.innerHTML = '<img src="https://www.google.com/s2/favicons?sz=12&domain=' + encodeURIComponent(dom) + '" style="width:12px;height:12px;flex-shrink:0;" onerror="this.style.display=\'none\'">' + escapeHtml(dom);
-              chipRow.appendChild(chip);
-            });
-            rankDiv.appendChild(chipRow);
-          } else {
-            var noCompEl = document.createElement('p');
-            noCompEl.style.cssText = 'margin:0;font-size:12px;color:#9ca3af;';
-            noCompEl.textContent = 'Keine Wettbewerber-Daten verfuegbar.';
-            rankDiv.appendChild(noCompEl);
-          }
-        }
-
-        if (hasSerp) {
-          var serpDiv = document.createElement('div');
-          serpDiv.innerHTML = renderSerpSummaryBlock(item.kw);
-          rankDiv.appendChild(serpDiv);
-        }
-        body.appendChild(rankDiv);
-      }
-
-      // ---- EMPFEHLUNG ----
-      if (item.recommendation) {
-        var recDiv = document.createElement('div');
-        recDiv.style.cssText = 'background:rgba(20,184,166,.08);border-left:3px solid #14b8a6;border-radius:0 4px 4px 0;padding:10px 12px;';
-        var recLbl = document.createElement('p');
-        recLbl.style.cssText = 'margin:0 0 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#0f766e;';
-        recLbl.textContent = 'Empfehlung';
-        var recTxt = document.createElement('p');
-        recTxt.style.cssText = 'margin:0;font-size:13px;color:#0f766e;line-height:1.55;';
-        recTxt.textContent = item.recommendation;
-        recDiv.appendChild(recLbl);
-        recDiv.appendChild(recTxt);
-        body.appendChild(recDiv);
-      }
-
-      // ---- CONTENT-STRATEGIE-HINWEIS ----
-      // Erscheint wenn mehrere near-miss Keywords auf dieselbe URL zeigen
-      if (item.type === 'near_miss_kw' && item.urlGroup && item.urlKey !== '__none__' && !shownStrategyUrls[item.urlKey]) {
-        shownStrategyUrls[item.urlKey] = true;
-        var stratDiv = document.createElement('div');
-        stratDiv.style.cssText = 'background:rgba(124,58,237,.06);border-left:3px solid #7c3aed;border-radius:0 4px 4px 0;padding:10px 12px;';
-        var stratLbl = document.createElement('p');
-        stratLbl.style.cssText = 'margin:0 0 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#5b21b6;';
-        stratLbl.textContent = 'Content-Strategie-Hinweis';
-        var stratTxt = document.createElement('p');
-        stratTxt.style.cssText = 'margin:0;font-size:13px;color:#5b21b6;line-height:1.55;';
-        stratTxt.textContent = item.urlGroup.length + ' Keywords ranken auf derselben Seite (' + item.urlKey + '). Eine einzelne Seite konkurriert fuer mehrere Suchanfragen, was Ranking-Potential verschenkt. Erwaegt ein Content-Hub: eine Pillar-Page als uebergeordneter Einstieg mit verlinkten Unterseiten zu den einzelnen Themen.';
-        stratDiv.appendChild(stratLbl);
-        stratDiv.appendChild(stratTxt);
-        body.appendChild(stratDiv);
-      }
-
-      card.appendChild(body);
-      list.appendChild(card);
-    });
-
-    wrap.appendChild(list);
-
-    // Plattformen mit Veroeffentlichungs-Chance
+    // Plattformen mit Veroeffentlichungs-Chance (immer zeigen wenn vorhanden)
     var publishable = (detail.source_profiles || []).filter(function (p) { return p.can_publish === true; });
     if (publishable.length > 0) {
       var platSection = document.createElement('div');
