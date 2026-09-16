@@ -2308,14 +2308,13 @@
         tabContent.appendChild(renderMessyMiddleTab(state.activeTopicId));
         break;
       case 'action':
-        tabContent.appendChild(renderActionTab(detail.opportunities));
+        tabContent.appendChild(renderActionTab(detail.opportunities, detail.source_profiles));
         break;
       case 'wettbewerber':
         var weeksData = state.citationTrendCache[state.activeTopicId];
         tabContent.appendChild(renderCompetitorManageSection(detail, state.activeTopicId));
         tabContent.appendChild(renderCompetitorInsightSection(weeksData, state.isLoadingCitationTrend, detail.source_profiles, detail.competitor_domains, detail.competitor_insights));
         tabContent.appendChild(renderContentGapsSection(detail.content_gaps));
-        tabContent.appendChild(renderCitedPlatformsSection(detail.cited_platforms));
         break;
       case 'keywords':
         // GEÄNDERT (15.09.2026): GSC-Suchanfragen (source='gsc_near_miss')
@@ -2890,7 +2889,7 @@
   // Opportunities, abgeleitet aus Prompts/Keyword-Ideen/GSC-Daten) samt
   // Claude-generierter Content-Empfehlung (siehe opportunities.py:
   // generate_content_recommendations, läuft einmal pro Monatslauf).
-  function renderActionTab(opportunities) {
+  function renderActionTab(opportunities, sourceProfiles) {
     var wrap = document.createElement('div');
 
     var heading = document.createElement('p');
@@ -2902,15 +2901,10 @@
     intro.className = 'cvz-card-placeholder-text';
     intro.style.marginBottom = '16px';
     intro.textContent =
-      'Fasst die offenen Opportunities (aus Prompts, Keyword-Ideen und GSC-Daten) zusammen und schl\u00e4gt ' +
-      'jeweils konkret vor, welcher Content das schlie\u00dfen k\u00f6nnte. Empfehlungen entstehen einmal pro Monatslauf.';
+      'Fasst die offenen Opportunities (aus Prompts, Keyword-Ideen und GSC-Daten) zusammen und schlägt ' +
+      'jeweils konkret vor, welcher Content das schließen könnte. Empfehlungen entstehen einmal pro Monatslauf.';
     wrap.appendChild(intro);
 
-    // Nur offene Opportunities (nicht dismissed/acted_on), UND nur die,
-    // für die der Monatslauf bereits eine Empfehlung erzeugt hat — eine
-    // Opportunity ohne Empfehlung (z.B. weil sie erst seit dem letzten
-    // Monatslauf offen ist, oder die Empfehlungs-Generierung fehlschlug)
-    // taucht hier bewusst nicht auf, statt eine leere Empfehlung zu zeigen.
     var actionable = (opportunities || []).filter(function (o) {
       return (o.status === 'new' || o.status === 'reviewed') && o.content_recommendation;
     });
@@ -2918,46 +2912,61 @@
     if (actionable.length === 0) {
       var empty = document.createElement('p');
       empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Noch keine Content-Empfehlungen verf\u00fcgbar. Diese entstehen einmal pro Monatslauf für alle aktuell offenen Opportunities.';
+      empty.textContent = 'Noch keine Content-Empfehlungen verfügbar. Diese entstehen einmal pro Monatslauf für alle aktuell offenen Opportunities.';
       wrap.appendChild(empty);
-      return wrap;
+    } else {
+      var grid = document.createElement('div');
+      grid.className = 'cvz-opportunity-grid';
+      actionable.forEach(function (opp) {
+        var card = document.createElement('div');
+        card.className = 'cvz-card cvz-opportunity-card';
+        card.innerHTML =
+          '<p class="cvz-opportunity-type">' + escapeHtml(OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type) + '</p>' +
+          '<p class="cvz-opportunity-description">' + escapeHtml(opp.description || '') + '</p>' +
+          '<div class="cvz-action-recommendation">' +
+            '<p class="cvz-changelog-guided-label">Content-Empfehlung</p>' +
+            '<p class="cvz-opportunity-description">' + escapeHtml(opp.content_recommendation) + '</p>' +
+          '</div>';
+        grid.appendChild(card);
+      });
+      wrap.appendChild(grid);
     }
 
-    var grid = document.createElement('div');
-    grid.className = 'cvz-opportunity-grid';
-    actionable.forEach(function (opp) {
-      var card = document.createElement('div');
-      card.className = 'cvz-card cvz-opportunity-card';
-      card.innerHTML =
-        '<p class="cvz-opportunity-type">' + escapeHtml(OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type) + '</p>' +
-        '<p class="cvz-opportunity-description">' + escapeHtml(opp.description || '') + '</p>' +
-        '<div class="cvz-action-recommendation">' +
-          '<p class="cvz-changelog-guided-label">Content-Empfehlung</p>' +
-          '<p class="cvz-opportunity-description">' + escapeHtml(opp.content_recommendation) + '</p>' +
-        '</div>';
-      grid.appendChild(card);
-    });
-    wrap.appendChild(grid);
+    // NEU: Plattformen, auf denen eigener Content publiziert werden kann
+    var publishable = (sourceProfiles || []).filter(function (p) { return p.can_publish === true; });
+    if (publishable.length > 0) {
+      var platHeading = document.createElement('p');
+      platHeading.className = 'cvz-section-label';
+      platHeading.style.marginTop = '24px';
+      platHeading.textContent = 'Plattformen zum Veröffentlichen eigener Inhalte';
+      wrap.appendChild(platHeading);
+
+      var platIntro = document.createElement('p');
+      platIntro.className = 'cvz-card-placeholder-text';
+      platIntro.style.marginBottom = '12px';
+      platIntro.textContent = 'Diese Plattformen werden in KI-Antworten zitiert und erlauben dir, eigene Inhalte zu veröffentlichen.';
+      wrap.appendChild(platIntro);
+
+      var platGrid = document.createElement('div');
+      platGrid.className = 'cvz-opportunity-grid';
+      publishable.forEach(function (p) {
+        var card = document.createElement('div');
+        card.className = 'cvz-card cvz-idea-card';
+        card.innerHTML =
+          '<p class="cvz-opportunity-type">' +
+            '<img class="cvz-inline-favicon" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(p.domain) + '" alt="">' +
+            escapeHtml(p.domain) +
+            (p.content_type ? ' \u00b7 ' + escapeHtml(CONTENT_TYPE_LABELS[p.content_type] || p.content_type) : '') +
+          '</p>' +
+          (p.summary ? '<p class="cvz-opportunity-description">' + escapeHtml(p.summary) + '</p>' : '') +
+          (p.differentiation_suggestion ? '<p class="cvz-opportunity-description"><strong>Deine Chance:</strong> ' + escapeHtml(p.differentiation_suggestion) + '</p>' : '');
+        platGrid.appendChild(card);
+      });
+      wrap.appendChild(platGrid);
+    }
+
     return wrap;
   }
-
-  function renderOpportunitySection(opportunities) {
-    var section = document.createElement('div');
-    section.className = 'cvz-section';
-
-    var heading = document.createElement('p');
-    heading.className = 'cvz-section-label';
-    heading.textContent = 'Opportunities';
-    section.appendChild(heading);
-
-    if (opportunities.length === 0) {
-      var empty = document.createElement('p');
-      empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Aktuell keine offenen Opportunities für dieses Thema.';
-      section.appendChild(empty);
-      return section;
-    }
-
     var grid = document.createElement('div');
     grid.className = 'cvz-opportunity-grid';
     opportunities.forEach(function (opp) {
