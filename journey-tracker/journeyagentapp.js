@@ -2359,7 +2359,7 @@
           // Fehlermeldung (siehe main.py: _record_topic_run_error),
           // statt nur "ist fehlgeschlagen" ohne jeden Grund.
           (detail.topic.last_run_error
-            ? '<br><span class="cvz-run-error-detail">' + escapeHtml(detail.topic.last_run_error) + '</span>'
+            ? '<br><span class="cvz-run-error-detail">' + escapeHtml(sanitizeRunError(detail.topic.last_run_error)) + '</span>'
             : '') +
         '</p>' +
         '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + detail.topic.id + '"' +
@@ -2379,7 +2379,7 @@
         '<p class="cvz-collecting-banner-text">' +
           '\u26a0\ufe0f Der letzte Lauf hatte ein Problem' +
           (detail.topic.last_run_error_at ? ' (' + formatRelativeTime(detail.topic.last_run_error_at) + ')' : '') +
-          ':<br><span class="cvz-run-error-detail">' + escapeHtml(detail.topic.last_run_error) + '</span>' +
+          ':<br><span class="cvz-run-error-detail">' + escapeHtml(sanitizeRunError(detail.topic.last_run_error)) + '</span>' +
         '</p>';
       wrap.appendChild(softErrorBanner);
     }
@@ -4490,7 +4490,9 @@
       var inPhase = prompts.filter(function (p) { return p.phase === phase; });
       var counts = { green: 0, yellow: 0, red: 0, unknown: 0 };
       inPhase.forEach(function (p) {
-        var key = p.visibility_status || 'unknown';
+        var key = (p.total_runs == null || p.total_runs === 0)
+          ? 'unknown'
+          : (p.cited_count > 0 ? 'green' : 'red');
         counts[key] = (counts[key] || 0) + 1;
       });
       return { phase: phase, total: inPhase.length, counts: counts };
@@ -5744,6 +5746,27 @@
   // ─── SITUATION ────────────────────────────────────────────────────────────
   // Schnell-Übersicht: Wo stehen wir in jeder Phase + Top-Chancen auf einen
   // Blick. Ziel: Marketer bekommt in 30 Sekunden das Wichtigste.
+  // NEU (16.09.2026): interne Fehlermeldungen aus main.py (z.B.
+  // "[generate_summary] Claude-Antwort war kein valides JSON") nutzerfreundlich
+  // aufbereiten, bevor sie im Frontend angezeigt werden. Rohe Step-Namen und
+  // technische Detail-Strings sollen nicht beim Endnutzer ankommen.
+  function sanitizeRunError(raw) {
+    if (!raw) return '';
+    // Internen Step-Namen "[step_name] " am Anfang entfernen
+    var cleaned = raw.replace(/^\[[^\]]+\]\s*/, '');
+    // Bekannte technische Muster auf nutzerfreundliche Texte mappen
+    var MAP = [
+      ['kein valides JSON', 'Analyse konnte nicht vollständig abgeschlossen werden. Beim nächsten Lauf wird es erneut versucht.'],
+      ['Claude-API-Fehler', 'Claude-API vorübergehend nicht erreichbar. Beim nächsten Lauf wird es erneut versucht.'],
+      ['timeout', 'Zeitüberschreitung beim Analyse-Lauf. Beim nächsten Lauf wird es erneut versucht.'],
+      ['connection', 'Verbindungsproblem beim Analyse-Lauf. Beim nächsten Lauf wird es erneut versucht.'],
+    ];
+    for (var i = 0; i < MAP.length; i++) {
+      if (cleaned.toLowerCase().indexOf(MAP[i][0].toLowerCase()) !== -1) return MAP[i][1];
+    }
+    return cleaned;
+  }
+
   function renderSituationTab(topicId, detail) {
     var wrap = document.createElement('div');
 
@@ -6013,6 +6036,113 @@
     return wrap;
   }
 
+  // ─── SUPPORTING DATA TABLE ────────────────────────────────────────────────
+  // Baut eine kleine Datentabelle (DOM), die die Rohdaten hinter einem
+  // Aktionsplan-Item auflistet: je nach Kategorie Prompts, Keywords oder
+  // Wettbewerber.
+  function _buildSupportingDataTable(catKey, phase, detail) {
+    var rows = [];
+    var headers = [];
+
+    if (catKey === 'ki_sichtbarkeit') {
+      var prompts = (detail.prompts || []).filter(function (p) {
+        return (phase === 'alle_phasen' || p.messymiddle_phase === phase)
+          && p.total_runs > 0;
+      }).sort(function (a, b) { return (b.cited_count || 0) - (a.cited_count || 0); });
+      if (prompts.length === 0) return null;
+      headers = ['Prompt', 'Zitiert', 'Läufe', 'Rate'];
+      rows = prompts.map(function (p) {
+        var rate = p.total_runs > 0 ? Math.round((p.cited_count / p.total_runs) * 100) : 0;
+        return [
+          p.prompt_text || '',
+          String(p.cited_count || 0),
+          String(p.total_runs || 0),
+          rate + '%'
+        ];
+      });
+    } else if (catKey === 'google_ranking') {
+      var kws = (detail.search_queries || []).filter(function (q) {
+        return (phase === 'alle_phasen' || q.messymiddle_phase === phase)
+          && q.gsc_position != null;
+      }).sort(function (a, b) { return (a.gsc_position || 999) - (b.gsc_position || 999); });
+      if (kws.length === 0) return null;
+      headers = ['Keyword', 'Position', 'Impressionen'];
+      rows = kws.map(function (q) {
+        return [
+          q.keyword || '',
+          q.gsc_position != null ? (Math.round(q.gsc_position * 10) / 10).toLocaleString('de-DE') : '',
+          q.gsc_impressions != null ? Number(q.gsc_impressions).toLocaleString('de-DE') : ''
+        ];
+      });
+    } else if (catKey === 'wettbewerb') {
+      var comps = (detail.competitor_insights || []).filter(function (c) { return c.domain; });
+      if (comps.length === 0) return null;
+      headers = ['Wettbewerber', 'Stärke', 'Schwäche'];
+      rows = comps.map(function (c) {
+        return [
+          c.domain || '',
+          c.strength || '',
+          c.weakness || ''
+        ];
+      });
+    } else if (catKey === 'content_luecke') {
+      var gaps = (detail.prompts || []).filter(function (p) {
+        return (phase === 'alle_phasen' || p.messymiddle_phase === phase)
+          && p.cited_count === 0 && p.total_runs > 0;
+      });
+      if (gaps.length === 0) return null;
+      headers = ['Prompt ohne eigene Zitierung', 'Läufe'];
+      rows = gaps.map(function (p) {
+        return [p.prompt_text || '', String(p.total_runs || 0)];
+      });
+    }
+
+    if (rows.length === 0) return null;
+
+    var wrapper = document.createElement('div');
+    wrapper.style.cssText = 'margin-top:4px;';
+
+    var lbl = document.createElement('p');
+    lbl.style.cssText = 'margin:0 0 6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--cvz-text-muted,#8b98a5);';
+    lbl.textContent = 'Zugrunde liegende Daten';
+    wrapper.appendChild(lbl);
+
+    var tbl = document.createElement('table');
+    tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;';
+
+    var thead = document.createElement('thead');
+    var trh = document.createElement('tr');
+    headers.forEach(function (h, hi) {
+      var th = document.createElement('th');
+      th.style.cssText = 'text-align:' + (hi === 0 ? 'left' : 'right') + ';padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#232b36);white-space:nowrap;';
+      th.textContent = h;
+      trh.appendChild(th);
+    });
+    thead.appendChild(trh);
+    tbl.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    rows.forEach(function (row, ri) {
+      var tr = document.createElement('tr');
+      tr.style.cssText = (ri % 2 === 0 ? 'background:transparent;' : 'background:rgba(255,255,255,.03);');
+      row.forEach(function (cell, ci) {
+        var td = document.createElement('td');
+        td.style.cssText = 'padding:5px 8px;color:var(--cvz-text,#e6edf3);vertical-align:top;' +
+          (ci === 0 ? 'text-align:left;word-break:break-word;max-width:220px;' : 'text-align:right;white-space:nowrap;');
+        td.textContent = cell;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+
+    var scrollWrap = document.createElement('div');
+    scrollWrap.style.cssText = 'overflow-x:auto;border:1px solid var(--cvz-border,#232b36);border-radius:6px;';
+    scrollWrap.appendChild(tbl);
+    wrapper.appendChild(scrollWrap);
+    return wrapper;
+  }
+
   // ─── AKTIONSPLAN ──────────────────────────────────────────────────────────
   // Strukturierte Aktions-Karten: Situation / Was rankt & wird zitiert / Empfehlung.
   // Priorisiert nach Impact; near-miss Keywords mit URL, Position und SERP-Kontext.
@@ -6055,7 +6185,9 @@
       emptyWrap.style.cssText = 'text-align:center;padding:48px 24px;';
       var emptyTxt = document.createElement('p');
       emptyTxt.className = 'cvz-card-placeholder-text';
-      emptyTxt.textContent = 'Der Aktionsplan wird beim naechsten Analyse-Lauf automatisch generiert. Noch keine Daten vorhanden.';
+      emptyTxt.textContent = ap.generated_at
+        ? 'Der Aktionsplan wurde generiert, enthält aber noch keine konkreten Empfehlungen. Es werden mehr Daten benötigt (mindestens einige ausgewertete Prompts und GSC-Daten). Empfehlungen erscheinen nach dem nächsten Analyse-Lauf mit ausreichend Datenlage.'
+        : 'Der Aktionsplan wird beim nächsten Analyse-Lauf automatisch generiert. Noch keine Daten vorhanden.';
       emptyWrap.appendChild(emptyTxt);
       wrap.appendChild(emptyWrap);
     } else {
@@ -6247,6 +6379,10 @@
             }
             body.appendChild(evDiv);
           }
+
+          // ---- ZUGRUNDE LIEGENDE DATEN ----
+          var dataTable = _buildSupportingDataTable(catKey, item.phase || 'alle_phasen', detail);
+          if (dataTable) body.appendChild(dataTable);
 
           // ---- EMPFEHLUNG ----
           if (item.recommendation) {
