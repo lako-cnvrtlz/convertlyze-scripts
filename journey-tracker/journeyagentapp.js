@@ -6144,75 +6144,102 @@
     if (openOpps.length > 0) {
       var oppSection = document.createElement('div');
       oppSection.className = 'cvz-section';
+
+      // Heading
       var oppHeading = document.createElement('p');
       oppHeading.className = 'cvz-section-label';
       oppHeading.textContent = 'Wichtigste Handlungsfelder';
       oppSection.appendChild(oppHeading);
-      var oppGrid = document.createElement('div');
-      oppGrid.className = 'cvz-opportunity-grid';
+
+      // Subtitle
+      var oppSub = document.createElement('p');
+      oppSub.className = 'cvz-card-placeholder-text';
+      oppSub.style.marginBottom = '14px';
+      oppSub.textContent = 'Automatisch erkannte Chancen auf Basis eurer KI-Sichtbarkeits- und GSC-Daten, sortiert nach Prioritaet. Konkrete Umsetzungsempfehlungen im Aktionsplan-Tab.';
+      oppSection.appendChild(oppSub);
+
+      // Sort by priority
       var PRIORITY_ORDER = [
         'near_miss_ranking', 'high_demand_low_visibility',
         'google_visible_ai_invisible', 'competitor_citation',
         'ai_visible_competitor_dominates', 'new_question',
       ];
-      var sorted = openOpps.slice().sort(function (a, b) {
+      var sortedOpps = openOpps.slice().sort(function (a, b) {
         return PRIORITY_ORDER.indexOf(a.opportunity_type) - PRIORITY_ORDER.indexOf(b.opportunity_type);
-      }).slice(0, 4);
-      sorted.forEach(function (opp) {
+      });
+
+      // Table wrapper (mobile scrollable)
+      var oppTableWrap = document.createElement('div');
+      oppTableWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+
+      var oppTable = document.createElement('table');
+      oppTable.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+
+      // Header
+      var oppThead = document.createElement('thead');
+      var oppHeaderRow = document.createElement('tr');
+      var oppCols = ['Typ', 'Was wir sehen', 'Empfohlene Massnahme'];
+      oppCols.forEach(function (col, i) {
+        var th = document.createElement('th');
+        th.textContent = col;
+        var widthStyle = i === 0 ? 'width:148px;white-space:nowrap;' : i === 2 ? 'width:28%;' : '';
+        th.style.cssText =
+          'text-align:left;padding:7px 10px;' +
+          'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
+          'color:var(--cvz-text-muted,#8b98a5);' +
+          'border-bottom:1px solid var(--cvz-border,#232b36);' + widthStyle;
+        oppHeaderRow.appendChild(th);
+      });
+      oppThead.appendChild(oppHeaderRow);
+      oppTable.appendChild(oppThead);
+
+      // Body
+      var oppTbody = document.createElement('tbody');
+      sortedOpps.forEach(function (opp, idx) {
         var tcfg = OPP_TYPE_CONFIG[opp.opportunity_type] || { color: '#8b98a5', bg: 'rgba(139,152,165,.08)', border: 'rgba(139,152,165,.3)' };
         var typeLabel = OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type;
 
-        var card = document.createElement('div');
-        card.className = 'cvz-card cvz-opportunity-card';
-        card.style.cssText = 'border-left:3px solid ' + tcfg.color + ';padding:0;overflow:hidden;';
+        var tr = document.createElement('tr');
+        tr.style.cssText = 'border-bottom:1px solid var(--cvz-border,#232b36);' +
+          (idx % 2 === 1 ? 'background:rgba(255,255,255,.025);' : '');
 
-        var inner = document.createElement('div');
-        inner.style.cssText = 'padding:12px 14px;display:flex;flex-direction:column;gap:8px;';
-
-        // Typ-Chip
-        var typeChip = document.createElement('span');
-        typeChip.style.cssText =
-          'display:inline-flex;align-items:center;align-self:flex-start;' +
+        // Col 1: Typ chip
+        var tdTyp = document.createElement('td');
+        tdTyp.style.cssText = 'padding:12px 10px;vertical-align:top;';
+        var chip = document.createElement('span');
+        chip.textContent = typeLabel;
+        chip.style.cssText =
+          'display:inline-block;' +
           'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
-          'padding:2px 8px;border-radius:9999px;' +
+          'padding:3px 8px;border-radius:9999px;white-space:nowrap;' +
           'color:' + tcfg.color + ';background:' + tcfg.bg + ';border:1px solid ' + tcfg.border + ';';
-        typeChip.textContent = typeLabel;
-        inner.appendChild(typeChip);
+        tdTyp.appendChild(chip);
+        tr.appendChild(tdTyp);
 
-        // Beschreibung
-        var descEl = document.createElement('p');
-        descEl.style.cssText = 'margin:0;font-size:13px;color:var(--cvz-text,#e6edf3);line-height:1.6;';
-        descEl.textContent = opp.description || '';
-        inner.appendChild(descEl);
+        // Col 2: Beschreibung
+        var tdDesc = document.createElement('td');
+        tdDesc.style.cssText = 'padding:12px 10px;vertical-align:top;line-height:1.65;color:var(--cvz-text,#e6edf3);';
+        tdDesc.textContent = opp.description || '';
+        tr.appendChild(tdDesc);
 
-        // Empfohlene Massnahme
+        // Col 3: Massnahme
+        var tdRec = document.createElement('td');
+        tdRec.style.cssText = 'padding:12px 10px;vertical-align:top;line-height:1.5;';
         if (opp.content_recommendation) {
-          var recEl = document.createElement('div');
-          recEl.style.cssText =
-            'padding:8px 10px;background:rgba(79,209,197,.08);' +
-            'border-left:2px solid #4fd1c5;border-radius:0 4px 4px 0;';
-          var recLblEl = document.createElement('span');
-          recLblEl.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#4fd1c5;display:block;margin-bottom:3px;';
-          recLblEl.textContent = 'Empfohlene Massnahme';
-          var recTxtEl = document.createElement('span');
-          recTxtEl.style.cssText = 'font-size:12px;color:#4fd1c5;line-height:1.5;';
-          recTxtEl.textContent = opp.content_recommendation;
-          recEl.appendChild(recLblEl);
-          recEl.appendChild(recTxtEl);
-          inner.appendChild(recEl);
+          tdRec.style.color = '#4fd1c5';
+          tdRec.style.fontSize = '12px';
+          tdRec.textContent = opp.content_recommendation;
+        } else {
+          tdRec.style.color = 'var(--cvz-text-muted,#8b98a5)';
+          tdRec.textContent = '-';
         }
+        tr.appendChild(tdRec);
 
-        card.appendChild(inner);
-        oppGrid.appendChild(card);
+        oppTbody.appendChild(tr);
       });
-      oppSection.appendChild(oppGrid);
-      if (openOpps.length > 4) {
-        var moreLink = document.createElement('p');
-        moreLink.className = 'cvz-card-placeholder-text';
-        moreLink.style.marginTop = '8px';
-        moreLink.textContent = 'Alle ' + openOpps.length + ' Handlungsfelder im Aktionsplan-Tab.';
-        oppSection.appendChild(moreLink);
-      }
+      oppTable.appendChild(oppTbody);
+      oppTableWrap.appendChild(oppTable);
+      oppSection.appendChild(oppTableWrap);
       wrap.appendChild(oppSection);
     }
 
