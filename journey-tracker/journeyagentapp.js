@@ -317,9 +317,9 @@
             top_serp_results: q.top_serp_results || null,
             serp_features: q.serp_features || null,
             serp_checked_at: q.serp_checked_at || null,
-            // NEU (16.09.2026): URL der rankenden Seite durchreichen (gespeichert
-            // via save_gsc_near_miss als page_url in search_queries).
-            page_url: q.page_url || null,
+            // NEU (16.09.2026): URL der rankenden Seite durchreichen.
+            // Verschiedene Backend-Feldnamen probieren (gsc_page, page_url, top_url).
+            page_url: q.page_url || q.gsc_page || q.top_url || q.ranking_url || null,
           };
         }),
       prompts: (data.prompts || []).map(function (p) {
@@ -880,6 +880,35 @@
     ai_visible_competitor_dominates: 'KI-sichtbar, Wettbewerber dominiert',
     new_question:                    'Neue Frage entdeckt',
     near_miss_ranking:               'Knapp an Seite 1 vorbei',
+  };
+
+  // Farb- und Label-Konfiguration fuer Opportunity-Typen.
+  // Wird in renderSituationTab (Wichtigste Handlungsfelder) verwendet.
+  var OPP_TYPE_CONFIG = {
+    near_miss_ranking:               { color: '#f2b13d', bg: 'rgba(242,177,61,.09)', border: 'rgba(242,177,61,.3)' },
+    high_demand_low_visibility:      { color: '#60a5fa', bg: 'rgba(96,165,250,.09)', border: 'rgba(96,165,250,.3)' },
+    google_visible_ai_invisible:     { color: '#a78bfa', bg: 'rgba(167,139,250,.09)', border: 'rgba(167,139,250,.3)' },
+    competitor_citation:             { color: '#f87171', bg: 'rgba(248,113,113,.09)', border: 'rgba(248,113,113,.3)' },
+    ai_visible_competitor_dominates: { color: '#fb923c', bg: 'rgba(251,146,60,.09)', border: 'rgba(251,146,60,.3)' },
+    new_question:                    { color: '#34d399', bg: 'rgba(52,211,153,.09)', border: 'rgba(52,211,153,.3)' },
+  };
+
+  // Farb- und Hinweis-Konfiguration fuer Beste-Content-Chancen-Typen.
+  var CONTENT_CHANCE_CONFIG = {
+    erste_ki_zitierung: {
+      label: 'Erste KI-Zitierung, ausbaufaehig',
+      color: '#4fd1c5',
+      bg: 'rgba(79,209,197,.08)',
+      border: 'rgba(79,209,197,.3)',
+      tip: 'Jetzt ausbauen: Thema tiefer abdecken, um Zitierrate dauerhaft zu steigern.',
+    },
+    seo_naeher_top10: {
+      label: 'Nah an Google Top 10',
+      color: '#f2b13d',
+      bg: 'rgba(242,177,61,.08)',
+      border: 'rgba(242,177,61,.3)',
+      tip: 'SEO-Potenzial: Inhalt und interne Verlinkung ausbauen fuer Top-10-Einstieg.',
+    },
   };
 
   var PHASE_LABELS = {
@@ -2893,11 +2922,7 @@
   }
 
   // NEU (15.09.2026): siehe main.py: _compute_best_content_chances.
-  var CONTENT_CHANCE_KIND_LABELS = {
-    seo_naeher_top10: 'Nah an/in Google Top 10, KI-unsichtbar',
-    erste_ki_zitierung: 'Erste KI-Zitierung, ausbaufähig',
-  };
-
+  // VERBESSERT (16.09.2026): visuell aussagekraeftiger, Zitierrate als Balken.
   function renderBestContentChancesSection(chances) {
     if (!chances || chances.length === 0) return null;
 
@@ -2909,17 +2934,100 @@
     heading.textContent = 'Beste Content-Chancen';
     section.appendChild(heading);
 
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = 'Prompts und Keywords mit dem hoechsten Hebel fuer mehr Sichtbarkeit.';
+    section.appendChild(sub);
+
     var grid = document.createElement('div');
     grid.className = 'cvz-opportunity-grid';
+
     chances.forEach(function (chance) {
+      var cfg = CONTENT_CHANCE_CONFIG[chance.kind] || {
+        label: chance.kind,
+        color: '#8b98a5',
+        bg: 'rgba(139,152,165,.08)',
+        border: 'rgba(139,152,165,.3)',
+        tip: '',
+      };
+
       var card = document.createElement('div');
       card.className = 'cvz-card cvz-idea-card';
-      card.innerHTML =
-        '<p class="cvz-opportunity-type">' + escapeHtml(CONTENT_CHANCE_KIND_LABELS[chance.kind] || chance.kind) + '</p>' +
-        '<p class="cvz-opportunity-description">' + escapeHtml(chance.label) + '</p>' +
-        '<p class="cvz-opportunity-topic">' + escapeHtml(chance.detail) + '</p>';
+      card.style.cssText = 'border-left:3px solid ' + cfg.color + ';padding:0;overflow:hidden;';
+
+      var inner = document.createElement('div');
+      inner.style.cssText = 'padding:12px 14px;display:flex;flex-direction:column;gap:10px;';
+
+      // Kind-Chip
+      var chip = document.createElement('span');
+      chip.style.cssText =
+        'display:inline-flex;align-items:center;align-self:flex-start;' +
+        'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
+        'padding:2px 8px;border-radius:9999px;' +
+        'color:' + cfg.color + ';background:' + cfg.bg + ';border:1px solid ' + cfg.border + ';';
+      chip.textContent = cfg.label;
+      inner.appendChild(chip);
+
+      // Prompt / Keyword als Zitat
+      var lbl = document.createElement('p');
+      lbl.style.cssText = 'margin:0;font-size:13px;font-weight:600;color:var(--cvz-text,#e6edf3);line-height:1.45;font-style:italic;';
+      lbl.textContent = '„' + chance.label + '“';
+      inner.appendChild(lbl);
+
+      // Zitierrate parsen ("N von M ausgewerteten Laeufen zitiert")
+      var m = chance.detail ? chance.detail.match(/(\d+)\s+von\s+(\d+)/) : null;
+      if (m) {
+        var cited = parseInt(m[1], 10);
+        var total = parseInt(m[2], 10);
+        var pct   = total > 0 ? Math.round((cited / total) * 100) : 0;
+
+        var statRow = document.createElement('div');
+        statRow.style.cssText = 'display:flex;align-items:center;gap:12px;';
+
+        var statBox = document.createElement('div');
+        statBox.style.cssText = 'flex-shrink:0;text-align:center;min-width:44px;';
+        statBox.innerHTML =
+          '<div style="font-size:22px;font-weight:800;line-height:1;color:' + cfg.color + ';">' + cited + '/' + total + '</div>' +
+          '<div style="font-size:10px;margin-top:2px;color:var(--cvz-text-muted,#8b98a5);">Laeufe</div>';
+        statRow.appendChild(statBox);
+
+        var barCol = document.createElement('div');
+        barCol.style.cssText = 'flex:1 1 0;';
+        var barTrack = document.createElement('div');
+        barTrack.style.cssText = 'height:6px;background:var(--cvz-border,#232b36);border-radius:3px;overflow:hidden;margin-bottom:3px;';
+        var barFill = document.createElement('div');
+        barFill.style.cssText = 'height:100%;width:' + pct + '%;background:' + cfg.color + ';border-radius:3px;';
+        barTrack.appendChild(barFill);
+        barCol.appendChild(barTrack);
+        var rateLbl = document.createElement('p');
+        rateLbl.style.cssText = 'margin:0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+        rateLbl.textContent = pct + '% Zitierrate';
+        barCol.appendChild(rateLbl);
+        statRow.appendChild(barCol);
+
+        inner.appendChild(statRow);
+      } else if (chance.detail) {
+        var detailTxt = document.createElement('p');
+        detailTxt.style.cssText = 'margin:0;font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+        detailTxt.textContent = chance.detail;
+        inner.appendChild(detailTxt);
+      }
+
+      // Tipp / naechster Schritt
+      if (cfg.tip) {
+        var tipEl = document.createElement('p');
+        tipEl.style.cssText =
+          'margin:0;font-size:11px;color:' + cfg.color + ';' +
+          'border-top:1px solid ' + cfg.border + ';padding-top:8px;';
+        tipEl.textContent = cfg.tip;
+        inner.appendChild(tipEl);
+      }
+
+      card.appendChild(inner);
       grid.appendChild(card);
     });
+
     section.appendChild(grid);
     return section;
   }
@@ -4539,7 +4647,7 @@
           (yellowPct ? '<span class="cvz-phase-rollup-segment cvz-dot-yellow" style="width:' + yellowPct + '%" title="' + row.counts.yellow + ' erwähnt, nicht zitiert"></span>' : '') +
           (redPct ? '<span class="cvz-phase-rollup-segment cvz-dot-red" style="width:' + redPct + '%" title="' + (row.counts.red + row.counts.unknown) + ' nicht vorhanden/unbekannt"></span>' : '') +
         '</div>' +
-        '<p class="cvz-phase-rollup-count">' + row.counts.green + ' von ' + row.total + ' zitiert</p>';
+        '<p class="cvz-phase-rollup-count">' + (row.counts.green > 0 ? row.counts.green + ' von ' + row.total + ' zitiert' : 'Eigene Domain nicht sichtbar') + '</p>';
       grid.appendChild(card);
     });
     section.appendChild(grid);
@@ -4697,7 +4805,9 @@
         var dotClass = prompt.visibility_status ? 'cvz-dot-' + prompt.visibility_status : 'cvz-dot-unknown';
         var statusLabel = prompt.visibility_status ? VISIBILITY_LABELS[prompt.visibility_status] : 'Unbekannt';
         var citationBadge = (prompt.total_runs !== null && prompt.total_runs !== undefined && prompt.total_runs > 0)
-          ? '<span class="cvz-prompt-citation-count">' + prompt.cited_count + '/' + prompt.total_runs + ' zitiert</span>'
+          ? (prompt.cited_count > 0
+              ? '<span class="cvz-prompt-citation-count">' + prompt.cited_count + '/' + prompt.total_runs + ' zitiert</span>'
+              : '<span class="cvz-prompt-citation-count" style="color:var(--cvz-text-muted,#8b98a5);">Eigene Domain nicht sichtbar</span>')
           : '';
 
         var contentTypeBadge = prompt.top_cited_content_type
@@ -4816,7 +4926,10 @@
       }
     });
     table.appendChild(tbody);
-    section.appendChild(table);
+    var tableScroll = document.createElement('div');
+    tableScroll.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    tableScroll.appendChild(table);
+    section.appendChild(tableScroll);
     return section;
   }
 
@@ -5767,6 +5880,174 @@
     return cleaned;
   }
 
+  // ─── VISIBILITY COMPARISON CHART ─────────────────────────────────────────
+  // Zeigt pro Journey-Phase: eigene Zitierrate (teal) vs. Top-3-Wettbewerber
+  // (konsistente Farben ueber alle Phasen hinweg). Wird in renderSituationTab
+  // nach der kompakten Phasen-Scorecard eingeblendet.
+  function renderVisibilityComparisonChart(topicId, detail) {
+    var dashData = state.dashboardDataCache[topicId];
+    if (!dashData || !dashData.phase_scores) return null;
+
+    var sov = dashData.share_of_voice || {};
+
+    // Top-3-Wettbewerber ermitteln: Summe der citation_rate ueber alle Phasen
+    var compTotals = {};
+    PHASE_ORDER.forEach(function (phase) {
+      (sov[phase] || []).forEach(function (c) {
+        if (c.domain) compTotals[c.domain] = (compTotals[c.domain] || 0) + (c.citation_rate || 0);
+      });
+    });
+    var topComps = Object.keys(compTotals)
+      .sort(function (a, b) { return compTotals[b] - compTotals[a]; })
+      .slice(0, 3);
+
+    // Kein Chart ohne Wettbewerber-Daten
+    if (topComps.length === 0) return null;
+
+    var COMP_COLORS = ['#f2b13d', '#f87171', '#a78bfa'];
+    var ownDomain = (detail.topic && detail.topic.own_domain) ? detail.topic.own_domain : 'Eure Domain';
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    section.style.marginTop = '24px';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Sichtbarkeit im Wettbewerbsvergleich';
+    section.appendChild(heading);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '14px';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. staerkste Wettbewerber (0-100 %).';
+    section.appendChild(sub);
+
+    // Legende
+    var legend = document.createElement('div');
+    legend.style.cssText = 'display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;';
+
+    function _faviconImg(domain) {
+      var img = document.createElement('img');
+      img.src = 'https://www.google.com/s2/favicons?sz=16&domain=' + encodeURIComponent(domain);
+      img.style.cssText = 'width:14px;height:14px;flex-shrink:0;border-radius:2px;';
+      img.onerror = function () { this.style.display = 'none'; };
+      return img;
+    }
+
+    function _legendItem(label, color, own, domain) {
+      var item = document.createElement('div');
+      item.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;' +
+        (own ? 'color:var(--cvz-text,#e6edf3);font-weight:600;' : 'color:var(--cvz-text-muted,#8b98a5);');
+      var dot = document.createElement('span');
+      dot.style.cssText = 'width:10px;height:10px;border-radius:2px;background:' + color + ';flex-shrink:0;' + (own ? '' : 'opacity:.7;');
+      item.appendChild(dot);
+      if (domain) item.appendChild(_faviconImg(domain));
+      item.appendChild(document.createTextNode(label));
+      return item;
+    }
+
+    legend.appendChild(_legendItem(ownDomain, '#4fd1c5', true, ownDomain));
+    topComps.forEach(function (domain, i) {
+      legend.appendChild(_legendItem(domain, COMP_COLORS[i], false, domain));
+    });
+    section.appendChild(legend);
+
+    // Chart-Card: ein Block pro Phase
+    var chartCard = document.createElement('div');
+    chartCard.className = 'cvz-card';
+    chartCard.style.cssText = 'padding:16px 18px;display:flex;flex-direction:column;gap:18px;';
+
+    PHASE_ORDER.forEach(function (phase) {
+      var scores   = (dashData.phase_scores || {})[phase] || {};
+      var phColor  = PHASE_COLORS[phase] || '#8b98a5';
+      var phComps  = sov[phase] || [];
+
+      // Eigene Rate: Durchschnitt ueber Kanaele mit Daten
+      var totalScore = 0, channelCount = 0, maxTotal = 0;
+      CHANNEL_ORDER.forEach(function (ch) {
+        var s = scores[ch];
+        if (s && s.total > 0) {
+          totalScore += (s.score || 0);
+          channelCount++;
+          if (s.total > maxTotal) maxTotal = s.total;
+        }
+      });
+      var ownPct = channelCount > 0 ? Math.round(totalScore / channelCount) : 0;
+
+      // Phase-Block
+      var phBlock = document.createElement('div');
+
+      // Phase-Kopfzeile
+      var phHdr = document.createElement('div');
+      phHdr.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:7px;';
+      var phDot = document.createElement('span');
+      phDot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + phColor + ';flex-shrink:0;';
+      var phLblEl = document.createElement('span');
+      phLblEl.style.cssText = 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:' + phColor + ';';
+      phLblEl.textContent = PHASE_LABELS[phase] || phase;
+      phHdr.appendChild(phDot);
+      phHdr.appendChild(phLblEl);
+      if (maxTotal > 0) {
+        var promptCtEl = document.createElement('span');
+        promptCtEl.style.cssText = 'font-size:10px;color:var(--cvz-text-muted,#8b98a5);';
+        promptCtEl.textContent = '(' + maxTotal + ' Prompts)';
+        phHdr.appendChild(promptCtEl);
+      }
+      phBlock.appendChild(phHdr);
+
+      // Balken-Zeilen
+      var rows = [{ label: ownDomain, pct: ownPct, color: '#4fd1c5', own: true }];
+      topComps.forEach(function (domain, i) {
+        var entry = phComps.filter(function (c) { return c.domain === domain; })[0];
+        var pct = entry ? Math.round((entry.citation_rate || 0) * 100) : 0;
+        rows.push({ label: domain, pct: pct, color: COMP_COLORS[i], own: false });
+      });
+
+      rows.forEach(function (row) {
+        var barRow = document.createElement('div');
+        barRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:3px;';
+
+        var domCell = document.createElement('div');
+        domCell.style.cssText = 'flex-shrink:0;width:150px;display:flex;align-items:center;gap:4px;overflow:hidden;';
+        domCell.appendChild(_faviconImg(row.label));
+        var domLbl = document.createElement('span');
+        domLbl.style.cssText =
+          'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;' +
+          (row.own
+            ? 'color:var(--cvz-text,#e6edf3);font-weight:600;'
+            : 'color:var(--cvz-text-muted,#8b98a5);');
+        domLbl.title = row.label;
+        domLbl.textContent = row.label;
+        domCell.appendChild(domLbl);
+        barRow.appendChild(domCell);
+
+        var track = document.createElement('div');
+        track.style.cssText = 'flex:1 1 0;height:10px;background:var(--cvz-border,#232b36);border-radius:5px;overflow:hidden;position:relative;';
+        var fill = document.createElement('div');
+        fill.style.cssText =
+          'position:absolute;left:0;top:0;bottom:0;border-radius:5px;' +
+          'width:' + row.pct + '%;background:' + row.color + ';' +
+          (row.own ? '' : 'opacity:.75;');
+        track.appendChild(fill);
+        barRow.appendChild(track);
+
+        var pctEl = document.createElement('span');
+        pctEl.style.cssText =
+          'flex-shrink:0;width:34px;text-align:right;font-size:11px;' +
+          (row.own ? 'font-weight:700;color:#4fd1c5;' : 'color:var(--cvz-text-muted,#8b98a5);');
+        pctEl.textContent = row.pct + '%';
+        barRow.appendChild(pctEl);
+
+        phBlock.appendChild(barRow);
+      });
+
+      chartCard.appendChild(phBlock);
+    });
+
+    section.appendChild(chartCard);
+    return section;
+  }
+
   function renderSituationTab(topicId, detail) {
     var wrap = document.createElement('div');
 
@@ -5848,6 +6129,10 @@
       if (rollup) wrap.appendChild(rollup);
     }
 
+    // Wettbewerbs-Sichtbarkeitsvergleich (Chart)
+    var compChart = renderVisibilityComparisonChart(topicId, detail);
+    if (compChart) wrap.appendChild(compChart);
+
     // Beste Content-Chancen
     var bestChances = renderBestContentChancesSection(detail.best_content_chances);
     if (bestChances) wrap.appendChild(bestChances);
@@ -5874,14 +6159,50 @@
         return PRIORITY_ORDER.indexOf(a.opportunity_type) - PRIORITY_ORDER.indexOf(b.opportunity_type);
       }).slice(0, 4);
       sorted.forEach(function (opp) {
+        var tcfg = OPP_TYPE_CONFIG[opp.opportunity_type] || { color: '#8b98a5', bg: 'rgba(139,152,165,.08)', border: 'rgba(139,152,165,.3)' };
+        var typeLabel = OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type;
+
         var card = document.createElement('div');
         card.className = 'cvz-card cvz-opportunity-card';
-        card.innerHTML =
-          '<p class="cvz-opportunity-type">' + escapeHtml(OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type) + '</p>' +
-          '<p class="cvz-opportunity-description">' + escapeHtml(opp.description || '') + '</p>' +
-          (opp.content_recommendation
-            ? '<p style="margin:6px 0 0;font-size:12px;font-weight:600;color:var(--cvz-teal,#0d9488);">' + escapeHtml(opp.content_recommendation) + '</p>'
-            : '');
+        card.style.cssText = 'border-left:3px solid ' + tcfg.color + ';padding:0;overflow:hidden;';
+
+        var inner = document.createElement('div');
+        inner.style.cssText = 'padding:12px 14px;display:flex;flex-direction:column;gap:8px;';
+
+        // Typ-Chip
+        var typeChip = document.createElement('span');
+        typeChip.style.cssText =
+          'display:inline-flex;align-items:center;align-self:flex-start;' +
+          'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
+          'padding:2px 8px;border-radius:9999px;' +
+          'color:' + tcfg.color + ';background:' + tcfg.bg + ';border:1px solid ' + tcfg.border + ';';
+        typeChip.textContent = typeLabel;
+        inner.appendChild(typeChip);
+
+        // Beschreibung
+        var descEl = document.createElement('p');
+        descEl.style.cssText = 'margin:0;font-size:13px;color:var(--cvz-text,#e6edf3);line-height:1.6;';
+        descEl.textContent = opp.description || '';
+        inner.appendChild(descEl);
+
+        // Empfohlene Massnahme
+        if (opp.content_recommendation) {
+          var recEl = document.createElement('div');
+          recEl.style.cssText =
+            'padding:8px 10px;background:rgba(79,209,197,.08);' +
+            'border-left:2px solid #4fd1c5;border-radius:0 4px 4px 0;';
+          var recLblEl = document.createElement('span');
+          recLblEl.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#4fd1c5;display:block;margin-bottom:3px;';
+          recLblEl.textContent = 'Empfohlene Massnahme';
+          var recTxtEl = document.createElement('span');
+          recTxtEl.style.cssText = 'font-size:12px;color:#4fd1c5;line-height:1.5;';
+          recTxtEl.textContent = opp.content_recommendation;
+          recEl.appendChild(recLblEl);
+          recEl.appendChild(recTxtEl);
+          inner.appendChild(recEl);
+        }
+
+        card.appendChild(inner);
         oppGrid.appendChild(card);
       });
       oppSection.appendChild(oppGrid);
