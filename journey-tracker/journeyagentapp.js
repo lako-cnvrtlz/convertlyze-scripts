@@ -1012,7 +1012,7 @@
 
     return (
       '<p class="cvz-changelog-guided-label">Top-SERP-Ergebnisse' +
-        (hasZeroClickFeature ? ' \u2014 Zero-Click-Risiko (siehe Features unten)' : '') +
+        (hasZeroClickFeature ? ' (Zero-Click-Risiko, siehe Features unten)' : '') +
       '</p>' +
       '<ul class="cvz-serp-results-list">' + resultsHtml + '</ul>' +
       (featuresHtml ? '<div class="cvz-persona-filter" style="margin-top:6px;">' + featuresHtml + '</div>' : '') +
@@ -1243,6 +1243,16 @@
         maybeLoadContentChanges(state.activeTopicId);
       }
       render();
+      return;
+    }
+
+    // Journey-Map Retry-Button
+    var journeyRetryBtn = event.target.closest('[data-cvz-journey-retry]');
+    if (journeyRetryBtn) {
+      var retryTopicId = journeyRetryBtn.getAttribute('data-cvz-journey-retry');
+      delete state.dashboardDataCache[retryTopicId];
+      maybeLoadDashboardData(retryTopicId);
+      maybeLoadContentChanges(retryTopicId);
       return;
     }
 
@@ -2373,7 +2383,7 @@
         tabContent.appendChild(renderMessyMiddleTab(state.activeTopicId));
         break;
       case 'action':
-        tabContent.appendChild(renderActionTab(detail.opportunities, detail.content_ideas, detail.source_profiles));
+        tabContent.appendChild(renderActionTab(detail.opportunities, detail.content_ideas, detail.keywords, detail.source_profiles));
         break;
       case 'wettbewerber':
         var weeksData = state.citationTrendCache[state.activeTopicId];
@@ -2949,164 +2959,244 @@
     return section;
   }
 
-  // GEÄNDERT (16.09.2026): Unified table statt getrennter Cards.
-  // Zeigt ALLE offenen Opportunities (kein content_recommendation-Filter mehr)
-  // UND alle Content-Ideen in einer gemeinsamen Tabelle.
-  // Spalten: Signal | Befund & Datenbasis | Nächster Schritt
-  function renderActionTab(opportunities, contentIdeas, sourceProfiles) {
+
+  // GEÄNDERT (16.09.2026 II): Zwei fokussierte Tabellen statt Einheitstabelle.
+  // Tabelle 1: Keywords mit bestehendem Ranking, gewichtet nach Suchvolumen.
+  // Tabelle 2: Prompts / Chancen, bei denen Wettbewerber zitiert werden, nicht wir.
+  // Tabelle 3: Content-Ideen.
+  // Keine Em-Dashes. Kein "Naechster Schritt" fuer Opportunities (immer leer).
+  function renderActionTab(opportunities, contentIdeas, keywords, sourceProfiles) {
     var wrap = document.createElement('div');
 
-    var heading = document.createElement('p');
-    heading.className = 'cvz-section-label';
-    heading.textContent = 'Maßnahmen-Übersicht';
-    wrap.appendChild(heading);
+    // ── Tabelle 1: Keyword-Chancen ───────────────────────────────────────────
+    (function () {
+      var heading = document.createElement('p');
+      heading.className = 'cvz-section-label';
+      heading.textContent = 'Keywords mit bestehendem Ranking';
+      wrap.appendChild(heading);
 
-    var intro = document.createElement('p');
-    intro.className = 'cvz-card-placeholder-text';
-    intro.style.marginBottom = '16px';
-    intro.textContent =
-      'Alle offenen Chancen aus Keyword-Daten, KI-Analysen und Content-Monitoring auf einen Blick — mit konkretem nächsten Schritt.';
-    wrap.appendChild(intro);
+      var intro = document.createElement('p');
+      intro.className = 'cvz-card-placeholder-text';
+      intro.style.marginBottom = '12px';
+      intro.textContent =
+        'Keywords, fuer die Google eure Domain bereits rankt (GSC oder organisch), sortiert nach Suchvolumen. ' +
+        'Aufklappen zeigt die Top-SERP-Ergebnisse.';
+      wrap.appendChild(intro);
 
-    // Collect rows: open opportunities + all content ideas
-    var rows = [];
-    (opportunities || []).forEach(function (o) {
-      if (o.status === 'new' || o.status === 'reviewed') {
-        rows.push({ kind: 'opportunity', item: o });
-      }
-    });
-    (contentIdeas || []).forEach(function (idea) {
-      rows.push({ kind: 'idea', item: idea });
-    });
-
-    if (rows.length === 0) {
-      var empty = document.createElement('p');
-      empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Noch keine Empfehlungen verfügbar. Diese entstehen nach dem ersten Analyse-Lauf.';
-      wrap.appendChild(empty);
-    } else {
-      var tableWrap = document.createElement('div');
-      tableWrap.style.overflowX = 'auto';
-
-      var table = document.createElement('table');
-      table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
-
-      var thead = document.createElement('thead');
-      thead.innerHTML =
-        '<tr>' +
-          '<th style="text-align:left;padding:8px 12px;border-bottom:2px solid #e5e7eb;white-space:nowrap;' +
-              'color:#6b7280;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Signal</th>' +
-          '<th style="text-align:left;padding:8px 12px;border-bottom:2px solid #e5e7eb;' +
-              'color:#6b7280;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Befund &amp; Datenbasis</th>' +
-          '<th style="text-align:left;padding:8px 12px;border-bottom:2px solid #e5e7eb;white-space:nowrap;' +
-              'color:#6b7280;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Nächster Schritt</th>' +
-        '</tr>';
-      table.appendChild(thead);
-
-      var tbody = document.createElement('tbody');
-
-      rows.forEach(function (row, idx) {
-        var tr = document.createElement('tr');
-        tr.style.borderBottom = '1px solid #f3f4f6';
-        if (idx % 2 === 1) { tr.style.backgroundColor = '#f9fafb'; }
-
-        if (row.kind === 'opportunity') {
-          var opp = row.item;
-          var signalText = OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type;
-
-          // Extract key data point from supporting_data
-          var sd = opp.supporting_data || {};
-          var dataSnippet = '';
-          if (opp.opportunity_type === 'competitor_citation') {
-            var cited = sd.cited_domains || [];
-            if (cited.length) { dataSnippet = cited.slice(0, 2).join(', '); }
-          } else if (opp.opportunity_type === 'ai_visible_competitor_dominates') {
-            var compD = sd.competitor_domains_cited || [];
-            if (compD.length) { dataSnippet = compD.slice(0, 2).join(', '); }
-          } else if (opp.opportunity_type === 'near_miss_ranking') {
-            var nkws = sd.keywords || [];
-            if (nkws.length) {
-              var nk = nkws[0];
-              dataSnippet = '„' + nk.keyword + '“ – Pos. ' + (nk.position || nk.avg_position || '?');
-            }
-          } else {
-            var gkws = sd.keywords || [];
-            if (gkws.length) {
-              var gk = gkws[0];
-              dataSnippet = '„' + gk.keyword + '“';
-              if (gk.search_volume) { dataSnippet += ' (' + Number(gk.search_volume).toLocaleString('de-DE') + ' Suchen/Mo.)'; }
-              if (gk.organic_rank)  { dataSnippet += ' – Rang ' + gk.organic_rank; }
-            }
-          }
-
-          var nextStep = opp.content_recommendation || '';
-          var nextStepHtml = nextStep
-            ? escapeHtml(nextStep)
-            : '<span style="color:#9ca3af;">— folgt beim nächsten Monatslauf</span>';
-
-          tr.innerHTML =
-            '<td style="padding:10px 12px;vertical-align:top;white-space:nowrap;">' +
-              '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:#e0f2fe;' +
-                  'color:#0369a1;font-size:11px;font-weight:600;">' +
-                escapeHtml(signalText) +
-              '</span>' +
-            '</td>' +
-            '<td style="padding:10px 12px;vertical-align:top;">' +
-              '<p style="margin:0 0 4px;color:#111;">' + escapeHtml(opp.description || '') + '</p>' +
-              (dataSnippet ? '<p style="margin:0;font-size:12px;color:#6b7280;">' + escapeHtml(dataSnippet) + '</p>' : '') +
-            '</td>' +
-            '<td style="padding:10px 12px;vertical-align:top;">' + nextStepHtml + '</td>';
-
-        } else {
-          // content idea
-          var idea = row.item;
-          var phaseLabel = idea.phase ? (PHASE_LABELS[idea.phase] || idea.phase) : '';
-          var providerLabel = idea.provider ? (MODEL_LABELS[idea.provider] || idea.provider) : '';
-          var ideaSignal = 'Content-Idee' + (phaseLabel ? ' · ' + phaseLabel : '');
-
-          // description format: "Titel: Begründung"
-          var colonIdx = (idea.description || '').indexOf(': ');
-          var ideaTitle  = colonIdx >= 0 ? idea.description.substring(0, colonIdx) : (idea.description || '');
-          var ideaReason = colonIdx >= 0 ? idea.description.substring(colonIdx + 2) : '';
-
-          tr.innerHTML =
-            '<td style="padding:10px 12px;vertical-align:top;white-space:nowrap;">' +
-              '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:#f0fdf4;' +
-                  'color:#16a34a;font-size:11px;font-weight:600;">' +
-                escapeHtml(ideaSignal) +
-              '</span>' +
-            '</td>' +
-            '<td style="padding:10px 12px;vertical-align:top;">' +
-              (ideaReason ? '<p style="margin:0 0 4px;color:#111;">' + escapeHtml(ideaReason) + '</p>' : '') +
-              (providerLabel ? '<p style="margin:0;font-size:12px;color:#6b7280;">Quelle: ' + escapeHtml(providerLabel) + '</p>' : '') +
-            '</td>' +
-            '<td style="padding:10px 12px;vertical-align:top;font-weight:500;color:#111;">' +
-              escapeHtml(ideaTitle) +
-            '</td>';
-        }
-
-        tbody.appendChild(tr);
+      var rankedKws = (keywords || []).filter(function (kw) {
+        return kw.organic_rank != null || kw.gsc_position != null;
+      }).sort(function (a, b) {
+        return (b.search_volume || 0) - (a.search_volume || 0);
       });
 
-      table.appendChild(tbody);
-      tableWrap.appendChild(table);
-      wrap.appendChild(tableWrap);
-    }
+      if (rankedKws.length === 0) {
+        var empty = document.createElement('p');
+        empty.className = 'cvz-card-placeholder-text';
+        empty.textContent = 'Noch keine Keywords mit Ranking vorhanden.';
+        wrap.appendChild(empty);
+      } else {
+        var list = document.createElement('div');
+        list.className = 'cvz-prompt-list';
+        list.style.marginBottom = '4px';
 
-    // Plattformen mit Veröffentlichungs-Chance (unverändert)
+        // Table header row
+        var headerRow = document.createElement('div');
+        headerRow.style.cssText =
+          'display:flex;gap:8px;padding:4px 12px 6px;font-size:11px;font-weight:600;' +
+          'text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#6b7280);' +
+          'border-bottom:1px solid var(--cvz-border,#e5e7eb);';
+        headerRow.innerHTML =
+          '<span style="flex:1 1 0;">Keyword</span>' +
+          '<span style="width:110px;text-align:right;">Suchen/Mo.</span>' +
+          '<span style="width:100px;text-align:right;">Eigene Pos.</span>' +
+          '<span style="width:24px;"></span>';
+        list.appendChild(headerRow);
+
+        rankedKws.forEach(function (kw) {
+          var rowId = 'action-kw-' + (kw.id || kw.keyword);
+          var ownPos = kw.organic_rank != null ? kw.organic_rank : kw.gsc_position;
+          var posStr = ownPos != null ? String(Math.round(ownPos * 10) / 10) : '';
+          var hasSerpData = kw.top_serp_results && kw.top_serp_results.length > 0;
+          var expanded = state.expandedKeywordId === rowId;
+
+          // Main row
+          var row = document.createElement('div');
+          row.className = 'cvz-prompt-row' + (hasSerpData ? ' cvz-prompt-row-clickable' : '');
+          row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px;';
+          if (hasSerpData) {
+            row.setAttribute('data-cvz-keyword-toggle', rowId);
+            row.setAttribute('data-cvz-keyword-text', kw.keyword);
+          }
+          row.innerHTML =
+            '<span class="cvz-prompt-text" style="flex:1 1 0;">' + escapeHtml(kw.keyword) + '</span>' +
+            '<span style="width:110px;text-align:right;font-size:13px;color:var(--cvz-text-muted,#6b7280);">' +
+              (kw.search_volume != null
+                ? Number(kw.search_volume).toLocaleString('de-DE')
+                : '<span style="opacity:.4;">-</span>') +
+            '</span>' +
+            '<span style="width:100px;text-align:right;font-size:13px;' +
+              (ownPos != null && ownPos <= 10 ? 'color:#16a34a;font-weight:600;' : 'color:var(--cvz-text-muted,#6b7280);') + '">' +
+              (posStr ? 'Pos. ' + posStr : '<span style="opacity:.4;">-</span>') +
+            '</span>' +
+            '<span style="width:24px;text-align:center;font-size:11px;color:var(--cvz-text-muted,#6b7280);">' +
+              (hasSerpData ? (expanded ? '▾' : '▸') : '') +
+            '</span>';
+          list.appendChild(row);
+
+          // SERP expansion
+          if (hasSerpData && expanded) {
+            var expRow = document.createElement('div');
+            expRow.className = 'cvz-keyword-expansion';
+            expRow.style.cssText = 'padding:8px 12px 12px 12px;background:var(--cvz-card-bg,#f9fafb);border-bottom:1px solid var(--cvz-border,#e5e7eb);';
+            expRow.innerHTML = renderSerpSummaryBlock(kw);
+            list.appendChild(expRow);
+          }
+        });
+
+        wrap.appendChild(list);
+      }
+    })();
+
+    // ── Tabelle 2: Zitierungs-Luecken ────────────────────────────────────────
+    (function () {
+      var citationTypes = ['competitor_citation', 'ai_visible_competitor_dominates'];
+      var citationOpps = (opportunities || []).filter(function (o) {
+        return citationTypes.indexOf(o.opportunity_type) !== -1 &&
+               (o.status === 'new' || o.status === 'reviewed');
+      });
+
+      if (citationOpps.length === 0) return;
+
+      var heading = document.createElement('p');
+      heading.className = 'cvz-section-label';
+      heading.style.marginTop = '28px';
+      heading.textContent = 'Prompts mit Wettbewerber-Zitierungen';
+      wrap.appendChild(heading);
+
+      var intro = document.createElement('p');
+      intro.className = 'cvz-card-placeholder-text';
+      intro.style.marginBottom = '12px';
+      intro.textContent =
+        'Bei diesen Prompts werden Wettbewerber zitiert, nicht convertlyze.com. ' +
+        'Hier liegt ungenutztes Zitierpotenzial.';
+      wrap.appendChild(intro);
+
+      citationOpps.forEach(function (opp) {
+        var sd = opp.supporting_data || {};
+        var compDomains = opp.opportunity_type === 'competitor_citation'
+          ? (sd.cited_domains || [])
+          : (sd.competitor_domains_cited || []);
+
+        // Extract example prompts from description
+        var examplePromptsText = '';
+        var desc = opp.description || '';
+        var bpIdx = desc.indexOf('Beispiel-Prompts:');
+        if (bpIdx !== -1) {
+          // Extract from "Beispiel-Prompts: ..." until end or next sentence ending with " ."
+          examplePromptsText = desc.substring(bpIdx + 'Beispiel-Prompts:'.length).trim();
+          // Stop at ". " followed by capital letter (next sentence) or end
+          var nextSentenceMatch = examplePromptsText.match(/\.\s+[A-Z]/);
+          if (nextSentenceMatch) {
+            examplePromptsText = examplePromptsText.substring(0, nextSentenceMatch.index + 1);
+          }
+        }
+
+        // Parse individual prompts (quoted with single quotes)
+        var promptMatches = [];
+        var promptRegex = /'([^']+)'/g;
+        var m;
+        var src = examplePromptsText || desc;
+        while ((m = promptRegex.exec(src)) !== null) {
+          promptMatches.push(m[1]);
+        }
+
+        var card = document.createElement('div');
+        card.className = 'cvz-card';
+        card.style.marginBottom = '8px';
+
+        var typeLabel = OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type;
+        var domainsHtml = compDomains.length
+          ? compDomains.map(function (d) {
+              return '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;margin-bottom:4px;">' +
+                '<img src="https://www.google.com/s2/favicons?sz=16&domain=' + encodeURIComponent(d) + '" style="width:14px;height:14px;">' +
+                '<strong>' + escapeHtml(d) + '</strong></span>';
+            }).join('')
+          : '';
+
+        var promptsHtml = promptMatches.length
+          ? '<ul style="margin:6px 0 0;padding-left:18px;font-size:13px;">' +
+              promptMatches.map(function (p) {
+                return '<li style="margin-bottom:3px;">' + escapeHtml(p) + '</li>';
+              }).join('') +
+            '</ul>'
+          : '';
+
+        card.innerHTML =
+          '<p style="margin:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;' +
+              'letter-spacing:.05em;color:#6b7280;">' + escapeHtml(typeLabel) + '</p>' +
+          (domainsHtml ? '<p style="margin:0 0 4px;">' + domainsHtml + '</p>' : '') +
+          (promptsHtml
+            ? '<p style="margin:6px 0 2px;font-size:12px;color:#6b7280;font-weight:600;">Beispiel-Prompts</p>' + promptsHtml
+            : '');
+
+        wrap.appendChild(card);
+      });
+    })();
+
+    // ── Tabelle 3: Content-Ideen ─────────────────────────────────────────────
+    (function () {
+      if (!contentIdeas || contentIdeas.length === 0) return;
+
+      var heading = document.createElement('p');
+      heading.className = 'cvz-section-label';
+      heading.style.marginTop = '28px';
+      heading.textContent = 'Content-Ideen aus KI-Analysen';
+      wrap.appendChild(heading);
+
+      var grid = document.createElement('div');
+      grid.className = 'cvz-opportunity-grid';
+
+      contentIdeas.forEach(function (idea) {
+        var phaseLabel    = idea.phase    ? (PHASE_LABELS[idea.phase]       || idea.phase)    : '';
+        var providerLabel = idea.provider ? (MODEL_LABELS[idea.provider]    || idea.provider) : '';
+
+        var colonIdx   = (idea.description || '').indexOf(': ');
+        var ideaTitle  = colonIdx >= 0 ? idea.description.substring(0, colonIdx) : (idea.description || '');
+        var ideaReason = colonIdx >= 0 ? idea.description.substring(colonIdx + 2) : '';
+
+        var card = document.createElement('div');
+        card.className = 'cvz-card cvz-idea-card';
+        card.innerHTML =
+          (phaseLabel
+            ? '<p class="cvz-opportunity-type">' + escapeHtml(phaseLabel) + '</p>'
+            : '') +
+          '<p style="margin:0 0 4px;font-weight:600;font-size:13px;">' + escapeHtml(ideaTitle) + '</p>' +
+          (ideaReason
+            ? '<p class="cvz-opportunity-description">' + escapeHtml(ideaReason) + '</p>'
+            : '') +
+          (providerLabel
+            ? '<p style="margin:6px 0 0;font-size:12px;color:#6b7280;">Quelle: ' + escapeHtml(providerLabel) + '</p>'
+            : '');
+        grid.appendChild(card);
+      });
+
+      wrap.appendChild(grid);
+    })();
+
+    // ── Plattformen mit Veroeffentlichungs-Chance ────────────────────────────
     var publishable = (sourceProfiles || []).filter(function (p) { return p.can_publish === true; });
     if (publishable.length > 0) {
       var platHeading = document.createElement('p');
       platHeading.className = 'cvz-section-label';
       platHeading.style.marginTop = '32px';
-      platHeading.textContent = 'Plattformen mit Veröffentlichungs-Chance';
+      platHeading.textContent = 'Plattformen mit Veroeffentlichungs-Chance';
       wrap.appendChild(platHeading);
 
       var platIntro = document.createElement('p');
       platIntro.className = 'cvz-card-placeholder-text';
       platIntro.style.marginBottom = '16px';
       platIntro.textContent =
-        'Diese Plattformen wurden von KI-Modellen als Quellen zitiert – und normale Nutzer können dort eigene Inhalte veröffentlichen (z. B. Foren, Bewertungsportale, YouTube, Wikipedia).';
+        'Diese Plattformen wurden von KI-Modellen als Quellen zitiert und normale Nutzer koennen dort eigene Inhalte veroeffentlichen (z. B. Foren, Bewertungsportale, YouTube, Wikipedia).';
       wrap.appendChild(platIntro);
 
       var platGrid = document.createElement('div');
@@ -4970,7 +5060,7 @@
     if (!data) {
       var errEl = document.createElement('div');
       errEl.className = 'cvz-card cvz-card-placeholder';
-      errEl.innerHTML = '<p class="cvz-card-placeholder-text">Keine Journey-Map-Daten verfügbar. Bitte Tab erneut aufrufen oder Seite neu laden.</p>';
+      errEl.innerHTML = '<p class="cvz-card-placeholder-text">Noch keine Journey-Map-Daten vorhanden. Diese entstehen nach dem ersten vollstaendigen Analyse-Lauf.</p>' + '<p style="margin-top:8px;"><button type="button" class="cvz-btn cvz-btn-secondary" data-cvz-journey-retry="' + topicId + '">Erneut laden</button></p>';
       wrap.appendChild(errEl);
       return wrap;
     }
