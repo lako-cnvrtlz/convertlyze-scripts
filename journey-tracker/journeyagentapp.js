@@ -286,6 +286,9 @@
       // NEU (15.09.2026): "beste Content-Chancen", siehe main.py:
       // _compute_best_content_chances.
       best_content_chances: data.best_content_chances || [],
+      // NEU (16.09.2026): Plattform-Übersicht, siehe main.py:
+      // _get_cited_platforms_overview.
+      cited_platforms: data.cited_platforms || [],
       competitors: [],
       gsc_rows: (data.search_queries || [])
         .filter(function (q) { return q.source === 'gsc_near_miss'; })
@@ -2108,12 +2111,33 @@
         '<p class="cvz-collecting-banner-text">' +
           '\u26a0\ufe0f Der Datenlauf f\u00fcr dieses Thema ist fehlgeschlagen. Bereits gesammelte Daten unten ' +
           'k\u00f6nnen unvollst\u00e4ndig sein.' +
+          // NEU (16.09.2026): zeigt die tats\u00e4chlich gespeicherte
+          // Fehlermeldung (siehe main.py: _record_topic_run_error),
+          // statt nur "ist fehlgeschlagen" ohne jeden Grund.
+          (detail.topic.last_run_error
+            ? '<br><span class="cvz-run-error-detail">' + escapeHtml(detail.topic.last_run_error) + '</span>'
+            : '') +
         '</p>' +
         '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + detail.topic.id + '"' +
           (state.retryingTopicId === detail.topic.id ? ' disabled' : '') + '>' +
           (state.retryingTopicId === detail.topic.id ? 'Wird erneut versucht \u2026' : 'Erneut versuchen') +
         '</button>';
       wrap.appendChild(errorBanner);
+    } else if (detail.topic.last_run_error) {
+      // NEU (16.09.2026): Thema ist insgesamt weiter 'active' (es gibt
+      // brauchbare Bestandsdaten), aber der ZULETZT versuchte Lauf (oder
+      // ein einzelner Analyse-Schritt darin) ist fehlgeschlagen — dezenter
+      // Hinweis statt der vollen roten Fehler-Leiste, die für einen
+      // kompletten Erstlauf-Abbruch reserviert bleibt.
+      var softErrorBanner = document.createElement('div');
+      softErrorBanner.className = 'cvz-card cvz-collecting-banner cvz-soft-error-banner';
+      softErrorBanner.innerHTML =
+        '<p class="cvz-collecting-banner-text">' +
+          '\u26a0\ufe0f Der letzte Lauf hatte ein Problem' +
+          (detail.topic.last_run_error_at ? ' (' + formatRelativeTime(detail.topic.last_run_error_at) + ')' : '') +
+          ':<br><span class="cvz-run-error-detail">' + escapeHtml(detail.topic.last_run_error) + '</span>' +
+        '</p>';
+      wrap.appendChild(softErrorBanner);
     }
 
     wrap.appendChild(renderTabNav(TOPIC_TABS, state.activeSubTab));
@@ -2130,6 +2154,7 @@
         tabContent.appendChild(renderCompetitorManageSection(detail, state.activeTopicId));
         tabContent.appendChild(renderCompetitorInsightSection(weeksData, state.isLoadingCitationTrend, detail.source_profiles, detail.competitor_domains, detail.competitor_insights));
         tabContent.appendChild(renderContentGapsSection(detail.content_gaps));
+        tabContent.appendChild(renderCitedPlatformsSection(detail.cited_platforms));
         break;
       case 'keywords':
         // GEÄNDERT (15.09.2026): GSC-Suchanfragen (source='gsc_near_miss')
@@ -2150,6 +2175,13 @@
         break;
       case 'uebersicht':
       default:
+        // GEÄNDERT (16.09.2026): "Beste Content-Chancen" führt die
+        // Übersichtsseite jetzt an (vor der Phasen-Leiste) — seit die
+        // Claude-Zusammenfassung im Monatslauf pausiert ist (siehe
+        // main.py: _monthly_background, Kundenentscheid 16.09.2026), ist
+        // das die wichtigste "auf einen Blick"-Information hier.
+        var bestChances = renderBestContentChancesSection(detail.best_content_chances);
+        if (bestChances) tabContent.appendChild(bestChances);
         // NEU (15.09.2026): Phasen-Übersicht auch auf der Hauptseite,
         // nicht mehr nur im Prompts-Tab — Kundenwunsch, auf einen Blick
         // zu sehen, wie die Sichtbarkeit über die Journey-Phasen verteilt
@@ -2158,12 +2190,6 @@
         // bewusst null zurück, wenn keine Prompts eine Phase haben.
         var overviewRollup = renderPhaseRollup(detail.prompts);
         if (overviewRollup) tabContent.appendChild(overviewRollup);
-        // GEÄNDERT (15.09.2026): Opportunities/Content-Ideen stehen jetzt
-        // VOR den grafischen Darstellungen (Kundenwunsch, siehe
-        // Chat-Verlauf 15.09.2026), vorher standen sie danach. Die neue
-        // "Beste Content-Chancen"-Sektion führt die Gruppe an.
-        var bestChances = renderBestContentChancesSection(detail.best_content_chances);
-        if (bestChances) tabContent.appendChild(bestChances);
         tabContent.appendChild(renderOpportunitySection(detail.opportunities));
         tabContent.appendChild(renderContentIdeasSection(detail.content_ideas));
         // GEÄNDERT (15.09.2026): alle Grafiken der Übersichtsseite jetzt
@@ -3077,6 +3103,63 @@
               promptList.map(function (p) { return '<li>' + escapeHtml(p) + '</li>'; }).join('') +
             '</ul>'
           : '');
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+    return section;
+  }
+
+  // NEU (16.09.2026): Kundenwunsch (siehe Chat-Verlauf 16.09.2026) —
+  // Plattform-Übersicht über ALLE zitierten Quellen (nicht nur
+  // bestätigte Wettbewerber), gruppiert nach Content-Typ, damit User
+  // daraus ihre eigene On-/Off-Page-Strategie ableiten können (z.B.
+  // "Reddit/Foren werden hier oft zitiert -> in Foren präsent werden").
+  function renderCitedPlatformsSection(platforms) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Zitierte Plattform-Typen';
+    section.appendChild(heading);
+
+    var intro = document.createElement('p');
+    intro.className = 'cvz-card-placeholder-text';
+    intro.style.marginBottom = '12px';
+    intro.textContent =
+      'Alle in KI-Antworten zitierten Quellen zu diesem Thema, gruppiert nach Art der Plattform \u2014 ' +
+      'unabh\u00e4ngig davon, ob es sich um einen best\u00e4tigten Wettbewerber handelt. Hilft einzusch\u00e4tzen, ' +
+      'wo eine eigene Pr\u00e4senz (z.B. in Foren, auf Bewertungsplattformen, per Video) lohnt.';
+    section.appendChild(intro);
+
+    if (!platforms || platforms.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine zitierten Quellen f\u00fcr dieses Thema.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-opportunity-grid';
+    platforms.forEach(function (group) {
+      var typeLabel = group.content_type
+        ? (CONTENT_TYPE_LABELS[group.content_type] || group.content_type)
+        : 'Noch nicht analysiert';
+      var totalCitations = group.domains.reduce(function (sum, d) { return sum + d.citations; }, 0);
+
+      var card = document.createElement('div');
+      card.className = 'cvz-card cvz-idea-card';
+      var domainsHtml = group.domains.map(function (d) {
+        var promptTitle = d.prompts && d.prompts.length ? ' title="' + escapeHtml(d.prompts.join(' | ')) + '"' : '';
+        return '<li' + promptTitle + '>' +
+          '<img class="cvz-inline-favicon" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(d.domain) + '" alt="">' +
+          escapeHtml(d.domain) + ' \u00b7 ' + d.citations + '\u00d7' +
+        '</li>';
+      }).join('');
+      card.innerHTML =
+        '<p class="cvz-opportunity-type">' + escapeHtml(typeLabel) + ' \u00b7 ' + totalCitations + ' Zitationen</p>' +
+        '<ul class="cvz-serp-results-list">' + domainsHtml + '</ul>';
       grid.appendChild(card);
     });
     section.appendChild(grid);
@@ -4461,6 +4544,8 @@
       '}' +
       '.cvz-collecting-banner-text { font-size: 13px; color: var(--cvz-text); margin: 0; flex: 1 1 320px; }' +
       '.cvz-error-banner { border-left-color: var(--cvz-red); }' +
+      '.cvz-soft-error-banner { border-left-color: var(--cvz-amber); }' +
+      '.cvz-run-error-detail { font-size: 12px; color: var(--cvz-text-muted); font-family: monospace; }' +
 
       '.cvz-create-form { margin-bottom: 16px; }' +
       '.cvz-create-toggle-btn {' +
