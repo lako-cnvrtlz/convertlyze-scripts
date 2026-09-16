@@ -456,7 +456,9 @@
       state.dashboardDataCache[topicId] = await loadDashboardData(topicId);
     } catch (e) {
       console.error('[CVZ Visibility] Journey-Map-Daten konnten nicht geladen werden:', e);
-      state.dashboardDataCache[topicId] = null;
+      // Sentinel-Objekt statt null: truthy, damit maybeLoadDashboardData nicht bei
+      // jedem Render einen neuen Request startet (null wäre falsy -> Endlosschleife).
+      state.dashboardDataCache[topicId] = { _error: true };
     }
     state.isLoadingDashboard = false;
     render();
@@ -921,7 +923,7 @@
       color: '#f2b13d',
       bg: 'rgba(242,177,61,.08)',
       border: 'rgba(242,177,61,.3)',
-      tip: 'SEO-Potenzial: Inhalt und interne Verlinkung ausbauen fuer Top-10-Einstieg.',
+      tip: 'SEO-Potenzial: Inhalt und interne Verlinkung ausbauen für Top-10-Einstieg.',
     },
   };
 
@@ -2437,24 +2439,6 @@
     var tabContent = document.createElement('div');
     tabContent.className = 'cvz-tab-content';
 
-    // Solange Dashboard-Daten geladen werden: ganzen Tab-Inhalt sperren
-    if (state.isLoadingDashboard) {
-      var loadingFull = document.createElement('div');
-      loadingFull.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;gap:12px;';
-      var spinner = document.createElement('span');
-      spinner.className = 'cvz-spinner';
-      spinner.style.cssText = 'width:22px;height:22px;border-width:3px;';
-      var loadingText = document.createElement('p');
-      loadingText.className = 'cvz-card-placeholder-text';
-      loadingText.style.margin = '0';
-      loadingText.textContent = 'KI-Sichtbarkeitsdaten werden geladen…';
-      loadingFull.appendChild(spinner);
-      loadingFull.appendChild(loadingText);
-      tabContent.appendChild(loadingFull);
-      wrap.appendChild(tabContent);
-      return wrap;
-    }
-
     // GEÄNDERT (16.09.2026): 5 fokussierte Views statt 7 Tabs
     switch (state.activeSubTab) {
       case 'journey':
@@ -2986,7 +2970,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '12px';
-    sub.textContent = 'Prompts und Keywords mit dem hoechsten Hebel fuer mehr Sichtbarkeit.';
+    sub.textContent = 'Prompts und Keywords mit dem höchsten Hebel für mehr Sichtbarkeit.';
     section.appendChild(sub);
 
     var grid = document.createElement('div');
@@ -3101,7 +3085,7 @@
       intro.className = 'cvz-card-placeholder-text';
       intro.style.marginBottom = '12px';
       intro.textContent =
-        'Keywords, fuer die Google eure Domain bereits rankt (GSC oder organisch), sortiert nach Suchvolumen. ' +
+        'Keywords, für die Google eure Domain bereits rankt (GSC oder organisch), sortiert nach Suchvolumen. ' +
         'Aufklappen zeigt die Top-SERP-Ergebnisse.';
       wrap.appendChild(intro);
 
@@ -3195,7 +3179,7 @@
       var heading = document.createElement('p');
       heading.className = 'cvz-section-label';
       heading.style.marginTop = '28px';
-      heading.textContent = 'Chancen: Zitierungs-Luecken';
+      heading.textContent = 'Chancen: Zitierungs-Lücken';
       wrap.appendChild(heading);
 
       citationOpps.forEach(function (opp) {
@@ -3297,14 +3281,14 @@
       var platHeading = document.createElement('p');
       platHeading.className = 'cvz-section-label';
       platHeading.style.marginTop = '32px';
-      platHeading.textContent = 'Plattformen mit Veroeffentlichungs-Chance';
+      platHeading.textContent = 'Plattformen mit Veröffentlichungs-Chance';
       wrap.appendChild(platHeading);
 
       var platIntro = document.createElement('p');
       platIntro.className = 'cvz-card-placeholder-text';
       platIntro.style.marginBottom = '16px';
       platIntro.textContent =
-        'Diese Plattformen wurden von KI-Modellen als Quellen zitiert und normale Nutzer koennen dort eigene Inhalte veroeffentlichen (z. B. Foren, Bewertungsportale, YouTube, Wikipedia).';
+        'Diese Plattformen wurden von KI-Modellen als Quellen zitiert und normale Nutzer können dort eigene Inhalte veröffentlichen (z. B. Foren, Bewertungsportale, YouTube, Wikipedia).';
       wrap.appendChild(platIntro);
 
       var platGrid = document.createElement('div');
@@ -4925,12 +4909,31 @@
               escapeHtml(prompt.ai_search_volume) + '/Monat</span>'
           : '';
 
+        // Changelog-Badge: shows an edit icon when this prompt is linked to changelog entries.
+        var promptLinkedCount = (changelogEntries || []).filter(function (entry) {
+          return (entry.linked_prompt_ids || []).indexOf(prompt.id) !== -1;
+        }).length;
+        var changelogBadgeHtml = promptLinkedCount > 0
+          ? ' <span class="cvz-changelog-linked-badge" title="' + promptLinkedCount + ' verknüpfte Änderung(en)">✎</span>'
+          : '';
+
+        // Favicon: small favicon for the top cited domain in the collapsed row.
+        var faviconHtml = (prompt.top_cited_domain && prompt.cited_count > 0)
+          ? '<span class="cvz-prompt-favicons" style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0;">' +
+              '<img src="https://www.google.com/s2/favicons?sz=12&domain=' + encodeURIComponent(prompt.top_cited_domain) + '" ' +
+              'style="width:12px;height:12px;" ' +
+              'onerror="this.style.display=\'none\'" ' +
+              'title="Zitiert: ' + escapeHtml(prompt.top_cited_domain) + '">' +
+            '</span>'
+          : '';
+
         var row = document.createElement('div');
         row.className = 'cvz-prompt-row' + (enableCitations ? ' cvz-prompt-row-clickable' : '');
         if (enableCitations) row.setAttribute('data-cvz-prompt-toggle', prompt.id);
         row.innerHTML =
           '<span class="cvz-dot ' + dotClass + '" title="' + escapeHtml(statusLabel) + '"></span>' +
-          '<span class="cvz-prompt-text">' + escapeHtml(prompt.prompt_text) + '</span>' +
+          '<span class="cvz-prompt-text">' + escapeHtml(prompt.prompt_text) + changelogBadgeHtml + '</span>' +
+          faviconHtml +
           citationBadge +
           contentTypeBadge +
           personaBadge +
@@ -4958,25 +4961,86 @@
   // ein Wort der Suchanfrage als Teilstring eines Topic-Terms.
   function filterGscByTopicRelevance(gscRows, detail) {
     if (!gscRows || gscRows.length === 0) return gscRows;
-    var STOP = ['und', 'der', 'die', 'das', 'von', 'mit', 'bei', 'zur', 'zum', 'ein', 'eine',
-                'ist', 'sind', 'oder', 'wie', 'was', 'als', 'for', 'the', 'and', 'of', 'vs'];
-    var terms = [];
-    function addTerms(str) {
-      (str || '').toLowerCase().split(/[\s\-_\/\.,]+/).forEach(function (w) {
-        if (w.length > 4 && STOP.indexOf(w) === -1 && terms.indexOf(w) === -1) terms.push(w);
+
+    // Extended stop words: function words + generic IT/business terms that appear in
+    // nearly every tech topic and must NOT drive the relevance filter.
+    var STOP = [
+      // German function words
+      'und', 'der', 'die', 'das', 'von', 'mit', 'bei', 'zur', 'zum', 'ein', 'eine',
+      'ist', 'sind', 'oder', 'wie', 'was', 'als', 'fuer', 'auch', 'nach', 'noch',
+      // English function words
+      'for', 'the', 'and', 'of', 'vs', 'with', 'from', 'that', 'this', 'are', 'not',
+      // Generic IT / business terms too common to discriminate
+      'service', 'services', 'management', 'cloud', 'digital', 'system', 'systems',
+      'platform', 'platforms', 'solution', 'solutions', 'migration', 'strategie',
+      'beratung', 'ansatz', 'helpdesk', 'software', 'enterprise', 'business', 'support',
+      'infrastructure', 'infrastruktur', 'application', 'applications', 'applikation',
+      'integration', 'transformation', 'outsourcing', 'consulting', 'dienstleistung',
+      'provider', 'vendor', 'managed', 'hybrid', 'online', 'network', 'netzwerk',
+      'security', 'sicherheit', 'data', 'daten', 'analyse', 'analysis', 'marketing',
+      'tool', 'tools', 'produkt', 'produkte', 'anbieter', 'losung', 'losungen',
+    ];
+
+    var terms = [];   // specific terms (min length varies by source)
+    var abbrevs = []; // uppercase abbreviations from topic name / seed_keyword (e.g. "TI", "ERP")
+
+    function extractAbbrevs(str) {
+      // Capture 2-4 letter ALL-CAPS words from the original string before lowercasing
+      (str || '').split(/[\s\-_\/\.,;:+()\[\]]+/).forEach(function (w) {
+        if (w.length >= 2 && w.length <= 4 && w === w.toUpperCase() && /^[A-Z]+$/.test(w)) {
+          var lw = w.toLowerCase();
+          if (abbrevs.indexOf(lw) === -1) abbrevs.push(lw);
+        }
       });
     }
-    addTerms((detail.topic && detail.topic.name) || '');
+
+    function addTerms(str, minLen) {
+      var min = minLen || 6;
+      (str || '').toLowerCase().split(/[\s\-_\/\.,;:+()\[\]]+/).forEach(function (w) {
+        if (w.length >= min && STOP.indexOf(w) === -1 && terms.indexOf(w) === -1) terms.push(w);
+      });
+    }
+
+    // Primary signal: seed_keyword (most discriminating; allow min 5 so specific
+    // short product names like "ariba" still qualify).
+    var seedKw = (detail.topic && detail.topic.seed_keyword) || '';
+    extractAbbrevs(seedKw);
+    addTerms(seedKw, 5);
+
+    // Topic name
+    var topicName = (detail.topic && detail.topic.name) || '';
+    extractAbbrevs(topicName);
+    addTerms(topicName, 6);
+
+    // Curated search queries (source !== 'gsc_near_miss' = hand-picked or AI-generated,
+    // not derived from GSC itself, so they carry stronger topic signal).
     (detail.search_queries || []).forEach(function (q) {
-      if (q.source !== 'gsc_near_miss') addTerms(q.keyword || '');
+      if (q.source !== 'gsc_near_miss') addTerms(q.keyword || '', 7);
     });
-    if (terms.length === 0) return gscRows;
+
+    if (terms.length === 0 && abbrevs.length === 0) return gscRows;
+
     return gscRows.filter(function (row) {
       var q = (row.query || '').toLowerCase();
+      var qWords = q.split(/[\s\-_\/\.,;:+()\[\]]+/);
+
+      // Abbreviation match: whole-word only (e.g. topic "TI as a Service" -> "ti"
+      // must appear as a standalone word in the query, not inside a longer token).
+      if (abbrevs.some(function (ab) { return qWords.indexOf(ab) !== -1; })) return true;
+
       return terms.some(function (term) {
-        if (q.indexOf(term) !== -1) return true;
-        return q.split(/[\s\-_\/\.,]+/).some(function (qw) {
-          return qw.length > 4 && term.indexOf(qw) !== -1;
+        if (term.length >= 10) {
+          // Long compound (e.g. "telematikinfrastruktur"): substring match is fine.
+          if (q.indexOf(term) !== -1) return true;
+        } else {
+          // Shorter specific term: require whole-word match to avoid "service"
+          // matching "application management services".
+          if (qWords.indexOf(term) !== -1) return true;
+        }
+        // Reverse direction: a query word appears as a component of a topic term
+        // (German compound decomposition, e.g. query "infrastruktur" in topic "telematikinfrastruktur").
+        return qWords.some(function (qw) {
+          return qw.length >= 6 && STOP.indexOf(qw) === -1 && term.indexOf(qw) !== -1;
         });
       });
     });
@@ -5578,6 +5642,10 @@
     var style = document.createElement('style');
     style.id = 'cvz-visibility-styles';
     style.textContent =
+      // Force the host page to always reserve scrollbar space so the layout
+      // never shifts when content expands or collapses and a scrollbar appears.
+      'html { overflow-y: scroll; }' +
+
       '#cvz-visibility-app {' +
         '--cvz-navy: #0d1117;' +
         '--cvz-navy-raised: #141b24;' +
@@ -6095,7 +6163,7 @@
   // X-Achse = 4 Journey-Phasen, Y-Achse = Zitierrate 0-100 %.
   function renderVisibilityComparisonChart(topicId, detail) {
     var dashData = state.dashboardDataCache[topicId];
-    if (!dashData || !dashData.phase_scores) return null;
+    if (!dashData || dashData._error || !dashData.phase_scores) return null;
 
     var sov = dashData.share_of_voice || {};
 
@@ -6250,12 +6318,24 @@
     var wrap = document.createElement('div');
 
     // Phase-Score-Übersicht (Dashboard-Daten, falls geladen)
+    // dashData === { _error: true }  → Ladefehler, einmalig gespeichert damit kein Endlos-Retry
+    // dashData === undefined          → noch nicht geladen (kommt nie hier an, da maybeLoad vorher)
     var dashData = state.dashboardDataCache[topicId];
+    var dashError = dashData && dashData._error;
     if (state.isLoadingDashboard) {
       var loadEl = document.createElement('p');
       loadEl.className = 'cvz-card-placeholder-text';
       loadEl.innerHTML = '<span class="cvz-spinner"></span>KI-Sichtbarkeit wird geladen…';
       wrap.appendChild(loadEl);
+    } else if (dashError) {
+      var errEl = document.createElement('p');
+      errEl.className = 'cvz-card-placeholder-text';
+      errEl.style.cssText = 'margin-bottom:12px;';
+      errEl.innerHTML =
+        'KI-Sichtbarkeitsdaten konnten nicht geladen werden. ' +
+        '<button type="button" data-cvz-journey-retry="' + escapeHtml(topicId) + '" ' +
+        'class="cvz-link-btn" style="font-size:inherit;">Erneut versuchen</button>';
+      wrap.appendChild(errEl);
     } else if (dashData && dashData.phase_scores) {
       // Kompakte Phasen-Scorecard (eigene Zitierrate als Balken)
       var phaseSection = document.createElement('div');
@@ -6336,8 +6416,8 @@
       });
       phaseSection.appendChild(phaseGrid);
       wrap.appendChild(phaseSection);
-    } else if (!dashData) {
-      // Fallback: show phase rollup from prompts
+    } else if (!dashData || dashError) {
+      // Fallback: Phasen-Rollup aus den Prompts des Topic-Detaildatensatzes
       var rollup = renderPhaseRollup(detail.prompts);
       if (rollup) wrap.appendChild(rollup);
     }
@@ -6367,7 +6447,7 @@
       oppHeading.textContent = 'Wichtigste Handlungsfelder';
       oppHeadRow.appendChild(oppHeading);
       oppHeadRow.appendChild(makeTip(
-        'Das System erkennt automatisch Chancen aus deinen KI-Sichtbarkeits- und GSC-Daten: wo du fast rankst, wo Konkurrenten dich verdraengen, wo neue Fragen auftauchen. Jede Zeile aufklappen, um die konkreten Keywords oder Domains dahinter zu sehen.'
+        'Das System erkennt automatisch Chancen aus deinen KI-Sichtbarkeits- und GSC-Daten: wo du fast rankst, wo Konkurrenten dich verdrängen, wo neue Fragen auftauchen. Jede Zeile aufklappen, um die konkreten Keywords oder Domains dahinter zu sehen.'
       ));
       oppSection.appendChild(oppHeadRow);
 
@@ -6375,7 +6455,7 @@
       var oppSub = document.createElement('p');
       oppSub.className = 'cvz-card-placeholder-text';
       oppSub.style.marginBottom = '14px';
-      oppSub.textContent = 'Automatisch erkannte Chancen auf Basis eurer KI-Sichtbarkeits- und GSC-Daten, sortiert nach Prioritaet. Konkrete Umsetzungsempfehlungen im Aktionsplan-Tab.';
+      oppSub.textContent = 'Automatisch erkannte Chancen auf Basis eurer KI-Sichtbarkeits- und GSC-Daten, sortiert nach Priorität. Konkrete Umsetzungsempfehlungen im Aktionsplan-Tab.';
       oppSection.appendChild(oppSub);
 
       // Sort by priority
@@ -6390,22 +6470,22 @@
 
       // Fallback-Empfehlungen pro Opportunity-Typ (wenn content_recommendation noch leer)
       var OPP_FALLBACK_RECOMMENDATION = {
-        'near_miss_ranking': 'Content gezielt auf diese Keywords optimieren: Meta-Title/H1 schaerfen, Suchintention pruefen (informationell vs. transaktional), interne Verlinkung staerken. Ziel: von Position 20+ in die Top 10.',
-        'high_demand_low_visibility': 'Dedizierten Content fuer diese Keywords erstellen oder bestehende Seiten ausbauen. Format: FAQ, Ratgeber oder Vergleichsseite je nach Suchintention.',
-        'google_visible_ai_invisible': 'Bestehende Seiten so ausbauen, dass KI-Systeme sie als zitierwuerdige Quelle einordnen: klare Autorenschaft, konkrete Aussagen mit Zahlen, strukturierte Antworten auf die Fragen hinter dem Keyword.',
-        'competitor_citation': 'Analysieren, welche Inhalte die haeufig zitierten Domains zu diesem Thema haben, und aehnliche Inhalte mit klarer Differenzierung erstellen (eigene Daten, Expertise, Perspektive).',
-        'ai_visible_competitor_dominates': 'Eigene Leitseite zum Thema erstellen: strukturierte Antwort auf die Top-Fragen, mit nachpruefbaren Fakten und klarer Autorenschaft, damit KI-Systeme sie als Alternative zitieren.',
-        'new_question': 'Diese neuen Suchintentionen fruehzeitig besetzen: dedizierten Content erstellen, bevor der Wettbewerb aufholt. FAQ-Block oder eigenstaendige Seite je nach Volumen.',
+        'near_miss_ranking': 'Content gezielt auf diese Keywords optimieren: Meta-Title/H1 schärfen, Suchintention prüfen (informationell vs. transaktional), interne Verlinkung stärken. Ziel: von Position 20+ in die Top 10.',
+        'high_demand_low_visibility': 'Dedizierten Content für diese Keywords erstellen oder bestehende Seiten ausbauen. Format: FAQ, Ratgeber oder Vergleichsseite je nach Suchintention.',
+        'google_visible_ai_invisible': 'Bestehende Seiten so ausbauen, dass KI-Systeme sie als zitierwürdige Quelle einordnen: klare Autorenschaft, konkrete Aussagen mit Zahlen, strukturierte Antworten auf die Fragen hinter dem Keyword.',
+        'competitor_citation': 'Analysieren, welche Inhalte die häufig zitierten Domains zu diesem Thema haben, und ähnliche Inhalte mit klarer Differenzierung erstellen (eigene Daten, Expertise, Perspektive).',
+        'ai_visible_competitor_dominates': 'Eigene Leitseite zum Thema erstellen: strukturierte Antwort auf die Top-Fragen, mit nachprüfbaren Fakten und klarer Autorenschaft, damit KI-Systeme sie als Alternative zitieren.',
+        'new_question': 'Diese neuen Suchintentionen frühzeitig besetzen: dedizierten Content erstellen, bevor der Wettbewerb aufholt. FAQ-Block oder eigenständige Seite je nach Volumen.',
       };
 
       // Erklaerungstexte fuer die Typ-Chips (werden als Tooltip am Chip angezeigt)
       var OPP_TYPE_TOOLTIPS = {
-        'near_miss_ranking': 'Ihr ranktet schon auf Seite 2 fuer dieses Keyword (Position 20+, mind. 50 Impressionen). Kleine SEO-Hebel koennen hier schnell auf Seite 1 bringen.',
-        'high_demand_low_visibility': 'Dieses Keyword hat viel Suchvolumen, aber ihr seid weder in Google noch in KI-Antworten sichtbar. Grosses Potenzial, noch kein Fuss in der Tuer.',
+        'near_miss_ranking': 'Ihr ranktet schon auf Seite 2 für dieses Keyword (Position 20+, mind. 50 Impressionen). Kleine SEO-Hebel können hier schnell auf Seite 1 bringen.',
+        'high_demand_low_visibility': 'Dieses Keyword hat viel Suchvolumen, aber ihr seid weder in Google noch in KI-Antworten sichtbar. Großes Potenzial, noch kein Fuß in der Tür.',
         'google_visible_ai_invisible': 'Ihr ranktet gut in Google, aber KI-Systeme wie ChatGPT zitieren euch nicht. Bestehender Content muss "KI-tauglicher" werden.',
-        'competitor_citation': 'Eine konkrete Wettbewerber-Domain wird regelmaessig an eurer Stelle zitiert. Hier lohnt sich ein direkter Inhaltsvergleich.',
-        'ai_visible_competitor_dominates': 'KI-Systeme zitieren euch zwar, aber ein Wettbewerber deutlich haeufiger. Eure Positionierung oder Tiefe reicht noch nicht aus.',
-        'new_question': 'Neue Fragen, die in KI-Prompts auftauchen und die ihr noch nicht beantwortet. Fruehzeitig Content erstellen, bevor Wettbewerber das Thema besetzen.',
+        'competitor_citation': 'Eine konkrete Wettbewerber-Domain wird regelmäßig an eurer Stelle zitiert. Hier lohnt sich ein direkter Inhaltsvergleich.',
+        'ai_visible_competitor_dominates': 'KI-Systeme zitieren euch zwar, aber ein Wettbewerber deutlich häufiger. Eure Positionierung oder Tiefe reicht noch nicht aus.',
+        'new_question': 'Neue Fragen, die in KI-Prompts auftauchen und die ihr noch nicht beantwortet. Frühzeitig Content erstellen, bevor Wettbewerber das Thema besetzen.',
       };
 
       // Table wrapper (mobile scrollable)
@@ -6566,7 +6646,7 @@
           } else {
             var noData = document.createElement('p');
             noData.style.cssText = 'margin:0;font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
-            noData.textContent = 'Keine Detail-Daten verfuegbar.';
+            noData.textContent = 'Keine Detail-Daten verfügbar.';
             expContent.appendChild(noData);
           }
 
@@ -6602,10 +6682,13 @@
     }
 
     var data = state.dashboardDataCache[topicId];
-    if (!data) {
+    if (!data || data._error) {
       var errEl = document.createElement('div');
       errEl.className = 'cvz-card cvz-card-placeholder';
-      errEl.innerHTML = '<p class="cvz-card-placeholder-text">Noch keine Journey-Map-Daten vorhanden. Diese entstehen nach dem ersten vollstaendigen Analyse-Lauf.</p>' +
+      var errMsg = data && data._error
+        ? 'Journey-Map-Daten konnten nicht geladen werden.'
+        : 'Noch keine Journey-Map-Daten vorhanden. Diese entstehen nach dem ersten vollstaendigen Analyse-Lauf.';
+      errEl.innerHTML = '<p class="cvz-card-placeholder-text">' + escapeHtml(errMsg) + '</p>' +
         '<p style="margin-top:8px;"><button type="button" ' +
         'style="padding:6px 14px;font-size:13px;border-radius:6px;border:1px solid var(--cvz-border,#e5e7eb);' +
         'background:transparent;color:var(--cvz-text,#374151);cursor:pointer;" ' +
@@ -6857,7 +6940,7 @@
       ki_sichtbarkeit: 'KI-Sichtbarkeit',
       google_ranking:  'Google-Ranking',
       wettbewerb:      'Wettbewerb',
-      content_luecke:  'Content-Luecke',
+      content_luecke:  'Content-Lücke',
     };
     var IMPACT_COLOR_MAP = { hoch: '#e5484d', mittel: '#f2b13d', niedrig: '#8b98a5' };
     var IMPACT_LABEL_MAP = { hoch: 'Hoch', mittel: 'Mittel', niedrig: 'Niedrig' };
@@ -7094,7 +7177,7 @@
       });
     }
 
-    // Plattformen mit Veroeffentlichungs-Chance (immer zeigen wenn vorhanden)
+    // Plattformen mit Veröffentlichungs-Chance (immer zeigen wenn vorhanden)
     var publishable = (detail.source_profiles || []).filter(function (p) { return p.can_publish === true; });
     if (publishable.length > 0) {
       var platSection = document.createElement('div');
@@ -7102,12 +7185,12 @@
       platSection.style.marginTop = '28px';
       var platHeading = document.createElement('p');
       platHeading.className = 'cvz-section-label';
-      platHeading.textContent = 'Plattformen mit Veroeffentlichungs-Chance';
+      platHeading.textContent = 'Plattformen mit Veröffentlichungs-Chance';
       platSection.appendChild(platHeading);
       var platSub = document.createElement('p');
       platSub.className = 'cvz-card-placeholder-text';
       platSub.style.marginBottom = '12px';
-      platSub.textContent = 'Von KI-Modellen zitierte Plattformen, auf denen Nutzer eigene Inhalte veroeffentlichen koennen (Foren, Bewertungsportale, YouTube etc.).';
+      platSub.textContent = 'Von KI-Modellen zitierte Plattformen, auf denen Nutzer eigene Inhalte veröffentlichen können (Foren, Bewertungsportale, YouTube etc.).';
       platSection.appendChild(platSub);
       var platGrid = document.createElement('div');
       platGrid.className = 'cvz-opportunity-grid';
