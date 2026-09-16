@@ -56,6 +56,8 @@
     manualPromptDraftText: '',
     manualPromptDraftPhase: 'exploration',
     isSubmittingManualPrompt: false,
+    manualKeywordDraftText: '',
+    isSubmittingManualKeyword: false,
     citationTrendCache: {},
     isLoadingCitationTrend: false,
     showCreateForm: false,
@@ -1106,7 +1108,7 @@
     }
     var promptDelete = event.target.closest('[data-cvz-prompt-delete]');
     if (promptDelete) {
-      deleteManualPrompt(state.activeTopicId, promptDelete.getAttribute('data-cvz-prompt-delete'));
+      deactivatePrompt(state.activeTopicId, promptDelete.getAttribute('data-cvz-prompt-delete'));
       return;
     }
     var promptToggle = event.target.closest('[data-cvz-prompt-toggle]');
@@ -1119,6 +1121,16 @@
       var personaValue = personaFilter.getAttribute('data-cvz-persona-filter');
       state.activePersonaFilter = personaValue || null;
       render();
+      return;
+    }
+    var kwDeactivate = event.target.closest('[data-cvz-keyword-deactivate]');
+    if (kwDeactivate) {
+      deactivateKeyword(state.activeTopicId, kwDeactivate.getAttribute('data-cvz-keyword-deactivate'));
+      return;
+    }
+    var manualKeywordSubmit = event.target.closest('[data-cvz-manual-keyword-submit]');
+    if (manualKeywordSubmit) {
+      submitManualKeyword(manualKeywordSubmit.getAttribute('data-cvz-manual-keyword-submit'));
       return;
     }
     var keywordToggle = event.target.closest('[data-cvz-keyword-toggle]');
@@ -1736,10 +1748,10 @@
     render();
   }
 
-  async function deleteManualPrompt(topicId, promptId) {
+  async function deactivatePrompt(topicId, promptId) {
     var confirmed = await showCvzConfirm(
-      'Diesen selbst hinzugefügten Prompt wirklich löschen?',
-      { title: 'Prompt löschen?', confirmLabel: 'Löschen' }
+      'Diesen Prompt wirklich deaktivieren?',
+      { title: 'Prompt deaktivieren?', confirmLabel: 'Deaktivieren' }
     );
     if (!confirmed) return;
 
@@ -1749,13 +1761,66 @@
     }
 
     try {
-      await apiFetch('/topics/' + topicId + '/prompts/' + promptId, { method: 'DELETE' });
+      await apiFetch('/topics/' + topicId + '/prompts/' + promptId + '/deactivate', { method: 'PATCH' });
+      state.manualPromptDraftText = '';
       delete state.topicDetailCache[topicId];
       await openTopicDetail(topicId, false);
     } catch (e) {
-      console.error('[CVZ Visibility] Prompt konnte nicht gelöscht werden:', e);
-      await showCvzAlert('Prompt konnte nicht gelöscht werden: ' + (e.message || 'Unbekannter Fehler'));
+      console.error('[CVZ Visibility] Prompt konnte nicht deaktiviert werden:', e);
+      await showCvzAlert('Prompt konnte nicht deaktiviert werden: ' + (e.message || 'Unbekannter Fehler'));
     }
+  }
+
+  async function deactivateKeyword(topicId, keywordId) {
+    var confirmed = await showCvzConfirm(
+      'Dieses Keyword wirklich deaktivieren?',
+      { title: 'Keyword deaktivieren?', confirmLabel: 'Deaktivieren' }
+    );
+    if (!confirmed) return;
+
+    if (CONFIG.useMockData) {
+      await showCvzAlert('Im Mock-Modus nicht verfügbar.');
+      return;
+    }
+
+    try {
+      await apiFetch('/topics/' + topicId + '/keywords/' + keywordId + '/deactivate', { method: 'PATCH' });
+      state.manualKeywordDraftText = '';
+      delete state.topicDetailCache[topicId];
+      await openTopicDetail(topicId, false);
+    } catch (e) {
+      console.error('[CVZ Visibility] Keyword konnte nicht deaktiviert werden:', e);
+      await showCvzAlert('Keyword konnte nicht deaktiviert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+  }
+
+  async function submitManualKeyword(topicId) {
+    if (state.isSubmittingManualKeyword) return;
+    var kw = (state.manualKeywordDraftText || '').trim();
+    if (!kw) return;
+
+    state.isSubmittingManualKeyword = true;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        await showCvzAlert('Im Mock-Modus nicht verfügbar.');
+      } else {
+        await apiFetch('/topics/' + topicId + '/keywords', {
+          method: 'POST',
+          body: { keyword: kw },
+        });
+        state.manualKeywordDraftText = '';
+        delete state.topicDetailCache[topicId];
+        await openTopicDetail(topicId, false);
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Keyword konnte nicht angelegt werden:', e);
+      await showCvzAlert('Keyword konnte nicht angelegt werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.isSubmittingManualKeyword = false;
+    render();
   }
 
   async function cancelArchiveTopic(topicId) {
