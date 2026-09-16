@@ -2878,14 +2878,14 @@
     var html = '';
     var maturity = detail.data_maturity || {};
 
-    var THIN_DATA_NOTE = '<p class="cvz-thin-data-note">Datenbasis hierf\u00fcr noch d\u00fcnn \u2014 die Einschätzung wird mit mehr gesammelten Daten pr\u00e4ziser.</p>';
+    var THIN_DATA_NOTE = '<p class="cvz-thin-data-note">Datenbasis hierf\u00fcr noch d\u00fcnn, die Einsch\u00e4tzung wird mit mehr gesammelten Daten pr\u00e4ziser.</p>';
 
     var strength = detail.competitor_strength;
     if (strength && strength.strongest_domain) {
       html += '<div class="cvz-summary-subsection">' +
         '<p class="cvz-section-label">St\u00e4rkster Wettbewerber</p>' +
         '<p class="cvz-summary-text"><strong>' + escapeHtml(strength.strongest_domain) + '</strong>' +
-        (strength.reasoning ? ' \u2014 ' + escapeHtml(strength.reasoning) : '') +
+        (strength.reasoning ? ': ' + escapeHtml(strength.reasoning) : '') +
         '</p>' +
         (maturity.wettbewerber_duenn ? THIN_DATA_NOTE : '') +
         '</div>';
@@ -3434,12 +3434,18 @@
     var activeDomains = detail.competitor_domains || [];
     var isOpen = !!state.competitorManageOpen[topicId];
 
+    var competitorToggleRow = document.createElement('div');
+    competitorToggleRow.style.cssText = 'display:flex;align-items:center;gap:6px;';
     var toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
     toggleBtn.className = 'cvz-create-toggle-btn';
     toggleBtn.setAttribute('data-cvz-competitor-manage-toggle', topicId);
     toggleBtn.textContent = (isOpen ? '\u2212 ' : '+ ') + 'Wettbewerber bearbeiten (' + activeDomains.length + ' aktiv)';
-    section.appendChild(toggleBtn);
+    competitorToggleRow.appendChild(toggleBtn);
+    competitorToggleRow.appendChild(makeTip(
+      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden in den KI-Antworten markiert und im Wettbewerber-Tab analysiert. Das System zeigt dann, wie oft diese Domains statt eurer zitiert werden. Bereits zitierte Domains aus vergangenen L\u00e4ufen werden als Vorschl\u00e4ge angezeigt.'
+    ));
+    section.appendChild(competitorToggleRow);
 
     if (!isOpen) return section;
 
@@ -4718,14 +4724,30 @@
       return wrap;
     }
 
-    wrap.innerHTML =
+    // Label mit Tooltip
+    var kwLabelRow = document.createElement('div');
+    kwLabelRow.style.cssText = 'display:flex;align-items:center;margin-bottom:6px;';
+    var kwLabel = document.createElement('span');
+    kwLabel.className = 'cvz-section-label';
+    kwLabel.style.margin = '0';
+    kwLabel.textContent = 'Eigenes Keyword hinzuf\u00fcgen';
+    kwLabelRow.appendChild(kwLabel);
+    kwLabelRow.appendChild(makeTip(
+      'Keywords, die du hier hinzuf\u00fcgst, werden beim n\u00e4chsten Datenlauf in die GSC-Abfrage einbezogen und mit KI-Pr\u00e4senz verglichen. Sie erscheinen sofort in der Liste, bekommen aber erst Daten, wenn der n\u00e4chste Lauf abgeschlossen ist.'
+    ));
+    wrap.appendChild(kwLabelRow);
+
+    var kwInputRow = document.createElement('div');
+    kwInputRow.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
+    kwInputRow.innerHTML =
       '<input type="text" id="cvz-manual-keyword-input" class="cvz-changelog-custom-input" style="flex:1;min-width:140px;" ' +
-        'placeholder="Eigenes Keyword hinzuf\u00fcgen (' + manualCount + '/' + MAX_MANUAL_KEYWORDS + ')" ' +
+        'placeholder="z.B. landingpage optimierung" ' +
         'value="' + escapeHtml(state.manualKeywordDraftText || '') + '">' +
       '<button type="button" class="cvz-changelog-submit-btn" data-cvz-manual-keyword-submit="' + topicId + '" ' +
         (state.isSubmittingManualKeyword ? 'disabled' : '') + '>' +
         (state.isSubmittingManualKeyword ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
       '</button>';
+    wrap.appendChild(kwInputRow);
 
     var inputEl = wrap.querySelector('#cvz-manual-keyword-input');
     inputEl.addEventListener('input', function () {
@@ -4750,14 +4772,41 @@
       return wrap;
     }
 
+    // Zwei Zeilen: Label+Tooltip oben, Eingabe unten
+    var promptLabelRow = document.createElement('div');
+    promptLabelRow.style.cssText = 'display:flex;align-items:center;margin-bottom:6px;';
+    var promptLabel = document.createElement('span');
+    promptLabel.className = 'cvz-section-label';
+    promptLabel.style.margin = '0';
+    promptLabel.textContent = 'Eigenen Prompt hinzuf\u00fcgen';
+    promptLabelRow.appendChild(promptLabel);
+    promptLabelRow.appendChild(makeTip(
+      'Prompts sind die konkreten Fragen, die potenzielle Kunden bei ChatGPT, Gemini & Co. stellen. Das System sendet sie in regelm\u00e4\u00dfigen Abst\u00e4nden an die KI-Systeme und pr\u00fcft, ob deine Domain in der Antwort vorkommt. Neue Prompts bekommen erst Daten nach dem n\u00e4chsten Lauf.'
+    ));
+    wrap.appendChild(promptLabelRow);
+
+    var phaseLabelRow = document.createElement('div');
+    phaseLabelRow.style.cssText = 'display:flex;align-items:center;margin-bottom:6px;';
+    var phaseLabel = document.createElement('span');
+    phaseLabel.className = 'cvz-section-label';
+    phaseLabel.style.margin = '0';
+    phaseLabel.textContent = 'Journey-Phase';
+    phaseLabelRow.appendChild(phaseLabel);
+    phaseLabelRow.appendChild(makeTip(
+      'Exploration: breite, informationelle Fragen ("Was ist..."). Evaluation: konkrete Anbieter- oder Produktfragen. Vergleich: Alternativen gegeneinander. Entscheidung: kaufbereit, sucht letzten Anstoss. Die Phase bestimmt, wo dein Prompt im Dashboard angezeigt wird.'
+    ));
+    wrap.appendChild(phaseLabelRow);
+
     var phaseOptionsHtml = PHASE_ORDER.map(function (phase) {
       return '<option value="' + phase + '"' + (state.manualPromptDraftPhase === phase ? ' selected' : '') + '>' +
         escapeHtml(PHASE_LABELS[phase] || phase) + '</option>';
     }).join('');
 
-    wrap.innerHTML =
+    var promptInputRow = document.createElement('div');
+    promptInputRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;';
+    promptInputRow.innerHTML =
       '<textarea id="cvz-manual-prompt-input" class="cvz-changelog-input" rows="1" ' +
-        'placeholder="Eigenen Prompt hinzuf\u00fcgen (' + manualCount + '/' + MAX_MANUAL_PROMPTS + ')">' +
+        'placeholder="z.B. Welches CRO-Tool lohnt sich f\u00fcr B2B-SaaS?">' +
         escapeHtml(state.manualPromptDraftText || '') +
       '</textarea>' +
       '<select id="cvz-manual-prompt-phase" class="cvz-changelog-custom-input" style="max-width:160px;">' +
@@ -4767,6 +4816,7 @@
         (state.isSubmittingManualPrompt ? 'disabled' : '') + '>' +
         (state.isSubmittingManualPrompt ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
       '</button>';
+    wrap.appendChild(promptInputRow);
 
     var textareaEl = wrap.querySelector('#cvz-manual-prompt-input');
     textareaEl.addEventListener('input', function () {
@@ -4869,10 +4919,17 @@
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
+    var gscHeadRow = document.createElement('div');
+    gscHeadRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:10px;';
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
     heading.textContent = 'Google-Search-Console-Performance';
-    section.appendChild(heading);
+    gscHeadRow.appendChild(heading);
+    gscHeadRow.appendChild(makeTip(
+      'Hier siehst du Keywords, bei denen du in Google auf Position 20+ rankst und mindestens 50 Impressionen hast ("Near-Miss"-Keywords). Das sind Seiten, die knapp an Seite 1 vorbeischrammen, mit gezielter Optimierung oft schnell verbesserbar.'
+    ));
+    section.appendChild(gscHeadRow);
 
     var refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
@@ -5114,6 +5171,20 @@
     return div.innerHTML;
   }
 
+  /**
+   * Erstellt ein [?]-Tooltip-Icon als DOM-Element.
+   * @param {string} text  Der Erklaerungstext der im Hover-Popup erscheint.
+   * @param {string} [dir] Optional: 'right' oeffnet den Tooltip nach rechts statt oben.
+   */
+  function makeTip(text, dir) {
+    var span = document.createElement('span');
+    span.className = 'cvz-tip' + (dir === 'right' ? ' cvz-tip-right' : '');
+    span.textContent = '?';
+    span.setAttribute('data-cvz-tip', text);
+    span.setAttribute('aria-label', text);
+    return span;
+  }
+
   // =========================================================================
   // NEU (16.09.2026): JOURNEY-MAP-TAB
   // Zeigt Phase-Scores (Zitierrate 0-100 % pro Kanal), Share-of-Voice der
@@ -5313,7 +5384,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '12px';
-    sub.textContent = 'Halte fest, wann ihr was geändert habt — so könnt ihr später sehen, ob sich die Sichtbarkeit danach verändert hat.';
+    sub.textContent = 'Halte fest, wann ihr was geändert habt, so könnt ihr später sehen, ob sich die Sichtbarkeit danach verändert hat.';
     section.appendChild(sub);
 
     // Form
@@ -5614,9 +5685,9 @@
       '.cvz-gsc-row-clickable:hover { background: rgba(79, 209, 197, 0.06); }' +
 
       '.cvz-phase-heading { font-family: "Syne", sans-serif; font-size: 14px; margin: 16px 0 8px; color: var(--cvz-text-muted); }' +
-      '.cvz-prompt-list { display: flex; flex-direction: column; gap: 4px; }' +
-      '.cvz-prompt-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 14px; }' +
-      '.cvz-prompt-text { flex: 1; }' +
+      '.cvz-prompt-list { display: flex; flex-direction: column; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch; }' +
+      '.cvz-prompt-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 14px; min-width: max-content; }' +
+      '.cvz-prompt-text { flex: 1; min-width: 160px; }' +
       '.cvz-prompt-source { font-size: 11px; color: var(--cvz-text-muted); }' +
       '.cvz-prompt-citation-count { font-size: 11px; color: var(--cvz-teal); white-space: nowrap; }' +
       '.cvz-prompt-delete-btn {' +
@@ -5833,7 +5904,47 @@
       '.cvz-prompt-source-summary {font-size: 12px; color: var(--cvz-text-muted); margin-bottom: 8px; padding: 5px 8px; background: var(--cvz-navy-raised); border-radius: 4px; font-variant-numeric: tabular-nums; }' +
       '.cvz-competitor-url-row { overflow: hidden; white-space: nowrap; max-width: 100%; }' +
       '.cvz-competitor-url {display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cvz-teal); font-size: 12px; text-decoration: none; max-width: 100%; }' +
-      '.cvz-competitor-url:hover { text-decoration: underline; }';
+      '.cvz-competitor-url:hover { text-decoration: underline; }' +
+
+      /* Tooltip-Komponente: [?] Icon mit Hover-Popup */
+      '.cvz-tip {' +
+        'position:relative;display:inline-block;' +
+        'font-size:11px;font-weight:700;line-height:1;' +
+        'width:16px;height:16px;text-align:center;' +
+        'border-radius:50%;border:1px solid var(--cvz-border,#232b36);' +
+        'color:var(--cvz-text-muted,#8b98a5);background:var(--cvz-navy-raised,#141b24);' +
+        'cursor:default;vertical-align:middle;margin-left:5px;flex-shrink:0;' +
+        'user-select:none;' +
+      '}' +
+      '.cvz-tip::after {' +
+        'content:attr(data-cvz-tip);' +
+        'position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);' +
+        'min-width:200px;max-width:280px;' +
+        'padding:8px 10px;' +
+        'background:#1e2a36;border:1px solid var(--cvz-border,#232b36);border-radius:4px;' +
+        'font-size:12px;font-weight:400;line-height:1.5;' +
+        'color:var(--cvz-text,#e6edf3);text-align:left;white-space:normal;' +
+        'box-shadow:0 4px 16px rgba(0,0,0,.4);' +
+        'pointer-events:none;opacity:0;transition:opacity .15s ease;' +
+        'z-index:1000;' +
+      '}' +
+      '.cvz-tip:hover::after { opacity:1; }' +
+      /* Pfeil nach unten zeigend */
+      '.cvz-tip::before {' +
+        'content:"";' +
+        'position:absolute;bottom:calc(100% + 2px);left:50%;transform:translateX(-50%);' +
+        'border:5px solid transparent;border-top:5px solid var(--cvz-border,#232b36);' +
+        'pointer-events:none;opacity:0;transition:opacity .15s ease;z-index:1001;' +
+      '}' +
+      '.cvz-tip:hover::before { opacity:1; }' +
+      /* Variante: Tooltip öffnet sich nach rechts (für Elemente am linken Rand) */
+      '.cvz-tip-right::after {' +
+        'left:calc(100% + 8px);bottom:auto;top:50%;transform:translateY(-50%);' +
+      '}' +
+      '.cvz-tip-right::before {' +
+        'left:calc(100% + 0px);bottom:auto;top:50%;transform:translateY(-50%);' +
+        'border:5px solid transparent;border-right:5px solid var(--cvz-border,#232b36);border-top:none;' +
+      '}';
 
     document.head.appendChild(style);
   }
@@ -5891,17 +6002,16 @@
     return cleaned;
   }
 
-  // ─── VISIBILITY COMPARISON CHART ─────────────────────────────────────────
-  // Zeigt pro Journey-Phase: eigene Zitierrate (teal) vs. Top-3-Wettbewerber
-  // (konsistente Farben ueber alle Phasen hinweg). Wird in renderSituationTab
-  // nach der kompakten Phasen-Scorecard eingeblendet.
+  // --- VISIBILITY COMPARISON CHART ---
+  // Zeigt per Liniendiagramm: eigene Zitierrate pro Journey-Phase vs. Top-3-Wettbewerber.
+  // X-Achse = 4 Journey-Phasen, Y-Achse = Zitierrate 0-100 %.
   function renderVisibilityComparisonChart(topicId, detail) {
     var dashData = state.dashboardDataCache[topicId];
     if (!dashData || !dashData.phase_scores) return null;
 
     var sov = dashData.share_of_voice || {};
 
-    // Top-3-Wettbewerber ermitteln: Summe der citation_rate ueber alle Phasen
+    // Top-3-Wettbewerber: Summe der citation_rate ueber alle Phasen
     var compTotals = {};
     PHASE_ORDER.forEach(function (phase) {
       (sov[phase] || []).forEach(function (c) {
@@ -5912,7 +6022,6 @@
       .sort(function (a, b) { return compTotals[b] - compTotals[a]; })
       .slice(0, 3);
 
-    // Kein Chart ohne Wettbewerber-Daten
     if (topComps.length === 0) return null;
 
     var COMP_COLORS = ['#f2b13d', '#f87171', '#a78bfa'];
@@ -5930,13 +6039,10 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. staerkste Wettbewerber (0-100 %).';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. st\u00e4rkste Wettbewerber (Zitierrate in %).';
     section.appendChild(sub);
 
-    // Legende
-    var legend = document.createElement('div');
-    legend.style.cssText = 'display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;';
-
+    // Favicon-Hilfsfunktion
     function _faviconImg(domain) {
       var img = document.createElement('img');
       img.src = 'https://www.google.com/s2/favicons?sz=16&domain=' + encodeURIComponent(domain);
@@ -5945,13 +6051,17 @@
       return img;
     }
 
+    // Legende
+    var legend = document.createElement('div');
+    legend.style.cssText = 'display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;';
+
     function _legendItem(label, color, own, domain) {
       var item = document.createElement('div');
       item.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;' +
         (own ? 'color:var(--cvz-text,#e6edf3);font-weight:600;' : 'color:var(--cvz-text-muted,#8b98a5);');
-      var dot = document.createElement('span');
-      dot.style.cssText = 'width:10px;height:10px;border-radius:2px;background:' + color + ';flex-shrink:0;' + (own ? '' : 'opacity:.7;');
-      item.appendChild(dot);
+      var swatch = document.createElement('span');
+      swatch.style.cssText = 'width:24px;height:3px;border-radius:2px;background:' + color + ';flex-shrink:0;' + (own ? '' : 'opacity:.75;');
+      item.appendChild(swatch);
       if (domain) item.appendChild(_faviconImg(domain));
       item.appendChild(document.createTextNode(label));
       return item;
@@ -5963,98 +6073,66 @@
     });
     section.appendChild(legend);
 
-    // Chart-Card: ein Block pro Phase
-    var chartCard = document.createElement('div');
-    chartCard.className = 'cvz-card';
-    chartCard.style.cssText = 'padding:16px 18px;display:flex;flex-direction:column;gap:18px;';
+    // Datenpunkte aufbauen
+    var SVG_W = 580, SVG_P = 32;
+    var xLabels = ['Exploration', 'Evaluation', 'Vergleich', 'Entscheidung'];
 
-    PHASE_ORDER.forEach(function (phase) {
-      var scores   = (dashData.phase_scores || {})[phase] || {};
-      var phColor  = PHASE_COLORS[phase] || '#8b98a5';
-      var phComps  = sov[phase] || [];
-
-      // Eigene Rate: Durchschnitt ueber Kanaele mit Daten
-      var totalScore = 0, channelCount = 0, maxTotal = 0;
+    // Eigene Zitierrate: Durchschnitt ueber Kanaele mit Daten
+    var ownValues = PHASE_ORDER.map(function (phase) {
+      var scores = dashData.phase_scores[phase] || {};
+      var total = 0, count = 0;
       CHANNEL_ORDER.forEach(function (ch) {
         var s = scores[ch];
-        if (s && s.total > 0) {
-          totalScore += (s.score || 0);
-          channelCount++;
-          if (s.total > maxTotal) maxTotal = s.total;
-        }
+        if (s && s.total > 0) { total += (s.score || 0); count++; }
       });
-      var ownPct = channelCount > 0 ? Math.round(totalScore / channelCount) : 0;
-
-      // Phase-Block
-      var phBlock = document.createElement('div');
-
-      // Phase-Kopfzeile
-      var phHdr = document.createElement('div');
-      phHdr.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:7px;';
-      var phDot = document.createElement('span');
-      phDot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + phColor + ';flex-shrink:0;';
-      var phLblEl = document.createElement('span');
-      phLblEl.style.cssText = 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:' + phColor + ';';
-      phLblEl.textContent = PHASE_LABELS[phase] || phase;
-      phHdr.appendChild(phDot);
-      phHdr.appendChild(phLblEl);
-      if (maxTotal > 0) {
-        var promptCtEl = document.createElement('span');
-        promptCtEl.style.cssText = 'font-size:10px;color:var(--cvz-text-muted,#8b98a5);';
-        promptCtEl.textContent = '(' + maxTotal + ' Prompts)';
-        phHdr.appendChild(promptCtEl);
-      }
-      phBlock.appendChild(phHdr);
-
-      // Balken-Zeilen
-      var rows = [{ label: ownDomain, pct: ownPct, color: '#4fd1c5', own: true }];
-      topComps.forEach(function (domain, i) {
-        var entry = phComps.filter(function (c) { return c.domain === domain; })[0];
-        var pct = entry ? Math.round((entry.citation_rate || 0) * 100) : 0;
-        rows.push({ label: domain, pct: pct, color: COMP_COLORS[i], own: false });
-      });
-
-      rows.forEach(function (row) {
-        var barRow = document.createElement('div');
-        barRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:3px;';
-
-        var domCell = document.createElement('div');
-        domCell.style.cssText = 'flex-shrink:0;width:150px;display:flex;align-items:center;gap:4px;overflow:hidden;';
-        domCell.appendChild(_faviconImg(row.label));
-        var domLbl = document.createElement('span');
-        domLbl.style.cssText =
-          'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;' +
-          (row.own
-            ? 'color:var(--cvz-text,#e6edf3);font-weight:600;'
-            : 'color:var(--cvz-text-muted,#8b98a5);');
-        domLbl.title = row.label;
-        domLbl.textContent = row.label;
-        domCell.appendChild(domLbl);
-        barRow.appendChild(domCell);
-
-        var track = document.createElement('div');
-        track.style.cssText = 'flex:1 1 0;height:10px;background:var(--cvz-border,#232b36);border-radius:5px;overflow:hidden;position:relative;';
-        var fill = document.createElement('div');
-        fill.style.cssText =
-          'position:absolute;left:0;top:0;bottom:0;border-radius:5px;' +
-          'width:' + row.pct + '%;background:' + row.color + ';' +
-          (row.own ? '' : 'opacity:.75;');
-        track.appendChild(fill);
-        barRow.appendChild(track);
-
-        var pctEl = document.createElement('span');
-        pctEl.style.cssText =
-          'flex-shrink:0;width:34px;text-align:right;font-size:11px;' +
-          (row.own ? 'font-weight:700;color:#4fd1c5;' : 'color:var(--cvz-text-muted,#8b98a5);');
-        pctEl.textContent = row.pct + '%';
-        barRow.appendChild(pctEl);
-
-        phBlock.appendChild(barRow);
-      });
-
-      chartCard.appendChild(phBlock);
+      return count > 0 ? Math.round(total / count) : 0;
     });
 
+    var seriesList = [{ label: ownDomain, color: '#4fd1c5', values: ownValues }];
+
+    // Wettbewerber-Zitierraten pro Phase
+    topComps.forEach(function (domain, i) {
+      var values = PHASE_ORDER.map(function (phase) {
+        var entry = (sov[phase] || []).filter(function (c) { return c.domain === domain; })[0];
+        return entry ? Math.round((entry.citation_rate || 0) * 100) : 0;
+      });
+      seriesList.push({ label: domain, color: COMP_COLORS[i], values: values });
+    });
+
+    // Chart-Karte
+    var chartCard = document.createElement('div');
+    chartCard.className = 'cvz-card';
+    chartCard.style.cssText = 'padding:16px 18px;';
+
+    // SVG einbetten
+    var svgWrap = document.createElement('div');
+    svgWrap.style.cssText = 'position:relative;';
+    svgWrap.innerHTML = buildLineChartSvg(seriesList, xLabels, { maxY: 100, height: 200, width: SVG_W });
+    var svgNode = svgWrap.querySelector('svg');
+    if (svgNode) {
+      svgNode.style.cssText = 'width:100%;display:block;';
+      svgNode.removeAttribute('width');
+      svgNode.removeAttribute('height');
+    }
+
+    // X-Achsen-Labels: als absolut positionierte Spans unter dem SVG
+    // Die Chart-Punkte liegen bei x = SVG_P + i * stepX (in SVG-Koordinaten)
+    // => als % von SVG_W gibt das die korrekte Position im responsiven SVG.
+    var stepX = (SVG_W - SVG_P * 2) / (xLabels.length - 1);
+    var labelRow = document.createElement('div');
+    labelRow.style.cssText = 'position:relative;height:18px;margin-top:3px;';
+    xLabels.forEach(function (lbl, i) {
+      var pct = ((SVG_P + i * stepX) / SVG_W * 100).toFixed(2) + '%';
+      var el = document.createElement('span');
+      el.style.cssText =
+        'position:absolute;left:' + pct + ';transform:translateX(-50%);' +
+        'font-size:10px;color:var(--cvz-text-muted,#8b98a5);white-space:nowrap;';
+      el.textContent = lbl;
+      labelRow.appendChild(el);
+    });
+    svgWrap.appendChild(labelRow);
+
+    chartCard.appendChild(svgWrap);
     section.appendChild(chartCard);
     return section;
   }
@@ -6073,10 +6151,17 @@
       // Kompakte Phasen-Scorecard (eigene Zitierrate als Balken)
       var phaseSection = document.createElement('div');
       phaseSection.className = 'cvz-section';
+      var phaseHeadRow = document.createElement('div');
+      phaseHeadRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:4px;';
       var phaseHeading = document.createElement('p');
       phaseHeading.className = 'cvz-section-label';
+      phaseHeading.style.margin = '0';
       phaseHeading.textContent = 'KI-Sichtbarkeit nach Journey-Phase';
-      phaseSection.appendChild(phaseHeading);
+      phaseHeadRow.appendChild(phaseHeading);
+      phaseHeadRow.appendChild(makeTip(
+        'Anteil der Prompts in jeder Phase, in denen eure Domain in der KI-Antwort vorkommt. 0 % = nie zitiert, 100 % = immer zitiert. Werte ueber 40 % gelten als stark. Klickt auf den Tab "Prompts nach Phase", um die einzelnen Prompts und Antworten zu sehen.'
+      ));
+      phaseSection.appendChild(phaseHeadRow);
       var phaseSub = document.createElement('p');
       phaseSub.className = 'cvz-card-placeholder-text';
       phaseSub.style.marginBottom = '12px';
@@ -6156,11 +6241,18 @@
       var oppSection = document.createElement('div');
       oppSection.className = 'cvz-section';
 
-      // Heading
+      // Heading mit Tooltip
+      var oppHeadRow = document.createElement('div');
+      oppHeadRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
       var oppHeading = document.createElement('p');
       oppHeading.className = 'cvz-section-label';
+      oppHeading.style.margin = '0';
       oppHeading.textContent = 'Wichtigste Handlungsfelder';
-      oppSection.appendChild(oppHeading);
+      oppHeadRow.appendChild(oppHeading);
+      oppHeadRow.appendChild(makeTip(
+        'Das System erkennt automatisch Chancen aus deinen KI-Sichtbarkeits- und GSC-Daten: wo du fast rankst, wo Konkurrenten dich verdraengen, wo neue Fragen auftauchen. Jede Zeile aufklappen, um die konkreten Keywords oder Domains dahinter zu sehen.'
+      ));
+      oppSection.appendChild(oppHeadRow);
 
       // Subtitle
       var oppSub = document.createElement('p');
@@ -6187,6 +6279,16 @@
         'competitor_citation': 'Analysieren, welche Inhalte die haeufig zitierten Domains zu diesem Thema haben, und aehnliche Inhalte mit klarer Differenzierung erstellen (eigene Daten, Expertise, Perspektive).',
         'ai_visible_competitor_dominates': 'Eigene Leitseite zum Thema erstellen: strukturierte Antwort auf die Top-Fragen, mit nachpruefbaren Fakten und klarer Autorenschaft, damit KI-Systeme sie als Alternative zitieren.',
         'new_question': 'Diese neuen Suchintentionen fruehzeitig besetzen: dedizierten Content erstellen, bevor der Wettbewerb aufholt. FAQ-Block oder eigenstaendige Seite je nach Volumen.',
+      };
+
+      // Erklaerungstexte fuer die Typ-Chips (werden als Tooltip am Chip angezeigt)
+      var OPP_TYPE_TOOLTIPS = {
+        'near_miss_ranking': 'Ihr ranktet schon auf Seite 2 fuer dieses Keyword (Position 20+, mind. 50 Impressionen). Kleine SEO-Hebel koennen hier schnell auf Seite 1 bringen.',
+        'high_demand_low_visibility': 'Dieses Keyword hat viel Suchvolumen, aber ihr seid weder in Google noch in KI-Antworten sichtbar. Grosses Potenzial, noch kein Fuss in der Tuer.',
+        'google_visible_ai_invisible': 'Ihr ranktet gut in Google, aber KI-Systeme wie ChatGPT zitieren euch nicht. Bestehender Content muss "KI-tauglicher" werden.',
+        'competitor_citation': 'Eine konkrete Wettbewerber-Domain wird regelmaessig an eurer Stelle zitiert. Hier lohnt sich ein direkter Inhaltsvergleich.',
+        'ai_visible_competitor_dominates': 'KI-Systeme zitieren euch zwar, aber ein Wettbewerber deutlich haeufiger. Eure Positionierung oder Tiefe reicht noch nicht aus.',
+        'new_question': 'Neue Fragen, die in KI-Prompts auftauchen und die ihr noch nicht beantwortet. Fruehzeitig Content erstellen, bevor Wettbewerber das Thema besetzen.',
       };
 
       // Table wrapper (mobile scrollable)
@@ -6231,9 +6333,11 @@
         tdToggle.textContent = isExpanded ? '▾' : '▸';
         tr.appendChild(tdToggle);
 
-        // Col 1: Typ chip
+        // Col 1: Typ chip (mit Tooltip)
         var tdTyp = document.createElement('td');
         tdTyp.style.cssText = 'padding:12px 10px;vertical-align:top;';
+        var chipWrap = document.createElement('div');
+        chipWrap.style.cssText = 'display:flex;align-items:center;gap:5px;';
         var chip = document.createElement('span');
         chip.textContent = typeLabel;
         chip.style.cssText =
@@ -6241,7 +6345,10 @@
           'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
           'padding:3px 8px;border-radius:9999px;white-space:nowrap;' +
           'color:' + tcfg.color + ';background:' + tcfg.bg + ';border:1px solid ' + tcfg.border + ';';
-        tdTyp.appendChild(chip);
+        chipWrap.appendChild(chip);
+        var tipText = OPP_TYPE_TOOLTIPS[opp.opportunity_type];
+        if (tipText) chipWrap.appendChild(makeTip(tipText));
+        tdTyp.appendChild(chipWrap);
         tr.appendChild(tdTyp);
 
         // Col 2: Beschreibung
