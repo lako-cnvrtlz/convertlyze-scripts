@@ -2429,6 +2429,24 @@
     var tabContent = document.createElement('div');
     tabContent.className = 'cvz-tab-content';
 
+    // Solange Dashboard-Daten geladen werden: ganzen Tab-Inhalt sperren
+    if (state.isLoadingDashboard) {
+      var loadingFull = document.createElement('div');
+      loadingFull.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;gap:12px;';
+      var spinner = document.createElement('span');
+      spinner.className = 'cvz-spinner';
+      spinner.style.cssText = 'width:22px;height:22px;border-width:3px;';
+      var loadingText = document.createElement('p');
+      loadingText.className = 'cvz-card-placeholder-text';
+      loadingText.style.margin = '0';
+      loadingText.textContent = 'KI-Sichtbarkeitsdaten werden geladen…';
+      loadingFull.appendChild(spinner);
+      loadingFull.appendChild(loadingText);
+      tabContent.appendChild(loadingFull);
+      wrap.appendChild(tabContent);
+      return wrap;
+    }
+
     // GEÄNDERT (16.09.2026): 5 fokussierte Views statt 7 Tabs
     switch (state.activeSubTab) {
       case 'journey':
