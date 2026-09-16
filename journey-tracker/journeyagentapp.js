@@ -317,6 +317,9 @@
             top_serp_results: q.top_serp_results || null,
             serp_features: q.serp_features || null,
             serp_checked_at: q.serp_checked_at || null,
+            // NEU (16.09.2026): URL der rankenden Seite durchreichen (gespeichert
+            // via save_gsc_near_miss als page_url in search_queries).
+            page_url: q.page_url || null,
           };
         }),
       prompts: (data.prompts || []).map(function (p) {
@@ -1025,13 +1028,15 @@
     );
   }
 
-  // GEÄNDERT (16.09.2026): 7 Tabs → 4 fokussierte Views (Kundenwunsch:
-  // Marketer-freundliches Frontend mit klarer Struktur).
+  // GEÄNDERT (16.09.2026): 7 Tabs → 5 fokussierte Views (Kundenwunsch:
+  // Marketer-freundliches Frontend mit klarer Struktur; "Daten"-Tab
+  // bewahrt den Zugang zu Keywords, Prompts und GSC).
   var TOPIC_TABS = [
     { id: 'situation', label: 'Situation' },
     { id: 'journey', label: 'Journey Map' },
     { id: 'aktionsplan', label: 'Aktionsplan' },
     { id: 'verlauf', label: 'Verlauf' },
+    { id: 'daten', label: 'Daten' },
   ];
 
   var DOMAIN_TABS = [
@@ -2384,7 +2389,7 @@
     var tabContent = document.createElement('div');
     tabContent.className = 'cvz-tab-content';
 
-    // GEÄNDERT (16.09.2026): 4 fokussierte Views statt 7 Tabs
+    // GEÄNDERT (16.09.2026): 5 fokussierte Views statt 7 Tabs
     switch (state.activeSubTab) {
       case 'journey':
         tabContent.appendChild(renderJourneyMapTab(state.activeTopicId, detail));
@@ -2395,6 +2400,18 @@
       case 'verlauf':
         tabContent.appendChild(renderVerlaufTab(state.activeTopicId, detail));
         break;
+      case 'daten': {
+        // Keywords (thematische, ohne GSC near-miss)
+        var thematicKws = (detail.search_queries || []).filter(function (q) { return q.source !== 'gsc_near_miss'; });
+        tabContent.appendChild(renderKeywordsTable(thematicKws, true, detail.changelog));
+        var posInsight = renderPositioningInsight(detail.positioning_insight);
+        if (posInsight) tabContent.appendChild(posInsight);
+        // Prompts nach Phase
+        tabContent.appendChild(renderPromptsByPhase(detail.prompts, true, detail.changelog));
+        // GSC-Performance
+        tabContent.appendChild(renderGscBlock(detail.gsc_rows, state.activeTopicId, detail.changelog));
+        break;
+      }
       case 'situation':
       default:
         tabContent.appendChild(renderSituationTab(state.activeTopicId, detail));
@@ -5997,15 +6014,15 @@
   }
 
   // ─── AKTIONSPLAN ──────────────────────────────────────────────────────────
-  // Priorisierte, unified Action-Liste: alle Opportunities + Content-Ideen
-  // + Keywords mit Ranking-Chance, nach Impact-Priorität sortiert.
+  // Strukturierte Aktions-Karten: Situation / Was rankt & wird zitiert / Empfehlung.
+  // Priorisiert nach Impact; near-miss Keywords mit URL, Position und SERP-Kontext.
   function renderAktionsplanTab(detail) {
     var wrap = document.createElement('div');
 
     var intro = document.createElement('p');
     intro.className = 'cvz-card-placeholder-text';
     intro.style.marginBottom = '20px';
-    intro.textContent = 'Alle konkreten Aktionen nach Hebel-Wirkung sortiert. Oben = groesster Impact zuerst.';
+    intro.textContent = 'Alle Aktionen nach Impact priorisiert. Jede Karte erklaert die Situation, was dort rankt oder zitiert wird, und gibt eine konkrete Empfehlung.';
     wrap.appendChild(intro);
 
     var PRIORITY_ORDER = [
@@ -6014,52 +6031,88 @@
       'ai_visible_competitor_dominates', 'new_question',
     ];
     var PRIORITY_IMPACT = {
-      near_miss_ranking:               { label: 'Hoch', color: '#dc2626' },
-      high_demand_low_visibility:      { label: 'Hoch', color: '#dc2626' },
-      google_visible_ai_invisible:     { label: 'Mittel', color: '#d97706' },
-      competitor_citation:             { label: 'Mittel', color: '#d97706' },
-      ai_visible_competitor_dominates: { label: 'Mittel', color: '#d97706' },
+      near_miss_ranking:               { label: 'Hoch',    color: '#dc2626' },
+      high_demand_low_visibility:      { label: 'Hoch',    color: '#dc2626' },
+      google_visible_ai_invisible:     { label: 'Mittel',  color: '#d97706' },
+      competitor_citation:             { label: 'Mittel',  color: '#d97706' },
+      ai_visible_competitor_dominates: { label: 'Mittel',  color: '#d97706' },
       new_question:                    { label: 'Niedrig', color: '#6b7280' },
     };
+    // Erklaerende Situation-Texte je Opportunity-Typ
+    var SITUATION_TEXT = {
+      near_miss_ranking:
+        'Laut eurer Search Console erzeugen diese Keywords bereits reale Impressionen, ranken aber noch ausserhalb der Top 5. Mit gezielten On-Page-Anpassungen ist Seite 1 realistisch.',
+      high_demand_low_visibility:
+        'Dieses Thema wird haeufig gesucht, aber in KI-Antworten seid ihr kaum vertreten. Fruehzeitige Praesenz sichert langfristige Sichtbarkeit in AI-Kanaelen.',
+      google_visible_ai_invisible:
+        'Eure Seite rankt organisch bei Google, wird von KI-Assistenten wie ChatGPT oder Gemini aber noch nicht zitiert. Eine typische Luecke, die mit gezielten Anpassungen zu schliessen ist.',
+      competitor_citation:
+        'Ein Wettbewerber wird von KI-Modellen zu diesem Thema bevorzugt zitiert. Mit besser strukturiertem, klarer abgegrenztem Inhalt koennt ihr die Position uebernehmen.',
+      ai_visible_competitor_dominates:
+        'Ihr seid in KI-Antworten praesent, aber Mitbewerber erhalten deutlich mehr Erwaehungen. Ziel ist, die Zitierfrequenz und thematische Tiefe zu erhoehen.',
+      new_question:
+        'KI-Modelle beantworten diese Frage bereits, aber kein Anbieter aus eurem Markt ist prominent vertreten. Wer zuerst guten Inhalt dazu liefert, besetzt das Feld.',
+    };
 
-    // Build unified action list
+    // Unified Action List aufbauen
     var items = [];
 
-    // 1. Opportunities
+    // 1. Opportunities (nur offene)
     var openOpps = (detail.opportunities || []).filter(function (o) {
       return o.status === 'new' || o.status === 'reviewed';
     });
     openOpps.forEach(function (opp) {
       var impact = PRIORITY_IMPACT[opp.opportunity_type] || { label: 'Mittel', color: '#d97706' };
+      var pIdx = PRIORITY_ORDER.indexOf(opp.opportunity_type);
       items.push({
-        priority: PRIORITY_ORDER.indexOf(opp.opportunity_type),
+        type: 'opportunity',
+        priority: pIdx >= 0 ? pIdx : 5,
         impactLabel: impact.label,
         impactColor: impact.color,
         category: OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type,
-        title: opp.content_recommendation || opp.description || '',
-        detail: opp.description || '',
-        extra: null,
+        titleText: opp.description || opp.content_recommendation || '',
+        situationText: SITUATION_TEXT[opp.opportunity_type] || (opp.description || ''),
+        recommendation: opp.content_recommendation || '',
         opp: opp,
       });
     });
 
-    // 2. Near-miss keywords (organic_rank 6-20 = push to page 1 candidate)
+    // 2. Near-miss Keywords (organischer Rang 6-20)
     var nearMissKws = (detail.search_queries || []).filter(function (kw) {
       var rank = kw.organic_rank != null ? kw.organic_rank : kw.gsc_position;
       return rank != null && rank >= 6 && rank <= 20;
     }).sort(function (a, b) {
       return (b.search_volume || 0) - (a.search_volume || 0);
     }).slice(0, 8);
+
+    // Gruppierung nach page_url fuer Content-Strategie-Hinweis
+    var urlGroupMap = {};
+    nearMissKws.forEach(function (kw) {
+      var key = kw.page_url || '__none__';
+      if (!urlGroupMap[key]) urlGroupMap[key] = [];
+      urlGroupMap[key].push(kw.keyword);
+    });
+
     nearMissKws.forEach(function (kw) {
       var rank = kw.organic_rank != null ? kw.organic_rank : kw.gsc_position;
+      var roundedRank = Math.round((rank || 0) * 10) / 10;
+      var sitParts = ['Laut eurer Search Console rankt "' + kw.keyword + '" auf Position ' + roundedRank + '.'];
+      if (kw.search_volume) sitParts.push(Number(kw.search_volume).toLocaleString('de-DE') + ' Suchen pro Monat.');
+      if (kw.gsc_impressions) sitParts.push(Number(kw.gsc_impressions).toLocaleString('de-DE') + ' Impressionen im Messzeitraum.');
+      var urlKey = kw.page_url || '__none__';
+      var urlGroup = (urlGroupMap[urlKey] && urlGroupMap[urlKey].length > 1) ? urlGroupMap[urlKey] : null;
       items.push({
-        priority: 0.5, // between near_miss_ranking and high_demand
+        type: 'near_miss_kw',
+        priority: 0.5,
         impactLabel: 'Hoch',
         impactColor: '#dc2626',
-        category: 'Google-Ranking ausbauen',
-        title: 'Seite 1 möglich: "' + kw.keyword + '"',
-        detail: 'Aktuell auf Position ' + Math.round(rank * 10) / 10 + (kw.search_volume ? ' · ' + Number(kw.search_volume).toLocaleString('de-DE') + ' Suchen/Mo.' : '') + '. Wenig Optimierungsaufwand nötig.',
-        extra: kw,
+        category: 'Organisches Ranking ausbauen',
+        titleText: 'Seite 1 in Reichweite: "' + kw.keyword + '"',
+        situationText: sitParts.join(' '),
+        recommendation: 'Optimiert die rankende Seite gezielt: Keyword in Titel, H1 und ersten Absatz aufnehmen. Interne Verlinkung von verwandten Seiten ausbauen. Falls die Seite nur eine Produktseite ist, kann ein ergaenzendes Ratgeber-Stueck die thematische Tiefe und damit die Ranking-Chance erhoehen.',
+        kw: kw,
+        urlGroup: urlGroup,
+        urlKey: urlKey,
       });
     });
 
@@ -6069,85 +6122,179 @@
       var title = colonIdx >= 0 ? idea.description.substring(0, colonIdx) : (idea.description || '');
       var reason = colonIdx >= 0 ? idea.description.substring(colonIdx + 2) : '';
       items.push({
-        priority: 10, // after opportunities
+        type: 'content_idea',
+        priority: 10,
         impactLabel: 'Niedrig',
         impactColor: '#6b7280',
-        category: (idea.phase ? PHASE_LABELS[idea.phase] + ' · ' : '') + (MODEL_LABELS[idea.provider] || idea.provider || 'KI-Idee'),
-        title: title,
-        detail: reason,
-        extra: null,
+        category: (idea.phase ? PHASE_LABELS[idea.phase] + ' | ' : '') + (MODEL_LABELS[idea.provider] || idea.provider || 'KI-Idee'),
+        titleText: title,
+        situationText: reason,
+        recommendation: '',
       });
     });
 
-    // Sort by priority
     items.sort(function (a, b) { return a.priority - b.priority; });
 
     if (items.length === 0) {
       var emptyEl = document.createElement('p');
       emptyEl.className = 'cvz-card-placeholder-text';
-      emptyEl.textContent = 'Noch keine Aktionen verfügbar. Warte auf den nächsten Analyse-Lauf.';
+      emptyEl.textContent = 'Noch keine Aktionen verfuegbar. Warte auf den naechsten Analyse-Lauf.';
       wrap.appendChild(emptyEl);
       return wrap;
     }
 
-    // Render as card list with visual priority indicator
+    // Tracking: Content-Strategie-Hinweis nur einmal pro URL zeigen
+    var shownStrategyUrls = {};
+
     var list = document.createElement('div');
-    list.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+    list.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+
     items.forEach(function (item, idx) {
       var card = document.createElement('div');
       card.className = 'cvz-card';
-      card.style.cssText = 'display:flex;gap:12px;align-items:flex-start;padding:14px 16px;';
+      card.style.cssText = 'padding:0;overflow:hidden;';
 
-      // Priority badge (left side)
-      var badge = document.createElement('div');
-      badge.style.cssText =
-        'flex-shrink:0;width:36px;display:flex;flex-direction:column;align-items:center;gap:2px;padding-top:2px;';
-      var numEl = document.createElement('span');
-      numEl.style.cssText = 'font-size:11px;font-weight:700;color:var(--cvz-text-muted,#6b7280);';
-      numEl.textContent = String(idx + 1);
-      var impactDot = document.createElement('span');
-      impactDot.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;background:' + item.impactColor + ';margin-top:2px;';
-      impactDot.title = item.impactLabel + ' Impact';
-      badge.appendChild(numEl);
-      badge.appendChild(impactDot);
-      card.appendChild(badge);
+      // --- Header-Leiste ---
+      var hdr = document.createElement('div');
+      hdr.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--cvz-border,#e5e7eb);background:var(--cvz-surface,#f9fafb);';
 
-      // Content (right side)
-      var content = document.createElement('div');
-      content.style.cssText = 'flex:1 1 0;min-width:0;';
+      var numSp = document.createElement('span');
+      numSp.style.cssText = 'font-size:11px;font-weight:700;color:var(--cvz-text-muted,#9ca3af);min-width:24px;flex-shrink:0;';
+      numSp.textContent = '#' + (idx + 1);
+      hdr.appendChild(numSp);
 
-      var catEl = document.createElement('p');
-      catEl.style.cssText = 'margin:0 0 4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#6b7280);';
-      catEl.textContent = item.category;
-      content.appendChild(catEl);
+      var impBadge = document.createElement('span');
+      impBadge.style.cssText = 'display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;color:#fff;background:' + item.impactColor + ';flex-shrink:0;';
+      impBadge.textContent = item.impactLabel;
+      hdr.appendChild(impBadge);
 
-      var titleEl = document.createElement('p');
-      titleEl.style.cssText = 'margin:0 0 4px;font-size:14px;font-weight:600;line-height:1.4;';
-      titleEl.textContent = item.title;
-      content.appendChild(titleEl);
+      var catSp = document.createElement('span');
+      catSp.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#6b7280);';
+      catSp.textContent = item.category;
+      hdr.appendChild(catSp);
+      card.appendChild(hdr);
 
-      if (item.detail && item.detail !== item.title) {
-        var detailEl = document.createElement('p');
-        detailEl.style.cssText = 'margin:0;font-size:13px;color:var(--cvz-text-muted,#6b7280);line-height:1.5;';
-        detailEl.textContent = item.detail;
-        content.appendChild(detailEl);
+      // --- Body ---
+      var body = document.createElement('div');
+      body.style.cssText = 'padding:14px 16px;display:flex;flex-direction:column;gap:14px;';
+
+      // Titel
+      if (item.titleText) {
+        var titleEl = document.createElement('p');
+        titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:700;line-height:1.4;';
+        titleEl.textContent = item.titleText;
+        body.appendChild(titleEl);
       }
 
-      // SERP context for near-miss keywords
-      if (item.extra && item.extra.keyword && item.extra.top_serp_results && item.extra.top_serp_results.length > 0) {
-        var serpSummary = document.createElement('div');
-        serpSummary.style.cssText = 'margin-top:8px;font-size:12px;color:var(--cvz-text-muted,#6b7280);';
-        serpSummary.innerHTML = renderSerpSummaryBlock(item.extra);
-        content.appendChild(serpSummary);
+      // ---- SITUATION ----
+      var sitDiv = document.createElement('div');
+      var sitLbl = document.createElement('p');
+      sitLbl.style.cssText = 'margin:0 0 5px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;';
+      sitLbl.textContent = 'Situation';
+      sitDiv.appendChild(sitLbl);
+
+      if (item.situationText) {
+        var sitTxt = document.createElement('p');
+        sitTxt.style.cssText = 'margin:0;font-size:13px;color:var(--cvz-text,#374151);line-height:1.55;';
+        sitTxt.textContent = item.situationText;
+        sitDiv.appendChild(sitTxt);
       }
 
-      card.appendChild(content);
+      // Rankende URL fuer near_miss_kw
+      if (item.type === 'near_miss_kw' && item.kw && item.kw.page_url) {
+        var urlRow = document.createElement('div');
+        urlRow.style.cssText = 'display:flex;align-items:baseline;gap:6px;margin-top:6px;flex-wrap:wrap;';
+        var urlLbl = document.createElement('span');
+        urlLbl.style.cssText = 'font-size:11px;font-weight:600;color:#6b7280;flex-shrink:0;';
+        urlLbl.textContent = 'Rankende Seite:';
+        var urlVal = document.createElement('span');
+        urlVal.style.cssText = 'font-size:12px;font-family:monospace;color:#2563eb;word-break:break-all;';
+        urlVal.textContent = item.kw.page_url;
+        urlRow.appendChild(urlLbl);
+        urlRow.appendChild(urlVal);
+        sitDiv.appendChild(urlRow);
+      }
+      body.appendChild(sitDiv);
+
+      // ---- WAS RANKT / WIRD ZITIERT ----
+      var hasCompetitors = item.type === 'opportunity' && item.opp && item.opp.supporting_data;
+      var hasSerp = item.type === 'near_miss_kw' && item.kw && item.kw.top_serp_results && item.kw.top_serp_results.length > 0;
+
+      if (hasCompetitors || hasSerp) {
+        var rankDiv = document.createElement('div');
+        var rankLbl = document.createElement('p');
+        rankLbl.style.cssText = 'margin:0 0 6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;';
+        rankLbl.textContent = item.type === 'near_miss_kw' ? 'Was rankt dort' : 'Wer wird zitiert';
+        rankDiv.appendChild(rankLbl);
+
+        if (hasCompetitors) {
+          var sd = item.opp.supporting_data;
+          var comps = sd.cited_domains || sd.competitor_domains_cited || [];
+          if (comps.length > 0) {
+            var chipRow = document.createElement('div');
+            chipRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+            comps.slice(0, 6).forEach(function (dom) {
+              var chip = document.createElement('span');
+              chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;background:var(--cvz-bg,#fff);border:1px solid var(--cvz-border,#e5e7eb);border-radius:6px;color:var(--cvz-text,#374151);';
+              chip.innerHTML = '<img src="https://www.google.com/s2/favicons?sz=12&domain=' + encodeURIComponent(dom) + '" style="width:12px;height:12px;flex-shrink:0;" onerror="this.style.display=\'none\'">' + escapeHtml(dom);
+              chipRow.appendChild(chip);
+            });
+            rankDiv.appendChild(chipRow);
+          } else {
+            var noCompEl = document.createElement('p');
+            noCompEl.style.cssText = 'margin:0;font-size:12px;color:#9ca3af;';
+            noCompEl.textContent = 'Keine Wettbewerber-Daten verfuegbar.';
+            rankDiv.appendChild(noCompEl);
+          }
+        }
+
+        if (hasSerp) {
+          var serpDiv = document.createElement('div');
+          serpDiv.innerHTML = renderSerpSummaryBlock(item.kw);
+          rankDiv.appendChild(serpDiv);
+        }
+        body.appendChild(rankDiv);
+      }
+
+      // ---- EMPFEHLUNG ----
+      if (item.recommendation) {
+        var recDiv = document.createElement('div');
+        recDiv.style.cssText = 'background:rgba(20,184,166,.08);border-left:3px solid #14b8a6;border-radius:0 4px 4px 0;padding:10px 12px;';
+        var recLbl = document.createElement('p');
+        recLbl.style.cssText = 'margin:0 0 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#0f766e;';
+        recLbl.textContent = 'Empfehlung';
+        var recTxt = document.createElement('p');
+        recTxt.style.cssText = 'margin:0;font-size:13px;color:#0f766e;line-height:1.55;';
+        recTxt.textContent = item.recommendation;
+        recDiv.appendChild(recLbl);
+        recDiv.appendChild(recTxt);
+        body.appendChild(recDiv);
+      }
+
+      // ---- CONTENT-STRATEGIE-HINWEIS ----
+      // Erscheint wenn mehrere near-miss Keywords auf dieselbe URL zeigen
+      if (item.type === 'near_miss_kw' && item.urlGroup && item.urlKey !== '__none__' && !shownStrategyUrls[item.urlKey]) {
+        shownStrategyUrls[item.urlKey] = true;
+        var stratDiv = document.createElement('div');
+        stratDiv.style.cssText = 'background:rgba(124,58,237,.06);border-left:3px solid #7c3aed;border-radius:0 4px 4px 0;padding:10px 12px;';
+        var stratLbl = document.createElement('p');
+        stratLbl.style.cssText = 'margin:0 0 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#5b21b6;';
+        stratLbl.textContent = 'Content-Strategie-Hinweis';
+        var stratTxt = document.createElement('p');
+        stratTxt.style.cssText = 'margin:0;font-size:13px;color:#5b21b6;line-height:1.55;';
+        stratTxt.textContent = item.urlGroup.length + ' Keywords ranken auf derselben Seite (' + item.urlKey + '). Eine einzelne Seite konkurriert fuer mehrere Suchanfragen, was Ranking-Potential verschenkt. Erwaegt ein Content-Hub: eine Pillar-Page als uebergeordneter Einstieg mit verlinkten Unterseiten zu den einzelnen Themen.';
+        stratDiv.appendChild(stratLbl);
+        stratDiv.appendChild(stratTxt);
+        body.appendChild(stratDiv);
+      }
+
+      card.appendChild(body);
       list.appendChild(card);
     });
 
     wrap.appendChild(list);
 
-    // Plattformen-Chancen (can_publish)
+    // Plattformen mit Veroeffentlichungs-Chance
     var publishable = (detail.source_profiles || []).filter(function (p) { return p.can_publish === true; });
     if (publishable.length > 0) {
       var platSection = document.createElement('div');
@@ -6160,14 +6307,14 @@
       var platSub = document.createElement('p');
       platSub.className = 'cvz-card-placeholder-text';
       platSub.style.marginBottom = '12px';
-      platSub.textContent = 'Von KI-Modellen zitierte Plattformen, auf denen normale Nutzer eigene Inhalte veroeffentlichen koennen (Foren, Bewertungsportale, YouTube etc.).';
+      platSub.textContent = 'Von KI-Modellen zitierte Plattformen, auf denen Nutzer eigene Inhalte veroeffentlichen koennen (Foren, Bewertungsportale, YouTube etc.).';
       platSection.appendChild(platSub);
       var platGrid = document.createElement('div');
       platGrid.className = 'cvz-opportunity-grid';
       publishable.forEach(function (p) {
-        var card = document.createElement('div');
-        card.className = 'cvz-card cvz-idea-card';
-        card.innerHTML =
+        var platCard = document.createElement('div');
+        platCard.className = 'cvz-card cvz-idea-card';
+        platCard.innerHTML =
           '<p class="cvz-opportunity-type">' +
             '<img src="https://www.google.com/s2/favicons?sz=16&domain=' + encodeURIComponent(p.domain) + '" ' +
             'style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">' +
@@ -6176,7 +6323,7 @@
           (p.content_type ? '<p class="cvz-opportunity-description" style="font-size:12px;color:#888;margin-bottom:4px;">' + escapeHtml(CONTENT_TYPE_LABELS[p.content_type] || p.content_type) + '</p>' : '') +
           (p.summary ? '<p class="cvz-opportunity-description">' + escapeHtml(p.summary) + '</p>' : '') +
           (p.differentiation_suggestion ? '<div class="cvz-action-recommendation"><p class="cvz-changelog-guided-label">Abgrenzung</p><p class="cvz-opportunity-description">' + escapeHtml(p.differentiation_suggestion) + '</p></div>' : '');
-        platGrid.appendChild(card);
+        platGrid.appendChild(platCard);
       });
       platSection.appendChild(platGrid);
       wrap.appendChild(platSection);
