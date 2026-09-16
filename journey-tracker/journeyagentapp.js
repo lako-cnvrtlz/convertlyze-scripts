@@ -435,10 +435,10 @@
         },
         weekly_timeseries: { weeks: [], series: {} },
         share_of_voice: {
-          exploration: [{ domain: 'hotjar.com', citation_rate: 0.75, cited_count: 6, total_runs: 8, content_type: 'produktseite', summary: 'Heatmap-Tool mit Fokus auf Nutzerverhaltensanalyse.', differentiation_suggestion: 'KI-gestützte Interpretation der Heatmap-Daten hervorheben.' }],
-          evaluation:  [{ domain: 'optimizely.com', citation_rate: 0.6, cited_count: 6, total_runs: 10, content_type: 'produktseite', summary: 'Enterprise A/B-Testing Plattform.', differentiation_suggestion: 'Einstiegshürde und Self-Service-Fokus betonen.' }],
-          comparison:  [{ domain: 'vwo.com', citation_rate: 0.55, cited_count: 5, total_runs: 9, content_type: 'vergleichsartikel', summary: 'Vergleichsseiten für CRO-Tools.', differentiation_suggestion: 'Eigene Vergleichsseite mit neutralem Ton aufbauen.' }],
-          decision:    [{ domain: 'capterra.de', citation_rate: 0.42, cited_count: 3, total_runs: 7, content_type: 'review_plattform', summary: 'Software-Bewertungsplattform.', differentiation_suggestion: 'Mehr verifizierte Reviews für höhere Sichtbarkeit auf Review-Plattformen sammeln.' }],
+          exploration: [{ domain: 'hotjar.com', citation_rate: 75.0, cited_count: 6, total_runs: 8, content_type: 'produktseite', summary: 'Heatmap-Tool mit Fokus auf Nutzerverhaltensanalyse.', differentiation_suggestion: 'KI-gestützte Interpretation der Heatmap-Daten hervorheben.' }],
+          evaluation:  [{ domain: 'optimizely.com', citation_rate: 60.0, cited_count: 6, total_runs: 10, content_type: 'produktseite', summary: 'Enterprise A/B-Testing Plattform.', differentiation_suggestion: 'Einstiegshürde und Self-Service-Fokus betonen.' }],
+          comparison:  [{ domain: 'vwo.com', citation_rate: 55.0, cited_count: 5, total_runs: 9, content_type: 'vergleichsartikel', summary: 'Vergleichsseiten für CRO-Tools.', differentiation_suggestion: 'Eigene Vergleichsseite mit neutralem Ton aufbauen.' }],
+          decision:    [{ domain: 'capterra.de', citation_rate: 42.0, cited_count: 3, total_runs: 7, content_type: 'review_plattform', summary: 'Software-Bewertungsplattform.', differentiation_suggestion: 'Mehr verifizierte Reviews für höhere Sichtbarkeit auf Review-Plattformen sammeln.' }],
         },
         google_organic: { score: 32, keyword_count: 6, top_keyword: 'conversion rate optimierung software' },
         content_changes: [],
@@ -5341,7 +5341,7 @@
 
         var tbody = document.createElement('tbody');
         competitors.forEach(function (comp) {
-          var pct = Math.round((comp.citation_rate || 0) * 100);
+          var pct = Math.round(comp.citation_rate || 0);
           var tr = document.createElement('tr');
           tr.innerHTML =
             '<td class="cvz-sov-domain">' + escapeHtml(comp.domain || '') + '</td>' +
@@ -6003,7 +6003,7 @@
   }
 
   // --- VISIBILITY COMPARISON CHART ---
-  // Zeigt per Liniendiagramm: eigene Zitierrate pro Journey-Phase vs. Top-3-Wettbewerber.
+  // Zeigt per Liniendiagramm: eigene Zitierrate pro Journey-Phase vs. Top-5-Wettbewerber.
   // X-Achse = 4 Journey-Phasen, Y-Achse = Zitierrate 0-100 %.
   function renderVisibilityComparisonChart(topicId, detail) {
     var dashData = state.dashboardDataCache[topicId];
@@ -6011,7 +6011,7 @@
 
     var sov = dashData.share_of_voice || {};
 
-    // Top-3-Wettbewerber: Summe der citation_rate ueber alle Phasen
+    // Top-5-Wettbewerber: Summe der citation_rate ueber alle Phasen
     var compTotals = {};
     PHASE_ORDER.forEach(function (phase) {
       (sov[phase] || []).forEach(function (c) {
@@ -6020,11 +6020,11 @@
     });
     var topComps = Object.keys(compTotals)
       .sort(function (a, b) { return compTotals[b] - compTotals[a]; })
-      .slice(0, 3);
+      .slice(0, 5);
 
-    if (topComps.length === 0) return null;
+    // (Show chart even without competitor data, just own domain)
 
-    var COMP_COLORS = ['#f2b13d', '#f87171', '#a78bfa'];
+    var COMP_COLORS = ['#f2b13d', '#f87171', '#a78bfa', '#34d399', '#60a5fa'];
     var ownDomain = (detail.topic && detail.topic.own_domain) ? detail.topic.own_domain : 'Eure Domain';
 
     var section = document.createElement('div');
@@ -6094,7 +6094,7 @@
     topComps.forEach(function (domain, i) {
       var values = PHASE_ORDER.map(function (phase) {
         var entry = (sov[phase] || []).filter(function (c) { return c.domain === domain; })[0];
-        return entry ? Math.round((entry.citation_rate || 0) * 100) : 0;
+        return entry ? Math.round(entry.citation_rate || 0) : 0;
       });
       seriesList.push({ label: domain, color: COMP_COLORS[i], values: values });
     });
@@ -6198,7 +6198,7 @@
         card.appendChild(ownRow);
         // Top competitor bar
         if (topComp) {
-          var compPct = Math.round((topComp.citation_rate || 0) * 100);
+          var compPct = Math.round(topComp.citation_rate || 0);
           var compRow = document.createElement('div');
           compRow.className = 'cvz-journey-channel-row';
           compRow.innerHTML =
@@ -6568,7 +6568,7 @@
         compLabel.textContent = 'Top-Wettbewerber';
         card.appendChild(compLabel);
         competitors.slice(0, 2).forEach(function (comp) {
-          var compPct = Math.round((comp.citation_rate || 0) * 100);
+          var compPct = Math.round(comp.citation_rate || 0);
           var compRow = document.createElement('div');
           compRow.className = 'cvz-journey-channel-row';
           compRow.innerHTML =
