@@ -2373,7 +2373,7 @@
         tabContent.appendChild(renderMessyMiddleTab(state.activeTopicId));
         break;
       case 'action':
-        tabContent.appendChild(renderActionTab(detail.opportunities, detail.source_profiles));
+        tabContent.appendChild(renderActionTab(detail.opportunities, detail.content_ideas, detail.source_profiles));
         break;
       case 'wettbewerber':
         var weeksData = state.citationTrendCache[state.activeTopicId];
@@ -2949,74 +2949,164 @@
     return section;
   }
 
-  // NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026) —
-  // Action-Tab: die wichtigsten offenen Chancen (= aktuell offene
-  // Opportunities, abgeleitet aus Prompts/Keyword-Ideen/GSC-Daten) samt
-  // Claude-generierter Content-Empfehlung (siehe opportunities.py:
-  // generate_content_recommendations, läuft einmal pro Monatslauf).
-  function renderActionTab(opportunities, sourceProfiles) {
+  // GEÄNDERT (16.09.2026): Unified table statt getrennter Cards.
+  // Zeigt ALLE offenen Opportunities (kein content_recommendation-Filter mehr)
+  // UND alle Content-Ideen in einer gemeinsamen Tabelle.
+  // Spalten: Signal | Befund & Datenbasis | Nächster Schritt
+  function renderActionTab(opportunities, contentIdeas, sourceProfiles) {
     var wrap = document.createElement('div');
 
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
-    heading.textContent = 'Wichtigste Chancen mit Content-Empfehlung';
+    heading.textContent = 'Maßnahmen-Übersicht';
     wrap.appendChild(heading);
 
     var intro = document.createElement('p');
     intro.className = 'cvz-card-placeholder-text';
     intro.style.marginBottom = '16px';
     intro.textContent =
-      'Fasst die offenen Opportunities (aus Prompts, Keyword-Ideen und GSC-Daten) zusammen und schl\u00e4gt ' +
-      'jeweils konkret vor, welcher Content das schlie\u00dfen k\u00f6nnte. Empfehlungen entstehen einmal pro Monatslauf.';
+      'Alle offenen Chancen aus Keyword-Daten, KI-Analysen und Content-Monitoring auf einen Blick — mit konkretem nächsten Schritt.';
     wrap.appendChild(intro);
 
-    // Nur offene Opportunities (nicht dismissed/acted_on), UND nur die,
-    // für die der Monatslauf bereits eine Empfehlung erzeugt hat — eine
-    // Opportunity ohne Empfehlung (z.B. weil sie erst seit dem letzten
-    // Monatslauf offen ist, oder die Empfehlungs-Generierung fehlschlug)
-    // taucht hier bewusst nicht auf, statt eine leere Empfehlung zu zeigen.
-    var actionable = (opportunities || []).filter(function (o) {
-      return (o.status === 'new' || o.status === 'reviewed') && o.content_recommendation;
+    // Collect rows: open opportunities + all content ideas
+    var rows = [];
+    (opportunities || []).forEach(function (o) {
+      if (o.status === 'new' || o.status === 'reviewed') {
+        rows.push({ kind: 'opportunity', item: o });
+      }
+    });
+    (contentIdeas || []).forEach(function (idea) {
+      rows.push({ kind: 'idea', item: idea });
     });
 
-    if (actionable.length === 0) {
+    if (rows.length === 0) {
       var empty = document.createElement('p');
       empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Noch keine Content-Empfehlungen verf\u00fcgbar. Diese entstehen einmal pro Monatslauf f\u00fcr alle aktuell offenen Opportunities.';
+      empty.textContent = 'Noch keine Empfehlungen verfügbar. Diese entstehen nach dem ersten Analyse-Lauf.';
       wrap.appendChild(empty);
     } else {
-      var grid = document.createElement('div');
-      grid.className = 'cvz-opportunity-grid';
-      actionable.forEach(function (opp) {
-        var card = document.createElement('div');
-        card.className = 'cvz-card cvz-opportunity-card';
-        card.innerHTML =
-          '<p class="cvz-opportunity-type">' + escapeHtml(OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type) + '</p>' +
-          '<p class="cvz-opportunity-description">' + escapeHtml(opp.description || '') + '</p>' +
-          '<div class="cvz-action-recommendation">' +
-            '<p class="cvz-changelog-guided-label">Content-Empfehlung</p>' +
-            '<p class="cvz-opportunity-description">' + escapeHtml(opp.content_recommendation) + '</p>' +
-          '</div>';
-        grid.appendChild(card);
+      var tableWrap = document.createElement('div');
+      tableWrap.style.overflowX = 'auto';
+
+      var table = document.createElement('table');
+      table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+
+      var thead = document.createElement('thead');
+      thead.innerHTML =
+        '<tr>' +
+          '<th style="text-align:left;padding:8px 12px;border-bottom:2px solid #e5e7eb;white-space:nowrap;' +
+              'color:#6b7280;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Signal</th>' +
+          '<th style="text-align:left;padding:8px 12px;border-bottom:2px solid #e5e7eb;' +
+              'color:#6b7280;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Befund &amp; Datenbasis</th>' +
+          '<th style="text-align:left;padding:8px 12px;border-bottom:2px solid #e5e7eb;white-space:nowrap;' +
+              'color:#6b7280;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Nächster Schritt</th>' +
+        '</tr>';
+      table.appendChild(thead);
+
+      var tbody = document.createElement('tbody');
+
+      rows.forEach(function (row, idx) {
+        var tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid #f3f4f6';
+        if (idx % 2 === 1) { tr.style.backgroundColor = '#f9fafb'; }
+
+        if (row.kind === 'opportunity') {
+          var opp = row.item;
+          var signalText = OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type;
+
+          // Extract key data point from supporting_data
+          var sd = opp.supporting_data || {};
+          var dataSnippet = '';
+          if (opp.opportunity_type === 'competitor_citation') {
+            var cited = sd.cited_domains || [];
+            if (cited.length) { dataSnippet = cited.slice(0, 2).join(', '); }
+          } else if (opp.opportunity_type === 'ai_visible_competitor_dominates') {
+            var compD = sd.competitor_domains_cited || [];
+            if (compD.length) { dataSnippet = compD.slice(0, 2).join(', '); }
+          } else if (opp.opportunity_type === 'near_miss_ranking') {
+            var nkws = sd.keywords || [];
+            if (nkws.length) {
+              var nk = nkws[0];
+              dataSnippet = '„' + nk.keyword + '“ – Pos. ' + (nk.position || nk.avg_position || '?');
+            }
+          } else {
+            var gkws = sd.keywords || [];
+            if (gkws.length) {
+              var gk = gkws[0];
+              dataSnippet = '„' + gk.keyword + '“';
+              if (gk.search_volume) { dataSnippet += ' (' + Number(gk.search_volume).toLocaleString('de-DE') + ' Suchen/Mo.)'; }
+              if (gk.organic_rank)  { dataSnippet += ' – Rang ' + gk.organic_rank; }
+            }
+          }
+
+          var nextStep = opp.content_recommendation || '';
+          var nextStepHtml = nextStep
+            ? escapeHtml(nextStep)
+            : '<span style="color:#9ca3af;">— folgt beim nächsten Monatslauf</span>';
+
+          tr.innerHTML =
+            '<td style="padding:10px 12px;vertical-align:top;white-space:nowrap;">' +
+              '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:#e0f2fe;' +
+                  'color:#0369a1;font-size:11px;font-weight:600;">' +
+                escapeHtml(signalText) +
+              '</span>' +
+            '</td>' +
+            '<td style="padding:10px 12px;vertical-align:top;">' +
+              '<p style="margin:0 0 4px;color:#111;">' + escapeHtml(opp.description || '') + '</p>' +
+              (dataSnippet ? '<p style="margin:0;font-size:12px;color:#6b7280;">' + escapeHtml(dataSnippet) + '</p>' : '') +
+            '</td>' +
+            '<td style="padding:10px 12px;vertical-align:top;">' + nextStepHtml + '</td>';
+
+        } else {
+          // content idea
+          var idea = row.item;
+          var phaseLabel = idea.phase ? (PHASE_LABELS[idea.phase] || idea.phase) : '';
+          var providerLabel = idea.provider ? (MODEL_LABELS[idea.provider] || idea.provider) : '';
+          var ideaSignal = 'Content-Idee' + (phaseLabel ? ' · ' + phaseLabel : '');
+
+          // description format: "Titel: Begründung"
+          var colonIdx = (idea.description || '').indexOf(': ');
+          var ideaTitle  = colonIdx >= 0 ? idea.description.substring(0, colonIdx) : (idea.description || '');
+          var ideaReason = colonIdx >= 0 ? idea.description.substring(colonIdx + 2) : '';
+
+          tr.innerHTML =
+            '<td style="padding:10px 12px;vertical-align:top;white-space:nowrap;">' +
+              '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:#f0fdf4;' +
+                  'color:#16a34a;font-size:11px;font-weight:600;">' +
+                escapeHtml(ideaSignal) +
+              '</span>' +
+            '</td>' +
+            '<td style="padding:10px 12px;vertical-align:top;">' +
+              (ideaReason ? '<p style="margin:0 0 4px;color:#111;">' + escapeHtml(ideaReason) + '</p>' : '') +
+              (providerLabel ? '<p style="margin:0;font-size:12px;color:#6b7280;">Quelle: ' + escapeHtml(providerLabel) + '</p>' : '') +
+            '</td>' +
+            '<td style="padding:10px 12px;vertical-align:top;font-weight:500;color:#111;">' +
+              escapeHtml(ideaTitle) +
+            '</td>';
+        }
+
+        tbody.appendChild(tr);
       });
-      wrap.appendChild(grid);
+
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      wrap.appendChild(tableWrap);
     }
 
-    // NEU (16.09.2026): Plattformen, auf denen eigene Inhalte ver\u00f6ffentlicht
-    // werden k\u00f6nnen (can_publish = true aus source_content_profiles).
+    // Plattformen mit Veröffentlichungs-Chance (unverändert)
     var publishable = (sourceProfiles || []).filter(function (p) { return p.can_publish === true; });
     if (publishable.length > 0) {
       var platHeading = document.createElement('p');
       platHeading.className = 'cvz-section-label';
       platHeading.style.marginTop = '32px';
-      platHeading.textContent = 'Plattformen mit Ver\u00f6ffentlichungs-Chance';
+      platHeading.textContent = 'Plattformen mit Veröffentlichungs-Chance';
       wrap.appendChild(platHeading);
 
       var platIntro = document.createElement('p');
       platIntro.className = 'cvz-card-placeholder-text';
       platIntro.style.marginBottom = '16px';
       platIntro.textContent =
-        'Diese Plattformen wurden von KI-Modellen als Quellen zitiert \u2013 und normale Nutzer k\u00f6nnen dort eigene Inhalte ver\u00f6ffentlichen (z.\u00a0B. Foren, Bewertungsportale, YouTube, Wikipedia).';
+        'Diese Plattformen wurden von KI-Modellen als Quellen zitiert – und normale Nutzer können dort eigene Inhalte veröffentlichen (z. B. Foren, Bewertungsportale, YouTube, Wikipedia).';
       wrap.appendChild(platIntro);
 
       var platGrid = document.createElement('div');
@@ -3045,7 +3135,6 @@
 
     return wrap;
   }
-
   function renderOpportunitySection(opportunities) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
