@@ -3897,6 +3897,11 @@
     heading.textContent = 'Thematisch passende Keywords';
     section.appendChild(heading);
 
+    // NEU (16.09.2026): manuelles Keyword-Formular, analog zu renderManualPromptForm
+    if (state.activeTopicId) {
+      section.appendChild(renderManualKeywordForm(keywords, state.activeTopicId));
+    }
+
     if (!keywords || keywords.length === 0) {
       var empty = document.createElement('p');
       empty.className = 'cvz-card-placeholder-text';
@@ -3930,6 +3935,9 @@
           (kw.search_volume == null ? '–' : escapeHtml(kw.search_volume) + '/Monat') +
         '</span>' +
         '<span class="cvz-prompt-source">' + escapeHtml(KEYWORD_SOURCE_LABELS[kw.source] || kw.source) + '</span>' +
+        (kw.id
+          ? '<button type="button" class="cvz-prompt-delete-btn" data-cvz-keyword-deactivate="' + kw.id + '" aria-label="Keyword deaktivieren" title="Keyword deaktivieren">\u00d7</button>'
+          : '') +
         (canExpand
           ? '<span class="cvz-prompt-expand-chevron">' + (state.expandedKeywordId === rowId ? '▾' : '▸') + '</span>'
           : '');
@@ -4379,6 +4387,38 @@
     return wrap;
   }
 
+  var MAX_MANUAL_KEYWORDS = 10;
+
+  function renderManualKeywordForm(keywords, topicId) {
+    var manualCount = (keywords || []).filter(function (k) { return k.source === 'manual'; }).length;
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-changelog-form';
+    wrap.style.marginBottom = '16px';
+
+    if (manualCount >= MAX_MANUAL_KEYWORDS) {
+      wrap.innerHTML =
+        '<p class="cvz-card-placeholder-text">Maximal ' + MAX_MANUAL_KEYWORDS + ' manuell hinzugef\u00fcgte Keywords erreicht ' +
+        '(' + manualCount + '/' + MAX_MANUAL_KEYWORDS + '). Erst ein bestehendes manuelles Keyword deaktivieren.</p>';
+      return wrap;
+    }
+
+    wrap.innerHTML =
+      '<input type="text" id="cvz-manual-keyword-input" class="cvz-changelog-custom-input" style="flex:1;min-width:140px;" ' +
+        'placeholder="Eigenes Keyword hinzuf\u00fcgen (' + manualCount + '/' + MAX_MANUAL_KEYWORDS + ')" ' +
+        'value="' + escapeHtml(state.manualKeywordDraftText || '') + '">' +
+      '<button type="button" class="cvz-changelog-submit-btn" data-cvz-manual-keyword-submit="' + topicId + '" ' +
+        (state.isSubmittingManualKeyword ? 'disabled' : '') + '>' +
+        (state.isSubmittingManualKeyword ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
+      '</button>';
+
+    var inputEl = wrap.querySelector('#cvz-manual-keyword-input');
+    inputEl.addEventListener('input', function () {
+      state.manualKeywordDraftText = inputEl.value;
+    });
+
+    return wrap;
+  }
+
   var MAX_MANUAL_PROMPTS = 4;
 
   function renderManualPromptForm(prompts, topicId) {
@@ -4464,7 +4504,7 @@
           : '';
 
         var contentTypeBadge = prompt.top_cited_content_type
-          ? '<span class="cvz-prompt-content-type" title="Meistzitierte Quelle: ' + escapeHtml(prompt.top_cited_domain || '') + '">' +
+          ? '<span class="cvz-prompt-content-type" title="Typ der meistzitierten Quelle: ' + escapeHtml(CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || prompt.top_cited_content_type) + ' (' + escapeHtml(prompt.top_cited_domain || '') + ')">' +
               (CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || escapeHtml(prompt.top_cited_content_type)) +
             '</span>'
           : '';
@@ -4493,9 +4533,7 @@
             (prompt.prompt_type === 'stable_core' ? '' : 'Discovery') +
             (prompt.topic_name ? ' · ' + escapeHtml(prompt.topic_name) : '') +
           '</span>' +
-          (prompt.source === 'manual'
-            ? '<button type="button" class="cvz-prompt-delete-btn" data-cvz-prompt-delete="' + prompt.id + '" aria-label="Prompt l\u00f6schen" title="Prompt l\u00f6schen">\u00d7</button>'
-            : '') +
+          '<button type="button" class="cvz-prompt-delete-btn" data-cvz-prompt-delete="' + prompt.id + '" aria-label="Prompt deaktivieren" title="Prompt deaktivieren">\u00d7</button>' +
           (enableCitations ? '<span class="cvz-prompt-expand-chevron">' + (state.expandedPromptId === prompt.id ? '\u25be' : '\u25b8') + '</span>' : '');
         list.appendChild(row);
 
@@ -4535,15 +4573,12 @@
     }
 
     // GEÄNDERT (15.09.2026): von einer reinen Tabelle auf aufklappbare
-    // Zeilen umgestellt (gleiches Prinzip wie Keywords/Prompts), damit die
-    // Entwicklung über die Zeit sichtbar wird, nicht nur der aktuelle
-    // Stand (Kundenwunsch, siehe Chat-Verlauf 15.09.2026). Die URL, die
-    // für eine Suchanfrage rankt, würde ich hier gerne mit anzeigen —
-    // dafür fehlt mir aber google_search_console.py, ich weiß nicht ob/
-    // unter welchem Feldnamen das schon erfasst wird.
+    // Zeilen umgestellt (gleiches Prinzip wie Keywords/Prompts).
+    // GEÄNDERT (16.09.2026): URL-Spalte und Deactivate-Button ergänzt (page_url
+    // aus search_queries, gespeichert via save_gsc_near_miss in run_topic.py).
     var table = document.createElement('table');
     table.className = 'cvz-table';
-    table.innerHTML = '<thead><tr><th></th><th>Suchanfrage</th><th>Klicks</th><th>Impressionen</th><th>CTR</th><th>Position</th><th>Verkn\u00fcpfte \u00c4nderungen</th></tr></thead>';
+    table.innerHTML = '<thead><tr><th></th><th>Suchanfrage</th><th>Rankende URL</th><th>Klicks</th><th>Impressionen</th><th>CTR</th><th>Position</th><th>Verkn\u00fcpfte \u00c4nderungen</th><th></th></tr></thead>';
     var tbody = document.createElement('tbody');
     gscRows.forEach(function (row) {
       var linkedEntries = (changelogEntries || []).filter(function (entry) {
@@ -4558,20 +4593,26 @@
       tr.className = 'cvz-gsc-row-clickable';
       tr.setAttribute('data-cvz-gsc-toggle', rowId);
       tr.setAttribute('data-cvz-gsc-text', row.query);
+      var pageUrlHtml = row.page_url
+        ? '<a href="' + escapeHtml(row.page_url) + '" target="_blank" rel="noopener" class="cvz-gsc-page-url" title="' + escapeHtml(row.page_url) + '">' +
+            escapeHtml(row.page_url.replace(/^https?:\/\/[^\/]+/, '').slice(0, 40) || '/') + '</a>'
+        : '\u2013';
       tr.innerHTML =
         '<td class="cvz-prompt-expand-chevron">' + (isExpanded ? '\u25be' : '\u25b8') + '</td>' +
         '<td>' + escapeHtml(row.query) + '</td>' +
+        '<td class="cvz-gsc-cell-url">' + pageUrlHtml + '</td>' +
         '<td>' + escapeHtml(row.clicks) + '</td>' +
         '<td>' + escapeHtml(row.impressions) + '</td>' +
         '<td>' + escapeHtml((row.ctr * 100).toFixed(1)) + '%</td>' +
         '<td>' + escapeHtml(row.position.toFixed(1)) + '</td>' +
-        '<td class="cvz-gsc-cell-linked">' + linkedCell + '</td>';
+        '<td class="cvz-gsc-cell-linked">' + linkedCell + '</td>' +
+        '<td><button type="button" class="cvz-prompt-delete-btn" data-cvz-keyword-deactivate="' + (row.id || '') + '" aria-label="Keyword deaktivieren" title="Keyword deaktivieren">\u00d7</button></td>';
       tbody.appendChild(tr);
 
       if (isExpanded) {
         var expansionTr = document.createElement('tr');
         var expansionTd = document.createElement('td');
-        expansionTd.colSpan = 7;
+        expansionTd.colSpan = 9;
         expansionTd.appendChild(renderGscRowExpansion(row, rowId));
         expansionTr.appendChild(expansionTd);
         tbody.appendChild(expansionTr);
@@ -5239,7 +5280,9 @@
       '.cvz-table td { padding: 8px 12px; border-bottom: 1px solid var(--cvz-border); }' +
       '.cvz-table-clickable tbody tr { cursor: pointer; }' +
       '.cvz-table-clickable tbody tr:hover { background: rgba(79, 209, 197, 0.06); }' +
-      '.cvz-gsc-cell-linked { color: var(--cvz-teal); max-width: 280px; }' +
+      '.cvz-gsc-page-url { color: var(--cvz-teal); font-size: 11px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; display: inline-block; vertical-align: middle; }' +
+        '.cvz-gsc-cell-url { max-width: 150px; overflow: hidden; }' +
+        '.cvz-gsc-cell-linked { color: var(--cvz-teal); max-width: 280px; }' +
       '.cvz-gsc-row-clickable { cursor: pointer; }' +
       '.cvz-gsc-row-clickable:hover { background: rgba(79, 209, 197, 0.06); }' +
 
