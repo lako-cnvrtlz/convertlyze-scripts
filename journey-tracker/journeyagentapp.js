@@ -99,6 +99,14 @@
     gscRankHistoryCache: {},
     loadingGscRankHistory: {},
     expandedGscRowId: null,
+    // NEU (16.09.2026): Journey-Map-Tab
+    dashboardDataCache: {},
+    isLoadingDashboard: false,
+    isSubmittingContentChange: false,
+    contentChangeDraft: { changed_at: '', change_type: 'neue_seite', description: '', url: '' },
+    contentChangesCache: {},
+    isLoadingContentChanges: false,
+    journeyActivePhase: null,
   };
 
   function getProjectById(id) {
@@ -408,6 +416,106 @@
     render();
   }
 
+  // NEU (16.09.2026): Journey-Map-Tab — lädt aggregierte Phase-Scores,
+  // Share-of-Voice und Content-Changes in einem einzigen API-Call.
+  async function loadDashboardData(topicId) {
+    if (CONFIG.useMockData) {
+      return {
+        phase_scores: {
+          exploration: { chat_gpt: { score: 62, cited: 5, total: 8 }, gemini: { score: 75, cited: 6, total: 8 }, google_ai: { score: 50, cited: 4, total: 8 }, google_organic: { score: 44, cited: 4, total: 9 } },
+          evaluation:  { chat_gpt: { score: 40, cited: 4, total: 10 }, gemini: { score: 55, cited: 6, total: 11 }, google_ai: { score: 36, cited: 4, total: 11 }, google_organic: { score: 39, cited: 4, total: 10 } },
+          comparison:  { chat_gpt: { score: 22, cited: 2, total: 9 }, gemini: { score: 33, cited: 3, total: 9 }, google_ai: { score: 11, cited: 1, total: 9 }, google_organic: { score: 28, cited: 3, total: 11 } },
+          decision:    { chat_gpt: { score: 14, cited: 1, total: 7 }, gemini: { score: 28, cited: 2, total: 7 }, google_ai: { score: 0, cited: 0, total: 7 }, google_organic: { score: 17, cited: 1, total: 6 } },
+        },
+        weekly_timeseries: { weeks: [], series: {} },
+        share_of_voice: {
+          exploration: [{ domain: 'hotjar.com', citation_rate: 0.75, cited_count: 6, total_runs: 8, content_type: 'produktseite', summary: 'Heatmap-Tool mit Fokus auf Nutzerverhaltensanalyse.', differentiation_suggestion: 'KI-gestützte Interpretation der Heatmap-Daten hervorheben.' }],
+          evaluation:  [{ domain: 'optimizely.com', citation_rate: 0.6, cited_count: 6, total_runs: 10, content_type: 'produktseite', summary: 'Enterprise A/B-Testing Plattform.', differentiation_suggestion: 'Einstiegshürde und Self-Service-Fokus betonen.' }],
+          comparison:  [{ domain: 'vwo.com', citation_rate: 0.55, cited_count: 5, total_runs: 9, content_type: 'vergleichsartikel', summary: 'Vergleichsseiten für CRO-Tools.', differentiation_suggestion: 'Eigene Vergleichsseite mit neutralem Ton aufbauen.' }],
+          decision:    [{ domain: 'capterra.de', citation_rate: 0.42, cited_count: 3, total_runs: 7, content_type: 'review_plattform', summary: 'Software-Bewertungsplattform.', differentiation_suggestion: 'Mehr verifizierte Reviews für höhere Sichtbarkeit auf Review-Plattformen sammeln.' }],
+        },
+        google_organic: { score: 32, keyword_count: 6, top_keyword: 'conversion rate optimierung software' },
+        content_changes: [],
+      };
+    }
+    var data = await apiFetch('/topics/' + topicId + '/dashboard-data');
+    return data;
+  }
+
+  async function maybeLoadDashboardData(topicId) {
+    if (!topicId || state.dashboardDataCache[topicId]) return;
+    state.isLoadingDashboard = true;
+    render();
+    try {
+      state.dashboardDataCache[topicId] = await loadDashboardData(topicId);
+    } catch (e) {
+      console.error('[CVZ Visibility] Journey-Map-Daten konnten nicht geladen werden:', e);
+      state.dashboardDataCache[topicId] = null;
+    }
+    state.isLoadingDashboard = false;
+    render();
+  }
+
+  async function loadContentChanges(topicId) {
+    if (CONFIG.useMockData) return [];
+    var data = await apiFetch('/topics/' + topicId + '/content-changes');
+    return data.changes || [];
+  }
+
+  async function maybeLoadContentChanges(topicId) {
+    if (!topicId || state.contentChangesCache[topicId]) return;
+    state.isLoadingContentChanges = true;
+    render();
+    try {
+      state.contentChangesCache[topicId] = await loadContentChanges(topicId);
+    } catch (e) {
+      console.error('[CVZ Visibility] Content-Änderungen konnten nicht geladen werden:', e);
+      state.contentChangesCache[topicId] = [];
+    }
+    state.isLoadingContentChanges = false;
+    render();
+  }
+
+  async function submitContentChange(topicId) {
+    var d = state.contentChangeDraft;
+    if (!d.description || !d.description.trim()) return;
+    if (!d.changed_at) {
+      d.changed_at = new Date().toISOString().slice(0, 10);
+    }
+    state.isSubmittingContentChange = true;
+    render();
+    try {
+      if (!CONFIG.useMockData) {
+        var created = await apiFetch('/topics/' + topicId + '/content-changes', {
+          method: 'POST',
+          body: {
+            changed_at: d.changed_at,
+            change_type: d.change_type,
+            description: d.description.trim(),
+            url: d.url ? d.url.trim() : null,
+          },
+        });
+        var existing = state.contentChangesCache[topicId] || [];
+        state.contentChangesCache[topicId] = [created.change || created].concat(existing);
+      } else {
+        var mockChange = {
+          id: 'mock-' + Date.now(),
+          changed_at: d.changed_at,
+          change_type: d.change_type,
+          description: d.description.trim(),
+          url: d.url ? d.url.trim() : null,
+          created_at: new Date().toISOString(),
+        };
+        state.contentChangesCache[topicId] = [mockChange].concat(state.contentChangesCache[topicId] || []);
+      }
+      state.contentChangeDraft = { changed_at: '', change_type: 'neue_seite', description: '', url: '' };
+    } catch (e) {
+      console.error('[CVZ Visibility] Content-Änderung konnte nicht gespeichert werden:', e);
+    }
+    state.isSubmittingContentChange = false;
+    render();
+  }
+
   async function loadKeywordRankHistory(topicId, keyword) {
     if (CONFIG.useMockData) return [];
     var data = await apiFetch('/topics/' + topicId + '/rank-history?keyword=' + encodeURIComponent(keyword));
@@ -714,6 +822,10 @@
       maybeLoadTopicRankHistory(topicId);
       maybeLoadMonthlyOverviewTrend(topicId);
     }
+    if (state.activeSubTab === 'journey') {
+      maybeLoadDashboardData(topicId);
+      maybeLoadContentChanges(topicId);
+    }
   }
 
   function backToOverview() {
@@ -767,6 +879,31 @@
     decision:    'Entscheidung',
   };
   var PHASE_ORDER = ['exploration', 'evaluation', 'comparison', 'decision'];
+
+  // NEU (16.09.2026): Journey-Map-Tab — Phasenfarben und Kanal-Reihenfolge
+  // für renderMessyMiddleTab / renderPhaseScoreGrid.
+  var PHASE_COLORS = {
+    exploration: '#6366f1',
+    evaluation:  '#0ea5e9',
+    comparison:  '#10b981',
+    decision:    '#f59e0b',
+  };
+
+  var CHANNEL_ORDER = ['chat_gpt', 'gemini', 'google_ai', 'google_organic'];
+  var CHANNEL_LABELS = {
+    chat_gpt:       'ChatGPT',
+    gemini:         'Gemini',
+    google_ai:      'Google AI Overview',
+    google_organic: 'Google Organic',
+  };
+
+  var CONTENT_CHANGE_TYPE_LABELS = {
+    neue_seite:   'Neue Seite',
+    ueberarbeitung: 'Überarbeitung',
+    kampagne:     'Kampagne',
+    sonstiges:    'Sonstiges',
+  };
+  var CONTENT_CHANGE_TYPE_ORDER = ['neue_seite', 'ueberarbeitung', 'kampagne', 'sonstiges'];
 
   var VISIBILITY_LABELS = {
     green:  'Zitiert',
@@ -883,6 +1020,7 @@
 
   var TOPIC_TABS = [
     { id: 'uebersicht', label: 'Übersicht' },
+    { id: 'journey', label: 'Journey Map' },
     { id: 'action', label: 'Action' },
     { id: 'wettbewerber', label: 'Wettbewerber & Quellen' },
     { id: 'keywords', label: 'Keywords' },
@@ -1088,7 +1226,27 @@
         maybeLoadTopicRankHistory(state.activeTopicId);
         maybeLoadMonthlyOverviewTrend(state.activeTopicId);
       }
+      if (newTab === 'journey' && state.activeView === 'topic-detail') {
+        maybeLoadDashboardData(state.activeTopicId);
+        maybeLoadContentChanges(state.activeTopicId);
+      }
       render();
+      return;
+    }
+
+    // NEU (16.09.2026): Journey-Map-Tab — Phasenwechsel
+    var journeyPhaseBtn = event.target.closest('[data-cvz-journey-phase]');
+    if (journeyPhaseBtn) {
+      var newPhase = journeyPhaseBtn.getAttribute('data-cvz-journey-phase');
+      state.journeyActivePhase = (state.journeyActivePhase === newPhase) ? null : newPhase;
+      render();
+      return;
+    }
+
+    // NEU (16.09.2026): Journey-Map-Tab — Content-Änderung einreichen
+    var contentChangeSubmit = event.target.closest('[data-cvz-content-change-submit]');
+    if (contentChangeSubmit) {
+      submitContentChange(state.activeTopicId);
       return;
     }
     var backBtn = event.target.closest('[data-cvz-back]');
@@ -2146,6 +2304,9 @@
     tabContent.className = 'cvz-tab-content';
 
     switch (state.activeSubTab) {
+      case 'journey':
+        tabContent.appendChild(renderMessyMiddleTab(state.activeTopicId));
+        break;
       case 'action':
         tabContent.appendChild(renderActionTab(detail.opportunities));
         break;
@@ -4489,6 +4650,300 @@
     return div.innerHTML;
   }
 
+  // =========================================================================
+  // NEU (16.09.2026): JOURNEY-MAP-TAB
+  // Zeigt Phase-Scores (Zitierrate 0-100 % pro Kanal), Share-of-Voice der
+  // Wettbewerber und ein einfaches Content-Change-Log.
+  // API-Endpunkt: GET /topics/{id}/dashboard-data (siehe dashboard.py)
+  //               POST /topics/{id}/content-changes
+  // =========================================================================
+
+  function renderMessyMiddleTab(topicId) {
+    var wrap = document.createElement('div');
+
+    if (state.isLoadingDashboard) {
+      var loadEl = document.createElement('p');
+      loadEl.className = 'cvz-card-placeholder-text';
+      loadEl.innerHTML = '<span class="cvz-spinner"></span>Journey-Map wird geladen…';
+      wrap.appendChild(loadEl);
+      return wrap;
+    }
+
+    var data = state.dashboardDataCache[topicId];
+    if (!data) {
+      var errEl = document.createElement('div');
+      errEl.className = 'cvz-card cvz-card-placeholder';
+      errEl.innerHTML = '<p class="cvz-card-placeholder-text">Keine Journey-Map-Daten verfügbar. Bitte Tab erneut aufrufen oder Seite neu laden.</p>';
+      wrap.appendChild(errEl);
+      return wrap;
+    }
+
+    wrap.appendChild(renderPhaseScoreGrid(data.phase_scores));
+    wrap.appendChild(renderJourneyShareOfVoice(data.share_of_voice));
+    wrap.appendChild(renderContentChangesSection(topicId));
+    return wrap;
+  }
+
+  function renderPhaseScoreGrid(phaseScores) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'KI-Sichtbarkeit nach Journey-Phase';
+    section.appendChild(heading);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = 'Wie oft wird eure Domain pro Phase und Kanal zitiert (0–100 %).';
+    section.appendChild(sub);
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-journey-phase-grid';
+
+    PHASE_ORDER.forEach(function (phase) {
+      var scores = (phaseScores || {})[phase] || {};
+      var color = PHASE_COLORS[phase] || '#8b98a5';
+
+      var card = document.createElement('div');
+      card.className = 'cvz-journey-phase-card';
+      card.style.borderTopColor = color;
+
+      var phaseLabel = document.createElement('p');
+      phaseLabel.className = 'cvz-journey-phase-name';
+      phaseLabel.style.color = color;
+      phaseLabel.textContent = PHASE_LABELS[phase] || phase;
+      card.appendChild(phaseLabel);
+
+      CHANNEL_ORDER.forEach(function (channel) {
+        var ch = scores[channel] || { score: 0, cited: 0, total: 0 };
+        var pct = Math.round(ch.score || 0);
+
+        var row = document.createElement('div');
+        row.className = 'cvz-journey-channel-row';
+
+        var lbl = document.createElement('span');
+        lbl.className = 'cvz-journey-channel-label';
+        lbl.textContent = CHANNEL_LABELS[channel] || channel;
+        row.appendChild(lbl);
+
+        var barWrap = document.createElement('div');
+        barWrap.className = 'cvz-journey-bar-wrap';
+
+        var bar = document.createElement('div');
+        bar.className = 'cvz-journey-bar-fill';
+        bar.style.width = pct + '%';
+        bar.style.backgroundColor = color;
+        barWrap.appendChild(bar);
+        row.appendChild(barWrap);
+
+        var num = document.createElement('span');
+        num.className = 'cvz-journey-channel-num';
+        num.textContent = pct + '%';
+        if (ch.total > 0) {
+          num.title = ch.cited + ' von ' + ch.total + ' Prompts zitiert';
+        }
+        row.appendChild(num);
+
+        card.appendChild(row);
+      });
+
+      grid.appendChild(card);
+    });
+
+    section.appendChild(grid);
+    return section;
+  }
+
+  function renderJourneyShareOfVoice(shareOfVoice) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Wettbewerber-Sichtbarkeit pro Phase';
+    section.appendChild(heading);
+
+    var hasAny = false;
+    PHASE_ORDER.forEach(function (phase) {
+      var competitors = ((shareOfVoice || {})[phase] || []);
+      if (competitors.length === 0) return;
+      hasAny = true;
+
+      var phaseColor = PHASE_COLORS[phase] || '#8b98a5';
+
+      var phaseBlock = document.createElement('div');
+      phaseBlock.className = 'cvz-sov-phase-block';
+
+      var phaseHeader = document.createElement('button');
+      phaseHeader.type = 'button';
+      phaseHeader.className = 'cvz-sov-phase-header';
+      phaseHeader.setAttribute('data-cvz-journey-phase', phase);
+      phaseHeader.innerHTML =
+        '<span class="cvz-sov-phase-dot" style="background:' + phaseColor + '"></span>' +
+        '<span class="cvz-sov-phase-title">' + escapeHtml(PHASE_LABELS[phase] || phase) + '</span>' +
+        '<span class="cvz-sov-phase-count">' + competitors.length + ' Wettbewerber</span>' +
+        '<span class="cvz-sov-chevron">' + (state.journeyActivePhase === phase ? '▲' : '▼') + '</span>';
+      phaseBlock.appendChild(phaseHeader);
+
+      if (state.journeyActivePhase === phase) {
+        var table = document.createElement('table');
+        table.className = 'cvz-sov-table';
+        table.innerHTML =
+          '<thead><tr>' +
+            '<th>Domain</th>' +
+            '<th>Typ</th>' +
+            '<th>Zitierrate</th>' +
+            '<th>Differenzierungstipp</th>' +
+          '</tr></thead>';
+
+        var tbody = document.createElement('tbody');
+        competitors.forEach(function (comp) {
+          var pct = Math.round((comp.citation_rate || 0) * 100);
+          var tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td class="cvz-sov-domain">' + escapeHtml(comp.domain || '') + '</td>' +
+            '<td><span class="cvz-opportunity-type">' + escapeHtml(CONTENT_TYPE_LABELS[comp.content_type] || comp.content_type || '–') + '</span></td>' +
+            '<td class="cvz-sov-rate">' +
+              '<div class="cvz-journey-bar-wrap cvz-sov-bar-wrap">' +
+                '<div class="cvz-journey-bar-fill" style="width:' + pct + '%;background:' + phaseColor + '"></div>' +
+              '</div>' +
+              '<span>' + pct + '%</span>' +
+            '</td>' +
+            '<td class="cvz-sov-tip">' + escapeHtml(comp.differentiation_suggestion || '–') + '</td>';
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        phaseBlock.appendChild(table);
+      }
+
+      section.appendChild(phaseBlock);
+    });
+
+    if (!hasAny) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine Wettbewerber-Analysen verfügbar. Beim nächsten Monatslauf werden neue Domains automatisch analysiert.';
+      section.appendChild(empty);
+    }
+
+    return section;
+  }
+
+  function renderContentChangesSection(topicId) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Content-Änderungen & Events';
+    section.appendChild(heading);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = 'Halte fest, wann ihr was geändert habt — so könnt ihr später sehen, ob sich die Sichtbarkeit danach verändert hat.';
+    section.appendChild(sub);
+
+    // Form
+    var formCard = document.createElement('div');
+    formCard.className = 'cvz-card cvz-content-change-form';
+
+    var formRow = document.createElement('div');
+    formRow.className = 'cvz-content-change-fields';
+
+    var d = state.contentChangeDraft;
+
+    var dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.className = 'cvz-create-input';
+    dateInput.value = d.changed_at || new Date().toISOString().slice(0, 10);
+    dateInput.addEventListener('input', function () {
+      state.contentChangeDraft.changed_at = dateInput.value;
+    });
+    formRow.appendChild(dateInput);
+
+    var typeSelect = document.createElement('select');
+    typeSelect.className = 'cvz-picker-select cvz-content-change-type-select';
+    CONTENT_CHANGE_TYPE_ORDER.forEach(function (t) {
+      var opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = CONTENT_CHANGE_TYPE_LABELS[t] || t;
+      if (t === d.change_type) opt.selected = true;
+      typeSelect.appendChild(opt);
+    });
+    typeSelect.addEventListener('change', function () {
+      state.contentChangeDraft.change_type = typeSelect.value;
+    });
+    formRow.appendChild(typeSelect);
+
+    var descInput = document.createElement('input');
+    descInput.type = 'text';
+    descInput.className = 'cvz-create-input';
+    descInput.placeholder = 'Was habt ihr geändert? (z.B. Headline der CRO-Landingpage überarbeitet)';
+    descInput.value = d.description;
+    descInput.addEventListener('input', function () {
+      state.contentChangeDraft.description = descInput.value;
+    });
+    formRow.appendChild(descInput);
+
+    var urlInput = document.createElement('input');
+    urlInput.type = 'url';
+    urlInput.className = 'cvz-create-input';
+    urlInput.placeholder = 'URL (optional)';
+    urlInput.value = d.url;
+    urlInput.addEventListener('input', function () {
+      state.contentChangeDraft.url = urlInput.value;
+    });
+    formRow.appendChild(urlInput);
+
+    var submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.className = 'cvz-create-submit-btn';
+    submitBtn.setAttribute('data-cvz-content-change-submit', '');
+    submitBtn.disabled = state.isSubmittingContentChange;
+    submitBtn.textContent = state.isSubmittingContentChange ? 'Speichert…' : 'Speichern';
+    formRow.appendChild(submitBtn);
+
+    formCard.appendChild(formRow);
+    section.appendChild(formCard);
+
+    // List
+    var changes = state.contentChangesCache[topicId] || [];
+    if (state.isLoadingContentChanges) {
+      var loadEl = document.createElement('p');
+      loadEl.className = 'cvz-card-placeholder-text';
+      loadEl.style.marginTop = '12px';
+      loadEl.innerHTML = '<span class="cvz-spinner"></span>Lädt…';
+      section.appendChild(loadEl);
+    } else if (changes.length === 0) {
+      var emptyEl = document.createElement('p');
+      emptyEl.className = 'cvz-card-placeholder-text';
+      emptyEl.style.marginTop = '12px';
+      emptyEl.textContent = 'Noch keine Änderungen eingetragen.';
+      section.appendChild(emptyEl);
+    } else {
+      var list = document.createElement('div');
+      list.className = 'cvz-content-change-list';
+      changes.forEach(function (ch) {
+        var item = document.createElement('div');
+        item.className = 'cvz-content-change-item';
+        var dateStr = ch.changed_at ? ch.changed_at.slice(0, 10) : '';
+        var typeLabel = CONTENT_CHANGE_TYPE_LABELS[ch.change_type] || ch.change_type || '';
+        item.innerHTML =
+          '<span class="cvz-content-change-date">' + escapeHtml(dateStr) + '</span>' +
+          '<span class="cvz-opportunity-type">' + escapeHtml(typeLabel) + '</span>' +
+          '<span class="cvz-content-change-desc">' + escapeHtml(ch.description || '') + '</span>' +
+          (ch.url ? '<a class="cvz-content-change-url" href="' + escapeHtml(ch.url) + '" target="_blank" rel="noopener">Link ↗</a>' : '');
+        list.appendChild(item);
+      });
+      section.appendChild(list);
+    }
+
+    return section;
+  }
+
   function injectStyles() {
     if (document.getElementById('cvz-visibility-styles')) return;
 
@@ -4831,7 +5286,77 @@
       '.cvz-changelog-restore-btn {' +
         'font-family: "Geist", sans-serif; font-size: 11px; padding: 3px 10px; flex-shrink: 0;' +
         'background: none; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer;' +
-      '}';
+      '}' +
+
+      /* NEU (16.09.2026): Journey-Map-Tab */
+      '.cvz-journey-phase-grid {' +
+        'display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 4px;' +
+      '}' +
+      '.cvz-journey-phase-card {' +
+        'background: var(--cvz-navy-raised); border: 1px solid var(--cvz-border); border-top: 3px solid; padding: 16px;' +
+      '}' +
+      '.cvz-journey-phase-name {' +
+        'font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 12px;' +
+      '}' +
+      '.cvz-journey-channel-row {' +
+        'display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px;' +
+      '}' +
+      '.cvz-journey-channel-label {' +
+        'flex: 0 0 120px; color: var(--cvz-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' +
+      '}' +
+      '.cvz-journey-bar-wrap {' +
+        'flex: 1; height: 6px; background: var(--cvz-border); border-radius: 3px; overflow: hidden;' +
+      '}' +
+      '.cvz-journey-bar-fill {' +
+        'height: 100%; border-radius: 3px; transition: width 0.3s ease;' +
+      '}' +
+      '.cvz-journey-channel-num {' +
+        'flex: 0 0 32px; text-align: right; font-size: 11px; color: var(--cvz-text); font-variant-numeric: tabular-nums;' +
+      '}' +
+
+      '.cvz-sov-phase-block { margin-bottom: 8px; border: 1px solid var(--cvz-border); }' +
+      '.cvz-sov-phase-header {' +
+        'width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 16px;' +
+        'background: var(--cvz-navy-raised); border: none; color: var(--cvz-text); cursor: pointer; text-align: left;' +
+        'font-family: "Geist", sans-serif; font-size: 14px;' +
+      '}' +
+      '.cvz-sov-phase-header:hover { background: var(--cvz-navy); }' +
+      '.cvz-sov-phase-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }' +
+      '.cvz-sov-phase-title { font-weight: 600; flex: 1; }' +
+      '.cvz-sov-phase-count { font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-sov-chevron { font-size: 11px; color: var(--cvz-text-muted); }' +
+      '.cvz-sov-table { width: 100%; border-collapse: collapse; font-size: 13px; }' +
+      '.cvz-sov-table th {' +
+        'text-align: left; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em;' +
+        'color: var(--cvz-text-muted); padding: 8px 16px; border-bottom: 1px solid var(--cvz-border);' +
+      '}' +
+      '.cvz-sov-table td { padding: 10px 16px; border-bottom: 1px solid var(--cvz-border); vertical-align: top; }' +
+      '.cvz-sov-table tr:last-child td { border-bottom: none; }' +
+      '.cvz-sov-domain { font-weight: 500; }' +
+      '.cvz-sov-rate { display: flex; align-items: center; gap: 8px; white-space: nowrap; }' +
+      '.cvz-sov-bar-wrap { width: 80px; flex-shrink: 0; }' +
+      '.cvz-sov-tip { color: var(--cvz-text-muted); max-width: 300px; }' +
+
+      '.cvz-content-change-form { margin-bottom: 12px; }' +
+      '.cvz-content-change-fields {' +
+        'display: flex; gap: 8px; flex-wrap: wrap; align-items: center;' +
+      '}' +
+      '.cvz-content-change-type-select {' +
+        'flex: 0 0 160px; min-width: 140px; max-width: 160px;' +
+      '}' +
+      '.cvz-content-change-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }' +
+      '.cvz-content-change-item {' +
+        'display: flex; align-items: baseline; gap: 10px; padding: 10px 0;' +
+        'border-bottom: 1px solid var(--cvz-border); flex-wrap: wrap; font-size: 13px;' +
+      '}' +
+      '.cvz-content-change-date {' +
+        'flex: 0 0 auto; color: var(--cvz-text-muted); font-size: 12px; font-variant-numeric: tabular-nums;' +
+      '}' +
+      '.cvz-content-change-desc { flex: 1; min-width: 140px; }' +
+      '.cvz-content-change-url {' +
+        'color: var(--cvz-teal); font-size: 12px; text-decoration: none; white-space: nowrap;' +
+      '}' +
+      '.cvz-content-change-url:hover { text-decoration: underline; }';
 
     document.head.appendChild(style);
   }
