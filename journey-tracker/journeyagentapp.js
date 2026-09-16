@@ -2383,7 +2383,9 @@
         tabContent.appendChild(renderMessyMiddleTab(state.activeTopicId));
         break;
       case 'action':
-        tabContent.appendChild(renderActionTab(detail.opportunities, detail.content_ideas, detail.keywords, detail.source_profiles));
+        // GEÄNDERT (16.09.2026): detail.keywords existiert nicht — API liefert
+        // search_queries. Korrigiert auf detail.search_queries.
+        tabContent.appendChild(renderActionTab(detail.opportunities, detail.content_ideas, detail.search_queries, detail.source_profiles));
         break;
       case 'wettbewerber':
         var weeksData = state.citationTrendCache[state.activeTopicId];
@@ -3058,6 +3060,9 @@
     })();
 
     // ── Tabelle 2: Zitierungs-Luecken ────────────────────────────────────────
+    // GEÄNDERT (16.09.2026): Zeigt jetzt Beschreibung + Empfehlung als
+    // Hauptinhalt; Wettbewerber-Domains nur kompakt als kleine Chips darunter.
+    // Vorher wurde nur die Domain-Liste als Blob gezeigt ohne Kontext.
     (function () {
       var citationTypes = ['competitor_citation', 'ai_visible_competitor_dominates'];
       var citationOpps = (opportunities || []).filter(function (o) {
@@ -3070,16 +3075,8 @@
       var heading = document.createElement('p');
       heading.className = 'cvz-section-label';
       heading.style.marginTop = '28px';
-      heading.textContent = 'Prompts mit Wettbewerber-Zitierungen';
+      heading.textContent = 'Chancen: Zitierungs-Luecken';
       wrap.appendChild(heading);
-
-      var intro = document.createElement('p');
-      intro.className = 'cvz-card-placeholder-text';
-      intro.style.marginBottom = '12px';
-      intro.textContent =
-        'Bei diesen Prompts werden Wettbewerber zitiert, nicht convertlyze.com. ' +
-        'Hier liegt ungenutztes Zitierpotenzial.';
-      wrap.appendChild(intro);
 
       citationOpps.forEach(function (opp) {
         var sd = opp.supporting_data || {};
@@ -3087,56 +3084,47 @@
           ? (sd.cited_domains || [])
           : (sd.competitor_domains_cited || []);
 
-        // Extract example prompts from description
-        var examplePromptsText = '';
-        var desc = opp.description || '';
-        var bpIdx = desc.indexOf('Beispiel-Prompts:');
-        if (bpIdx !== -1) {
-          // Extract from "Beispiel-Prompts: ..." until end or next sentence ending with " ."
-          examplePromptsText = desc.substring(bpIdx + 'Beispiel-Prompts:'.length).trim();
-          // Stop at ". " followed by capital letter (next sentence) or end
-          var nextSentenceMatch = examplePromptsText.match(/\.\s+[A-Z]/);
-          if (nextSentenceMatch) {
-            examplePromptsText = examplePromptsText.substring(0, nextSentenceMatch.index + 1);
-          }
-        }
+        // Show max 5 domains to keep card compact
+        var domainsToShow = compDomains.slice(0, 5);
+        var moreCount = compDomains.length - domainsToShow.length;
 
-        // Parse individual prompts (quoted with single quotes)
-        var promptMatches = [];
-        var promptRegex = /'([^']+)'/g;
-        var m;
-        var src = examplePromptsText || desc;
-        while ((m = promptRegex.exec(src)) !== null) {
-          promptMatches.push(m[1]);
-        }
+        var typeLabel = OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type;
+
+        // Description: keep full text (it contains the actionable insight)
+        var desc = (opp.description || '').trim();
+
+        // Content recommendation
+        var rec = (opp.content_recommendation || '').trim();
+
+        var domainsChipsHtml = domainsToShow.map(function (d) {
+          return '<span style="display:inline-flex;align-items:center;gap:3px;' +
+            'background:var(--cvz-chip-bg,#f3f4f6);border-radius:4px;' +
+            'padding:2px 6px;font-size:11px;margin:2px 4px 2px 0;">' +
+            '<img src="https://www.google.com/s2/favicons?sz=12&domain=' + encodeURIComponent(d) + '" ' +
+            'style="width:12px;height:12px;">' +
+            escapeHtml(d) + '</span>';
+        }).join('') + (moreCount > 0
+          ? '<span style="font-size:11px;color:var(--cvz-text-muted,#6b7280);padding:2px 4px;">+' + moreCount + ' weitere</span>'
+          : '');
 
         var card = document.createElement('div');
         card.className = 'cvz-card';
         card.style.marginBottom = '8px';
 
-        var typeLabel = OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type;
-        var domainsHtml = compDomains.length
-          ? compDomains.map(function (d) {
-              return '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;margin-bottom:4px;">' +
-                '<img src="https://www.google.com/s2/favicons?sz=16&domain=' + encodeURIComponent(d) + '" style="width:14px;height:14px;">' +
-                '<strong>' + escapeHtml(d) + '</strong></span>';
-            }).join('')
-          : '';
-
-        var promptsHtml = promptMatches.length
-          ? '<ul style="margin:6px 0 0;padding-left:18px;font-size:13px;">' +
-              promptMatches.map(function (p) {
-                return '<li style="margin-bottom:3px;">' + escapeHtml(p) + '</li>';
-              }).join('') +
-            '</ul>'
-          : '';
-
         card.innerHTML =
           '<p style="margin:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;' +
-              'letter-spacing:.05em;color:#6b7280;">' + escapeHtml(typeLabel) + '</p>' +
-          (domainsHtml ? '<p style="margin:0 0 4px;">' + domainsHtml + '</p>' : '') +
-          (promptsHtml
-            ? '<p style="margin:6px 0 2px;font-size:12px;color:#6b7280;font-weight:600;">Beispiel-Prompts</p>' + promptsHtml
+              'letter-spacing:.05em;color:var(--cvz-text-muted,#6b7280);">' + escapeHtml(typeLabel) + '</p>' +
+          (desc
+            ? '<p style="margin:0 0 8px;font-size:13px;line-height:1.5;">' + escapeHtml(desc) + '</p>'
+            : '') +
+          (rec
+            ? '<p style="margin:0 0 8px;font-size:13px;font-weight:600;' +
+              'color:var(--cvz-teal,#0d9488);">' + escapeHtml(rec) + '</p>'
+            : '') +
+          (domainsChipsHtml
+            ? '<p style="margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#6b7280);font-weight:600;' +
+              'text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Zitierte Wettbewerber</p>' +
+              '<div style="display:flex;flex-wrap:wrap;gap:2px;">' + domainsChipsHtml + '</div>'
             : '');
 
         wrap.appendChild(card);
@@ -5060,7 +5048,13 @@
     if (!data) {
       var errEl = document.createElement('div');
       errEl.className = 'cvz-card cvz-card-placeholder';
-      errEl.innerHTML = '<p class="cvz-card-placeholder-text">Noch keine Journey-Map-Daten vorhanden. Diese entstehen nach dem ersten vollstaendigen Analyse-Lauf.</p>' + '<p style="margin-top:8px;"><button type="button" class="cvz-btn cvz-btn-secondary" data-cvz-journey-retry="' + topicId + '">Erneut laden</button></p>';
+      // GEÄNDERT (16.09.2026): cvz-btn-secondary war nirgends in CSS definiert
+      // (Button erschien weiß auf weiß). Inline-Styles statt fehlender Klasse.
+      errEl.innerHTML = '<p class="cvz-card-placeholder-text">Noch keine Journey-Map-Daten vorhanden. Diese entstehen nach dem ersten vollstaendigen Analyse-Lauf.</p>' +
+        '<p style="margin-top:8px;"><button type="button" ' +
+        'style="padding:6px 14px;font-size:13px;border-radius:6px;border:1px solid var(--cvz-border,#e5e7eb);' +
+        'background:transparent;color:var(--cvz-text,#374151);cursor:pointer;" ' +
+        'data-cvz-journey-retry="' + topicId + '">Erneut laden</button></p>';
       wrap.appendChild(errEl);
       return wrap;
     }
