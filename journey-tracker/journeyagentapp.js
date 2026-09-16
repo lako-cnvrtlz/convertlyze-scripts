@@ -880,6 +880,7 @@
 
   var TOPIC_TABS = [
     { id: 'uebersicht', label: 'Übersicht' },
+    { id: 'action', label: 'Action' },
     { id: 'wettbewerber', label: 'Wettbewerber & Quellen' },
     { id: 'keywords', label: 'Keywords' },
     { id: 'prompts', label: 'Prompts' },
@@ -985,6 +986,16 @@
         state.activeTopicId,
         keywordToggle.getAttribute('data-cvz-keyword-toggle'),
         keywordToggle.getAttribute('data-cvz-keyword-text'),
+      );
+      return;
+    }
+    // NEU (15.09.2026): manuelle Phasen-Korrektur bei Keywords/PAA-Fragen.
+    var keywordPhaseSet = event.target.closest('[data-cvz-keyword-phase-set]');
+    if (keywordPhaseSet) {
+      updateKeywordPhase(
+        state.activeTopicId,
+        keywordPhaseSet.getAttribute('data-cvz-keyword-phase-id'),
+        keywordPhaseSet.getAttribute('data-cvz-keyword-phase-set'),
       );
       return;
     }
@@ -2111,6 +2122,9 @@
     tabContent.className = 'cvz-tab-content';
 
     switch (state.activeSubTab) {
+      case 'action':
+        tabContent.appendChild(renderActionTab(detail.opportunities));
+        break;
       case 'wettbewerber':
         var weeksData = state.citationTrendCache[state.activeTopicId];
         tabContent.appendChild(renderCompetitorManageSection(detail, state.activeTopicId));
@@ -2684,6 +2698,62 @@
     return section;
   }
 
+  // NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026) —
+  // Action-Tab: die wichtigsten offenen Chancen (= aktuell offene
+  // Opportunities, abgeleitet aus Prompts/Keyword-Ideen/GSC-Daten) samt
+  // Claude-generierter Content-Empfehlung (siehe opportunities.py:
+  // generate_content_recommendations, läuft einmal pro Monatslauf).
+  function renderActionTab(opportunities) {
+    var wrap = document.createElement('div');
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Wichtigste Chancen mit Content-Empfehlung';
+    wrap.appendChild(heading);
+
+    var intro = document.createElement('p');
+    intro.className = 'cvz-card-placeholder-text';
+    intro.style.marginBottom = '16px';
+    intro.textContent =
+      'Fasst die offenen Opportunities (aus Prompts, Keyword-Ideen und GSC-Daten) zusammen und schl\u00e4gt ' +
+      'jeweils konkret vor, welcher Content das schlie\u00dfen k\u00f6nnte. Empfehlungen entstehen einmal pro Monatslauf.';
+    wrap.appendChild(intro);
+
+    // Nur offene Opportunities (nicht dismissed/acted_on), UND nur die,
+    // für die der Monatslauf bereits eine Empfehlung erzeugt hat — eine
+    // Opportunity ohne Empfehlung (z.B. weil sie erst seit dem letzten
+    // Monatslauf offen ist, oder die Empfehlungs-Generierung fehlschlug)
+    // taucht hier bewusst nicht auf, statt eine leere Empfehlung zu zeigen.
+    var actionable = (opportunities || []).filter(function (o) {
+      return (o.status === 'new' || o.status === 'reviewed') && o.content_recommendation;
+    });
+
+    if (actionable.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine Content-Empfehlungen verf\u00fcgbar. Diese entstehen einmal pro Monatslauf für alle aktuell offenen Opportunities.';
+      wrap.appendChild(empty);
+      return wrap;
+    }
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-opportunity-grid';
+    actionable.forEach(function (opp) {
+      var card = document.createElement('div');
+      card.className = 'cvz-card cvz-opportunity-card';
+      card.innerHTML =
+        '<p class="cvz-opportunity-type">' + escapeHtml(OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type) + '</p>' +
+        '<p class="cvz-opportunity-description">' + escapeHtml(opp.description || '') + '</p>' +
+        '<div class="cvz-action-recommendation">' +
+          '<p class="cvz-changelog-guided-label">Content-Empfehlung</p>' +
+          '<p class="cvz-opportunity-description">' + escapeHtml(opp.content_recommendation) + '</p>' +
+        '</div>';
+      grid.appendChild(card);
+    });
+    wrap.appendChild(grid);
+    return wrap;
+  }
+
   function renderOpportunitySection(opportunities) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -2882,6 +2952,23 @@
       '<input type="text" id="cvz-competitor-manual-input" class="cvz-changelog-input" placeholder="eigene-domain.de">' +
       '<button type="button" class="cvz-create-toggle-btn" data-cvz-competitor-manual-add="' + topicId + '">Hinzuf\u00fcgen</button>';
     section.appendChild(manualRow);
+
+    // NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026) —
+    // klarstellen, ab wann für einen Wettbewerber tatsächlich Daten
+    // vorliegen. Zitationsdaten existieren rückwirkend NUR, wenn die
+    // Domain in bisherigen Läufen bereits (unabhängig vom Wettbewerber-
+    // Status) zitiert wurde — eine neu hinzugefügte, bisher nie zitierte
+    // Domain taucht im Wettbewerber-Tab erst ab dem nächsten Datenlauf
+    // auf, in dem sie tatsächlich vorkommt. Direkt über dem
+    // Speichern-Button, damit die Erwartung VOR dem Klick gesetzt wird.
+    var dataWindowNote = document.createElement('p');
+    dataWindowNote.className = 'cvz-card-placeholder-text';
+    dataWindowNote.style.marginTop = '8px';
+    dataWindowNote.textContent =
+      'Hinweis: Eine neu hinzugef\u00fcgte Domain zeigt hier nur Daten, wenn sie in bisherigen L\u00e4ufen bereits ' +
+      'zitiert wurde. Wurde sie bisher nie zitiert, erscheint sie erst ab dem n\u00e4chsten Datenlauf, in dem das ' +
+      'tats\u00e4chlich passiert \u2014 nicht sofort nach dem Speichern.';
+    section.appendChild(dataWindowNote);
 
     var submitBtn = document.createElement('button');
     submitBtn.type = 'button';
@@ -3541,8 +3628,16 @@
       var linkedCount = (changelogEntries || []).filter(function (entry) {
         return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
       }).length;
-      var hasDetail = kw.organic_rank != null || kw.gsc_impressions != null || kw.gsc_position != null || kw.first_seen_at || linkedCount > 0 || (kw.top_serp_results && kw.top_serp_results.length > 0);
+      var hasDetail = kw.organic_rank != null || kw.gsc_impressions != null || kw.gsc_position != null || kw.first_seen_at || linkedCount > 0 || (kw.top_serp_results && kw.top_serp_results.length > 0) || !!kw.messymiddle_phase;
       var canExpand = !!(enableExpansion && hasDetail);
+
+      // NEU (15.09.2026): Messy-Middle-Phase, siehe Chat-Verlauf
+      // 15.09.2026 — Badge in der eingeklappten Zeile, Korrektur-Chips
+      // erst nach dem Aufklappen (siehe renderKeywordExpansion), damit
+      // die Zeile selbst nicht überladen wirkt.
+      var phaseBadge = kw.messymiddle_phase
+        ? '<span class="cvz-prompt-persona">' + escapeHtml(PHASE_LABELS[kw.messymiddle_phase] || kw.messymiddle_phase) + '</span>'
+        : '';
 
       var row = document.createElement('div');
       row.className = 'cvz-prompt-row' + (canExpand ? ' cvz-prompt-row-clickable' : '');
@@ -3560,6 +3655,7 @@
           (kw.search_volume == null ? '\u2013' : escapeHtml(kw.search_volume) + '/Monat') +
         '</span>' +
         '<span class="cvz-prompt-source">' + escapeHtml(KEYWORD_SOURCE_LABELS[kw.source] || kw.source) + '</span>' +
+        phaseBadge +
         (canExpand
           ? '<span class="cvz-prompt-expand-chevron">' + (state.expandedKeywordId === rowId ? '\u25be' : '\u25b8') + '</span>'
           : '');
@@ -3571,6 +3667,27 @@
     });
     section.appendChild(list);
     return section;
+  }
+
+  // NEU (15.09.2026): manuelle Korrektur der Messy-Middle-Phase eines
+  // Keywords/einer PAA-Frage, siehe main.py: update_keyword_phase_endpoint.
+  async function updateKeywordPhase(topicId, keywordId, phase) {
+    try {
+      await apiFetch('/topics/' + topicId + '/keywords/' + keywordId + '/phase', {
+        method: 'PATCH',
+        body: { messymiddle_phase: phase },
+      });
+      var cached = state.topicDetailCache[topicId];
+      var kw = cached && (cached.search_queries || []).filter(function (q) { return q.id === keywordId; })[0];
+      if (kw) {
+        kw.messymiddle_phase = phase;
+        kw.phase_manually_set = true;
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Phase konnte nicht gespeichert werden:', e);
+      await showCvzAlert('Phase konnte nicht gespeichert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    render();
   }
 
   function renderKeywordExpansion(kw, rowId, changelogEntries) {
@@ -3609,7 +3726,25 @@
     if (kw.first_seen_at) {
       lines.push('<p class="cvz-opportunity-topic">Erstmals erfasst: ' + formatRelativeTime(kw.first_seen_at) + '</p>');
     }
-    wrap.innerHTML = linkedHtml + lines.join('') + renderSerpSummaryBlock(kw);
+
+    // NEU (15.09.2026): Korrektur-Chips für die Messy-Middle-Phase (siehe
+    // Chat-Verlauf 15.09.2026) — Claude ordnet Keywords/PAA-Fragen
+    // automatisch einer Phase zu, hier kann der Nutzer das korrigieren.
+    var phaseChipsHtml = '';
+    if (kw.id) {
+      phaseChipsHtml =
+        '<p class="cvz-changelog-guided-label">Phase' + (kw.phase_manually_set ? ' (manuell gesetzt)' : '') + '</p>' +
+        '<div class="cvz-persona-filter">' +
+          PHASE_ORDER.map(function (phase) {
+            var isActive = kw.messymiddle_phase === phase;
+            return '<button type="button" class="cvz-persona-chip' + (isActive ? ' cvz-persona-chip-active' : '') + '" ' +
+              'data-cvz-keyword-phase-set="' + phase + '" data-cvz-keyword-phase-id="' + escapeHtml(kw.id) + '">' +
+              escapeHtml(PHASE_LABELS[phase]) + '</button>';
+          }).join('') +
+        '</div>';
+    }
+
+    wrap.innerHTML = linkedHtml + lines.join('') + renderSerpSummaryBlock(kw) + phaseChipsHtml;
 
     if (state.loadingKeywordRankHistory[rowId]) {
       var loading = document.createElement('p');
@@ -4446,6 +4581,7 @@
       '.cvz-opportunity-type { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--cvz-red); }' +
       '.cvz-opportunity-description { margin: 0 0 8px; font-size: 14px; line-height: 1.4; color: var(--cvz-text); }' +
       '.cvz-opportunity-topic { margin: 0; font-size: 11px; color: var(--cvz-text-muted); }' +
+      '.cvz-action-recommendation { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--cvz-border); }' +
       '.cvz-competitor-prompt-list { margin: 2px 0 8px; padding-left: 16px; font-size: 12px; color: var(--cvz-text-muted); }' +
       '.cvz-competitor-prompt-list li { margin: 2px 0; }' +
 
