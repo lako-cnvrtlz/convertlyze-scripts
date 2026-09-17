@@ -6110,6 +6110,7 @@
       '.cvz-domain-header { margin-bottom: 24px; }' +
 
       '.cvz-tab-nav { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--cvz-border); margin-bottom: 20px; position: sticky; top: 0; z-index: 10; background: var(--cvz-navy); padding-top: 8px; margin-top: -8px; }' +
+      '@media (max-width: 600px) { .cvz-opp-rec-col { display: none; } .cvz-opp-rec-header { display: none; } }' +
       '.cvz-tab-btn {' +
         'font-family: "Geist", sans-serif; font-size: 14px; padding: 10px 16px; margin-bottom: -1px;' +
         'background: none; color: var(--cvz-text-muted); border: none; border-bottom: 2px solid transparent;' +
@@ -7032,9 +7033,10 @@
       // Header: toggle | Typ | Was wir sehen | Empfohlene Massnahme
       var oppThead = document.createElement('thead');
       var oppHeaderRow = document.createElement('tr');
-      [['', 'width:24px;'], ['Typ', 'width:148px;white-space:nowrap;'], ['Was wir sehen', ''], ['Empfohlene Massnahme', 'width:28%;']].forEach(function (pair) {
+      [['', 'width:24px;', ''], ['Typ', 'width:148px;white-space:nowrap;', ''], ['Was wir sehen', '', ''], ['Empfohlene Massnahme', 'width:28%;', 'cvz-opp-rec-header']].forEach(function (pair) {
         var th = document.createElement('th');
         th.textContent = pair[0];
+        if (pair[2]) th.className = pair[2];
         th.style.cssText =
           'text-align:left;padding:7px 10px;' +
           'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
@@ -7082,23 +7084,25 @@
         tdTyp.appendChild(chipWrap);
         tr.appendChild(tdTyp);
 
-        // Col 2: Beschreibung
+        // Col 2: Beschreibung (max 3 Zeilen, Rest per Expand sichtbar)
         var tdDesc = document.createElement('td');
         tdDesc.style.cssText = 'padding:12px 10px;vertical-align:top;line-height:1.65;color:var(--cvz-text-muted,#8b98a5);';
-        tdDesc.textContent = opp.description || '';
+        var descInner = document.createElement('div');
+        descInner.style.cssText = 'display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;';
+        descInner.textContent = opp.description || '';
+        tdDesc.appendChild(descInner);
         tr.appendChild(tdDesc);
 
-        // Col 3: Massnahme (mit Fallback)
+        // Col 3: Massnahme — auf Mobile ausgeblendet (steht ausführlich im Aktionsplan-Tab)
         var tdRec = document.createElement('td');
+        tdRec.className = 'cvz-opp-rec-col';
         tdRec.style.cssText = 'padding:12px 10px;vertical-align:top;line-height:1.5;font-size:12px;';
         var recText = opp.content_recommendation || OPP_FALLBACK_RECOMMENDATION[opp.opportunity_type] || '';
-        if (recText) {
-          tdRec.style.color = 'var(--cvz-text-muted,#8b98a5)';
-          tdRec.textContent = recText;
-        } else {
-          tdRec.style.color = 'var(--cvz-text-muted,#8b98a5)';
-          tdRec.textContent = '-';
-        }
+        var recInner = document.createElement('div');
+        recInner.style.cssText = 'display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;';
+        recInner.style.color = 'var(--cvz-text-muted,#8b98a5)';
+        recInner.textContent = recText || '-';
+        tdRec.appendChild(recInner);
         tr.appendChild(tdRec);
         oppTbody.appendChild(tr);
 
