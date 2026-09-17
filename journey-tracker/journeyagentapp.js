@@ -7778,12 +7778,13 @@
               var newComplete = !itemIsCompleted;
               apiFetch('/topics/' + topicId + '/action-plan/toggle-item', {
                 method: 'POST',
-                body: JSON.stringify({
+                // apiFetch ruft selbst JSON.stringify(options.body) auf — kein manuelles Stringify hier!
+                body: {
                   item_index: itemOrigIdx,
                   item_title: itemTitle || ('Item #' + (itemOrigIdx + 1)),
                   item_phase: itemPhase || 'alle_phasen',
                   complete: newComplete,
-                }),
+                },
               }).then(function(resp) {
                 // Cache aktualisieren
                 var cached = state.topicDetailCache[topicId];
