@@ -2311,7 +2311,10 @@
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    section.appendChild(table);
+    var _scrollWrap = document.createElement('div');
+    _scrollWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    _scrollWrap.appendChild(table);
+    section.appendChild(_scrollWrap);
     return section;
   }
 
@@ -3414,20 +3417,42 @@
       section.appendChild(empty);
       return section;
     }
-    var grid = document.createElement('div');
-    grid.className = 'cvz-opportunity-grid';
-    profiles.forEach(function (profile) {
-      var card = document.createElement('div');
-      card.className = 'cvz-card cvz-idea-card';
-      card.innerHTML =
-        '<p class="cvz-opportunity-type">' + escapeHtml(profile.domain) +
-          (profile.content_type ? ' · ' + escapeHtml(CONTENT_TYPE_LABELS[profile.content_type] || profile.content_type) : '') +
-        '</p>' +
-        (profile.summary ? '<p class="cvz-opportunity-description">' + escapeHtml(profile.summary) + '</p>' : '') +
-        (profile.differentiation_suggestion ? '<p class="cvz-opportunity-description"><strong>Differenzierung:</strong> ' + escapeHtml(profile.differentiation_suggestion) + '</p>' : '');
-      grid.appendChild(card);
+    var table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+    var thead = document.createElement('thead');
+    var hrow = document.createElement('tr');
+    ['Domain', 'Content-Typ', 'Zusammenfassung', 'Differenzierung'].forEach(function (label, i) {
+      var th = document.createElement('th');
+      th.textContent = label;
+      th.style.cssText = 'text-align:left;padding:7px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#30363d);white-space:nowrap;' + (i === 0 ? 'width:160px;' : '');
+      hrow.appendChild(th);
     });
-    section.appendChild(grid);
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+    var tbody = document.createElement('tbody');
+    profiles.forEach(function (profile, idx) {
+      var borderBottom = idx === profiles.length - 1 ? 'none' : '1px solid var(--cvz-border,#30363d)';
+      var tr = document.createElement('tr');
+      var tdDomain = document.createElement('td');
+      tdDomain.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-weight:600;';
+      tdDomain.innerHTML = '<img style="width:14px;height:14px;border-radius:2px;vertical-align:middle;margin-right:5px;object-fit:contain;" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(profile.domain) + '" alt="">' + escapeHtml(profile.domain);
+      tr.appendChild(tdDomain);
+      var tdType = document.createElement('td');
+      tdType.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+      tdType.textContent = profile.content_type ? (CONTENT_TYPE_LABELS[profile.content_type] || profile.content_type) : '';
+      tr.appendChild(tdType);
+      var tdSum = document.createElement('td');
+      tdSum.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;';
+      tdSum.textContent = profile.summary || '';
+      tr.appendChild(tdSum);
+      var tdDiff = document.createElement('td');
+      tdDiff.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;color:var(--cvz-opportunity-topic-color,#58a6ff);';
+      tdDiff.textContent = profile.differentiation_suggestion || '';
+      tr.appendChild(tdDiff);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    section.appendChild(table);
     return section;
   }
 
@@ -3457,38 +3482,80 @@
     });
     section.appendChild(filterRow);
 
+    // Tabelle
+    var table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+    var thead = document.createElement('thead');
+    var hrow = document.createElement('tr');
+    var COLS = ['Domain', 'Phase', 'Zitierrate', 'Content-Typ', 'Zusammenfassung', 'Differenzierung'];
+    var COL_WIDTHS = ['150px', '130px', '80px', '110px', '', ''];
+    COLS.forEach(function (label, i) {
+      var th = document.createElement('th');
+      th.textContent = label;
+      th.style.cssText = 'text-align:left;padding:7px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#30363d);white-space:nowrap;' + (COL_WIDTHS[i] ? 'width:' + COL_WIDTHS[i] + ';' : '');
+      hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+    var tbody = document.createElement('tbody');
+
     var phasesToRender = activeFilter ? [activeFilter] : PHASE_ORDER;
     phasesToRender.forEach(function (phase) {
       var sources = sov[phase] || [];
       if (!sources.length) return;
-      var color = PHASE_COLORS[phase] || '#94a3b8';
-
-      if (!activeFilter) {
-        var phaseHead = document.createElement('p');
-        phaseHead.style.cssText = 'margin:16px 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:' + color + ';border-left:3px solid ' + color + ';padding-left:8px;';
-        phaseHead.textContent = PHASE_LABELS[phase] || phase;
-        section.appendChild(phaseHead);
-      }
-
-      var grid = document.createElement('div');
-      grid.className = 'cvz-opportunity-grid';
-      sources.forEach(function (src) {
-        var card = document.createElement('div');
-        card.className = 'cvz-card cvz-idea-card';
+      var phaseColor = PHASE_COLORS[phase] || '#94a3b8';
+      sources.forEach(function (src, idx) {
+        var isLast = !activeFilter
+          ? (idx === sources.length - 1 && phase === phasesToRender[phasesToRender.length - 1])
+          : idx === sources.length - 1;
+        var borderBottom = isLast ? 'none' : '1px solid var(--cvz-border,#30363d)';
         var citePct = Math.round(src.citation_rate || 0);
-        var headerHtml =
-          '<img class="cvz-inline-favicon" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(src.domain) + '" alt="">' +
-          escapeHtml(src.domain) +
-          (src.content_type ? ' · ' + escapeHtml(CONTENT_TYPE_LABELS[src.content_type] || src.content_type) : '') +
-          ' · <strong>' + citePct + '%</strong> zitiert';
-        card.innerHTML =
-          '<p class="cvz-opportunity-type">' + headerHtml + '</p>' +
-          (src.summary ? '<p class="cvz-opportunity-description">' + escapeHtml(src.summary) + '</p>' : '') +
-          (src.differentiation_suggestion ? '<p class="cvz-opportunity-description"><strong>Differenzierung:</strong> ' + escapeHtml(src.differentiation_suggestion) + '</p>' : '');
-        grid.appendChild(card);
+        var tr = document.createElement('tr');
+
+        // Domain
+        var tdDomain = document.createElement('td');
+        tdDomain.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';';
+        tdDomain.innerHTML = '<img style="width:14px;height:14px;border-radius:2px;vertical-align:middle;margin-right:5px;object-fit:contain;" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(src.domain) + '" alt=""><span style="font-weight:600;">' + escapeHtml(src.domain) + '</span>';
+        tr.appendChild(tdDomain);
+
+        // Phase
+        var tdPhase = document.createElement('td');
+        tdPhase.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:11px;font-weight:700;color:' + phaseColor + ';white-space:nowrap;';
+        tdPhase.textContent = PHASE_LABELS[phase] || phase;
+        tr.appendChild(tdPhase);
+
+        // Zitierrate
+        var tdCite = document.createElement('td');
+        tdCite.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-weight:700;';
+        tdCite.textContent = citePct + '%';
+        tr.appendChild(tdCite);
+
+        // Content-Typ
+        var tdType = document.createElement('td');
+        tdType.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+        tdType.textContent = src.content_type ? (CONTENT_TYPE_LABELS[src.content_type] || src.content_type) : '';
+        tr.appendChild(tdType);
+
+        // Zusammenfassung
+        var tdSum = document.createElement('td');
+        tdSum.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;';
+        tdSum.textContent = src.summary || '';
+        tr.appendChild(tdSum);
+
+        // Differenzierung
+        var tdDiff = document.createElement('td');
+        tdDiff.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;color:var(--cvz-opportunity-topic-color,#58a6ff);';
+        tdDiff.textContent = src.differentiation_suggestion || '';
+        tr.appendChild(tdDiff);
+
+        tbody.appendChild(tr);
       });
-      section.appendChild(grid);
     });
+    table.appendChild(tbody);
+    var _scrollWrap = document.createElement('div');
+    _scrollWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    _scrollWrap.appendChild(table);
+    section.appendChild(_scrollWrap);
   }
 
   function renderDomainCompetitorTable(competitors) {
@@ -3964,7 +4031,10 @@
       tbody.appendChild(_buildGapRow(item, idx === allRows.length - 1));
     });
     table.appendChild(tbody);
-    section.appendChild(table);
+    var _scrollWrap = document.createElement('div');
+    _scrollWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    _scrollWrap.appendChild(table);
+    section.appendChild(_scrollWrap);
 
     return section;
   }
@@ -4801,13 +4871,16 @@
       wrap.appendChild(runNav);
     }
 
-    var statusLine = document.createElement('p');
-    statusLine.className = 'cvz-prompt-run-status';
-    statusLine.textContent = run.own_domain_cited
+    var _statusText = run.own_domain_cited
       ? '\u2713 zitiert' + (run.own_domain_citation_position ? ' (Position ' + run.own_domain_citation_position + ')' : '')
-      : (run.own_domain_mentioned ? '\u2013 nur erw\u00e4hnt, nicht zitiert' : '\u2717 in dieser Antwort nicht sichtbar');
-    if (run.own_domain_recommended === true) statusLine.textContent += ' \u00b7 aktiv empfohlen';
-    wrap.appendChild(statusLine);
+      : (run.own_domain_mentioned ? '\u2013 nur erw\u00e4hnt, nicht zitiert' : '');
+    if (run.own_domain_recommended === true) _statusText += ' \u00b7 aktiv empfohlen';
+    if (_statusText) {
+      var statusLine = document.createElement('p');
+      statusLine.className = 'cvz-prompt-run-status';
+      statusLine.textContent = _statusText;
+      wrap.appendChild(statusLine);
+    }
 
     var answerBlock = document.createElement('div');
     answerBlock.className = 'cvz-prompt-answer';
@@ -5137,13 +5210,19 @@
           ? ' <span class="cvz-changelog-linked-badge" title="' + promptLinkedCount + ' verknüpfte Änderung(en)">✎</span>'
           : '';
 
-        // Favicon: small favicon for the top cited domain in the collapsed row.
-        var faviconHtml = (prompt.top_cited_domain && prompt.cited_count > 0)
-          ? '<span class="cvz-prompt-favicons" style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0;">' +
-              '<img src="https://www.google.com/s2/favicons?sz=12&domain=' + encodeURIComponent(prompt.top_cited_domain) + '" ' +
-              'style="width:12px;height:12px;" ' +
-              'onerror="this.style.display=\'none\'" ' +
-              'title="Zitiert: ' + escapeHtml(prompt.top_cited_domain) + '">' +
+        // Favicons: cited_domains kommt direkt vom Backend (alle zitierten Domains
+        // sortiert nach Häufigkeit). Fallback auf top_cited_domain für ältere Responses.
+        var _favDomains = (prompt.cited_domains && prompt.cited_domains.length > 0)
+          ? prompt.cited_domains.slice(0, 6)
+          : (prompt.top_cited_domain ? [prompt.top_cited_domain] : []);
+        var faviconHtml = _favDomains.length > 0
+          ? '<span style="display:inline-flex;align-items:center;gap:2px;flex-shrink:0;">' +
+              _favDomains.map(function (d) {
+                return '<img src="https://www.google.com/s2/favicons?sz=14&domain=' + encodeURIComponent(d) + '" ' +
+                  'style="width:14px;height:14px;border-radius:2px;" ' +
+                  'onerror="this.style.display=\'none\'" ' +
+                  'title="' + escapeHtml(d) + '">';
+              }).join('') +
             '</span>'
           : '';
 
