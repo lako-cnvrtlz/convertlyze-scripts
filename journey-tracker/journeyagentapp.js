@@ -7607,6 +7607,8 @@
     // Kann nach Bestätigung dass alles funktioniert wieder entfernt werden.
     console.log('[CVZ] renderAktionsplanTab — action_plan vom Server:', JSON.stringify(ap).slice(0, 500));
     var items = ap.items || [];
+    // NEU (17.09.2026): erledigte Items — Array mit 0-basierten Original-Indizes
+    var completedIndices = ap.completed_item_indices || [];
 
     // ----- Empty / waiting state -----
     if (items.length === 0) {
@@ -7683,9 +7685,12 @@
         wrap.appendChild(introEl);
       }
 
-      // Group by phase
+      // Group by phase — NEU (17.09.2026): _origIdx merken, damit completed_item_indices korrekt sind
+      var itemsWithIdx = items.map(function(item, idx) {
+        return Object.assign({}, item, { _origIdx: idx });
+      });
       var groups = {};
-      items.forEach(function (item) {
+      itemsWithIdx.forEach(function (item) {
         var ph = item.phase || 'alle_phasen';
         if (!groups[ph]) groups[ph] = [];
         groups[ph].push(item);
@@ -7715,9 +7720,13 @@
         phList.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
 
         phItems.forEach(function (item, cardIdx) {
+          // NEU (17.09.2026): Erledigt-Status prüfen
+          var origIdx    = item._origIdx;
+          var isCompleted = completedIndices.indexOf(origIdx) !== -1;
+
           var card = document.createElement('div');
           card.className = 'cvz-card';
-          card.style.cssText = 'padding:0;overflow:hidden;';
+          card.style.cssText = 'padding:0;overflow:hidden;' + (isCompleted ? 'opacity:0.45;' : '');
 
           var impactLvl = (item.impact || 'mittel').toLowerCase();
           var impColor  = IMPACT_COLOR_MAP[impactLvl] || '#d97706';
@@ -7744,16 +7753,70 @@
           catSp.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#8b98a5);';
           catSp.textContent = catLabel;
           hdr.appendChild(catSp);
+
+          // NEU (17.09.2026): Erledigt-Toggle — rechts im Header
+          var spacer = document.createElement('span');
+          spacer.style.cssText = 'flex:1;';
+          hdr.appendChild(spacer);
+
+          var doneBtn = document.createElement('button');
+          doneBtn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:9999px;cursor:pointer;transition:all .15s;border:1px solid;flex-shrink:0;' +
+            (isCompleted
+              ? 'background:rgba(78,198,138,.12);border-color:rgba(78,198,138,.45);color:#4ec68a;'
+              : 'background:transparent;border-color:var(--cvz-border,#232b36);color:var(--cvz-text-muted,#8b98a5);');
+          doneBtn.innerHTML = isCompleted
+            ? '<span style="font-size:13px;">✓</span> Erledigt'
+            : '<span style="font-size:11px;">○</span> Als erledigt markieren';
+          doneBtn.title = isCompleted ? 'Erledigt-Markierung aufheben' : 'Item als erledigt markieren';
+
+          // Closure: Klick-Handler mit aktuellem Kontext
+          (function(btn, topicId, itemOrigIdx, itemTitle, itemPhase, itemIsCompleted, apObj) {
+            btn.addEventListener('click', function(e) {
+              e.stopPropagation();
+              btn.disabled = true;
+              btn.style.opacity = '0.5';
+              var newComplete = !itemIsCompleted;
+              apiFetch('/topics/' + topicId + '/action-plan/toggle-item', {
+                method: 'POST',
+                body: JSON.stringify({
+                  item_index: itemOrigIdx,
+                  item_title: itemTitle || ('Item #' + (itemOrigIdx + 1)),
+                  item_phase: itemPhase || 'alle_phasen',
+                  complete: newComplete,
+                }),
+              }).then(function(resp) {
+                // Cache aktualisieren
+                var cached = state.topicDetailCache[topicId];
+                if (cached && cached.action_plan) {
+                  cached.action_plan.completed_item_indices = resp.completed_item_indices || [];
+                }
+                // Wenn ein content_change zurückkam, contentChangesCache updaten
+                if (resp.content_change && state.contentChangesCache) {
+                  if (!state.contentChangesCache[topicId]) {
+                    state.contentChangesCache[topicId] = [];
+                  }
+                  state.contentChangesCache[topicId].push(resp.content_change);
+                }
+                render();
+              }).catch(function(err) {
+                console.error('[CVZ] toggle-action-plan-item Fehler:', err);
+                btn.disabled = false;
+                btn.style.opacity = '1';
+              });
+            });
+          })(doneBtn, state.activeTopicId, origIdx, item.title, item.phase, isCompleted, ap);
+
+          hdr.appendChild(doneBtn);
           card.appendChild(hdr);
 
           // ---- Body ----
           var body = document.createElement('div');
           body.style.cssText = 'padding:14px 16px;display:flex;flex-direction:column;gap:14px;';
 
-          // Title
+          // Title — NEU (17.09.2026): durchgestrichen wenn erledigt
           if (item.title) {
             var titleEl = document.createElement('p');
-            titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:700;line-height:1.4;color:var(--cvz-text-muted,#8b98a5);';
+            titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:700;line-height:1.4;color:var(--cvz-text-muted,#8b98a5);' + (isCompleted ? 'text-decoration:line-through;' : '');
             titleEl.textContent = item.title;
             body.appendChild(titleEl);
           }
@@ -7866,15 +7929,15 @@
           var dataTable = _buildSupportingDataTable(catKey, item.phase || 'alle_phasen', detail);
           if (dataTable) body.appendChild(dataTable);
 
-          // ---- EMPFEHLUNG ----
+          // ---- EMPFEHLUNG — NEU (17.09.2026): durchgestrichen wenn erledigt ----
           if (item.recommendation) {
             var recDiv = document.createElement('div');
             recDiv.style.cssText = 'background:rgba(79,209,197,.1);border-left:3px solid #4fd1c5;border-radius:0 4px 4px 0;padding:10px 12px;';
             var recLbl = document.createElement('p');
             recLbl.style.cssText = 'margin:0 0 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4fd1c5;';
-            recLbl.textContent = 'Empfehlung';
+            recLbl.textContent = isCompleted ? 'Empfehlung (erledigt)' : 'Empfehlung';
             var recTxt = document.createElement('p');
-            recTxt.style.cssText = 'margin:0;font-size:13px;color:#4fd1c5;line-height:1.55;';
+            recTxt.style.cssText = 'margin:0;font-size:13px;color:#4fd1c5;line-height:1.55;' + (isCompleted ? 'text-decoration:line-through;' : '');
             recTxt.textContent = item.recommendation;
             recDiv.appendChild(recLbl);
             recDiv.appendChild(recTxt);
