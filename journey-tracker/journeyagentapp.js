@@ -2981,6 +2981,7 @@
         '</div>';
     }
 
+    html += '<p class="cvz-ai-attribution">Zusammenfassung erstellt mit Claude (Anthropic)</p>';
     return html;
   }
 
@@ -3034,7 +3035,7 @@
 
       // Prompt / Keyword als Zitat
       var lbl = document.createElement('p');
-      lbl.style.cssText = 'margin:0;font-size:13px;font-weight:600;color:var(--cvz-text,#e6edf3);line-height:1.45;font-style:italic;';
+      lbl.style.cssText = 'margin:0;font-size:13px;font-weight:600;color:var(--cvz-text-muted,#8b98a5);line-height:1.45;font-style:italic;';
       lbl.textContent = '„' + chance.label + '“';
       inner.appendChild(lbl);
 
@@ -6052,7 +6053,7 @@
         'border-left: 3px solid var(--cvz-teal); padding: 12px 16px; margin: 0 0 16px; display: flex;' +
         'align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;' +
       '}' +
-      '.cvz-collecting-banner-text { font-size: 13px; color: var(--cvz-text); margin: 0; flex: 1 1 320px; }' +
+      '.cvz-collecting-banner-text { font-size: 13px; color: var(--cvz-text-muted); margin: 0; flex: 1 1 320px; }' +
       '.cvz-error-banner { border-left-color: var(--cvz-red); }' +
       '.cvz-soft-error-banner { border-left-color: var(--cvz-amber); }' +
       '.cvz-run-error-detail { font-size: 12px; color: var(--cvz-text-muted); font-family: monospace; }' +
@@ -6165,6 +6166,7 @@
       '.cvz-section-title { margin: 0 0 4px; font-size: 22px; }' +
 
       '.cvz-summary-card { margin-bottom: 24px; }' +
+      '.cvz-ai-attribution { margin: 20px 0 0; padding-top: 12px; border-top: 1px solid var(--cvz-border); font-size: 11px; color: var(--cvz-text-muted); opacity: 0.6; }' +
       '.cvz-summary-text { font-size: 15px; line-height: 1.5; margin: 12px 0 0; color: var(--cvz-text-muted); }' +
       '.cvz-summary-subsection { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--cvz-border); }' +
       '.cvz-summary-phase-block { margin-top: 12px; }' +
@@ -6203,7 +6205,7 @@
       '.cvz-phase-heading { font-family: "Syne", sans-serif; font-size: 14px; margin: 16px 0 8px; color: var(--cvz-text-muted); }' +
       '.cvz-prompt-list { display: flex; flex-direction: column; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch; }' +
       '.cvz-prompt-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 14px; min-width: max-content; }' +
-      '.cvz-prompt-text { flex: 1; min-width: 160px; }' +
+      '.cvz-prompt-text { flex: 1; min-width: 160px; color: var(--cvz-text-muted); }' +
       '.cvz-prompt-source { font-size: 11px; color: var(--cvz-text-muted); }' +
       '.cvz-prompt-citation-count { font-size: 11px; color: var(--cvz-teal); white-space: nowrap; }' +
       '.cvz-prompt-delete-btn {' +
@@ -6230,7 +6232,7 @@
       '.cvz-prompt-answer a { color: var(--cvz-teal); }' +
       '.cvz-prompt-source-list { display: flex; flex-direction: column; gap: 6px; }' +
       '.cvz-prompt-source-item {' +
-        'display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--cvz-text); text-decoration: none;' +
+        'display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--cvz-text-muted); text-decoration: none;' +
       '}' +
       '.cvz-prompt-source-item:hover { color: var(--cvz-teal); }' +
       '.cvz-prompt-source-competitor { font-weight: 600; }' +
