@@ -1123,32 +1123,47 @@
     container.innerHTML = '';
     if (state.activeView === 'topic-detail') {
       container.appendChild(renderTopicDetailView());
-      // JS-basiertes sticky Tab-Nav (position:sticky wird von Webflow-Containern mit
-      // overflow:hidden blockiert — daher Scroll-Listener als Fallback).
+      // JS-basiertes sticky Tab-Nav.
+      // position:sticky scheitert an Webflow-Containern mit overflow:hidden.
+      // window-scroll-Listener scheitert wenn Webflow einen eigenen Scroll-
+      // Container (overflow:auto/scroll) baut.
+      // IntersectionObserver ist scroll-container-agnostisch: er beobachtet
+      // wann das Sentinel-Element (direkt vor dem Tab-Nav) den Viewport
+      // verlässt — unabhängig davon, was scrollt.
       requestAnimationFrame(function () {
         var tabNavEl = container.querySelector('.cvz-tab-nav');
-        if (!tabNavEl) return;
-        var rect = tabNavEl.getBoundingClientRect();
-        var navTopInPage = rect.top + window.scrollY;
-        var origLeft = rect.left;
-        var origWidth = rect.width;
+        if (!tabNavEl || !window.IntersectionObserver) return;
+
+        // Sentinel: 1px-Platzhalter direkt vor dem Tab-Nav
+        var sentinel = document.createElement('div');
+        sentinel.style.cssText = 'height:1px;pointer-events:none;margin-bottom:-1px;';
+        tabNavEl.parentNode.insertBefore(sentinel, tabNavEl);
+
+        var origLeft = tabNavEl.getBoundingClientRect().left;
+        var origWidth = tabNavEl.getBoundingClientRect().width;
         var navHeight = tabNavEl.offsetHeight;
         var spacer = null;
-        var fixed = false;
 
-        var handler = function () {
-          if (window.scrollY > navTopInPage - 4) {
-            if (!fixed) {
-              // Capture position before going fixed (left might have shifted)
-              origLeft = tabNavEl.getBoundingClientRect().left;
-              origWidth = tabNavEl.getBoundingClientRect().width;
-              fixed = true;
+        var observer = new IntersectionObserver(function (entries) {
+          var isVisible = entries[0].isIntersecting;
+          // DIAGNOSE-LOG (17.09.2026): zeigt ob der Observer überhaupt feuert.
+          // Kann nach Bestätigung entfernt werden.
+          console.log('[CVZ] IntersectionObserver sentinel:', isVisible ? 'sichtbar (kein Sticky)' : 'unsichtbar (Sticky aktiv)');
+          if (!isVisible) {
+            // Sentinel hat den Viewport verlassen → Nav fixieren
+            var curLeft = tabNavEl.getBoundingClientRect().left;
+            var curWidth = tabNavEl.getBoundingClientRect().width;
+            // Nur updaten wenn noch nicht fixed (verhindert Flackern)
+            if (tabNavEl.style.position !== 'fixed') {
+              origLeft = curLeft;
+              origWidth = curWidth;
             }
             tabNavEl.style.position = 'fixed';
             tabNavEl.style.top = '0';
             tabNavEl.style.left = origLeft + 'px';
             tabNavEl.style.width = origWidth + 'px';
-            tabNavEl.style.zIndex = '100';
+            // z-index 9999 wegen möglicher Webflow-Stacking-Contexts
+            tabNavEl.style.zIndex = '9999';
             tabNavEl.style.background = 'var(--cvz-navy)';
             tabNavEl.style.paddingTop = '8px';
             tabNavEl.style.boxShadow = '0 2px 8px rgba(0,0,0,0.28)';
@@ -1158,7 +1173,7 @@
               tabNavEl.parentNode.insertBefore(spacer, tabNavEl.nextSibling);
             }
           } else {
-            fixed = false;
+            // Sentinel wieder sichtbar → Nav zurück in den Flow
             tabNavEl.style.position = '';
             tabNavEl.style.top = '';
             tabNavEl.style.left = '';
@@ -1169,13 +1184,14 @@
             tabNavEl.style.boxShadow = '';
             if (spacer) { spacer.remove(); spacer = null; }
           }
-        };
+        }, { threshold: 0 });
 
-        window.addEventListener('scroll', handler, { passive: true });
-        handler(); // Apply correct state immediately (page may already be scrolled)
+        observer.observe(sentinel);
+
         state._tabNavCleanup = function () {
-          window.removeEventListener('scroll', handler);
-          if (spacer) { spacer.remove(); spacer = null; }
+          observer.disconnect();
+          if (sentinel.parentNode) sentinel.remove();
+          if (spacer && spacer.parentNode) spacer.remove();
         };
       });
     } else {
@@ -1380,6 +1396,19 @@
       }
       if (newTab === 'verlauf' && state.activeView === 'topic-detail') {
         maybeLoadVisibilityTrend(state.activeTopicId);
+      }
+      // NEU (17.09.2026): Aktionsplan-Tab — Cache-Busting.
+      // Falls der gecachete Detail-Fetch noch kein action_plan hatte (z.B. weil
+      // beim Öffnen noch kein Plan existierte, oder weil ein Deployment den Plan
+      // erst nachträglich befüllt hat), Datensatz verwerfen und neu laden.
+      if (newTab === 'aktionsplan' && state.activeView === 'topic-detail') {
+        var _apCached = state.topicDetailCache[state.activeTopicId];
+        var _apMissing = !_apCached || !_apCached.action_plan || !_apCached.action_plan.generated_at;
+        if (_apMissing) {
+          delete state.topicDetailCache[state.activeTopicId];
+          openTopicDetail(state.activeTopicId, false); // async, neu laden + rendern
+          return;
+        }
       }
       render();
       return;
@@ -3043,8 +3072,10 @@
       if (phaseRowsHtml) {
         html += '<div class="cvz-summary-subsection">' +
           '<p class="cvz-section-label">Je Phase</p>' +
-          '<table class="cvz-table"><thead><tr><th>Phase</th><th>Einsch\u00e4tzung</th><th>Empfohlene Content-Typen</th></tr></thead>' +
+          '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">' +
+          '<table class="cvz-table" style="min-width:480px;"><thead><tr><th>Phase</th><th>Einsch\u00e4tzung</th><th>Empfohlene Content-Typen</th></tr></thead>' +
           '<tbody>' + phaseRowsHtml + '</tbody></table>' +
+          '</div>' +
           (maturity.content_luecken_duenn ? THIN_DATA_NOTE : '') +
           '</div>';
       }
@@ -4088,7 +4119,7 @@
 
       // Content-Luecke
       var tdDesc = document.createElement('td');
-      tdDesc.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';line-height:1.5;';
+      tdDesc.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';line-height:1.5;color:var(--cvz-text,#e6edf3);';
       tdDesc.textContent = gap.gap_description || '';
       tr.appendChild(tdDesc);
 
@@ -4100,7 +4131,7 @@
 
       // Empfehlung
       var tdRec = document.createElement('td');
-      tdRec.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;color:var(--cvz-opportunity-topic-color,#5aacd2);line-height:1.4;';
+      tdRec.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;color:var(--cvz-text-muted,#8b98a5);line-height:1.4;';
       tdRec.textContent = gap.recommended_content_type || '';
       tr.appendChild(tdRec);
 
@@ -7566,6 +7597,9 @@
     var IMPACT_LABEL_MAP = { hoch: 'Hoch', mittel: 'Mittel', niedrig: 'Niedrig' };
 
     var ap = detail.action_plan || {};
+    // DIAGNOSE-LOG (17.09.2026): zeigt im Browser-DevTools-Console was der Server liefert.
+    // Kann nach Bestätigung dass alles funktioniert wieder entfernt werden.
+    console.log('[CVZ] renderAktionsplanTab — action_plan vom Server:', JSON.stringify(ap).slice(0, 500));
     var items = ap.items || [];
 
     // ----- Empty / waiting state -----
