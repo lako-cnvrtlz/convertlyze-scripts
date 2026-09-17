@@ -110,6 +110,9 @@
     contentChangesCache: {},
     isLoadingContentChanges: false,
     journeyActivePhase: null,
+    // NEU (17.09.2026): Phase-Filter fuer Content-Luecken und Quellen-Analyse
+    gapPhaseFilter: null,
+    sourcePhaseFilter: null,
   };
 
   function getProjectById(id) {
@@ -1174,6 +1177,20 @@
     if (personaFilter) {
       var personaValue = personaFilter.getAttribute('data-cvz-persona-filter');
       state.activePersonaFilter = personaValue || null;
+      render();
+      return;
+    }
+    // NEU (17.09.2026): Phase-Filter fuer Content-Luecken
+    var gapPhaseFilter = event.target.closest('[data-cvz-gap-phase-filter]');
+    if (gapPhaseFilter) {
+      state.gapPhaseFilter = gapPhaseFilter.getAttribute('data-cvz-gap-phase-filter') || null;
+      render();
+      return;
+    }
+    // NEU (17.09.2026): Phase-Filter fuer Quellen-Analyse
+    var sourcePhaseFilter = event.target.closest('[data-cvz-source-phase-filter]');
+    if (sourcePhaseFilter) {
+      state.sourcePhaseFilter = sourcePhaseFilter.getAttribute('data-cvz-source-phase-filter') || null;
       render();
       return;
     }
@@ -3348,7 +3365,32 @@
     return section;
   }
 
-  function renderSourceProfilesSection(profiles) {
+  // --- NEU (17.09.2026): Phase-Heuristik + localStorage-Overrides ---
+  function _detectGapPhase(description) {
+    if (!description) return null;
+    var d = description.toLowerCase();
+    if (/vergleich|versus|\bvs\b|alternativ|unterschied|gegenüber|brownfield.*greenfield|greenfield.*brownfield|verschiedene.*ansätz|ansätz.*vergleich|migrationsansätz/.test(d)) return 'comparison';
+    if (/anforderung|compliance|dsgvo|rechtlich|gesetz|regulier|prüfung|audit|zertifizier|bewertungs.*kriterien|beurteilung/.test(d)) return 'evaluation';
+    if (/implementierung|deployment|einführung|rollout|projektplan|zeitplan|meilenstein|performance.*nach|monitoring.*nach|nach.*implementierung|nach.*archivierung|betrieb/.test(d)) return 'decision';
+    if (/was ist|grundlagen|überblick|einführung.*thema|definition|konzept|grundsätzlich|wie funktioniert|warum.*archivierung/.test(d)) return 'exploration';
+    return null;
+  }
+
+  function _gapLsKey(topicId, desc) {
+    return 'cvz-gap-phase:' + (topicId || '') + ':' + (desc || '').substring(0, 60);
+  }
+  function _getGapPhase(topicId, desc) {
+    try { return localStorage.getItem(_gapLsKey(topicId, desc)) || null; } catch (e) { return null; }
+  }
+  function _setGapPhase(topicId, desc, phase) {
+    try {
+      if (phase) { localStorage.setItem(_gapLsKey(topicId, desc), phase); }
+      else { localStorage.removeItem(_gapLsKey(topicId, desc)); }
+    } catch (e) {}
+  }
+
+  // --- NEU (17.09.2026): Quellen-Analyse phase-gruppiert ---
+  function renderSourceProfilesSection(profiles, topicId, sovData) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
@@ -3357,6 +3399,14 @@
     heading.textContent = 'Quellen-Analyse (Live-Web-Search, gecacht pro Domain)';
     section.appendChild(heading);
 
+    // Wenn share_of_voice-Daten vorhanden: phase-gruppierte Ansicht
+    var hasSov = sovData && PHASE_ORDER.some(function (p) { return sovData[p] && sovData[p].length; });
+    if (hasSov) {
+      _renderSourcesByPhase(section, sovData);
+      return section;
+    }
+
+    // Fallback: flache Liste
     if (!profiles || profiles.length === 0) {
       var empty = document.createElement('p');
       empty.className = 'cvz-card-placeholder-text';
@@ -3364,7 +3414,6 @@
       section.appendChild(empty);
       return section;
     }
-
     var grid = document.createElement('div');
     grid.className = 'cvz-opportunity-grid';
     profiles.forEach(function (profile) {
@@ -3372,7 +3421,7 @@
       card.className = 'cvz-card cvz-idea-card';
       card.innerHTML =
         '<p class="cvz-opportunity-type">' + escapeHtml(profile.domain) +
-          (profile.content_type ? ' \u00b7 ' + escapeHtml(CONTENT_TYPE_LABELS[profile.content_type] || profile.content_type) : '') +
+          (profile.content_type ? ' · ' + escapeHtml(CONTENT_TYPE_LABELS[profile.content_type] || profile.content_type) : '') +
         '</p>' +
         (profile.summary ? '<p class="cvz-opportunity-description">' + escapeHtml(profile.summary) + '</p>' : '') +
         (profile.differentiation_suggestion ? '<p class="cvz-opportunity-description"><strong>Differenzierung:</strong> ' + escapeHtml(profile.differentiation_suggestion) + '</p>' : '');
@@ -3380,6 +3429,66 @@
     });
     section.appendChild(grid);
     return section;
+  }
+
+  function _renderSourcesByPhase(section, sov) {
+    var activeFilter = state.sourcePhaseFilter;
+
+    // Phase-Filter-Chips
+    var filterRow = document.createElement('div');
+    filterRow.className = 'cvz-persona-filter';
+    filterRow.style.marginBottom = '12px';
+    var allChip = document.createElement('button');
+    allChip.type = 'button';
+    allChip.className = 'cvz-persona-chip' + (activeFilter === null ? ' cvz-persona-chip-active' : '');
+    allChip.setAttribute('data-cvz-source-phase-filter', '');
+    allChip.textContent = 'Alle';
+    filterRow.appendChild(allChip);
+    PHASE_ORDER.forEach(function (phase) {
+      var count = (sov[phase] || []).length;
+      if (!count) return;
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cvz-persona-chip' + (activeFilter === phase ? ' cvz-persona-chip-active' : '');
+      chip.style.borderLeftColor = PHASE_COLORS[phase] || '';
+      chip.setAttribute('data-cvz-source-phase-filter', phase);
+      chip.textContent = (PHASE_LABELS[phase] || phase) + ' (' + count + ')';
+      filterRow.appendChild(chip);
+    });
+    section.appendChild(filterRow);
+
+    var phasesToRender = activeFilter ? [activeFilter] : PHASE_ORDER;
+    phasesToRender.forEach(function (phase) {
+      var sources = sov[phase] || [];
+      if (!sources.length) return;
+      var color = PHASE_COLORS[phase] || '#94a3b8';
+
+      if (!activeFilter) {
+        var phaseHead = document.createElement('p');
+        phaseHead.style.cssText = 'margin:16px 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:' + color + ';border-left:3px solid ' + color + ';padding-left:8px;';
+        phaseHead.textContent = PHASE_LABELS[phase] || phase;
+        section.appendChild(phaseHead);
+      }
+
+      var grid = document.createElement('div');
+      grid.className = 'cvz-opportunity-grid';
+      sources.forEach(function (src) {
+        var card = document.createElement('div');
+        card.className = 'cvz-card cvz-idea-card';
+        var citePct = Math.round(src.citation_rate || 0);
+        var headerHtml =
+          '<img class="cvz-inline-favicon" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(src.domain) + '" alt="">' +
+          escapeHtml(src.domain) +
+          (src.content_type ? ' · ' + escapeHtml(CONTENT_TYPE_LABELS[src.content_type] || src.content_type) : '') +
+          ' · <strong>' + citePct + '%</strong> zitiert';
+        card.innerHTML =
+          '<p class="cvz-opportunity-type">' + headerHtml + '</p>' +
+          (src.summary ? '<p class="cvz-opportunity-description">' + escapeHtml(src.summary) + '</p>' : '') +
+          (src.differentiation_suggestion ? '<p class="cvz-opportunity-description"><strong>Differenzierung:</strong> ' + escapeHtml(src.differentiation_suggestion) + '</p>' : '');
+        grid.appendChild(card);
+      });
+      section.appendChild(grid);
+    });
   }
 
   function renderDomainCompetitorTable(competitors) {
@@ -3465,7 +3574,7 @@
     toggleBtn.textContent = (isOpen ? '\u2212 ' : '+ ') + 'Wettbewerber bearbeiten (' + activeDomains.length + ' aktiv)';
     competitorToggleRow.appendChild(toggleBtn);
     competitorToggleRow.appendChild(makeTip(
-      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden in den KI-Antworten markiert und im Wettbewerber-Tab analysiert. Das System zeigt dann, wie oft diese Domains statt eurer zitiert werden. Bereits zitierte Domains aus vergangenen L\u00e4ufen werden als Vorschl\u00e4ge angezeigt.'
+      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden f\u00fcr den hochpriorit\u00e4ren Alert \u201eWettbewerber \u00fcberholt euch\u201c genutzt und im Wettbewerber-Tab gesondert analysiert. Die Grafik \u201eSichtbarkeit im Wettbewerbsvergleich\u201c zeigt dagegen ALLE Domains, die KI-Systeme tats\u00e4chlich zitiert haben \u2013 auch bisher nicht best\u00e4tigte. Bereits zitierte Domains werden als Vorschl\u00e4ge angezeigt.'
     ));
     section.appendChild(competitorToggleRow);
 
@@ -3709,7 +3818,8 @@
     return section;
   }
 
-  function renderContentGapsSection(gaps) {
+  // GEAENDERT (17.09.2026): Phase-Tabs + manuelle Phase-Overrides per localStorage
+  function renderContentGapsSection(gaps, topicId) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
@@ -3726,26 +3836,140 @@
       return section;
     }
 
-    var grid = document.createElement('div');
-    grid.className = 'cvz-opportunity-grid';
+    // Phase-Filter-Chips
+    var activeFilter = state.gapPhaseFilter;
+    var filterRow = document.createElement('div');
+    filterRow.className = 'cvz-persona-filter';
+    filterRow.style.marginBottom = '12px';
+    var allChip = document.createElement('button');
+    allChip.type = 'button';
+    allChip.className = 'cvz-persona-chip' + (activeFilter === null ? ' cvz-persona-chip-active' : '');
+    allChip.setAttribute('data-cvz-gap-phase-filter', '');
+    allChip.textContent = 'Alle';
+    filterRow.appendChild(allChip);
+    PHASE_ORDER.forEach(function (phase) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cvz-persona-chip' + (activeFilter === phase ? ' cvz-persona-chip-active' : '');
+      chip.style.borderLeftColor = PHASE_COLORS[phase] || '';
+      chip.setAttribute('data-cvz-gap-phase-filter', phase);
+      chip.textContent = PHASE_LABELS[phase] || phase;
+      filterRow.appendChild(chip);
+    });
+    section.appendChild(filterRow);
+
+    // Gaps in Phasen gruppieren (localStorage-Override > Heuristik)
+    var grouped = {};
+    PHASE_ORDER.forEach(function (p) { grouped[p] = []; });
+    grouped._unknown = [];
     gaps.forEach(function (gap) {
+      var phase = _getGapPhase(topicId, gap.gap_description) || _detectGapPhase(gap.gap_description);
+      var bucket = (phase && grouped[phase]) ? phase : '_unknown';
+      grouped[bucket].push({ gap: gap, phase: phase });
+    });
+
+    function _buildGapCard(item) {
+      var gap = item.gap;
+      var currentPhase = item.phase || '';
       var priorityClass = gap.priority ? ' cvz-gap-priority-' + gap.priority : '';
       var card = document.createElement('div');
       card.className = 'cvz-card cvz-idea-card' + priorityClass;
-      card.innerHTML =
-        (gap.priority
-          ? '<p class="cvz-opportunity-type">' + escapeHtml(GAP_PRIORITY_LABELS[gap.priority] || gap.priority) + '</p>'
-          : '') +
-        '<p class="cvz-opportunity-description">' + escapeHtml(gap.gap_description || '') + '</p>' +
-        (gap.evidence
-          ? '<p class="cvz-opportunity-description"><strong>Beleg:</strong> ' + escapeHtml(gap.evidence) + '</p>'
-          : '') +
-        (gap.recommended_content_type
-          ? '<p class="cvz-opportunity-topic"><strong>Empfehlung:</strong> ' + escapeHtml(gap.recommended_content_type) + '</p>'
-          : '');
-      grid.appendChild(card);
+
+      // Kopfzeile: Prioritaet links, Phase-Override rechts
+      var topRow = document.createElement('div');
+      topRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap;';
+      if (gap.priority) {
+        var prioEl = document.createElement('p');
+        prioEl.className = 'cvz-opportunity-type';
+        prioEl.style.margin = '0';
+        prioEl.textContent = GAP_PRIORITY_LABELS[gap.priority] || gap.priority;
+        topRow.appendChild(prioEl);
+      } else {
+        topRow.appendChild(document.createElement('span'));
+      }
+
+      // Phase-Override-Select
+      var phaseWrap = document.createElement('div');
+      phaseWrap.style.cssText = 'display:flex;align-items:center;gap:4px;flex-shrink:0;';
+      var phaseIcon = document.createElement('span');
+      phaseIcon.textContent = 'Phase:';
+      phaseIcon.style.cssText = 'font-size:10px;color:var(--cvz-text-muted,#8b98a5);white-space:nowrap;';
+      phaseWrap.appendChild(phaseIcon);
+      var sel = document.createElement('select');
+      sel.style.cssText = 'font-size:10px;padding:2px 5px;border-radius:4px;border:1px solid var(--cvz-border,#e5e7eb);background:var(--cvz-card,#161b22);color:var(--cvz-text,#e6edf3);cursor:pointer;';
+      var phaseOpts = [{ value: '', label: '-- nicht zugeordnet --' }];
+      PHASE_ORDER.forEach(function (p) { phaseOpts.push({ value: p, label: PHASE_LABELS[p] || p }); });
+      phaseOpts.forEach(function (opt) {
+        var o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        if (currentPhase === opt.value) o.selected = true;
+        sel.appendChild(o);
+      });
+      (function (desc) {
+        sel.onchange = function () {
+          _setGapPhase(topicId, desc, sel.value || null);
+          render();
+        };
+      })(gap.gap_description);
+      phaseWrap.appendChild(sel);
+      topRow.appendChild(phaseWrap);
+      card.appendChild(topRow);
+
+      var descEl = document.createElement('p');
+      descEl.className = 'cvz-opportunity-description';
+      descEl.textContent = gap.gap_description || '';
+      card.appendChild(descEl);
+      if (gap.evidence) {
+        var evEl = document.createElement('p');
+        evEl.className = 'cvz-opportunity-description';
+        evEl.innerHTML = '<strong>Beleg:</strong> ' + escapeHtml(gap.evidence);
+        card.appendChild(evEl);
+      }
+      if (gap.recommended_content_type) {
+        var recEl = document.createElement('p');
+        recEl.className = 'cvz-opportunity-topic';
+        recEl.innerHTML = '<strong>Empfehlung:</strong> ' + escapeHtml(gap.recommended_content_type);
+        card.appendChild(recEl);
+      }
+      return card;
+    }
+
+    var hasAny = false;
+    var phasesToRender = activeFilter ? [activeFilter] : PHASE_ORDER.concat(['_unknown']);
+    phasesToRender.forEach(function (phase) {
+      var items = grouped[phase] || [];
+      if (!items.length) return;
+      hasAny = true;
+
+      if (!activeFilter) {
+        if (phase === '_unknown') {
+          var unknownHead = document.createElement('p');
+          unknownHead.style.cssText = 'margin:16px 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--cvz-text-muted,#6b7280);border-left:3px solid var(--cvz-border,#e5e7eb);padding-left:8px;';
+          unknownHead.textContent = 'Phase nicht zugeordnet';
+          section.appendChild(unknownHead);
+        } else {
+          var color = PHASE_COLORS[phase] || '#94a3b8';
+          var phaseHead = document.createElement('p');
+          phaseHead.style.cssText = 'margin:16px 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:' + color + ';border-left:3px solid ' + color + ';padding-left:8px;';
+          phaseHead.textContent = PHASE_LABELS[phase] || phase;
+          section.appendChild(phaseHead);
+        }
+      }
+
+      var grid = document.createElement('div');
+      grid.className = 'cvz-opportunity-grid';
+      items.forEach(function (item) { grid.appendChild(_buildGapCard(item)); });
+      section.appendChild(grid);
     });
-    section.appendChild(grid);
+
+    if (!hasAny) {
+      var noMatch = document.createElement('p');
+      noMatch.className = 'cvz-card-placeholder-text';
+      noMatch.textContent = 'Keine Content-Lücken in dieser Phase.';
+      section.appendChild(noMatch);
+    }
+
     return section;
   }
 
@@ -5821,6 +6045,8 @@
       '.cvz-competitor-prompt-list { margin: 2px 0 8px; padding-left: 16px; font-size: 12px; color: var(--cvz-text-muted); }' +
       '.cvz-competitor-prompt-list li { margin: 2px 0; }' +
 
+      '.cvz-phase-section-heading { margin: 16px 0 8px; }' +
+      '.cvz-inline-favicon { width:16px;height:16px;border-radius:2px;vertical-align:middle;margin-right:4px;object-fit:contain; }' +
       '.cvz-gap-priority-hoch { border-left-color: var(--cvz-red); }' +
       '.cvz-gap-priority-mittel { border-left-color: var(--cvz-amber); }' +
       '.cvz-gap-priority-niedrig { border-left-color: var(--cvz-teal); }' +
@@ -6195,7 +6421,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. st\u00e4rkste Wettbewerber (Zitierrate in %).';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt ALLE Domains \u2013 nicht nur manuell ausgew\u00e4hlte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck.';
     section.appendChild(sub);
 
     // Favicon-Hilfsfunktion
@@ -6794,12 +7020,14 @@
     // Detaillierte Wettbewerber-Tabellen pro Phase (aufklappbar)
     wrap.appendChild(renderJourneyShareOfVoice(data.share_of_voice));
 
-    // Content-Lücken aus Gap-Analyse
-    wrap.appendChild(renderContentGapsSection(detail.content_gaps));
+    // Content-Lücken aus Gap-Analyse (GEAENDERT 17.09.2026: topicId + Phase-Filter)
+    wrap.appendChild(renderContentGapsSection(detail.content_gaps, topicId));
 
-    // Quellen-Analyse (Source Profiles)
-    if (detail.source_profiles && detail.source_profiles.length > 0) {
-      wrap.appendChild(renderSourceProfilesSection(detail.source_profiles));
+    // Quellen-Analyse (GEAENDERT 17.09.2026: phase-gruppiert via share_of_voice)
+    var _sov = data.share_of_voice || {};
+    var _hasSov = PHASE_ORDER.some(function (p) { return _sov[p] && _sov[p].length; });
+    if (_hasSov || (detail.source_profiles && detail.source_profiles.length > 0)) {
+      wrap.appendChild(renderSourceProfilesSection(detail.source_profiles, topicId, _sov));
     }
 
     return wrap;
