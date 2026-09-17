@@ -2059,11 +2059,17 @@
       if (domainSelect.value === '__new__') newDomainInput.focus();
     });
 
+    var TOPIC_MAX_CHARS = 80;
     var topicInput = document.createElement('input');
     topicInput.type = 'text';
     topicInput.id = 'cvz-create-topic';
     topicInput.className = 'cvz-create-input';
     topicInput.placeholder = 'Thema / Seed-Keyword (z.B. landingpage optimierung)';
+    topicInput.maxLength = TOPIC_MAX_CHARS;
+
+    var topicHint = document.createElement('p');
+    topicHint.style.cssText = 'margin:-2px 0 6px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    topicHint.textContent = 'max. ' + TOPIC_MAX_CHARS + ' Zeichen';
 
     var submitBtn = document.createElement('button');
     submitBtn.type = 'button';
@@ -2075,6 +2081,7 @@
     form.appendChild(domainSelect);
     form.appendChild(newDomainInput);
     form.appendChild(topicInput);
+    form.appendChild(topicHint);
     form.appendChild(submitBtn);
 
     if (state.createError) {
@@ -3450,7 +3457,7 @@
       tdSum.textContent = profile.summary || '';
       tr.appendChild(tdSum);
       var tdDiff = document.createElement('td');
-      tdDiff.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;color:var(--cvz-opportunity-topic-color,#5aacd2);';
+      tdDiff.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;color:var(--cvz-text-muted,#8b98a5);';
       tdDiff.textContent = profile.differentiation_suggestion || '';
       tr.appendChild(tdDiff);
       tbody.appendChild(tr);
@@ -3525,8 +3532,8 @@
 
         // Phase
         var tdPhase = document.createElement('td');
-        tdPhase.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:11px;font-weight:700;color:' + phaseColor + ';white-space:nowrap;';
-        tdPhase.textContent = PHASE_LABELS[phase] || phase;
+        tdPhase.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:11px;white-space:nowrap;color:var(--cvz-text-muted,#8b98a5);';
+        tdPhase.innerHTML = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + phaseColor + ';margin-right:5px;vertical-align:middle;flex-shrink:0;"></span>' + escapeHtml(PHASE_LABELS[phase] || phase);
         tr.appendChild(tdPhase);
 
         // Zitierrate
@@ -3549,7 +3556,7 @@
 
         // Differenzierung
         var tdDiff = document.createElement('td');
-        tdDiff.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;color:var(--cvz-opportunity-topic-color,#5aacd2);';
+        tdDiff.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;color:var(--cvz-text-muted,#8b98a5);';
         tdDiff.textContent = src.differentiation_suggestion || '';
         tr.appendChild(tdDiff);
 
@@ -3699,9 +3706,13 @@
     var manualRow = document.createElement('div');
     manualRow.className = 'cvz-changelog-form';
     manualRow.innerHTML =
-      '<input type="text" id="cvz-competitor-manual-input" class="cvz-changelog-input" placeholder="eigene-domain.de">' +
+      '<input type="text" id="cvz-competitor-manual-input" class="cvz-changelog-input" maxlength="100" placeholder="eigene-domain.de">' +
       '<button type="button" class="cvz-create-toggle-btn" data-cvz-competitor-manual-add="' + topicId + '">Hinzuf\u00fcgen</button>';
     section.appendChild(manualRow);
+    var compInputHint = document.createElement('p');
+    compInputHint.style.cssText = 'margin:2px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    compInputHint.textContent = 'max. 100 Zeichen';
+    section.appendChild(compInputHint);
 
     // NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026) —
     // klarstellen, ab wann für einen Wettbewerber tatsächlich Daten
@@ -4266,10 +4277,12 @@
     heading.textContent = '\u00c4nderungsprotokoll';
     section.appendChild(heading);
 
+    var CHANGELOG_MAX_CHARS = 1000;
     var form = document.createElement('div');
     form.className = 'cvz-changelog-form';
     form.innerHTML =
       '<textarea id="cvz-changelog-input" class="cvz-changelog-input" rows="2" ' +
+        'maxlength="' + CHANGELOG_MAX_CHARS + '" ' +
         'placeholder="Was habt ihr ge\u00e4ndert? (z.B. Preistabelle als Vergleichstabelle umgebaut)">' +
         escapeHtml(state.changelogDraft || '') +
       '</textarea>' +
@@ -4278,9 +4291,21 @@
         (state.isSubmittingChangelog ? 'Wird gespeichert \u2026' : 'Eintragen') +
       '</button>';
     section.appendChild(form);
+    var changelogCharHint = document.createElement('p');
+    changelogCharHint.id = 'cvz-changelog-char-hint';
+    changelogCharHint.style.cssText = 'margin:4px 0 8px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    changelogCharHint.textContent = 'max. ' + CHANGELOG_MAX_CHARS + ' Zeichen';
+    section.appendChild(changelogCharHint);
     var textareaEl = form.querySelector('#cvz-changelog-input');
     textareaEl.addEventListener('input', function () {
       state.changelogDraft = textareaEl.value;
+      var remaining = CHANGELOG_MAX_CHARS - textareaEl.value.length;
+      changelogCharHint.textContent = remaining < 100
+        ? remaining + ' Zeichen \u00fcbrig'
+        : 'max. ' + CHANGELOG_MAX_CHARS + ' Zeichen';
+      changelogCharHint.style.color = remaining < 30
+        ? 'var(--cvz-red,#de5b50)'
+        : 'var(--cvz-text-muted,#8b98a5)';
     });
 
     var locationLabel = document.createElement('p');
@@ -5052,15 +5077,21 @@
     kwLabel.style.margin = '0';
     kwLabel.textContent = 'Eigenes Keyword hinzuf\u00fcgen';
     kwLabelRow.appendChild(kwLabel);
+    var kwSlotBadge = document.createElement('span');
+    kwSlotBadge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);font-weight:400;';
+    kwSlotBadge.textContent = manualCount + '\u202fvon\u202f' + MAX_MANUAL_KEYWORDS + ' Slots';
+    kwLabelRow.appendChild(kwSlotBadge);
     kwLabelRow.appendChild(makeTip(
       'Keywords, die du hier hinzuf\u00fcgst, werden beim n\u00e4chsten Datenlauf in die GSC-Abfrage einbezogen und mit KI-Pr\u00e4senz verglichen. Sie erscheinen sofort in der Liste, bekommen aber erst Daten, wenn der n\u00e4chste Lauf abgeschlossen ist.'
     ));
     wrap.appendChild(kwLabelRow);
 
+    var KW_MAX_CHARS = 80;
     var kwInputRow = document.createElement('div');
     kwInputRow.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
     kwInputRow.innerHTML =
       '<input type="text" id="cvz-manual-keyword-input" class="cvz-changelog-custom-input" style="flex:1;min-width:140px;" ' +
+        'maxlength="' + KW_MAX_CHARS + '" ' +
         'placeholder="z.B. landingpage optimierung" ' +
         'value="' + escapeHtml(state.manualKeywordDraftText || '') + '">' +
       '<button type="button" class="cvz-changelog-submit-btn" data-cvz-manual-keyword-submit="' + topicId + '" ' +
@@ -5068,6 +5099,10 @@
         (state.isSubmittingManualKeyword ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
       '</button>';
     wrap.appendChild(kwInputRow);
+    var kwHint = document.createElement('p');
+    kwHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    kwHint.textContent = 'max. ' + KW_MAX_CHARS + ' Zeichen';
+    wrap.appendChild(kwHint);
 
     var inputEl = wrap.querySelector('#cvz-manual-keyword-input');
     inputEl.addEventListener('input', function () {
@@ -5100,6 +5135,11 @@
     promptLabel.style.margin = '0';
     promptLabel.textContent = 'Eigenen Prompt hinzuf\u00fcgen';
     promptLabelRow.appendChild(promptLabel);
+    var promptAvail = MAX_MANUAL_PROMPTS - manualCount;
+    var promptSlotBadge = document.createElement('span');
+    promptSlotBadge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);font-weight:400;';
+    promptSlotBadge.textContent = 'noch\u202f' + promptAvail + '\u202fvon\u202f' + MAX_MANUAL_PROMPTS + ' frei';
+    promptLabelRow.appendChild(promptSlotBadge);
     promptLabelRow.appendChild(makeTip(
       'Prompts sind die konkreten Fragen, die potenzielle Kunden bei ChatGPT, Gemini & Co. stellen. Das System sendet sie in regelm\u00e4\u00dfigen Abst\u00e4nden an die KI-Systeme und pr\u00fcft, ob deine Domain in der Antwort vorkommt. Neue Prompts bekommen erst Daten nach dem n\u00e4chsten Lauf.'
     ));
@@ -5122,10 +5162,12 @@
         escapeHtml(PHASE_LABELS[phase] || phase) + '</option>';
     }).join('');
 
+    var PROMPT_MAX_CHARS = 400;
     var promptInputRow = document.createElement('div');
     promptInputRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;';
     promptInputRow.innerHTML =
       '<textarea id="cvz-manual-prompt-input" class="cvz-changelog-input" rows="1" ' +
+        'maxlength="' + PROMPT_MAX_CHARS + '" ' +
         'placeholder="z.B. Welches CRO-Tool lohnt sich f\u00fcr B2B-SaaS?">' +
         escapeHtml(state.manualPromptDraftText || '') +
       '</textarea>' +
@@ -5138,9 +5180,22 @@
       '</button>';
     wrap.appendChild(promptInputRow);
 
+    var promptCharHint = document.createElement('p');
+    promptCharHint.id = 'cvz-prompt-char-hint';
+    promptCharHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    promptCharHint.textContent = 'max. ' + PROMPT_MAX_CHARS + ' Zeichen';
+    wrap.appendChild(promptCharHint);
+
     var textareaEl = wrap.querySelector('#cvz-manual-prompt-input');
     textareaEl.addEventListener('input', function () {
       state.manualPromptDraftText = textareaEl.value;
+      var remaining = PROMPT_MAX_CHARS - textareaEl.value.length;
+      promptCharHint.textContent = remaining < 50
+        ? remaining + ' Zeichen \u00fcbrig'
+        : 'max. ' + PROMPT_MAX_CHARS + ' Zeichen';
+      promptCharHint.style.color = remaining < 20
+        ? 'var(--cvz-red,#de5b50)'
+        : 'var(--cvz-text-muted,#8b98a5)';
     });
     var selectEl = wrap.querySelector('#cvz-manual-prompt-phase');
     selectEl.addEventListener('change', function () {
