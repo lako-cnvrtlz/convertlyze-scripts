@@ -6109,7 +6109,7 @@
       '.cvz-card-eyebrow { font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
       '.cvz-domain-header { margin-bottom: 24px; }' +
 
-      '.cvz-tab-nav { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--cvz-border); margin-bottom: 20px; }' +
+      '.cvz-tab-nav { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--cvz-border); margin-bottom: 20px; position: sticky; top: 0; z-index: 10; background: var(--cvz-navy); padding-top: 8px; margin-top: -8px; }' +
       '.cvz-tab-btn {' +
         'font-family: "Geist", sans-serif; font-size: 14px; padding: 10px 16px; margin-bottom: -1px;' +
         'background: none; color: var(--cvz-text-muted); border: none; border-bottom: 2px solid transparent;' +
@@ -7507,10 +7507,35 @@
       emptyWrap.style.cssText = 'text-align:center;padding:48px 24px;';
       var emptyTxt = document.createElement('p');
       emptyTxt.className = 'cvz-card-placeholder-text';
-      emptyTxt.textContent = ap.generated_at
-        ? 'Der Aktionsplan wurde generiert, enthält aber noch keine konkreten Empfehlungen. Es werden mehr Daten benötigt (mindestens einige ausgewertete Prompts und GSC-Daten). Empfehlungen erscheinen nach dem nächsten Analyse-Lauf mit ausreichend Datenlage.'
-        : 'Der Aktionsplan wird beim nächsten Analyse-Lauf automatisch generiert. Noch keine Daten vorhanden.';
-      emptyWrap.appendChild(emptyTxt);
+      if (ap.generated_at) {
+        // Plan existiert, aber ohne Items — mehr Daten nötig
+        emptyTxt.textContent = 'Der Aktionsplan wurde generiert, enthält aber noch keine konkreten Empfehlungen. Es werden mehr Daten benötigt (mindestens einige ausgewertete Prompts und GSC-Daten). Empfehlungen erscheinen nach dem nächsten Analyse-Lauf mit ausreichend Datenlage.';
+        emptyWrap.appendChild(emptyTxt);
+      } else {
+        // Noch gar kein Plan — Erster Lauf oder veraltetes Topic
+        emptyTxt.textContent = 'Der Aktionsplan wird beim nächsten Analyse-Lauf automatisch generiert.';
+        emptyWrap.appendChild(emptyTxt);
+
+        var genBtn = document.createElement('button');
+        genBtn.className = 'cvz-btn cvz-btn-sm';
+        genBtn.style.cssText = 'margin-top:16px;';
+        genBtn.textContent = 'Jetzt generieren';
+        genBtn.addEventListener('click', async function () {
+          genBtn.disabled = true;
+          genBtn.textContent = 'Wird generiert…';
+          try {
+            await apiFetch('/topics/' + state.activeTopicId + '/generate-action-plan', { method: 'POST' });
+            // Cache löschen damit die Detail-Seite neu geladen wird
+            delete state.topicDetailCache[state.activeTopicId];
+            await openTopicDetail(state.activeTopicId, false);
+          } catch (err) {
+            genBtn.disabled = false;
+            genBtn.textContent = 'Jetzt generieren';
+            await showCvzAlert('Aktionsplan konnte nicht generiert werden. Bitte versuche es erneut.');
+          }
+        });
+        emptyWrap.appendChild(genBtn);
+      }
       wrap.appendChild(emptyWrap);
     } else {
       // Intro line with generation timestamp
