@@ -113,6 +113,8 @@
     // NEU (17.09.2026): Phase-Filter fuer Content-Luecken und Quellen-Analyse
     gapPhaseFilter: null,
     sourcePhaseFilter: null,
+    // NEU (17.09.2026): Pro-Topic gepinnte Wettbewerber fuer den Vergleichs-Chart
+    chartPinnedComps: {},
   };
 
   function getProjectById(id) {
@@ -2308,7 +2310,8 @@
         '<td>' + formatRelativeTime(topic.created_at) + '</td>' +
         '<td>' + (topic.opportunities_count === null ? '–' : escapeHtml(topic.opportunities_count)) + '</td>' +
         '<td>' + actionCell + '</td>';
-      tbody.appendChild(tr);
+        tbody.appendChild(tr);
+      });
     });
     table.appendChild(tbody);
     var _scrollWrap = document.createElement('div');
@@ -2681,7 +2684,8 @@
       if (segment.length > 1) polylines.push(segment.join(' '));
 
       polylines.forEach(function (points) {
-        parts.push('<polyline points="' + points + '" class="cvz-chart-line" style="stroke:' + color + '"></polyline>');
+        var dashAttr = s.dashed ? ' stroke-dasharray="6 4"' : '';
+        parts.push('<polyline points="' + points + '"' + dashAttr + ' class="cvz-chart-line" style="stroke:' + color + ';opacity:' + (s.dashed ? '.7' : '1') + '"></polyline>');
       });
 
       s.values.forEach(function (v, i) {
@@ -3430,8 +3434,9 @@
     thead.appendChild(hrow);
     table.appendChild(thead);
     var tbody = document.createElement('tbody');
-    profiles.forEach(function (profile, idx) {
-      var borderBottom = idx === profiles.length - 1 ? 'none' : '1px solid var(--cvz-border,#30363d)';
+    var _visibleProfiles = profiles.filter(function (p) { return p.summary || p.content_type; });
+    _visibleProfiles.forEach(function (profile, idx) {
+      var borderBottom = idx === _visibleProfiles.length - 1 ? 'none' : '1px solid var(--cvz-border,#30363d)';
       var tr = document.createElement('tr');
       var tdDomain = document.createElement('td');
       tdDomain.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-weight:600;';
@@ -3504,10 +3509,11 @@
       var sources = sov[phase] || [];
       if (!sources.length) return;
       var phaseColor = PHASE_COLORS[phase] || '#4a5568';
-      sources.forEach(function (src, idx) {
+      var _visibleSources = sources.filter(function (s) { return s.summary || s.content_type; });
+      _visibleSources.forEach(function (src, idx) {
         var isLast = !activeFilter
-          ? (idx === sources.length - 1 && phase === phasesToRender[phasesToRender.length - 1])
-          : idx === sources.length - 1;
+          ? (idx === _visibleSources.length - 1 && phase === phasesToRender[phasesToRender.length - 1])
+          : idx === _visibleSources.length - 1;
         var borderBottom = isLast ? 'none' : '1px solid var(--cvz-border,#30363d)';
         var citePct = Math.round(src.citation_rate || 0);
         var tr = document.createElement('tr');
@@ -6481,7 +6487,15 @@
 
     // (Show chart even without competitor data, just own domain)
 
-    var COMP_COLORS = ['#c98e2a', '#de5b50', '#8878ca', '#4ec68a', '#5aacd2'];
+    // NEU (17.09.2026): Gepinnte Wettbewerber aus localStorage laden
+    var _pinnedKey = 'cvz_chart_pins_' + topicId;
+    var pinnedComps = [];
+    try { pinnedComps = JSON.parse(localStorage.getItem(_pinnedKey) || '[]'); } catch (e) { pinnedComps = []; }
+    // Nur Domains anzeigen, die nicht bereits unter den Auto-Top-5 sind (max. 3)
+    var extraComps = pinnedComps.filter(function (d) { return topComps.indexOf(d) === -1; }).slice(0, 3);
+
+    // 5 Auto-Farben + 3 Extra-Farben fuer gepinnte Wettbewerber
+    var COMP_COLORS = ['#c98e2a', '#de5b50', '#8878ca', '#4ec68a', '#5aacd2', '#e8855b', '#a3c97a', '#c97ab5'];
     var ownDomain = (detail.topic && detail.topic.own_domain) ? detail.topic.own_domain : 'Eure Domain';
 
     var section = document.createElement('div');
@@ -6524,9 +6538,25 @@
       return item;
     }
 
+    function _legendItemDashed(label, color, domain) {
+      var item = document.createElement('div');
+      item.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+      var swatch = document.createElement('span');
+      swatch.style.cssText =
+        'width:24px;height:3px;border-radius:2px;flex-shrink:0;opacity:.7;' +
+        'background:repeating-linear-gradient(90deg,' + color + ' 0,' + color + ' 5px,transparent 5px,transparent 9px);';
+      item.appendChild(swatch);
+      if (domain) item.appendChild(_faviconImg(domain));
+      item.appendChild(document.createTextNode(label));
+      return item;
+    }
+
     legend.appendChild(_legendItem(ownDomain, '#4fd1c5', true, ownDomain));
     topComps.forEach(function (domain, i) {
       legend.appendChild(_legendItem(domain, COMP_COLORS[i], false, domain));
+    });
+    extraComps.forEach(function (domain, i) {
+      legend.appendChild(_legendItemDashed(domain, COMP_COLORS[5 + i], domain));
     });
     section.appendChild(legend);
 
@@ -6576,6 +6606,14 @@
       });
       seriesList.push({ label: domain, color: COMP_COLORS[i], values: values });
     });
+    // NEU (17.09.2026): Gepinnte Extra-Wettbewerber (gestrichelte Linien)
+    extraComps.forEach(function (domain, i) {
+      var values = activePhases.map(function (phase) {
+        var entry = (sov[phase] || []).filter(function (c) { return c.domain === domain; })[0];
+        return entry ? Math.round(entry.citation_rate || 0) : 0;
+      });
+      seriesList.push({ label: domain, color: COMP_COLORS[5 + i], values: values, dashed: true });
+    });
 
     // Chart-Karte
     var chartCard = document.createElement('div');
@@ -6612,6 +6650,130 @@
 
     chartCard.appendChild(svgWrap);
     section.appendChild(chartCard);
+
+    // NEU (17.09.2026): Pin-Verwaltungs-UI unter dem Chart
+    var pinWrap = document.createElement('div');
+    pinWrap.style.cssText = 'margin-top:12px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;';
+
+    var pinLabel = document.createElement('span');
+    pinLabel.style.cssText = 'font-size:11px;color:var(--cvz-text-muted,#8b98a5);flex-shrink:0;';
+    pinLabel.textContent = 'Weitere Wettbewerber:';
+    pinWrap.appendChild(pinLabel);
+
+    // Alle bekannten Domains aus sov (ausser ownDomain und top-5) fuer Autocomplete
+    var _knownDomains = [];
+    PHASE_ORDER.forEach(function (phase) {
+      (sov[phase] || []).forEach(function (c) {
+        if (c.domain && c.domain !== ownDomain && topComps.indexOf(c.domain) === -1 && _knownDomains.indexOf(c.domain) === -1) {
+          _knownDomains.push(c.domain);
+        }
+      });
+    });
+    _knownDomains.sort();
+
+    function _rebuildPinUi() {
+      while (pinWrap.firstChild) pinWrap.removeChild(pinWrap.firstChild);
+      pinWrap.appendChild(pinLabel);
+
+      try { pinnedComps = JSON.parse(localStorage.getItem(_pinnedKey) || '[]'); } catch (e) { pinnedComps = []; }
+      var currentExtra = pinnedComps.filter(function (d) { return topComps.indexOf(d) === -1; }).slice(0, 3);
+
+      currentExtra.forEach(function (domain) {
+        var chip = document.createElement('span');
+        chip.style.cssText =
+          'display:inline-flex;align-items:center;gap:4px;padding:2px 6px 2px 5px;' +
+          'border-radius:20px;border:1px dashed var(--cvz-border,#30363d);' +
+          'font-size:11px;color:var(--cvz-text-muted,#8b98a5);background:var(--cvz-card-bg,#161b22);';
+        chip.appendChild(_faviconImg(domain));
+        chip.appendChild(document.createTextNode(domain));
+        var rm = document.createElement('button');
+        rm.type = 'button';
+        rm.style.cssText =
+          'background:none;border:none;padding:0 0 0 3px;cursor:pointer;line-height:1;' +
+          'font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+        rm.textContent = '✕';
+        rm.title = 'Entfernen';
+        rm.onclick = function () {
+          try {
+            var arr = JSON.parse(localStorage.getItem(_pinnedKey) || '[]');
+            arr = arr.filter(function (d) { return d !== domain; });
+            localStorage.setItem(_pinnedKey, JSON.stringify(arr));
+          } catch (e) {}
+          render();
+        };
+        chip.appendChild(rm);
+        pinWrap.appendChild(chip);
+      });
+
+      if (currentExtra.length < 3) {
+        var addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.style.cssText =
+          'display:inline-flex;align-items:center;gap:3px;padding:2px 8px;' +
+          'border-radius:20px;border:1px dashed var(--cvz-border,#30363d);' +
+          'font-size:11px;color:var(--cvz-text-muted,#8b98a5);background:none;cursor:pointer;';
+        addBtn.textContent = '+ Wettbewerber hinzufügen';
+        addBtn.onclick = function () {
+          pinWrap.removeChild(addBtn);
+
+          var datalistId = 'cvz-pin-dl-' + topicId;
+          if (!document.getElementById(datalistId)) {
+            var dl = document.createElement('datalist');
+            dl.id = datalistId;
+            _knownDomains.forEach(function (d) {
+              var opt = document.createElement('option');
+              opt.value = d;
+              dl.appendChild(opt);
+            });
+            pinWrap.appendChild(dl);
+          }
+
+          var inp = document.createElement('input');
+          inp.type = 'text';
+          inp.placeholder = 'domain.com';
+          inp.setAttribute('list', datalistId);
+          inp.style.cssText =
+            'font-size:11px;padding:2px 8px;border-radius:20px;' +
+            'border:1px solid var(--cvz-border,#30363d);background:var(--cvz-card-bg,#161b22);' +
+            'color:var(--cvz-text,#e6edf3);outline:none;width:145px;';
+
+          var okBtn = document.createElement('button');
+          okBtn.type = 'button';
+          okBtn.textContent = '✓';
+          okBtn.style.cssText =
+            'padding:2px 7px;border-radius:4px;border:none;background:var(--cvz-accent,#4fd1c5);' +
+            'color:#000;font-size:11px;cursor:pointer;';
+
+          function _commit() {
+            var val = inp.value.trim().toLowerCase()
+              .replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            if (!val) { _rebuildPinUi(); return; }
+            try {
+              var arr = JSON.parse(localStorage.getItem(_pinnedKey) || '[]');
+              var extra = arr.filter(function (d) { return topComps.indexOf(d) === -1; });
+              if (arr.indexOf(val) === -1 && extra.length < 3) arr.push(val);
+              localStorage.setItem(_pinnedKey, JSON.stringify(arr));
+            } catch (e) {}
+            render();
+          }
+
+          inp.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); _commit(); }
+            if (e.key === 'Escape') { _rebuildPinUi(); }
+          });
+          okBtn.onclick = _commit;
+
+          pinWrap.appendChild(inp);
+          pinWrap.appendChild(okBtn);
+          inp.focus();
+        };
+        pinWrap.appendChild(addBtn);
+      }
+    }
+
+    _rebuildPinUi();
+    section.appendChild(pinWrap);
+
     return section;
   }
 
@@ -6962,9 +7124,6 @@
       wrap.appendChild(oppSection);
     }
 
-    // Wettbewerber & Quellen (kompakt, nur Manage-Sektion)
-    wrap.appendChild(renderCompetitorManageSection(detail, topicId));
-
     return wrap;
   }
 
@@ -7104,6 +7263,26 @@
     if (_hasSov || (detail.source_profiles && detail.source_profiles.length > 0)) {
       wrap.appendChild(renderSourceProfilesSection(detail.source_profiles, topicId, _sov));
     }
+
+    // VERSCHOBEN (17.09.2026): Wettbewerber-Verwaltung gehoert zur Journey Map,
+    // weil die bestaetigten Domains den Alert „Wettbewerber ueberholt euch" und
+    // die Share-of-Voice-Analyse in diesem Tab steuern.
+    var compManageWrap = document.createElement('div');
+    compManageWrap.style.cssText = 'margin-top:28px;padding-top:20px;border-top:1px solid var(--cvz-border,#30363d);';
+    var compManageHeading = document.createElement('p');
+    compManageHeading.className = 'cvz-section-label';
+    compManageHeading.textContent = 'Beobachtete Wettbewerber';
+    compManageWrap.appendChild(compManageHeading);
+    var compManageSub = document.createElement('p');
+    compManageSub.className = 'cvz-card-placeholder-text';
+    compManageSub.style.marginBottom = '10px';
+    compManageSub.textContent =
+      'Diese Domains steuern den Alert „Wettbewerber überholt euch“ ' +
+      'und werden in der Share-of-Voice-Analyse oben gesondert hervorgehoben. ' +
+      'Der Vergleichs-Chart im Überblick zeigt davon unabhängig alle KI-zitierten Domains.';
+    compManageWrap.appendChild(compManageSub);
+    compManageWrap.appendChild(renderCompetitorManageSection(detail, topicId));
+    wrap.appendChild(compManageWrap);
 
     return wrap;
   }
