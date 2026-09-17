@@ -3574,7 +3574,7 @@
     toggleBtn.textContent = (isOpen ? '\u2212 ' : '+ ') + 'Wettbewerber bearbeiten (' + activeDomains.length + ' aktiv)';
     competitorToggleRow.appendChild(toggleBtn);
     competitorToggleRow.appendChild(makeTip(
-      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden f\u00fcr den hochpriorit\u00e4ren Alert \u201eWettbewerber \u00fcberholt euch\u201c genutzt und im Wettbewerber-Tab gesondert analysiert. Die Grafik \u201eSichtbarkeit im Wettbewerbsvergleich\u201c zeigt dagegen ALLE Domains, die KI-Systeme tats\u00e4chlich zitiert haben \u2013 auch bisher nicht best\u00e4tigte. Bereits zitierte Domains werden als Vorschl\u00e4ge angezeigt.'
+      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden f\u00fcr den hochpriorit\u00e4ren Alert \u201eWettbewerber \u00fcberholt euch\u201c genutzt und in der Journey Map als Share of Voice analysiert. Die Grafik \u201eSichtbarkeit im Wettbewerbsvergleich\u201c zeigt dagegen ALLE Domains, die KI-Systeme tats\u00e4chlich zitiert haben \u2013 auch bisher nicht best\u00e4tigte. Bereits zitierte Domains werden als Vorschl\u00e4ge angezeigt.'
     ));
     section.appendChild(competitorToggleRow);
 
@@ -3868,36 +3868,46 @@
       grouped[bucket].push({ gap: gap, phase: phase });
     });
 
-    function _buildGapCard(item) {
+    // Tabelle aufbauen
+    var table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+
+    var thead = document.createElement('thead');
+    var hrow = document.createElement('tr');
+    var COLS = ['Priorität', 'Phase', 'Content-Lücke', 'Beleg', 'Empfehlung'];
+    var COL_WIDTHS = ['90px', '140px', '', '', '180px'];
+    COLS.forEach(function (label, i) {
+      var th = document.createElement('th');
+      th.textContent = label;
+      th.style.cssText = 'text-align:left;padding:7px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#30363d);white-space:nowrap;' + (COL_WIDTHS[i] ? 'width:' + COL_WIDTHS[i] + ';' : '');
+      hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    var PRIORITY_COLORS = { hoch: '#f85149', mittel: '#f0883e', niedrig: '#58a6ff' };
+
+    function _buildGapRow(item, isLast) {
       var gap = item.gap;
       var currentPhase = item.phase || '';
-      var priorityClass = gap.priority ? ' cvz-gap-priority-' + gap.priority : '';
-      var card = document.createElement('div');
-      card.className = 'cvz-card cvz-idea-card' + priorityClass;
+      var phaseColor = PHASE_COLORS[currentPhase] || 'var(--cvz-border,#30363d)';
+      var prioColor = PRIORITY_COLORS[gap.priority] || 'var(--cvz-text-muted,#8b98a5)';
+      var tr = document.createElement('tr');
+      var borderBottom = isLast ? 'none' : '1px solid var(--cvz-border,#30363d)';
 
-      // Kopfzeile: Prioritaet links, Phase-Override rechts
-      var topRow = document.createElement('div');
-      topRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap;';
-      if (gap.priority) {
-        var prioEl = document.createElement('p');
-        prioEl.className = 'cvz-opportunity-type';
-        prioEl.style.margin = '0';
-        prioEl.textContent = GAP_PRIORITY_LABELS[gap.priority] || gap.priority;
-        topRow.appendChild(prioEl);
-      } else {
-        topRow.appendChild(document.createElement('span'));
-      }
+      // Prioritaet
+      var tdPrio = document.createElement('td');
+      tdPrio.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';';
+      tdPrio.innerHTML = gap.priority ? '<span style="font-size:11px;font-weight:700;color:' + prioColor + ';">' + escapeHtml(GAP_PRIORITY_LABELS[gap.priority] || gap.priority) + '</span>' : '<span style="color:var(--cvz-text-muted,#8b98a5);font-size:11px;">–</span>';
+      tr.appendChild(tdPrio);
 
-      // Phase-Override-Select
-      var phaseWrap = document.createElement('div');
-      phaseWrap.style.cssText = 'display:flex;align-items:center;gap:4px;flex-shrink:0;';
-      var phaseIcon = document.createElement('span');
-      phaseIcon.textContent = 'Phase:';
-      phaseIcon.style.cssText = 'font-size:10px;color:var(--cvz-text-muted,#8b98a5);white-space:nowrap;';
-      phaseWrap.appendChild(phaseIcon);
+      // Phase (editable)
+      var tdPhase = document.createElement('td');
+      tdPhase.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';';
       var sel = document.createElement('select');
-      sel.style.cssText = 'font-size:10px;padding:2px 5px;border-radius:4px;border:1px solid var(--cvz-border,#e5e7eb);background:var(--cvz-card,#161b22);color:var(--cvz-text,#e6edf3);cursor:pointer;';
-      var phaseOpts = [{ value: '', label: '-- nicht zugeordnet --' }];
+      sel.style.cssText = 'font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid ' + phaseColor + ';background:var(--cvz-card,#161b22);color:var(--cvz-text,#e6edf3);cursor:pointer;width:100%;';
+      var phaseOpts = [{ value: '', label: '– keine Phase –' }];
       PHASE_ORDER.forEach(function (p) { phaseOpts.push({ value: p, label: PHASE_LABELS[p] || p }); });
       phaseOpts.forEach(function (opt) {
         var o = document.createElement('option');
@@ -3912,63 +3922,49 @@
           render();
         };
       })(gap.gap_description);
-      phaseWrap.appendChild(sel);
-      topRow.appendChild(phaseWrap);
-      card.appendChild(topRow);
+      tdPhase.appendChild(sel);
+      tr.appendChild(tdPhase);
 
-      var descEl = document.createElement('p');
-      descEl.className = 'cvz-opportunity-description';
-      descEl.textContent = gap.gap_description || '';
-      card.appendChild(descEl);
-      if (gap.evidence) {
-        var evEl = document.createElement('p');
-        evEl.className = 'cvz-opportunity-description';
-        evEl.innerHTML = '<strong>Beleg:</strong> ' + escapeHtml(gap.evidence);
-        card.appendChild(evEl);
-      }
-      if (gap.recommended_content_type) {
-        var recEl = document.createElement('p');
-        recEl.className = 'cvz-opportunity-topic';
-        recEl.innerHTML = '<strong>Empfehlung:</strong> ' + escapeHtml(gap.recommended_content_type);
-        card.appendChild(recEl);
-      }
-      return card;
+      // Content-Luecke
+      var tdDesc = document.createElement('td');
+      tdDesc.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';line-height:1.5;';
+      tdDesc.textContent = gap.gap_description || '';
+      tr.appendChild(tdDesc);
+
+      // Beleg
+      var tdEvid = document.createElement('td');
+      tdEvid.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;color:var(--cvz-text-muted,#8b98a5);line-height:1.4;';
+      tdEvid.textContent = gap.evidence || '';
+      tr.appendChild(tdEvid);
+
+      // Empfehlung
+      var tdRec = document.createElement('td');
+      tdRec.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;color:var(--cvz-opportunity-topic-color,#58a6ff);line-height:1.4;';
+      tdRec.textContent = gap.recommended_content_type || '';
+      tr.appendChild(tdRec);
+
+      return tr;
     }
 
-    var hasAny = false;
+    var allRows = [];
     var phasesToRender = activeFilter ? [activeFilter] : PHASE_ORDER.concat(['_unknown']);
     phasesToRender.forEach(function (phase) {
-      var items = grouped[phase] || [];
-      if (!items.length) return;
-      hasAny = true;
-
-      if (!activeFilter) {
-        if (phase === '_unknown') {
-          var unknownHead = document.createElement('p');
-          unknownHead.style.cssText = 'margin:16px 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--cvz-text-muted,#6b7280);border-left:3px solid var(--cvz-border,#e5e7eb);padding-left:8px;';
-          unknownHead.textContent = 'Phase nicht zugeordnet';
-          section.appendChild(unknownHead);
-        } else {
-          var color = PHASE_COLORS[phase] || '#94a3b8';
-          var phaseHead = document.createElement('p');
-          phaseHead.style.cssText = 'margin:16px 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:' + color + ';border-left:3px solid ' + color + ';padding-left:8px;';
-          phaseHead.textContent = PHASE_LABELS[phase] || phase;
-          section.appendChild(phaseHead);
-        }
-      }
-
-      var grid = document.createElement('div');
-      grid.className = 'cvz-opportunity-grid';
-      items.forEach(function (item) { grid.appendChild(_buildGapCard(item)); });
-      section.appendChild(grid);
+      (grouped[phase] || []).forEach(function (item) { allRows.push(item); });
     });
 
-    if (!hasAny) {
+    if (!allRows.length) {
       var noMatch = document.createElement('p');
       noMatch.className = 'cvz-card-placeholder-text';
       noMatch.textContent = 'Keine Content-Lücken in dieser Phase.';
       section.appendChild(noMatch);
+      return section;
     }
+
+    allRows.forEach(function (item, idx) {
+      tbody.appendChild(_buildGapRow(item, idx === allRows.length - 1));
+    });
+    table.appendChild(tbody);
+    section.appendChild(table);
 
     return section;
   }
