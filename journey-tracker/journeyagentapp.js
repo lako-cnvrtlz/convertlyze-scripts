@@ -2311,7 +2311,6 @@
         '<td>' + (topic.opportunities_count === null ? '–' : escapeHtml(topic.opportunities_count)) + '</td>' +
         '<td>' + actionCell + '</td>';
         tbody.appendChild(tr);
-      });
     });
     table.appendChild(tbody);
     var _scrollWrap = document.createElement('div');
