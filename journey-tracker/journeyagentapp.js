@@ -254,7 +254,7 @@
   function maybeStartPolling() {
     if (CONFIG.useMockData || state.pollTimer) return;
 
-    var hasCollecting = state.allTopics.some(function (t) { return t.status === 'collecting'; });
+    var hasCollecting = state.allTopics.some(function (t) { return t.status === 'collecting' || t.status === 'analyzing'; });
     if (!hasCollecting) return;
 
     state.pollTimer = setInterval(async function () {
@@ -262,9 +262,9 @@
         await loadTopics();
         if (state.activeView === 'topic-detail' && state.activeTopicId) {
           var current = getTopicById(state.activeTopicId);
-          if (current && current.status !== 'collecting' && state.topicDetailCache[state.activeTopicId]) {
+          if (current && current.status !== 'collecting' && current.status !== 'analyzing' && state.topicDetailCache[state.activeTopicId]) {
             var cachedTopic = state.topicDetailCache[state.activeTopicId].topic;
-            if (cachedTopic && cachedTopic.status === 'collecting') {
+            if (cachedTopic && (cachedTopic.status === 'collecting' || cachedTopic.status === 'analyzing')) {
               delete state.topicDetailCache[state.activeTopicId];
               await openTopicDetail(state.activeTopicId, false);
             }
@@ -274,7 +274,7 @@
         console.error('[CVZ Visibility] Polling fehlgeschlagen:', e);
       }
 
-      var stillCollecting = state.allTopics.some(function (t) { return t.status === 'collecting'; });
+      var stillCollecting = state.allTopics.some(function (t) { return t.status === 'collecting' || t.status === 'analyzing'; });
       if (!stillCollecting) {
         clearInterval(state.pollTimer);
         state.pollTimer = null;
@@ -823,7 +823,7 @@
     state.activeTopicId = topicId;
     var topic = getTopicById(topicId);
     if (topic) state.activeProjectId = topic.project_id;
-    if (topic && topic.status === 'collecting') {
+    if (topic && (topic.status === 'collecting' || topic.status === 'analyzing')) {
       maybeStartPolling();
     }
     state.isLoadingDetail = true;
@@ -832,7 +832,7 @@
 
     try {
       var cachedDetail = state.topicDetailCache[topicId];
-      if (!cachedDetail || (cachedDetail.topic && cachedDetail.topic.status === 'collecting')) {
+      if (!cachedDetail || (cachedDetail.topic && (cachedDetail.topic.status === 'collecting' || cachedDetail.topic.status === 'analyzing'))) {
         state.topicDetailCache[topicId] = await loadTopicDetail(topicId);
       }
     } catch (e) {
@@ -889,6 +889,7 @@
   var STATUS_LABELS = {
     active:     { label: 'Aktiv',         className: 'cvz-status-active' },
     collecting: { label: 'Sammelt Daten', className: 'cvz-status-collecting' },
+    analyzing:  { label: 'Analysiert',    className: 'cvz-status-analyzing' },
     error:      { label: 'Fehler',        className: 'cvz-status-error' },
     archived:   { label: 'Archiviert',    className: 'cvz-status-archived' },
     queued:     { label: 'Wartet',        className: 'cvz-status-queued' },
@@ -2396,6 +2397,19 @@
     }
 
     wrap.appendChild(renderSummaryCard(detail.topic));
+
+    if (detail.topic.status === 'analyzing') {
+      var analyzingBanner = document.createElement('div');
+      analyzingBanner.className = 'cvz-card cvz-collecting-banner';
+      analyzingBanner.innerHTML =
+        '<p class="cvz-collecting-banner-text">' +
+          '<span class="cvz-spinner"></span>' +
+          'Daten gesammelt — Aktionsplan, Zusammenfassung und Lükenanalyse werden jetzt erstellt. ' +
+          'Diese Seite aktualisiert sich automatisch.' +
+        '</p>';
+      wrap.appendChild(analyzingBanner);
+      return wrap;
+    }
 
     if (detail.topic.status === 'collecting') {
       var STUCK_COLLECTING_THRESHOLD_MINUTES_DETAIL = 45;
@@ -6137,6 +6151,7 @@
       '.cvz-archived-notice { font-size: 13px; color: var(--cvz-text-muted); margin: 0 0 8px; font-style: italic; }' +
       '.cvz-status-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
       '.cvz-status-collecting { color: var(--cvz-amber); border-color: var(--cvz-amber); }' +
+      '.cvz-status-analyzing { color: var(--cvz-amber); border-color: var(--cvz-amber); }' +
       '.cvz-status-error { color: var(--cvz-red); border-color: var(--cvz-red); }' +
       '.cvz-status-archived { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
       '.cvz-status-queued { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
