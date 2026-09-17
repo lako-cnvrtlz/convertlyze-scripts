@@ -115,6 +115,8 @@
     sourcePhaseFilter: null,
     // NEU (17.09.2026): Pro-Topic gepinnte Wettbewerber fuer den Vergleichs-Chart
     chartPinnedComps: {},
+    // NEU (17.09.2026): Cleanup-Fn fuer JS-basierten sticky Tab-Nav
+    _tabNavCleanup: null,
   };
 
   function getProjectById(id) {
@@ -1096,6 +1098,12 @@
   ];
 
   function render() {
+    // Cleanup sticky tab-nav scroll listener from previous render
+    if (state._tabNavCleanup) {
+      state._tabNavCleanup();
+      state._tabNavCleanup = null;
+    }
+
     var container = document.getElementById('cvz-visibility-app');
     if (!container) {
       console.error('[CVZ Visibility] Container #cvz-visibility-app nicht gefunden.');
@@ -1115,6 +1123,61 @@
     container.innerHTML = '';
     if (state.activeView === 'topic-detail') {
       container.appendChild(renderTopicDetailView());
+      // JS-basiertes sticky Tab-Nav (position:sticky wird von Webflow-Containern mit
+      // overflow:hidden blockiert — daher Scroll-Listener als Fallback).
+      requestAnimationFrame(function () {
+        var tabNavEl = container.querySelector('.cvz-tab-nav');
+        if (!tabNavEl) return;
+        var rect = tabNavEl.getBoundingClientRect();
+        var navTopInPage = rect.top + window.scrollY;
+        var origLeft = rect.left;
+        var origWidth = rect.width;
+        var navHeight = tabNavEl.offsetHeight;
+        var spacer = null;
+        var fixed = false;
+
+        var handler = function () {
+          if (window.scrollY > navTopInPage - 4) {
+            if (!fixed) {
+              // Capture position before going fixed (left might have shifted)
+              origLeft = tabNavEl.getBoundingClientRect().left;
+              origWidth = tabNavEl.getBoundingClientRect().width;
+              fixed = true;
+            }
+            tabNavEl.style.position = 'fixed';
+            tabNavEl.style.top = '0';
+            tabNavEl.style.left = origLeft + 'px';
+            tabNavEl.style.width = origWidth + 'px';
+            tabNavEl.style.zIndex = '100';
+            tabNavEl.style.background = 'var(--cvz-navy)';
+            tabNavEl.style.paddingTop = '8px';
+            tabNavEl.style.boxShadow = '0 2px 8px rgba(0,0,0,0.28)';
+            if (!spacer) {
+              spacer = document.createElement('div');
+              spacer.style.height = navHeight + 'px';
+              tabNavEl.parentNode.insertBefore(spacer, tabNavEl.nextSibling);
+            }
+          } else {
+            fixed = false;
+            tabNavEl.style.position = '';
+            tabNavEl.style.top = '';
+            tabNavEl.style.left = '';
+            tabNavEl.style.width = '';
+            tabNavEl.style.zIndex = '';
+            tabNavEl.style.background = '';
+            tabNavEl.style.paddingTop = '';
+            tabNavEl.style.boxShadow = '';
+            if (spacer) { spacer.remove(); spacer = null; }
+          }
+        };
+
+        window.addEventListener('scroll', handler, { passive: true });
+        handler(); // Apply correct state immediately (page may already be scrolled)
+        state._tabNavCleanup = function () {
+          window.removeEventListener('scroll', handler);
+          if (spacer) { spacer.remove(); spacer = null; }
+        };
+      });
     } else {
       container.appendChild(renderOverview());
     }
@@ -6109,7 +6172,7 @@
       '.cvz-card-eyebrow { font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
       '.cvz-domain-header { margin-bottom: 24px; }' +
 
-      '.cvz-tab-nav { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--cvz-border); margin-bottom: 20px; position: sticky; top: 0; z-index: 10; background: var(--cvz-navy); padding-top: 8px; margin-top: -8px; }' +
+      '.cvz-tab-nav { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--cvz-border); margin-bottom: 20px; background: var(--cvz-navy); padding-top: 8px; }' +
       '@media (max-width: 600px) { .cvz-opp-rec-col { display: none; } .cvz-opp-rec-header { display: none; } }' +
       '.cvz-tab-btn {' +
         'font-family: "Geist", sans-serif; font-size: 14px; padding: 10px 16px; margin-bottom: -1px;' +
@@ -7514,32 +7577,11 @@
       if (ap.generated_at) {
         // Plan existiert, aber ohne Items — mehr Daten nötig
         emptyTxt.textContent = 'Der Aktionsplan wurde generiert, enthält aber noch keine konkreten Empfehlungen. Es werden mehr Daten benötigt (mindestens einige ausgewertete Prompts und GSC-Daten). Empfehlungen erscheinen nach dem nächsten Analyse-Lauf mit ausreichend Datenlage.';
-        emptyWrap.appendChild(emptyTxt);
       } else {
-        // Noch gar kein Plan — Erster Lauf oder veraltetes Topic
+        // Noch gar kein Plan — erster Lauf läuft noch
         emptyTxt.textContent = 'Der Aktionsplan wird beim nächsten Analyse-Lauf automatisch generiert.';
-        emptyWrap.appendChild(emptyTxt);
-
-        var genBtn = document.createElement('button');
-        genBtn.className = 'cvz-btn cvz-btn-sm';
-        genBtn.style.cssText = 'margin-top:16px;';
-        genBtn.textContent = 'Jetzt generieren';
-        genBtn.addEventListener('click', async function () {
-          genBtn.disabled = true;
-          genBtn.textContent = 'Wird generiert…';
-          try {
-            await apiFetch('/topics/' + state.activeTopicId + '/generate-action-plan', { method: 'POST' });
-            // Cache löschen damit die Detail-Seite neu geladen wird
-            delete state.topicDetailCache[state.activeTopicId];
-            await openTopicDetail(state.activeTopicId, false);
-          } catch (err) {
-            genBtn.disabled = false;
-            genBtn.textContent = 'Jetzt generieren';
-            await showCvzAlert('Aktionsplan konnte nicht generiert werden. Bitte versuche es erneut.');
-          }
-        });
-        emptyWrap.appendChild(genBtn);
       }
+      emptyWrap.appendChild(emptyTxt);
       wrap.appendChild(emptyWrap);
     } else {
       // Intro line with generation timestamp
