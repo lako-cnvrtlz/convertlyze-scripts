@@ -307,6 +307,9 @@
       // NEU (16.09.2026): Plattform-Übersicht, siehe main.py:
       // _get_cited_platforms_overview.
       cited_platforms: data.cited_platforms || [],
+      // NEU (17.09.2026): KI-generierter Aktionsplan — FEHLTE bisher hier,
+      // deshalb war detail.action_plan immer undefined und der Tab immer leer.
+      action_plan: data.action_plan || null,
       competitors: [],
       gsc_rows: (data.search_queries || [])
         .filter(function (q) { return q.source === 'gsc_near_miss'; })
@@ -1398,12 +1401,15 @@
         maybeLoadVisibilityTrend(state.activeTopicId);
       }
       // NEU (17.09.2026): Aktionsplan-Tab — Cache-Busting.
-      // Falls der gecachete Detail-Fetch noch kein action_plan hatte (z.B. weil
-      // beim Öffnen noch kein Plan existierte, oder weil ein Deployment den Plan
-      // erst nachträglich befüllt hat), Datensatz verwerfen und neu laden.
+      // Re-fetch NUR wenn action_plan komplett fehlt ODER wenn noch keine Items vorhanden
+      // UND generated_at ebenfalls fehlt (= Plan wurde noch nie generiert).
+      // NICHT re-fetchen wenn Items vorhanden sind (auch wenn generated_at null ist) —
+      // das wuerde bei einem NULL-generated_at in der DB eine Endlos-Schleife erzeugen.
       if (newTab === 'aktionsplan' && state.activeView === 'topic-detail') {
         var _apCached = state.topicDetailCache[state.activeTopicId];
-        var _apMissing = !_apCached || !_apCached.action_plan || !_apCached.action_plan.generated_at;
+        var _apObj = _apCached && _apCached.action_plan;
+        var _apHasItems = _apObj && Array.isArray(_apObj.items) && _apObj.items.length > 0;
+        var _apMissing = !_apCached || !_apObj || (!_apHasItems && !_apObj.generated_at);
         if (_apMissing) {
           delete state.topicDetailCache[state.activeTopicId];
           openTopicDetail(state.activeTopicId, false); // async, neu laden + rendern
@@ -7612,8 +7618,57 @@
         // Plan existiert, aber ohne Items — mehr Daten nötig
         emptyTxt.textContent = 'Der Aktionsplan wurde generiert, enthält aber noch keine konkreten Empfehlungen. Es werden mehr Daten benötigt (mindestens einige ausgewertete Prompts und GSC-Daten). Empfehlungen erscheinen nach dem nächsten Analyse-Lauf mit ausreichend Datenlage.';
       } else {
-        // Noch gar kein Plan — erster Lauf läuft noch
-        emptyTxt.textContent = 'Der Aktionsplan wird beim nächsten Analyse-Lauf automatisch generiert.';
+        // Noch gar kein Plan — Generierung anbieten
+        emptyTxt.textContent = 'Für dieses Topic wurde noch kein Aktionsplan generiert.';
+        // Manueller Trigger-Button: ruft POST /topics/{id}/generate-action-plan auf.
+        // Der Endpunkt startet die KI-Generierung im Hintergrund (202) und dauert ~30–60 s.
+        var genBtn = document.createElement('button');
+        genBtn.style.cssText = 'display:inline-block;margin-top:16px;padding:10px 22px;background:var(--cvz-accent,#5aacd2);color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;';
+        genBtn.textContent = 'Aktionsplan jetzt generieren';
+        (function(btn, statusEl, topicId) {
+          btn.addEventListener('click', function() {
+            btn.disabled = true;
+            btn.style.opacity = '0.6';
+            btn.textContent = 'Wird generiert …';
+            apiFetch('/topics/' + topicId + '/generate-action-plan', { method: 'POST' })
+              .then(function() {
+                statusEl.textContent = 'Generierung gestartet — dauert ~30–60 Sekunden. Seite wird automatisch neu geladen …';
+                btn.style.display = 'none';
+                // Pollt alle 10 s max. 12x (2 min), bricht ab wenn generated_at gesetzt
+                var attempts = 0;
+                var poller = setInterval(function() {
+                  attempts++;
+                  delete state.topicDetailCache[topicId];
+                  loadTopicDetail(topicId)
+                    .then(function(freshDetail) {
+                      if (freshDetail && freshDetail.action_plan && freshDetail.action_plan.generated_at) {
+                        clearInterval(poller);
+                        state.topicDetailCache[topicId] = freshDetail;
+                        state.isLoadingDetail = false;
+                        render();
+                      } else if (attempts >= 12) {
+                        clearInterval(poller);
+                        statusEl.textContent = 'Generierung läuft noch oder ist fehlgeschlagen — bitte Seite manuell neu laden.';
+                      }
+                    })
+                    .catch(function() {
+                      if (attempts >= 12) clearInterval(poller);
+                    });
+                }, 10000);
+              })
+              .catch(function(err) {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.textContent = 'Aktionsplan jetzt generieren';
+                statusEl.textContent = 'Fehler beim Starten der Generierung — bitte erneut versuchen.';
+                console.error('[CVZ] generate-action-plan Fehler:', err);
+              });
+          });
+        })(genBtn, emptyTxt, state.activeTopicId);
+        emptyWrap.appendChild(emptyTxt);
+        emptyWrap.appendChild(genBtn);
+        wrap.appendChild(emptyWrap);
+        return wrap; // früher return, emptyTxt wurde bereits angehängt
       }
       emptyWrap.appendChild(emptyTxt);
       wrap.appendChild(emptyWrap);
