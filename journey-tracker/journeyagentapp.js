@@ -904,12 +904,12 @@
   // Farb- und Label-Konfiguration fuer Opportunity-Typen.
   // Wird in renderSituationTab (Wichtigste Handlungsfelder) verwendet.
   var OPP_TYPE_CONFIG = {
-    near_miss_ranking:               { color: '#f2b13d', bg: 'rgba(242,177,61,.09)', border: 'rgba(242,177,61,.3)' },
-    high_demand_low_visibility:      { color: '#60a5fa', bg: 'rgba(96,165,250,.09)', border: 'rgba(96,165,250,.3)' },
-    google_visible_ai_invisible:     { color: '#a78bfa', bg: 'rgba(167,139,250,.09)', border: 'rgba(167,139,250,.3)' },
-    competitor_citation:             { color: '#f87171', bg: 'rgba(248,113,113,.09)', border: 'rgba(248,113,113,.3)' },
-    ai_visible_competitor_dominates: { color: '#fb923c', bg: 'rgba(251,146,60,.09)', border: 'rgba(251,146,60,.3)' },
-    new_question:                    { color: '#34d399', bg: 'rgba(52,211,153,.09)', border: 'rgba(52,211,153,.3)' },
+    near_miss_ranking:               { color: '#c98e2a', bg: 'rgba(201,142,42,.09)', border: 'rgba(201,142,42,.3)' },
+    high_demand_low_visibility:      { color: '#5aacd2', bg: 'rgba(90,172,210,.09)', border: 'rgba(90,172,210,.3)' },
+    google_visible_ai_invisible:     { color: '#8878ca', bg: 'rgba(136,120,202,.09)', border: 'rgba(136,120,202,.3)' },
+    competitor_citation:             { color: '#de5b50', bg: 'rgba(222,91,80,.09)', border: 'rgba(222,91,80,.3)' },
+    ai_visible_competitor_dominates: { color: '#c87a38', bg: 'rgba(200,122,56,.09)', border: 'rgba(200,122,56,.3)' },
+    new_question:                    { color: '#4ec68a', bg: 'rgba(78,198,138,.09)', border: 'rgba(78,198,138,.3)' },
   };
 
   // Farb- und Hinweis-Konfiguration fuer Beste-Content-Chancen-Typen.
@@ -923,9 +923,9 @@
     },
     seo_naeher_top10: {
       label: 'Nah an Google Top 10',
-      color: '#f2b13d',
-      bg: 'rgba(242,177,61,.08)',
-      border: 'rgba(242,177,61,.3)',
+      color: '#c98e2a',
+      bg: 'rgba(201,142,42,.08)',
+      border: 'rgba(201,142,42,.3)',
       tip: 'SEO-Potenzial: Inhalt und interne Verlinkung ausbauen für Top-10-Einstieg.',
     },
   };
@@ -941,10 +941,10 @@
   // NEU (16.09.2026): Journey-Map-Tab — Phasenfarben und Kanal-Reihenfolge
   // für renderMessyMiddleTab / renderPhaseScoreGrid.
   var PHASE_COLORS = {
-    exploration: '#6366f1',
-    evaluation:  '#0ea5e9',
-    comparison:  '#10b981',
-    decision:    '#f59e0b',
+    exploration: '#8878ca',
+    evaluation:  '#5aacd2',
+    comparison:  '#4ec68a',
+    decision:    '#c98e2a',
   };
 
   var CHANNEL_ORDER = ['chat_gpt', 'gemini', 'google_ai', 'google_organic'];
@@ -3161,7 +3161,7 @@
                 : '<span style="opacity:.4;">-</span>') +
             '</span>' +
             '<span style="width:100px;text-align:right;font-size:13px;' +
-              (ownPos != null && ownPos <= 10 ? 'color:#16a34a;font-weight:600;' : 'color:var(--cvz-text-muted,#6b7280);') + '">' +
+              (ownPos != null && ownPos <= 10 ? 'color:#35a86b;font-weight:600;' : 'color:var(--cvz-text-muted,#6b7280);') + '">' +
               (posStr ? 'Pos. ' + posStr : '<span style="opacity:.4;">-</span>') +
             '</span>' +
             '<span style="width:24px;text-align:center;font-size:11px;color:var(--cvz-text-muted,#6b7280);">' +
@@ -3446,7 +3446,7 @@
       tdSum.textContent = profile.summary || '';
       tr.appendChild(tdSum);
       var tdDiff = document.createElement('td');
-      tdDiff.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;color:var(--cvz-opportunity-topic-color,#58a6ff);';
+      tdDiff.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;color:var(--cvz-opportunity-topic-color,#5aacd2);';
       tdDiff.textContent = profile.differentiation_suggestion || '';
       tr.appendChild(tdDiff);
       tbody.appendChild(tr);
@@ -3503,7 +3503,7 @@
     phasesToRender.forEach(function (phase) {
       var sources = sov[phase] || [];
       if (!sources.length) return;
-      var phaseColor = PHASE_COLORS[phase] || '#94a3b8';
+      var phaseColor = PHASE_COLORS[phase] || '#4a5568';
       sources.forEach(function (src, idx) {
         var isLast = !activeFilter
           ? (idx === sources.length - 1 && phase === phasesToRender[phasesToRender.length - 1])
@@ -3544,7 +3544,7 @@
 
         // Differenzierung
         var tdDiff = document.createElement('td');
-        tdDiff.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;color:var(--cvz-opportunity-topic-color,#58a6ff);';
+        tdDiff.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;color:var(--cvz-opportunity-topic-color,#5aacd2);';
         tdDiff.textContent = src.differentiation_suggestion || '';
         tr.appendChild(tdDiff);
 
@@ -3953,7 +3953,7 @@
     table.appendChild(thead);
 
     var tbody = document.createElement('tbody');
-    var PRIORITY_COLORS = { hoch: '#f85149', mittel: '#f0883e', niedrig: '#58a6ff' };
+    var PRIORITY_COLORS = { hoch: '#de5b50', mittel: '#c87a38', niedrig: '#5aacd2' };
 
     function _buildGapRow(item, isLast) {
       var gap = item.gap;
@@ -4006,7 +4006,7 @@
 
       // Empfehlung
       var tdRec = document.createElement('td');
-      tdRec.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;color:var(--cvz-opportunity-topic-color,#58a6ff);line-height:1.4;';
+      tdRec.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;color:var(--cvz-opportunity-topic-color,#5aacd2);line-height:1.4;';
       tdRec.textContent = gap.recommended_content_type || '';
       tr.appendChild(tdRec);
 
@@ -4608,7 +4608,7 @@
     // Render phase groups
     PHASE_ORDER.forEach(function (phase) {
       if (grouped[phase].length === 0) return;
-      var phaseColor = PHASE_COLORS[phase] || '#94a3b8';
+      var phaseColor = PHASE_COLORS[phase] || '#4a5568';
 
       var groupHeading = document.createElement('p');
       groupHeading.className = 'cvz-prompt-phase-heading';
@@ -4626,7 +4626,7 @@
     if (grouped['__none__'].length > 0) {
       var noneHeading = document.createElement('p');
       noneHeading.className = 'cvz-prompt-phase-heading';
-      noneHeading.style.borderLeftColor = '#94a3b8';
+      noneHeading.style.borderLeftColor = '#4a5568';
       noneHeading.textContent = 'Nicht zugeordnet';
       section.appendChild(noneHeading);
 
@@ -5949,9 +5949,9 @@
         '--cvz-navy: #0d1117;' +
         '--cvz-navy-raised: #141b24;' +
         '--cvz-teal: #4fd1c5;' +
-        '--cvz-red: #e5484d;' +
-        '--cvz-amber: #f2b13d;' +
-        '--cvz-green: #4fd1c5;' +
+        '--cvz-red: #de5b50;' +
+        '--cvz-amber: #c98e2a;' +
+        '--cvz-green: #4ec68a;' +
         '--cvz-text: #e6edf3;' +
         '--cvz-text-muted: #8b98a5;' +
         '--cvz-border: #232b36;' +
@@ -6481,7 +6481,7 @@
 
     // (Show chart even without competitor data, just own domain)
 
-    var COMP_COLORS = ['#f2b13d', '#f87171', '#a78bfa', '#34d399', '#60a5fa'];
+    var COMP_COLORS = ['#c98e2a', '#de5b50', '#8878ca', '#4ec68a', '#5aacd2'];
     var ownDomain = (detail.topic && detail.topic.own_domain) ? detail.topic.own_domain : 'Eure Domain';
 
     var section = document.createElement('div');
@@ -6710,7 +6710,7 @@
           vsLabel.textContent = diff >= 0
             ? '+' + diff + 'pp vor Top-Wettbewerber'
             : diff + 'pp hinter ' + topComp.domain;
-          vsLabel.style.color = diff >= 0 ? '#16a34a' : '#dc2626';
+          vsLabel.style.color = diff >= 0 ? '#35a86b' : '#de5b50';
           card.appendChild(vsLabel);
         }
         phaseGrid.appendChild(card);
@@ -6908,12 +6908,12 @@
               if (first.search_volume !== undefined) {
                 cells = [[k.keyword || '', 'text-align:left;'], [k.search_volume != null ? String(k.search_volume) : '-', 'text-align:right;color:var(--cvz-teal,#4fd1c5);']];
               } else if (first.organic_rank !== undefined) {
-                cells = [[k.keyword || '', 'text-align:left;'], [k.organic_rank != null ? String(k.organic_rank) : '-', 'text-align:right;color:var(--cvz-amber,#f2b13d);']];
+                cells = [[k.keyword || '', 'text-align:left;'], [k.organic_rank != null ? String(k.organic_rank) : '-', 'text-align:right;color:var(--cvz-amber,#c98e2a);']];
               } else {
                 cells = [
                   [k.keyword || '', 'text-align:left;'],
                   [k.impressions != null ? String(k.impressions) : '-', 'text-align:right;color:var(--cvz-teal,#4fd1c5);'],
-                  [k.position != null ? Number(k.position).toFixed(1) : '-', 'text-align:right;color:var(--cvz-amber,#f2b13d);'],
+                  [k.position != null ? Number(k.position).toFixed(1) : '-', 'text-align:right;color:var(--cvz-amber,#c98e2a);'],
                 ];
               }
               cells.forEach(function (cell) {
@@ -7233,11 +7233,11 @@
       alle_phasen: 'Alle Phasen',
     };
     var PHASE_COLOR_MAP = {
-      exploration: '#a78bfa',
-      evaluation:  '#60a5fa',
-      comparison:  '#22d3ee',
-      decision:    '#34d399',
-      alle_phasen: '#8b98a5',
+      exploration: '#8878ca',
+      evaluation:  '#5aacd2',
+      comparison:  '#4ec68a',
+      decision:    '#c98e2a',
+      alle_phasen: '#4a5568',
     };
     var CAT_LABEL_MAP = {
       ki_sichtbarkeit: 'KI-Sichtbarkeit',
@@ -7245,7 +7245,7 @@
       wettbewerb:      'Wettbewerb',
       content_luecke:  'Content-Lücke',
     };
-    var IMPACT_COLOR_MAP = { hoch: '#e5484d', mittel: '#f2b13d', niedrig: '#8b98a5' };
+    var IMPACT_COLOR_MAP = { hoch: '#de5b50', mittel: '#c98e2a', niedrig: '#4a5568' };
     var IMPACT_LABEL_MAP = { hoch: 'Hoch', mittel: 'Mittel', niedrig: 'Niedrig' };
 
     var ap = detail.action_plan || {};
@@ -7386,7 +7386,7 @@
               if (ev.top_competitor && ev.competitor_citation_rate_pct != null) {
                 var compBox = document.createElement('div');
                 compBox.style.cssText = 'background:rgba(229,72,77,.1);border:1px solid rgba(229,72,77,.35);border-radius:6px;padding:6px 12px;min-width:90px;';
-                compBox.innerHTML = '<div style="font-size:10px;font-weight:700;color:#f87171;text-transform:uppercase;margin-bottom:2px;">' + escapeHtml(ev.top_competitor) + '</div><div style="font-size:22px;font-weight:800;color:#f87171;">' + ev.competitor_citation_rate_pct + '%</div>';
+                compBox.innerHTML = '<div style="font-size:10px;font-weight:700;color:#de5b50;text-transform:uppercase;margin-bottom:2px;">' + escapeHtml(ev.top_competitor) + '</div><div style="font-size:22px;font-weight:800;color:#de5b50;">' + ev.competitor_citation_rate_pct + '%</div>';
                 rateRow.appendChild(compBox);
               }
               evDiv.appendChild(rateRow);
@@ -7403,7 +7403,7 @@
               if (ev.position != null) {
                 var posStat = document.createElement('div');
                 posStat.style.cssText = 'background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.35);border-radius:6px;padding:6px 12px;';
-                posStat.innerHTML = '<div style="font-size:10px;font-weight:700;color:#60a5fa;text-transform:uppercase;margin-bottom:2px;">Position</div><div style="font-size:22px;font-weight:800;color:#60a5fa;">' + (Math.round(ev.position * 10) / 10) + '</div>';
+                posStat.innerHTML = '<div style="font-size:10px;font-weight:700;color:#5aacd2;text-transform:uppercase;margin-bottom:2px;">Position</div><div style="font-size:22px;font-weight:800;color:#5aacd2;">' + (Math.round(ev.position * 10) / 10) + '</div>';
                 statsRow.appendChild(posStat);
               }
               if (ev.impressions != null) {
@@ -7420,7 +7420,7 @@
                 pgUrlLbl.style.cssText = 'font-size:11px;font-weight:600;color:var(--cvz-text-muted,#8b98a5);flex-shrink:0;';
                 pgUrlLbl.textContent = 'Rankende Seite:';
                 var pgUrlVal = document.createElement('span');
-                pgUrlVal.style.cssText = 'font-size:12px;font-family:monospace;color:#60a5fa;word-break:break-all;';
+                pgUrlVal.style.cssText = 'font-size:12px;font-family:monospace;color:#5aacd2;word-break:break-all;';
                 pgUrlVal.textContent = ev.page_url;
                 pgUrlRow.appendChild(pgUrlLbl);
                 pgUrlRow.appendChild(pgUrlVal);
@@ -7444,7 +7444,7 @@
             } else if (catKey === 'content_luecke') {
               if (ev.example_prompt) {
                 var gapQ = document.createElement('div');
-                gapQ.style.cssText = 'background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.35);border-radius:6px;padding:10px 12px;font-size:13px;color:#a78bfa;font-style:italic;line-height:1.55;';
+                gapQ.style.cssText = 'background:rgba(136,120,202,.12);border:1px solid rgba(136,120,202,.35);border-radius:6px;padding:10px 12px;font-size:13px;color:#8878ca;font-style:italic;line-height:1.55;';
                 gapQ.textContent = '"' + ev.example_prompt + '"';
                 evDiv.appendChild(gapQ);
               }
@@ -7626,7 +7626,7 @@
         typeLabel: 'System-Erkennung',
         text: entry.entry_text || '',
         url: null,
-        color: '#6366f1',
+        color: '#8878ca',
       });
     });
     // Sort by date descending
