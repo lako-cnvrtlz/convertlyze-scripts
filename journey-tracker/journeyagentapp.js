@@ -1009,6 +1009,11 @@
     review_plattform:  'Review-Plattform',
     vergleichsartikel: 'Vergleichsartikel',
     produktseite:      'Produktseite',
+    // NEU (18.09.2026): siehe source_analysis.py _ALLOWED_CONTENT_TYPES —
+    // deckt Behörden-/Verbands-/Institutionsseiten und reine "So
+    // funktioniert's"-Seiten ohne Verkaufsabsicht ab, die vorher
+    // zwangsläufig auf 'fachartikel' oder 'produktseite' fielen.
+    erklaerseite:      'Erklärseite',
     fachartikel:       'Fachartikel',
     video:             'Video',
     forum:             'Forum',
@@ -3530,7 +3535,7 @@
 
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
-    heading.textContent = 'Quellen-Analyse (Live-Web-Search, gecacht pro Domain)';
+    heading.textContent = 'Quellen-Analyse (Live-Web-Search, gecacht pro URL)';
     section.appendChild(heading);
 
     // Wenn share_of_voice-Daten vorhanden: phase-gruppierte Ansicht
@@ -3894,9 +3899,18 @@
       return section;
     }
 
-    var profileByDomain = {};
+    // GEÄNDERT (18.09.2026): source_profiles cachen jetzt pro URL statt pro
+    // Domain (Backend: source_analysis.py) — eine Domain kann also mehrere
+    // Content-Typen haben (Blog UND Produktseite). profileByUrl matcht
+    // deshalb primär über comp.url (die tatsächlich zitierte URL), nur wenn
+    // die exakt nicht analysiert ist, Fallback auf irgendein Profil dieser
+    // Domain (profileByDomainFallback), besser als gar nichts zu zeigen.
+    var profileByUrl = {};
+    var profileByDomainFallback = {};
     (sourceProfiles || []).forEach(function (p) {
-      profileByDomain[normalizeDomainForMatch(p.domain)] = p;
+      if (p.analyzed_url) profileByUrl[p.analyzed_url] = p;
+      var nd = normalizeDomainForMatch(p.domain);
+      if (!profileByDomainFallback[nd]) profileByDomainFallback[nd] = p;
     });
     var insightByDomain = {};
     (competitorInsights || []).forEach(function (i) {
@@ -3907,7 +3921,8 @@
     grid.className = 'cvz-opportunity-grid';
     allDomains.slice(0, 8).forEach(function (comp) {
       var normDomain = normalizeDomainForMatch(comp.domain);
-      var profile = profileByDomain[normDomain];
+      var lookupUrl = comp.url || ('https://' + comp.domain);
+      var profile = profileByUrl[lookupUrl] || profileByDomainFallback[normDomain];
       var insight = insightByDomain[normDomain];
       var byModel = comp.by_model || {};
       var modelParts = [];
@@ -5848,7 +5863,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '12px';
-    sub.textContent = 'Wie oft wird eure Domain pro Phase und Kanal zitiert (0–100 %).';
+    sub.textContent = 'Wie oft wird eure Domain pro Phase und Kanal als Quelle genannt (heller Balken) bzw. mit echtem Link zitiert (dunkler Balken), 0–100 %.';
     section.appendChild(sub);
 
     var grid = document.createElement('div');
@@ -5869,8 +5884,12 @@
       card.appendChild(phaseLabel);
 
       CHANNEL_ORDER.forEach(function (channel) {
-        var ch = scores[channel] || { score: 0, cited: 0, total: 0 };
+        var ch = scores[channel] || { score: 0, cited: 0, total: 0, score_with_url: 0, cited_with_url: 0 };
         var pct = Math.round(ch.score || 0);
+        // NEU (18.09.2026): engere Definition (own_domain_cited_with_url)
+        // als zweiter, kleinerer Balken innerhalb desselben Balkens, plus
+        // im Tooltip aufgeschluesselt. score_with_url ist immer <= score.
+        var pctLinked = Math.round(ch.score_with_url || 0);
 
         var row = document.createElement('div');
         row.className = 'cvz-journey-channel-row';
@@ -5882,19 +5901,30 @@
 
         var barWrap = document.createElement('div');
         barWrap.className = 'cvz-journey-bar-wrap';
+        barWrap.style.position = 'relative';
 
         var bar = document.createElement('div');
         bar.className = 'cvz-journey-bar-fill';
         bar.style.width = pct + '%';
         bar.style.backgroundColor = color;
+        bar.style.opacity = '.45';
         barWrap.appendChild(bar);
+
+        var barLinked = document.createElement('div');
+        barLinked.className = 'cvz-journey-bar-fill';
+        barLinked.style.width = pctLinked + '%';
+        barLinked.style.backgroundColor = color;
+        barLinked.style.position = 'absolute';
+        barLinked.style.left = '0';
+        barLinked.style.top = '0';
+        barWrap.appendChild(barLinked);
         row.appendChild(barWrap);
 
         var num = document.createElement('span');
         num.className = 'cvz-journey-channel-num';
         num.textContent = pct + '%';
         if (ch.total > 0) {
-          num.title = ch.cited + ' von ' + ch.total + ' Prompts zitiert';
+          num.title = ch.cited + ' von ' + ch.total + ' Prompts als Quelle genannt, davon ' + ch.cited_with_url + ' mit echtem Link zitiert (' + pctLinked + '%)';
         }
         row.appendChild(num);
 
@@ -8064,6 +8094,25 @@
         return { label: PHASE_LABELS[phase] || phase, values: values, color: PHASE_COLORS[phase] };
       });
 
+      // NEU (18.09.2026): zweite, gestrichelte Linie pro Phase — die engere
+      // Definition own_domain_cited_with_url ("mit echtem Link zitiert"),
+      // aus ts.series_with_url (dashboard.py: _compute_weekly_timeseries).
+      // Gleiche Farbe wie die durchgezogene Linie derselben Phase, damit die
+      // Zuordnung klar bleibt; dashed:true wird von buildLineChartSvg direkt
+      // unterstützt (Strichelung + reduzierte Deckkraft).
+      var seriesWithUrl = PHASE_ORDER.map(function (phase) {
+        var phaseSeries = (ts.series_with_url || {})[phase] || {};
+        var values = weeks.map(function (w, wi) {
+          var total = 0, count = 0;
+          CHANNEL_ORDER.forEach(function (ch) {
+            var arr = phaseSeries[ch];
+            if (arr && arr[wi] != null) { total += arr[wi]; count++; }
+          });
+          return count > 0 ? Math.round(total / count) : null;
+        });
+        return { label: (PHASE_LABELS[phase] || phase) + ' (mit Link zitiert)', values: values, color: PHASE_COLORS[phase], dashed: true };
+      });
+
       // Markers from content changes
       var contentChanges = state.contentChangesCache[topicId] || [];
       var markers = contentChanges.map(function (ch) {
@@ -8091,13 +8140,13 @@
       var chartCard = document.createElement('div');
       chartCard.className = 'cvz-card';
       chartCard.innerHTML =
-        buildLineChartSvg(series, xLabels, { maxY: 100, markers: markers }) +
+        buildLineChartSvg(series.concat(seriesWithUrl), xLabels, { maxY: 100, markers: markers }) +
         '<div class="cvz-chart-legend">' +
           PHASE_ORDER.map(function (phase) {
             return '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background:' + PHASE_COLORS[phase] + '"></span>' + escapeHtml(PHASE_LABELS[phase] || phase) + '</span>';
           }).join('') +
         '</div>' +
-        '<p class="cvz-chart-caption">Durchschnittliche KI-Zitierrate (0–100 %) pro Journey-Phase und Woche, gemittelt über alle KI-Kanäle. Senkrechte Linien markieren eingetragene Content-Änderungen.</p>';
+        '<p class="cvz-chart-caption">Durchgezogene Linie: als Quelle genannt (own_domain_cited). Gestrichelte Linie: davon mit echtem Link zitiert (own_domain_cited_with_url) — beides 0–100 % pro Journey-Phase und Woche, gemittelt über alle KI-Kanäle. Senkrechte Linien markieren eingetragene Content-Änderungen.</p>';
       chartSection.appendChild(chartCard);
     }
     wrap.appendChild(chartSection);
