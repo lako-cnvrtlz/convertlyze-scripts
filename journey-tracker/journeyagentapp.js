@@ -5382,6 +5382,16 @@
               : '<span class="cvz-prompt-citation-count" style="color:var(--cvz-text-muted,#8b98a5);">Eigene Domain nicht sichtbar</span>')
           : '';
 
+        // NEU (18.09.2026): priorisierter Marker fuer Prompts, bei denen die
+        // eigene Domain zwar als Quelle genannt wird, aber ohne echten Link
+        // (siehe main.py: _compute_unlinked_citation_by_prompt). Bewusst
+        // visuell auffaelliger als contentTypeBadge (Warn-Farbe), weil das
+        // laut Kundenwunsch der entscheidende, priorisiert zu behebende
+        // Unterschied ist.
+        var unlinkedBadge = prompt.cited_without_link
+          ? '<span class="cvz-prompt-citation-count" style="color:var(--cvz-orange,#e0a030);border:1px solid var(--cvz-orange,#e0a030);border-radius:4px;padding:1px 6px;" title="Wird als Quelle genannt, aber die KI setzt keinen echten Link \u2014 priorisiert beheben (z.B. Struktur/Schema.org/Crawlability pruefen)">\u26a0 ohne Link zitiert</span>'
+          : '';
+
         var contentTypeBadge = prompt.top_cited_content_type
           ? '<span class="cvz-prompt-content-type" title="Typ der meistzitierten Quelle: ' + escapeHtml(CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || prompt.top_cited_content_type) + ' (' + escapeHtml(prompt.top_cited_domain || '') + ')">' +
               (CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || escapeHtml(prompt.top_cited_content_type)) +
@@ -5430,6 +5440,7 @@
           '<span class="cvz-prompt-text">' + escapeHtml(prompt.prompt_text) + changelogBadgeHtml + '</span>' +
           faviconHtml +
           citationBadge +
+          unlinkedBadge +
           contentTypeBadge +
           personaBadge +
           aiSearchVolumeBadge +
@@ -5927,6 +5938,21 @@
           num.title = ch.cited + ' von ' + ch.total + ' Prompts als Quelle genannt, davon ' + ch.cited_with_url + ' mit echtem Link zitiert (' + pctLinked + '%)';
         }
         row.appendChild(num);
+
+        // NEU (18.09.2026): prozentuale Entwicklung ggue. dem vorherigen
+        // Zeitraum gleicher Laenge (dashboard.py: _add_phase_score_deltas).
+        // null heisst "kein Vergleich moeglich" (z.B. Topic juenger als
+        // 2x der Fenstergroesse) und wird bewusst nicht angezeigt statt
+        // einer irrefuehrenden 0%-Aenderung.
+        if (ch.delta_pct != null) {
+          var deltaEl = document.createElement('span');
+          var deltaUp = ch.delta_pct > 0;
+          var deltaFlat = ch.delta_pct === 0;
+          deltaEl.className = 'cvz-journey-channel-delta ' + (deltaFlat ? 'cvz-delta-flat' : (deltaUp ? 'cvz-delta-up' : 'cvz-delta-down'));
+          deltaEl.textContent = (deltaFlat ? '\u2192 ' : (deltaUp ? '\u25b2 ' : '\u25bc ')) + Math.abs(ch.delta_pct) + ' Pp';
+          deltaEl.title = 'Vs. vorherige Periode gleicher Länge: ' + (deltaUp ? '+' : '') + ch.delta_pct + ' Prozentpunkte (als Quelle genannt)';
+          row.appendChild(deltaEl);
+        }
 
         card.appendChild(row);
       });
@@ -6526,6 +6552,15 @@
       '.cvz-journey-channel-num {' +
         'flex: 0 0 32px; text-align: right; font-size: 11px; color: var(--cvz-text-muted); font-variant-numeric: tabular-nums;' +
       '}' +
+
+      // NEU (18.09.2026): Delta-Badge im Phasen-Score-Grid, siehe Chat-Verlauf
+      // 18.09.2026 ("prozentuale Entwicklung pro Journey-Phase").
+      '.cvz-journey-channel-delta {' +
+        'flex: 0 0 auto; font-size: 10px; font-weight: 600; margin-left: 4px; padding: 1px 5px; border-radius: 3px; white-space: nowrap;' +
+      '}' +
+      '.cvz-delta-up { color: var(--cvz-teal); background: rgba(13,148,136,0.12); }' +
+      '.cvz-delta-down { color: var(--cvz-red); background: rgba(222,91,80,0.12); }' +
+      '.cvz-delta-flat { color: var(--cvz-text-muted); background: rgba(139,152,165,0.12); }' +
 
       '.cvz-sov-phase-block { margin-bottom: 8px; border: 1px solid var(--cvz-border); }' +
       '.cvz-sov-phase-header {' +
