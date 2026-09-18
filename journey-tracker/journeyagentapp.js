@@ -968,6 +968,12 @@
     ueberarbeitung: 'Überarbeitung',
     kampagne:     'Kampagne',
     sonstiges:    'Sonstiges',
+    // NEU (18.09.2026): automatisch vom Backend gesetzt, wenn ein
+    // Aktionsplan-Item als erledigt markiert wird (main.py,
+    // toggle_action_plan_item_endpoint). Bewusst NICHT in
+    // CONTENT_CHANGE_TYPE_ORDER, damit es nicht im manuellen
+    // "Content-Änderung eintragen"-Formular als Option auftaucht.
+    aktionsplan:  'Aktions-Plan',
   };
   var CONTENT_CHANGE_TYPE_ORDER = ['neue_seite', 'ueberarbeitung', 'kampagne', 'sonstiges'];
 
@@ -7798,6 +7804,21 @@
                   }
                   state.contentChangesCache[topicId].push(resp.content_change);
                 }
+                // NEU (18.09.2026): Beim Zurücksetzen entfernt das Backend die
+                // zugehörigen content_changes-/topic_changelog-Einträge wieder
+                // (siehe main.py toggle_action_plan_item_endpoint) — Caches
+                // hier entsprechend bereinigen, sonst bleiben die Einträge bis
+                // zum nächsten vollständigen Neuladen sichtbar.
+                if (resp.removed_content_change_ids && resp.removed_content_change_ids.length && state.contentChangesCache[topicId]) {
+                  state.contentChangesCache[topicId] = state.contentChangesCache[topicId].filter(function (ch) {
+                    return resp.removed_content_change_ids.indexOf(ch.id) === -1;
+                  });
+                }
+                if (resp.removed_changelog_ids && resp.removed_changelog_ids.length && cached && cached.changelog) {
+                  cached.changelog = cached.changelog.filter(function (e) {
+                    return resp.removed_changelog_ids.indexOf(e.id) === -1;
+                  });
+                }
                 render();
               }).catch(function(err) {
                 console.error('[CVZ] toggle-action-plan-item Fehler:', err);
@@ -8082,8 +8103,15 @@
     wrap.appendChild(chartSection);
 
     // Timeline: Content-Änderungen (user-logged) + detail.changelog (system)
+    // GEAENDERT (18.09.2026): Eintraege mit change_type 'aktionsplan'
+    // (automatisch beim Erledigen eines Aktionsplan-Items angelegt, siehe
+    // main.py toggle_action_plan_item_endpoint) werden hier bewusst
+    // ausgeblendet. Sie bleiben in "Content-Änderungen & Events" sowie als
+    // Marker im Trend-Chart sichtbar, sollen aber nicht zusätzlich in der
+    // Änderungs-Chronik auftauchen.
     var combined = [];
     (state.contentChangesCache[topicId] || []).forEach(function (ch) {
+      if (ch.change_type === 'aktionsplan') return;
       combined.push({
         date: ch.changed_at,
         type: 'change',
