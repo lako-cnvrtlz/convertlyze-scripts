@@ -115,8 +115,6 @@
     sourcePhaseFilter: null,
     // NEU (17.09.2026): Pro-Topic gepinnte Wettbewerber fuer den Vergleichs-Chart
     chartPinnedComps: {},
-    // NEU (17.09.2026): Cleanup-Fn fuer JS-basierten sticky Tab-Nav
-    _tabNavCleanup: null,
   };
 
   function getProjectById(id) {
@@ -1018,6 +1016,20 @@
     video:             'Video',
     forum:             'Forum',
     sonstiges:         'Sonstiges',
+    // NEU (18.09.2026): zwei deterministisch (ohne Claude-Call) erkannte
+    // Sonderfälle, siehe source_analysis.py _looks_like_asset/_analyze_url —
+    // ersetzen das bisherige leere "–", wenn eine zitierte URL entweder ein
+    // reiner Datei-Download ist oder automatisiert gar nicht auslesbar war
+    // (z.B. Bot-Schutz). Ebenfalls bewusst NICHT in CONTENT_CHANGE_TYPE_ORDER/
+    // manuell wählbar, da nie von Claude, sondern nur code-seitig gesetzt.
+    dokument_download: 'Datei-Download (PDF/Bild/etc.)',
+    nicht_abrufbar:    'Nicht automatisiert auslesbar',
+    // NEU (18.09.2026): LinkedIn/X/Facebook/Instagram/TikTok/Pinterest/
+    // Medium/GitHub — bewusst eine eigene, plattform- statt seitentyp-
+    // bezogene Kategorie (siehe source_analysis.py _KNOWN_PLATFORM_DOMAINS),
+    // weil der konkrete Seitentyp je Pfad zu unterschiedlich wäre, die
+    // Kernaussage "hier lohnt sich Präsenz" aber unabhängig davon gilt.
+    social_media:      'Social-Media-Plattform',
   };
 
   var GAP_PRIORITY_LABELS = {
@@ -1112,12 +1124,6 @@
   ];
 
   function render() {
-    // Cleanup sticky tab-nav scroll listener from previous render
-    if (state._tabNavCleanup) {
-      state._tabNavCleanup();
-      state._tabNavCleanup = null;
-    }
-
     var container = document.getElementById('cvz-visibility-app');
     if (!container) {
       console.error('[CVZ Visibility] Container #cvz-visibility-app nicht gefunden.');
@@ -1136,78 +1142,12 @@
 
     container.innerHTML = '';
     if (state.activeView === 'topic-detail') {
+      // GEAENDERT (18.09.2026): JS-basiertes sticky Tab-Nav (17.09.2026,
+      // IntersectionObserver-Loesung) wieder entfernt, siehe Chat-Verlauf
+      // 18.09.2026 — sah in der Praxis nicht gut aus (Nav blieb beim
+      // Fixieren ueber Content stehen/ueberlappte). Tab-Nav ist jetzt
+      // wieder normaler Teil des Flows, ohne Sticky-Verhalten.
       container.appendChild(renderTopicDetailView());
-      // JS-basiertes sticky Tab-Nav.
-      // position:sticky scheitert an Webflow-Containern mit overflow:hidden.
-      // window-scroll-Listener scheitert wenn Webflow einen eigenen Scroll-
-      // Container (overflow:auto/scroll) baut.
-      // IntersectionObserver ist scroll-container-agnostisch: er beobachtet
-      // wann das Sentinel-Element (direkt vor dem Tab-Nav) den Viewport
-      // verlässt — unabhängig davon, was scrollt.
-      requestAnimationFrame(function () {
-        var tabNavEl = container.querySelector('.cvz-tab-nav');
-        if (!tabNavEl || !window.IntersectionObserver) return;
-
-        // Sentinel: 1px-Platzhalter direkt vor dem Tab-Nav
-        var sentinel = document.createElement('div');
-        sentinel.style.cssText = 'height:1px;pointer-events:none;margin-bottom:-1px;';
-        tabNavEl.parentNode.insertBefore(sentinel, tabNavEl);
-
-        var origLeft = tabNavEl.getBoundingClientRect().left;
-        var origWidth = tabNavEl.getBoundingClientRect().width;
-        var navHeight = tabNavEl.offsetHeight;
-        var spacer = null;
-
-        var observer = new IntersectionObserver(function (entries) {
-          var isVisible = entries[0].isIntersecting;
-          // DIAGNOSE-LOG (17.09.2026): zeigt ob der Observer überhaupt feuert.
-          // Kann nach Bestätigung entfernt werden.
-          console.log('[CVZ] IntersectionObserver sentinel:', isVisible ? 'sichtbar (kein Sticky)' : 'unsichtbar (Sticky aktiv)');
-          if (!isVisible) {
-            // Sentinel hat den Viewport verlassen → Nav fixieren
-            var curLeft = tabNavEl.getBoundingClientRect().left;
-            var curWidth = tabNavEl.getBoundingClientRect().width;
-            // Nur updaten wenn noch nicht fixed (verhindert Flackern)
-            if (tabNavEl.style.position !== 'fixed') {
-              origLeft = curLeft;
-              origWidth = curWidth;
-            }
-            tabNavEl.style.position = 'fixed';
-            tabNavEl.style.top = '0';
-            tabNavEl.style.left = origLeft + 'px';
-            tabNavEl.style.width = origWidth + 'px';
-            // z-index 9999 wegen möglicher Webflow-Stacking-Contexts
-            tabNavEl.style.zIndex = '9999';
-            tabNavEl.style.background = 'var(--cvz-navy)';
-            tabNavEl.style.paddingTop = '8px';
-            tabNavEl.style.boxShadow = '0 2px 8px rgba(0,0,0,0.28)';
-            if (!spacer) {
-              spacer = document.createElement('div');
-              spacer.style.height = navHeight + 'px';
-              tabNavEl.parentNode.insertBefore(spacer, tabNavEl.nextSibling);
-            }
-          } else {
-            // Sentinel wieder sichtbar → Nav zurück in den Flow
-            tabNavEl.style.position = '';
-            tabNavEl.style.top = '';
-            tabNavEl.style.left = '';
-            tabNavEl.style.width = '';
-            tabNavEl.style.zIndex = '';
-            tabNavEl.style.background = '';
-            tabNavEl.style.paddingTop = '';
-            tabNavEl.style.boxShadow = '';
-            if (spacer) { spacer.remove(); spacer = null; }
-          }
-        }, { threshold: 0 });
-
-        observer.observe(sentinel);
-
-        state._tabNavCleanup = function () {
-          observer.disconnect();
-          if (sentinel.parentNode) sentinel.remove();
-          if (spacer && spacer.parentNode) spacer.remove();
-        };
-      });
     } else {
       container.appendChild(renderOverview());
     }
@@ -6023,7 +5963,15 @@
           tbody.appendChild(tr);
         });
         table.appendChild(tbody);
-        phaseBlock.appendChild(table);
+        var sovScrollWrap = document.createElement('div');
+        // NEU (18.09.2026): horizontales Scrollen innerhalb der Card auf
+        // Mobile — Tabelle war vorher breiter als der Viewport und die
+        // Spalten (Typ/Zitierrate/Differenzierungstipp) liefen einfach ab,
+        // ohne Möglichkeit sie zu erreichen. Gleiches Muster wie bei den
+        // anderen scrollbaren Tabellen (z.B. GSC-Tabelle).
+        sovScrollWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+        sovScrollWrap.appendChild(table);
+        phaseBlock.appendChild(sovScrollWrap);
       }
 
       section.appendChild(phaseBlock);
@@ -6321,7 +6269,7 @@
       '.cvz-create-info { width: 100%; font-size: 13px; color: var(--cvz-text-muted); margin: 6px 0 0; }' +
       '.cvz-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 16px; }' +
       '.cvz-modal-box { background: #141b24; border: 1px solid #232b36; border-radius: 4px; padding: 20px; max-width: 380px; width: 100%; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }' +
-      '.cvz-modal-title { font-family: "Geist", sans-serif; font-size: 15px; font-weight: 600; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
+      '.cvz-modal-title { font-family: "Geist", sans-serif; font-size: 15px; font-weight: 600; color: var(--cvz-text-muted); margin: 0 0 8px; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
       '.cvz-modal-text { font-family: "Geist", sans-serif; font-size: 13px; color: #8b98a5; margin: 0 0 20px; line-height: 1.5; }' +
       '.cvz-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }' +
       '.cvz-modal-btn { font-family: "Geist", sans-serif; font-size: 12px; padding: 6px 14px; border-radius: 0; cursor: pointer; border: 1px solid transparent; }' +
@@ -6341,7 +6289,7 @@
       '.cvz-charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }' +
       '.cvz-charts-grid > .cvz-section { margin-bottom: 0; }' +
       '.cvz-section-label { font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
-      '.cvz-section-title { margin: 0 0 4px; font-size: 22px; }' +
+      '.cvz-section-title { margin: 0 0 4px; font-size: 22px; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
 
       '.cvz-summary-card { margin-bottom: 24px; }' +
       '.cvz-ai-attribution { margin: 20px 0 0; padding-top: 12px; border-top: 1px solid var(--cvz-border); font-size: 11px; color: var(--cvz-text-muted); opacity: 0.6; }' +
@@ -6360,7 +6308,7 @@
       '.cvz-competitor-prompt-list { margin: 2px 0 8px; padding-left: 16px; font-size: 12px; color: var(--cvz-text-muted); }' +
       '.cvz-competitor-prompt-list li { margin: 2px 0; }' +
 
-      '.cvz-phase-section-heading { margin: 16px 0 8px; }' +
+      '.cvz-phase-section-heading { margin: 16px 0 8px; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
       '.cvz-inline-favicon { width:16px;height:16px;border-radius:2px;vertical-align:middle;margin-right:4px;object-fit:contain; }' +
       '.cvz-gap-priority-hoch { border-left-color: var(--cvz-red); }' +
       '.cvz-gap-priority-mittel { border-left-color: var(--cvz-amber); }' +
@@ -6380,7 +6328,7 @@
       '.cvz-gsc-row-clickable { cursor: pointer; }' +
       '.cvz-gsc-row-clickable:hover { background: rgba(79, 209, 197, 0.06); }' +
 
-      '.cvz-phase-heading { font-family: "Syne", sans-serif; font-size: 14px; margin: 16px 0 8px; color: var(--cvz-text-muted); }' +
+      '.cvz-phase-heading { font-family: "Syne", sans-serif; font-size: 14px; margin: 16px 0 8px; color: var(--cvz-text-muted); hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
       '.cvz-prompt-list { display: flex; flex-direction: column; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch; }' +
       '.cvz-prompt-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 14px; min-width: max-content; }' +
       '.cvz-prompt-text { flex: 1; min-width: 160px; color: var(--cvz-text-muted); }' +
@@ -6570,10 +6518,10 @@
       '}' +
       '.cvz-sov-phase-header:hover { background: var(--cvz-navy); }' +
       '.cvz-sov-phase-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }' +
-      '.cvz-sov-phase-title { font-weight: 600; flex: 1; }' +
+      '.cvz-sov-phase-title { font-weight: 600; flex: 1; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
       '.cvz-sov-phase-count { font-size: 12px; color: var(--cvz-text-muted); }' +
       '.cvz-sov-chevron { font-size: 11px; color: var(--cvz-text-muted); }' +
-      '.cvz-sov-table { width: 100%; border-collapse: collapse; font-size: 13px; }' +
+      '.cvz-sov-table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 13px; }' +
       '.cvz-sov-table th {' +
         'text-align: left; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em;' +
         'color: var(--cvz-text-muted); padding: 8px 16px; border-bottom: 1px solid var(--cvz-border);' +
@@ -6606,7 +6554,7 @@
         'color: var(--cvz-teal); font-size: 12px; text-decoration: none; white-space: nowrap;' +
       '}' +
       '.cvz-content-change-url:hover { text-decoration: underline; }' +
-      '.cvz-prompt-phase-heading {font-family: "Syne", sans-serif; font-size: 13px; margin: 16px 0 6px; padding-left: 8px; border-left: 3px solid var(--cvz-teal); color: var(--cvz-text-muted); }' +
+      '.cvz-prompt-phase-heading {font-family: "Syne", sans-serif; font-size: 13px; margin: 16px 0 6px; padding-left: 8px; border-left: 3px solid var(--cvz-teal); color: var(--cvz-text-muted); hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
       '.cvz-prompt-source-summary {font-size: 12px; color: var(--cvz-text-muted); margin-bottom: 8px; padding: 5px 8px; background: var(--cvz-navy-raised); border-radius: 4px; font-variant-numeric: tabular-nums; }' +
       '.cvz-competitor-url-row { overflow: hidden; white-space: nowrap; max-width: 100%; }' +
       '.cvz-competitor-url {display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cvz-teal); font-size: 12px; text-decoration: none; max-width: 100%; }' +
@@ -7259,7 +7207,15 @@
         var tdDesc = document.createElement('td');
         tdDesc.style.cssText = 'padding:12px 10px;vertical-align:top;line-height:1.65;color:var(--cvz-text-muted,#8b98a5);';
         var descInner = document.createElement('div');
-        descInner.style.cssText = 'display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;';
+        // GEAENDERT (18.09.2026): Klammerung (line-clamp:3) faellt weg, wenn
+        // die Zeile aufgeklappt ist — vorher blieb der Text auch nach dem
+        // Klick auf 3 Zeilen begrenzt, das Aufklappen zeigte nur die
+        // Keywords/Domains-Tabelle darunter, nicht den vollen Beschreibungs-
+        // text. Auf Mobile (keine Maus fuer Hover/Tooltip) war der
+        // abgeschnittene Text dadurch nirgends vollstaendig lesbar.
+        if (!isExpanded) {
+          descInner.style.cssText = 'display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;';
+        }
         descInner.textContent = opp.description || '';
         tdDesc.appendChild(descInner);
         tr.appendChild(tdDesc);
@@ -7270,7 +7226,10 @@
         tdRec.style.cssText = 'padding:12px 10px;vertical-align:top;line-height:1.5;font-size:12px;';
         var recText = opp.content_recommendation || OPP_FALLBACK_RECOMMENDATION[opp.opportunity_type] || '';
         var recInner = document.createElement('div');
-        recInner.style.cssText = 'display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;';
+        // GEAENDERT (18.09.2026): gleiche Begruendung wie bei descInner oben.
+        if (!isExpanded) {
+          recInner.style.cssText = 'display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;';
+        }
         recInner.style.color = 'var(--cvz-text-muted,#8b98a5)';
         recInner.textContent = recText || '-';
         tdRec.appendChild(recInner);
