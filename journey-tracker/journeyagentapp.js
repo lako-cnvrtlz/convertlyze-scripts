@@ -252,37 +252,41 @@
   }
 
   function maybeStartPolling() {
-    if (CONFIG.useMockData || state.pollTimer) return;
+  if (CONFIG.useMockData || state.pollTimer) return;
 
-    var hasCollecting = state.allTopics.some(function (t) { return t.status === 'collecting' || t.status === 'analyzing'; });
-    if (!hasCollecting) return;
+  var hasCollecting = state.allTopics.some(function (t) { return t.status === 'collecting' || t.status === 'analyzing'; });
+  if (!hasCollecting) return;
 
-    state.pollTimer = setInterval(async function () {
-      try {
-        await loadTopics();
-        if (state.activeView === 'topic-detail' && state.activeTopicId) {
-          var current = getTopicById(state.activeTopicId);
-          if (current && current.status !== 'collecting' && current.status !== 'analyzing' && state.topicDetailCache[state.activeTopicId]) {
-            var cachedTopic = state.topicDetailCache[state.activeTopicId].topic;
-            if (cachedTopic && (cachedTopic.status === 'collecting' || cachedTopic.status === 'analyzing')) {
-              delete state.topicDetailCache[state.activeTopicId];
-              await openTopicDetail(state.activeTopicId, false);
-            }
+  state.pollTimer = setInterval(async function () {
+    try {
+      await loadTopics();
+      if (state.activeView === 'topic-detail' && state.activeTopicId) {
+        var current = getTopicById(state.activeTopicId);
+        if (current && current.status !== 'collecting' && current.status !== 'analyzing' && state.topicDetailCache[state.activeTopicId]) {
+          var cachedTopic = state.topicDetailCache[state.activeTopicId].topic;
+          if (cachedTopic && (cachedTopic.status === 'collecting' || cachedTopic.status === 'analyzing')) {
+            delete state.topicDetailCache[state.activeTopicId];
+            delete state.dashboardDataCache[state.activeTopicId];
+            delete state.contentChangesCache[state.activeTopicId];
+            delete state.visibilityTrendCache[state.activeTopicId];
+            delete state.monthlyOverviewTrendCache[state.activeTopicId];
+            delete state.topicRankHistoryCache[state.activeTopicId];
+            await openTopicDetail(state.activeTopicId, false);
           }
         }
-      } catch (e) {
-        console.error('[CVZ Visibility] Polling fehlgeschlagen:', e);
       }
+    } catch (e) {
+      console.error('[CVZ Visibility] Polling fehlgeschlagen:', e);
+    }
 
-      var stillCollecting = state.allTopics.some(function (t) { return t.status === 'collecting' || t.status === 'analyzing'; });
-      if (!stillCollecting) {
-        clearInterval(state.pollTimer);
-        state.pollTimer = null;
-      }
-      render();
-    }, 5000);
-  }
-
+    var stillCollecting = state.allTopics.some(function (t) { return t.status === 'collecting' || t.status === 'analyzing'; });
+    if (!stillCollecting) {
+      clearInterval(state.pollTimer);
+      state.pollTimer = null;
+    }
+    render();
+  }, 5000);
+}
   async function loadTopicDetail(topicId) {
     if (CONFIG.useMockData) {
       return MOCK_TOPIC_DETAIL[topicId] || null;
