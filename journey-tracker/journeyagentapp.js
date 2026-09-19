@@ -2719,7 +2719,21 @@
       });
     }
 
-    function xFor(i) { return padding + i * stepX; }
+    // NEU (19.09.2026): Wenn mehrere Serien beim selben X-Wert denselben Score
+    // haben (z.B. alle Phasen bei 0%, siehe Chat-Verlauf 19.09.2026 — erster
+    // Analyse-Lauf eines Topics, alle vier Phasen landen exakt übereinander),
+    // zeichnet SVG in Dokumentreihenfolge — die zuletzt gezeichnete Serie
+    // verdeckt optisch alle darunterliegenden identischen Punkte vollständig.
+    // Fix: jede Serie bekommt einen kleinen, konstanten horizontalen Versatz
+    // je nach Position in seriesList, damit deckungsgleiche Punkte sichtbar
+    // nebeneinander liegen statt sich zu überdecken. Bei unterschiedlichen
+    // Werten ist der Versatz (wenige Pixel) nicht wahrnehmbar.
+    var DOT_SPACING = 3;
+    function offsetForSeries(si) {
+      return (si - (seriesList.length - 1) / 2) * DOT_SPACING;
+    }
+
+    function xFor(i, si) { return padding + i * stepX + (si != null ? offsetForSeries(si) : 0); }
     function yFor(value) { return height - padding - (value / maxValue) * (height - padding * 2); }
     var baselineY = height - padding;
 
@@ -2742,7 +2756,7 @@
       );
     });
 
-    seriesList.forEach(function (s) {
+    seriesList.forEach(function (s, si) {
       var color = s.color || 'var(--cvz-teal)';
       var segment = [];
       var polylines = [];
@@ -2752,7 +2766,7 @@
           segment = [];
           return;
         }
-        segment.push(xFor(i).toFixed(1) + ',' + yFor(v).toFixed(1));
+        segment.push(xFor(i, si).toFixed(1) + ',' + yFor(v).toFixed(1));
       });
       if (segment.length > 1) polylines.push(segment.join(' '));
 
@@ -2763,7 +2777,7 @@
 
       s.values.forEach(function (v, i) {
         if (v == null) return;
-        var cx = xFor(i).toFixed(1), cy = yFor(v).toFixed(1);
+        var cx = xFor(i, si).toFixed(1), cy = yFor(v).toFixed(1);
         if (opts.xKeys && opts.xKeys[i] != null) {
           parts.push('<circle cx="' + cx + '" cy="' + cy + '" r="9" fill="transparent" class="cvz-chart-hit" data-cvz-week-detail="' + escapeHtml(opts.xKeys[i]) + '"></circle>');
         }
