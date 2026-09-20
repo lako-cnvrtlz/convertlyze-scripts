@@ -3063,17 +3063,19 @@
       // GEÄNDERT (15.09.2026): echte Tabelle statt gestapelter Blöcke,
       // Kundenwunsch: "eine Tabelle, die in die unterschiedlichen Phasen
       // geht und dort eine Einschätzung gibt".
+      // GE\u00c4NDERT (20.09.2026): Spalte "Empfohlene Content-Typen" entfernt \u2014
+      // sie kam aus einer eigenen, von claude_summary.py unabh\u00e4ngigen
+      // Claude-Generierung und konnte damit vom (separat generierten)
+      // Aktionsplan abweichen. Die Zusammenfassungs-Card ist reine
+      // Bestandsaufnahme ("wo stehen wir"), Handlungsempfehlungen mit
+      // Priorit\u00e4t und Beleg geh\u00f6ren ausschlie\u00dflich in den Aktionsplan-Tab.
       var phaseRowsHtml = PHASE_ORDER.map(function (phase) {
         var p = phaseSummaries[phase];
         if (!p || !p.summary) return '';
-        var chips = (p.recommended_content_types || []).map(function (ct) {
-          return '<span class="cvz-persona-chip">' + escapeHtml(ct) + '</span>';
-        }).join('');
         return (
           '<tr>' +
             '<td style="color:var(--cvz-text-muted,#8b98a5);"><strong>' + escapeHtml(PHASE_LABELS[phase] || phase) + '</strong></td>' +
             '<td style="color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(p.summary) + (phasenDuenn[phase] ? THIN_DATA_NOTE : '') + '</td>' +
-            '<td>' + (chips ? '<div class="cvz-persona-filter" style="margin:0;">' + chips + '</div>' : '\u2013') + '</td>' +
           '</tr>'
         );
       }).join('');
@@ -3081,7 +3083,7 @@
         html += '<div class="cvz-summary-subsection">' +
           '<p class="cvz-section-label">Je Phase</p>' +
           '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">' +
-          '<table class="cvz-table" style="min-width:480px;"><thead><tr><th>Phase</th><th>Einsch\u00e4tzung</th><th>Empfohlene Content-Typen</th></tr></thead>' +
+          '<table class="cvz-table" style="min-width:360px;"><thead><tr><th>Phase</th><th>Einsch\u00e4tzung</th></tr></thead>' +
           '<tbody>' + phaseRowsHtml + '</tbody></table>' +
           '</div>' +
           (maturity.content_luecken_duenn ? THIN_DATA_NOTE : '') +
