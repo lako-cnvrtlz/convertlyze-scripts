@@ -5,7 +5,7 @@
   // KONFIGURATION
   // =========================================================================
   var CONFIG = {
-    apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
+    apiBaseUrl: 'https://visibility–-tracker-production-741c.up.railway.app',
     stripeCheckoutUrl: 'https://<euer-supabase-projekt>.supabase.co/functions/v1/stripe-topic-slot-checkout',
     useMockData: false,  // TODO: für den echten Test
   };
@@ -2988,14 +2988,14 @@
     card.className = 'cvz-card cvz-summary-card';
     var archivedNotice = '';
     if (topic.status === 'archived') {
-      archivedNotice = '<p class="cvz-archived-notice">Archiviert – es werden aktuell keine neuen Datenläufe für dieses Thema gestartet. Alle bisher gesammelten Daten bleiben unten sichtbar.</p>';
+      archivedNotice = '<p class="cvz-archived-notice">Archiviert. Es werden aktuell keine neuen Datenläufe für dieses Thema gestartet. Alle bisher gesammelten Daten bleiben unten sichtbar.</p>';
     } else if (topic.status === 'active' && topic.archive_effective_at) {
       var archiveDate = formatShortDate(topic.archive_effective_at);
-      archivedNotice = '<p class="cvz-archived-notice">Deaktivierung vorgemerkt' +
+      archivedNotice = '<p class="cvz-archived-notice">Deaktivierung vorgemerkt.' +
         (archiveDate ? ' für ' + archiveDate : '') +
-        ' – bis dahin laufen die regulären Datenläufe für dieses Thema noch normal weiter.</p>';
+        ' Bis dahin laufen die regulären Datenläufe für dieses Thema noch normal weiter.</p>';
     } else if (topic.status === 'queued') {
-      archivedNotice = '<p class="cvz-archived-notice">Wartet auf einen freien Themen-Slot – der erste Datenlauf startet automatisch, kann nach Freiwerden eines Slots aber bis zu 30 Minuten dauern.</p>';
+      archivedNotice = '<p class="cvz-archived-notice">Wartet auf einen freien Themen-Slot. Der erste Datenlauf startet automatisch, kann nach Freiwerden eines Slots aber bis zu 30 Minuten dauern.</p>';
     }
     card.innerHTML =
       '<h3 class="cvz-section-title">' + escapeHtml(topic.name) + '</h3>' +
@@ -8134,7 +8134,7 @@
             btn.textContent = 'Wird generiert …';
             apiFetch('/topics/' + topicId + '/generate-action-plan', { method: 'POST' })
               .then(function() {
-                statusEl.textContent = 'Generierung gestartet — dauert ~30–60 Sekunden. Seite wird automatisch neu geladen …';
+                statusEl.textContent = 'Generierung gestartet. Das dauert einige Minuten. Die Seite wird automatisch neu geladen …';
                 btn.style.display = 'none';
                 // Pollt alle 10 s max. 12x (2 min), bricht ab wenn generated_at gesetzt
                 var attempts = 0;
