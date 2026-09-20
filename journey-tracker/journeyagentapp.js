@@ -318,11 +318,11 @@
       // NEU (16.09.2026): Plattform-Übersicht, siehe main.py:
       // _get_cited_platforms_overview.
       cited_platforms: data.cited_platforms || [],
-      // NEU (17.09.2026): KI-generierter Aktionsplan — FEHLTE bisher hier,
+      // NEU (17.09.2026): KI-generierter Aktionsplan fehlte bisher hier,
       // deshalb war detail.action_plan immer undefined und der Tab immer leer.
       action_plan: data.action_plan || null,
       // GEFIXT (20.09.2026): fehlten bisher komplett hier, genau wie
-      // vorher schon bei action_plan (siehe Kommentar oben) — dadurch
+      // vorher schon bei action_plan (siehe Kommentar oben), dadurch
       // waren detail.ai_knowledge / .change_assessment / .step_status /
       // .outreach_targets immer undefined und renderKnowledgeSection,
       // renderChangeAssessmentSection, renderStepNotice und
@@ -455,12 +455,12 @@
     render();
   }
 
-  // NEU (16.09.2026): Journey-Map-Tab — lädt aggregierte Phase-Scores,
+  // NEU (16.09.2026): Journey-Map-Tab: lädt aggregierte Phase-Scores,
   // Share-of-Voice und Content-Changes in einem einzigen API-Call.
   async function loadDashboardData(topicId) {
     if (CONFIG.useMockData) {
       return {
-        // GEÄNDERT (20.09.2026): 'google_organic' pro Phase entfernt — kein
+        // GEÄNDERT (20.09.2026): 'google_organic' pro Phase entfernt, kein
         // Feld, das die echte API (dashboard.py) je liefert, siehe
         // CHANNEL_ORDER-Kommentar oben.
         phase_scores: {
@@ -646,7 +646,7 @@
   // (siehe toggleKeywordExpansion), damit auch hier die Entwicklung über
   // die Zeit sichtbar wird (Kundenwunsch: "GSC-Daten ... in dem Stil, nur
   // mit den zusätzlichen Tabellendaten"). Nutzt denselben rank-history-
-  // Endpunkt wie Keywords — dieselben Suchanfrage-Texte, dieselbe
+  // Endpunkt wie Keywords, dieselben Suchanfrage-Texte, dieselbe
   // Datenquelle (search_rank_snapshots), kein neuer Endpunkt nötig.
   async function toggleGscRowExpansion(topicId, rowId, keywordText) {
     if (state.expandedGscRowId === rowId) {
@@ -972,7 +972,7 @@
   };
   var PHASE_ORDER = ['exploration', 'evaluation', 'comparison', 'decision'];
 
-  // NEU (16.09.2026): Journey-Map-Tab — Phasenfarben und Kanal-Reihenfolge
+  // NEU (16.09.2026): Journey-Map-Tab: Phasenfarben und Kanal-Reihenfolge
   // für renderMessyMiddleTab / renderPhaseScoreGrid.
   var PHASE_COLORS = {
     exploration: '#8878ca',
@@ -981,11 +981,11 @@
     decision:    '#c98e2a',
   };
 
-  // GEÄNDERT (20.09.2026): 'google_organic' entfernt — dashboard.py:
+  // GEÄNDERT (20.09.2026): 'google_organic' entfernt, dashboard.py:
   // _compute_phase_scores() liefert pro Phase nur chat_gpt/gemini/
   // google_ai (siehe AI_CHANNELS + "google_ai" dort). Ein "google_organic"-
   // Kanal existierte nur in den Mock-Daten (CONFIG.useMockData) dieser
-  // Datei, nie in der echten API-Antwort — die Journey-Map-Karten zeigten
+  // Datei, nie in der echten API-Antwort. Die Journey-Map-Karten zeigten
   // dadurch pro Phase eine vierte Zeile "Google Organic: 0 %", die wie eine
   // echte Messung aussah, aber nie etwas anderes als 0 anzeigen konnte.
   var CHANNEL_ORDER = ['chat_gpt', 'gemini', 'google_ai'];
@@ -1012,7 +1012,7 @@
   var VISIBILITY_LABELS = {
     green:  'Zitiert',
     yellow: 'Erwähnt, nicht zitiert',
-    // GEÄNDERT (15.09.2026): war "Nicht vorhanden" — unklar, WAS nicht
+    // GEÄNDERT (15.09.2026): war "Nicht vorhanden": unklar, WAS nicht
     // vorhanden ist (siehe Chat-Verlauf 15.09.2026). Gemeint ist: die
     // eigene Domain taucht in den ausgewerteten ChatGPT/Gemini-Antworten
     // zu diesem Prompt nicht auf, weder erwähnt noch zitiert.
@@ -1041,7 +1041,7 @@
     review_plattform:  'Review-Plattform',
     vergleichsartikel: 'Vergleichsartikel',
     produktseite:      'Produktseite',
-    // NEU (18.09.2026): siehe source_analysis.py _ALLOWED_CONTENT_TYPES —
+    // NEU (18.09.2026): siehe source_analysis.py _ALLOWED_CONTENT_TYPES:
     // deckt Behörden-/Verbands-/Institutionsseiten und reine "So
     // funktioniert's"-Seiten ohne Verkaufsabsicht ab, die vorher
     // zwangsläufig auf 'fachartikel' oder 'produktseite' fielen.
@@ -1051,7 +1051,7 @@
     forum:             'Forum',
     sonstiges:         'Sonstiges',
     // NEU (18.09.2026): zwei deterministisch (ohne Claude-Call) erkannte
-    // Sonderfälle, siehe source_analysis.py _looks_like_asset/_analyze_url —
+    // Sonderfälle, siehe source_analysis.py _looks_like_asset/_analyze_url,
     // ersetzen das bisherige leere "–", wenn eine zitierte URL entweder ein
     // reiner Datei-Download ist oder automatisiert gar nicht auslesbar war
     // (z.B. Bot-Schutz). Ebenfalls bewusst NICHT in CONTENT_CHANGE_TYPE_ORDER/
@@ -1059,7 +1059,7 @@
     dokument_download: 'Datei-Download (PDF/Bild/etc.)',
     nicht_abrufbar:    'Nicht automatisiert auslesbar',
     // NEU (18.09.2026): LinkedIn/X/Facebook/Instagram/TikTok/Pinterest/
-    // Medium/GitHub — bewusst eine eigene, plattform- statt seitentyp-
+    // Medium/GitHub: bewusst eine eigene, plattform- statt seitentyp-
     // bezogene Kategorie (siehe source_analysis.py _KNOWN_PLATFORM_DOMAINS),
     // weil der konkrete Seitentyp je Pfad zu unterschiedlich wäre, die
     // Kernaussage "hier lohnt sich Präsenz" aber unabhängig davon gilt.
@@ -1096,7 +1096,7 @@
     gemini:   'Gemini',
   };
 
-  // NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026) — Top-
+  // NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026): Top-
   // SERP-Ergebnisse + SERP-Feature-Typen bei Keywords/GSC-Keywords, siehe
   // run_topic.py: check_serp_for_top_keywords/_extract_serp_summary.
   var SERP_FEATURE_LABELS = {
@@ -1113,12 +1113,12 @@
     shopping: 'Shopping',
   };
   // Feature-Typen, die typischerweise bedeuten "Google beantwortet die
-  // Frage schon direkt, ohne Klick" — nur zur Einordnung, keine
+  // Frage schon direkt, ohne Klick", nur zur Einordnung, keine
   // abschließende Liste aller möglichen DataForSEO-Typen.
   var SERP_ZERO_CLICK_FEATURE_TYPES = ['featured_snippet', 'answer_box', 'ai_overview', 'knowledge_graph'];
 
   // Gemeinsam genutzt von renderKeywordExpansion (Keywords-Tab) und
-  // renderGscRowExpansion (GSC-Performance-Tab) — dieselbe Datenquelle
+  // renderGscRowExpansion (GSC-Performance-Tab), dieselbe Datenquelle
   // (search_queries.top_serp_results/serp_features), zwei Anzeigeorte.
   function renderSerpSummaryBlock(row) {
     if (!row.top_serp_results || row.top_serp_results.length === 0) return '';
@@ -1188,7 +1188,7 @@
     if (state.activeView === 'topic-detail') {
       // GEAENDERT (18.09.2026): JS-basiertes sticky Tab-Nav (17.09.2026,
       // IntersectionObserver-Loesung) wieder entfernt, siehe Chat-Verlauf
-      // 18.09.2026 — sah in der Praxis nicht gut aus (Nav blieb beim
+      // 18.09.2026: sah in der Praxis nicht gut aus (Nav blieb beim
       // Fixieren ueber Content stehen/ueberlappte). Tab-Nav ist jetzt
       // wieder normaler Teil des Flows, ohne Sticky-Verhalten.
       container.appendChild(renderTopicDetailView());
@@ -1366,7 +1366,7 @@
       return;
     }
     // NEU (20.09.2026): Klick-Handler für den "Jetzt erstellen"/"Erneut
-    // erstellen"-Button aus renderStepNotice — fehlte bisher komplett,
+    // erstellen"-Button aus renderStepNotice, fehlte bisher komplett,
     // der Button (data-cvz-retry-step) tat also nichts.
     var retryStepBtn = event.target.closest('[data-cvz-retry-step]');
     if (retryStepBtn) {
@@ -1403,11 +1403,11 @@
       if (newTab === 'verlauf' && state.activeView === 'topic-detail') {
         maybeLoadVisibilityTrend(state.activeTopicId);
       }
-      // NEU (17.09.2026): Aktionsplan-Tab — Cache-Busting.
+      // NEU (17.09.2026): Aktionsplan-Tab: Cache-Busting.
       // Re-fetch NUR wenn action_plan komplett fehlt ODER wenn noch keine Items vorhanden
       // UND generated_at ebenfalls fehlt (= Plan wurde noch nie generiert).
-      // NICHT re-fetchen wenn Items vorhanden sind (auch wenn generated_at null ist) —
-      // das wuerde bei einem NULL-generated_at in der DB eine Endlos-Schleife erzeugen.
+      // NICHT re-fetchen wenn Items vorhanden sind (auch wenn generated_at null ist).
+      // Das wuerde bei einem NULL-generated_at in der DB eine Endlos-Schleife erzeugen.
       if (newTab === 'aktionsplan' && state.activeView === 'topic-detail') {
         var _apCached = state.topicDetailCache[state.activeTopicId];
         var _apObj = _apCached && _apCached.action_plan;
@@ -1433,7 +1433,7 @@
       return;
     }
 
-    // NEU (16.09.2026): Journey-Map-Tab — Phasenwechsel
+    // NEU (16.09.2026): Journey-Map-Tab: Phasenwechsel
     var journeyPhaseBtn = event.target.closest('[data-cvz-journey-phase]');
     if (journeyPhaseBtn) {
       var newPhase = journeyPhaseBtn.getAttribute('data-cvz-journey-phase');
@@ -1442,7 +1442,7 @@
       return;
     }
 
-    // NEU (16.09.2026): Journey-Map-Tab — Content-Änderung einreichen
+    // NEU (16.09.2026): Journey-Map-Tab: Content-Änderung einreichen
     var contentChangeSubmit = event.target.closest('[data-cvz-content-change-submit]');
     if (contentChangeSubmit) {
       submitContentChange(state.activeTopicId);
@@ -2505,7 +2505,7 @@
       analyzingBanner.innerHTML =
         '<p class="cvz-collecting-banner-text">' +
           '<span class="cvz-spinner"></span>' +
-          'Daten gesammelt — Aktionsplan, Zusammenfassung und Lükenanalyse werden jetzt erstellt. ' +
+          'Daten gesammelt. Aktionsplan, Zusammenfassung und Lükenanalyse werden jetzt erstellt. ' +
           'Diese Seite aktualisiert sich automatisch.' +
         '</p>';
       wrap.appendChild(analyzingBanner);
@@ -2564,7 +2564,7 @@
     } else if (detail.topic.last_run_error) {
       // NEU (16.09.2026): Thema ist insgesamt weiter 'active' (es gibt
       // brauchbare Bestandsdaten), aber der ZULETZT versuchte Lauf (oder
-      // ein einzelner Analyse-Schritt darin) ist fehlgeschlagen — dezenter
+      // ein einzelner Analyse-Schritt darin) ist fehlgeschlagen, dezenter
       // Hinweis statt der vollen roten Fehler-Leiste, die für einen
       // kompletten Erstlauf-Abbruch reserviert bleibt.
       var softErrorBanner = document.createElement('div');
@@ -2772,9 +2772,9 @@
     }
 
     // NEU (19.09.2026): Wenn mehrere Serien beim selben X-Wert denselben Score
-    // haben (z.B. alle Phasen bei 0%, siehe Chat-Verlauf 19.09.2026 — erster
+    // haben (z.B. alle Phasen bei 0%, siehe Chat-Verlauf 19.09.2026, erster
     // Analyse-Lauf eines Topics, alle vier Phasen landen exakt übereinander),
-    // zeichnet SVG in Dokumentreihenfolge — die zuletzt gezeichnete Serie
+    // zeichnet SVG in Dokumentreihenfolge. Die zuletzt gezeichnete Serie
     // verdeckt optisch alle darunterliegenden identischen Punkte vollständig.
     // Fix: jede Serie bekommt einen kleinen, konstanten horizontalen Versatz
     // je nach Position in seriesList, damit deckungsgleiche Punkte sichtbar
@@ -3755,7 +3755,7 @@
         entry.citations += d.citations;
         // GEÄNDERT (15.09.2026): url wird jetzt mit durchgereicht (kam vom
         // Backend schon immer mit, siehe main.py: _get_competitor_
-        // citation_trend, wurde hier aber bisher verworfen) — Kundenwunsch:
+        // citation_trend, wurde hier aber bisher verworfen), Kundenwunsch:
         // "genaue URLs, die zitiert werden, sichtbar machen". Neuere Woche
         // gewinnt, falls sich die zitierte URL über die Zeit geändert hat.
         if (d.url) entry.url = d.url;
@@ -3852,11 +3852,11 @@
     compInputHint.textContent = 'max. 100 Zeichen';
     section.appendChild(compInputHint);
 
-    // NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026) —
+    // NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026):
     // klarstellen, ab wann für einen Wettbewerber tatsächlich Daten
     // vorliegen. Zitationsdaten existieren rückwirkend NUR, wenn die
     // Domain in bisherigen Läufen bereits (unabhängig vom Wettbewerber-
-    // Status) zitiert wurde — eine neu hinzugefügte, bisher nie zitierte
+    // Status) zitiert wurde. Eine neu hinzugefügte, bisher nie zitierte
     // Domain taucht im Wettbewerber-Tab erst ab dem nächsten Datenlauf
     // auf, in dem sie tatsächlich vorkommt. Direkt über dem
     // Speichern-Button, damit die Erwartung VOR dem Klick gesetzt wird.
@@ -3912,7 +3912,7 @@
     }
 
     // GEÄNDERT (18.09.2026): source_profiles cachen jetzt pro URL statt pro
-    // Domain (Backend: source_analysis.py) — eine Domain kann also mehrere
+    // Domain (Backend: source_analysis.py). Eine Domain kann also mehrere
     // Content-Typen haben (Blog UND Produktseite). profileByUrl matcht
     // deshalb primär über comp.url (die tatsächlich zitierte URL), nur wenn
     // die exakt nicht analysiert ist, Fallback auf irgendein Profil dieser
@@ -3950,7 +3950,7 @@
           escapeHtml(comp.domain) + ' \u00b7 ' + comp.citations + ' Zitationen' +
         '</p>' +
         // NEU (15.09.2026): tatsächlich zitierte URL, nicht nur die
-        // Domain — Kundenwunsch: "damit man sich gleich informieren kann,
+        // Domain, Kundenwunsch: "damit man sich gleich informieren kann,
         // wie die zitierten Inhalte aufgebaut sind". Nur die zuletzt
         // gesehene URL (siehe aggregateCompetitorDomains), eine Domain
         // kann über mehrere Wochen mit unterschiedlichen URLs zitiert
@@ -3977,7 +3977,7 @@
             : '')) +
         (promptList.length
           // GEÄNDERT (15.09.2026): vorher nur eine Zahl mit den vollen
-          // Prompt-Texten versteckt im title-Tooltip — der Kunde will
+          // Prompt-Texten versteckt im title-Tooltip, der Kunde will
           // aber direkt sehen, BEI WELCHEN Prompts ein Wettbewerber
           // genannt wird, nicht nur wie oft (siehe Chat-Verlauf
           // 15.09.2026).
@@ -3992,7 +3992,7 @@
     return section;
   }
 
-  // NEU (16.09.2026): Kundenwunsch (siehe Chat-Verlauf 16.09.2026) —
+  // NEU (16.09.2026): Kundenwunsch (siehe Chat-Verlauf 16.09.2026):
   // Plattform-Übersicht über ALLE zitierten Quellen (nicht nur
   // bestätigte Wettbewerber), gruppiert nach Content-Typ, damit User
   // daraus ihre eigene On-/Off-Page-Strategie ableiten können (z.B.
@@ -4226,7 +4226,7 @@
       var card = document.createElement('div');
       card.className = 'cvz-card cvz-idea-card';
       // GEÄNDERT (15.09.2026): zeigt jetzt, WELCHE KI das Angebot gemacht
-      // hat (idea.provider, siehe content_ideas.py — fehlte bisher im
+      // hat (idea.provider, siehe content_ideas.py; fehlte bisher im
       // main.py-Select, "Welche KI?" ließ sich vorher gar nicht
       // beantworten, siehe Chat-Verlauf 15.09.2026).
       var providerLabel = idea.provider ? (MODEL_LABELS[idea.provider] || idea.provider) : null;
@@ -4294,7 +4294,7 @@
   }
 
   // GEÄNDERT (15.09.2026): gibt jetzt ZWEI getrennte Sections als Array
-  // zurück (vorher eine gemeinsame Section mit beiden Karten gestapelt) —
+  // zurück (vorher eine gemeinsame Section mit beiden Karten gestapelt),
   // Kundenwunsch: alle Übersicht-Grafiken sollen auf Desktop nebeneinander
   // und kleiner dargestellt werden (siehe cvz-charts-grid am Aufrufer).
   // Damit jede Grafik ein gleich großes Grid-Element ist, statt einer
@@ -4785,7 +4785,7 @@
     var hasAnyPhase = PHASE_ORDER.some(function (p) { return grouped[p].length > 0; });
 
     if (!hasAnyPhase) {
-      // No phase data yet — render flat list as before
+      // No phase data yet: render flat list as before
       var flatList = document.createElement('div');
       flatList.className = 'cvz-prompt-list';
       keywords.forEach(function (kw) { _renderKwRow(kw, flatList); });
@@ -4886,7 +4886,7 @@
     }
 
     // NEU (15.09.2026): Korrektur-Chips für die Messy-Middle-Phase (siehe
-    // Chat-Verlauf 15.09.2026) — Claude ordnet Keywords/PAA-Fragen
+    // Chat-Verlauf 15.09.2026): Claude ordnet Keywords/PAA-Fragen
     // automatisch einer Phase zu, hier kann der Nutzer das korrigieren.
     var phaseChipsHtml = '';
     if (kw.id) {
@@ -5139,11 +5139,11 @@
     heading.textContent = 'Sichtbarkeit über die Journey-Phasen';
     section.appendChild(heading);
 
-    // NEU (15.09.2026): Klarstellung, siehe Chat-Verlauf 15.09.2026 — die
+    // NEU (15.09.2026): Klarstellung, siehe Chat-Verlauf 15.09.2026: die
     // Balken hier messen AUSSCHLIESSLICH, ob die EIGENE Domain zitiert
     // wurde, nicht ob überhaupt irgendeine Zitierung stattfand. Ein
     // Wettbewerber kann im selben Prompt zitiert werden, ohne dass sich
-    // das hier niederschlägt — beides sind bewusst getrennte Kennzahlen
+    // das hier niederschlägt. Beides sind bewusst getrennte Kennzahlen
     // (siehe Wettbewerber-Tab für die andere Seite).
     var clarification = document.createElement('p');
     clarification.className = 'cvz-card-placeholder-text';
@@ -5586,7 +5586,7 @@
     heading.textContent = 'Google-Search-Console-Performance';
     gscHeadRow.appendChild(heading);
     gscHeadRow.appendChild(makeTip(
-      'Hier siehst du Keywords, bei denen du in Google auf Position 20+ rankst und mindestens 50 Impressionen hast ("Near-Miss"-Keywords). Das sind Seiten, die knapp an Seite 1 vorbeischrammen, mit gezielter Optimierung oft schnell verbesserbar.'
+      'Hier siehst du Keywords, bei denen du in Google auf Position 15+ rankst und mindestens 30 Impressionen hast ("Near-Miss"-Keywords). Das sind Seiten, die knapp an Seite 1 vorbeischrammen, mit gezielter Optimierung oft schnell verbesserbar.'
     ));
     section.appendChild(gscHeadRow);
 
@@ -5667,8 +5667,8 @@
     var wrap = document.createElement('div');
     wrap.className = 'cvz-prompt-expansion';
 
-    // NEU (15.09.2026): SERP-Block zuerst gebaut, nicht direkt angehängt —
-    // die folgenden früh-verlassenden Zustände (lädt/kein Verlauf) setzen
+    // NEU (15.09.2026): SERP-Block zuerst gebaut, nicht direkt angehängt.
+    // Die folgenden früh-verlassenden Zustände (lädt/kein Verlauf) setzen
     // wrap.innerHTML komplett neu, das würde einen bereits angehängten
     // SERP-Block sonst überschreiben.
     var serpHtml = renderSerpSummaryBlock(row);
@@ -6047,7 +6047,7 @@
         table.appendChild(tbody);
         var sovScrollWrap = document.createElement('div');
         // NEU (18.09.2026): horizontales Scrollen innerhalb der Card auf
-        // Mobile — Tabelle war vorher breiter als der Viewport und die
+        // Mobile: Tabelle war vorher breiter als der Viewport und die
         // Spalten (Typ/Zitierrate/Differenzierungstipp) liefen einfach ab,
         // ohne Möglichkeit sie zu erreichen. Gleiches Muster wie bei den
         // anderen scrollbaren Tabellen (z.B. GSC-Tabelle).
@@ -6155,7 +6155,7 @@
     }));
 
     // GEÄNDERT (20.09.2026): Die separate Liste eingetragener Änderungen an
-    // dieser Stelle wurde entfernt — sie duplizierte 1:1 die weiter unten im
+    // dieser Stelle wurde entfernt. Sie duplizierte 1:1 die weiter unten im
     // Verlauf-Tab gerenderte "Änderungs-Chronik" (die zusätzlich auch
     // System-Erkennungen zeigt, also die vollständigere Ansicht ist).
     if (state.isLoadingContentChanges) {
@@ -6786,7 +6786,7 @@
       '.cvz-modal-btn-primary:hover { background: #4fd1c5; color: #0d1117; }' +
 
       '.cvz-section { margin-bottom: 24px; }' +
-      // NEU (15.09.2026): Kundenwunsch — Grafiken der Übersichtsseite auf
+      // NEU (15.09.2026): Kundenwunsch: Grafiken der Übersichtsseite auf
       // Desktop kleiner und nebeneinander statt einzeln über volle Breite.
       // auto-fit/minmax fällt auf schmalen Bildschirmen automatisch auf
       // eine Spalte zurück, keine eigene Media-Query nötig. Die einzelnen
@@ -7209,7 +7209,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). ';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt ALLE Domains \u2013 nicht nur manuell ausgew\u00e4hlte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck.';
     section.appendChild(sub);
 
     // Favicon-Hilfsfunktion
@@ -7510,7 +7510,7 @@
       if (rollup) wrap.appendChild(rollup);
     }
     // GEÄNDERT (20.09.2026): Die kompakte Phasen-Scorecard, die hier stand,
-    // ist entfernt — sie zeigte dieselbe Kennzahl (Zitierrate pro Phase inkl.
+    // ist entfernt. Sie zeigte dieselbe Kennzahl (Zitierrate pro Phase inkl.
     // Top-Wettbewerber) doppelt: einmal hier als Karten, direkt darunter noch
     // einmal als vollständiger Chart (Wettbewerbsvergleich). Die identische
     // Karten-Variante gab es außerdem nochmal im Journey-Map-Tab. Diese
@@ -7523,7 +7523,7 @@
 
     // VERSCHOBEN (20.09.2026): Die Wettbewerber-Tabelle mit Differenzierungs-
     // Tipps pro Phase stand bisher nur im Journey-Map-Tab, war dort aber
-    // eingeklappt und stand hinter mehreren anderen Abschnitten — für eine
+    // eingeklappt und stand hinter mehreren anderen Abschnitten, für eine
     // so wichtige Analyse zu gut versteckt. Sie steht jetzt direkt hier,
     // gleich hinter dem Wettbewerbsvergleich, im ersten Tab.
     wrap.appendChild(renderJourneyShareOfVoice(dashData && dashData.share_of_voice));
@@ -7572,7 +7572,7 @@
 
       // Fallback-Empfehlungen pro Opportunity-Typ (wenn content_recommendation noch leer)
       var OPP_FALLBACK_RECOMMENDATION = {
-        'near_miss_ranking': 'Content gezielt auf diese Keywords optimieren: Meta-Title/H1 schärfen, Suchintention prüfen (informationell vs. transaktional), interne Verlinkung stärken. Ziel: von Position 20+ in die Top 10.',
+        'near_miss_ranking': 'Content gezielt auf diese Keywords optimieren: Meta-Title/H1 schärfen, Suchintention prüfen (informationell vs. transaktional), interne Verlinkung stärken. Ziel: von Position 15+ in die Top 10.',
         'high_demand_low_visibility': 'Dedizierten Content für diese Keywords erstellen oder bestehende Seiten ausbauen. Format: FAQ, Ratgeber oder Vergleichsseite je nach Suchintention.',
         'google_visible_ai_invisible': 'Bestehende Seiten so ausbauen, dass KI-Systeme sie als zitierwürdige Quelle einordnen: klare Autorenschaft, konkrete Aussagen mit Zahlen, strukturierte Antworten auf die Fragen hinter dem Keyword.',
         'competitor_citation': 'Analysieren, welche Inhalte die häufig zitierten Domains zu diesem Thema haben, und ähnliche Inhalte mit klarer Differenzierung erstellen (eigene Daten, Expertise, Perspektive).',
@@ -7582,7 +7582,7 @@
 
       // Erklaerungstexte fuer die Typ-Chips (werden als Tooltip am Chip angezeigt)
       var OPP_TYPE_TOOLTIPS = {
-        'near_miss_ranking': 'Ihr ranktet schon auf Seite 2 für dieses Keyword (Position 20+, mind. 50 Impressionen). Kleine SEO-Hebel können hier schnell auf Seite 1 bringen.',
+        'near_miss_ranking': 'Ihr ranktet schon auf Seite 2 für dieses Keyword (Position 15+, mind. 30 Impressionen). Kleine SEO-Hebel können hier schnell auf Seite 1 bringen.',
         'high_demand_low_visibility': 'Dieses Keyword hat viel Suchvolumen, aber ihr seid weder in Google noch in KI-Antworten sichtbar. Großes Potenzial, noch kein Fuß in der Tür.',
         'google_visible_ai_invisible': 'Ihr ranktet gut in Google, aber KI-Systeme wie ChatGPT zitieren euch nicht. Bestehender Content muss "KI-tauglicher" werden.',
         'competitor_citation': 'Eine konkrete Wettbewerber-Domain wird regelmäßig an eurer Stelle zitiert. Hier lohnt sich ein direkter Inhaltsvergleich.',
@@ -7656,7 +7656,7 @@
         tdDesc.style.cssText = 'padding:12px 10px;vertical-align:top;line-height:1.65;color:var(--cvz-text-muted,#8b98a5);';
         var descInner = document.createElement('div');
         // GEAENDERT (18.09.2026): Klammerung (line-clamp:3) faellt weg, wenn
-        // die Zeile aufgeklappt ist — vorher blieb der Text auch nach dem
+        // die Zeile aufgeklappt ist. Vorher blieb der Text auch nach dem
         // Klick auf 3 Zeilen begrenzt, das Aufklappen zeigte nur die
         // Keywords/Domains-Tabelle darunter, nicht den vollen Beschreibungs-
         // text. Auf Mobile (keine Maus fuer Hover/Tooltip) war der
@@ -7668,7 +7668,7 @@
         tdDesc.appendChild(descInner);
         tr.appendChild(tdDesc);
 
-        // Col 3: Massnahme — auf Mobile ausgeblendet (steht ausführlich im Aktionsplan-Tab)
+        // Col 3: Massnahme, auf Mobile ausgeblendet (steht ausführlich im Aktionsplan-Tab)
         var tdRec = document.createElement('td');
         tdRec.className = 'cvz-opp-rec-col';
         tdRec.style.cssText = 'padding:12px 10px;vertical-align:top;line-height:1.5;font-size:12px;';
@@ -7777,7 +7777,7 @@
       wrap.appendChild(oppSection);
     }
 
-    // NEU (20.09.2026): KI-Wissens-Check — was ChatGPT/Gemini über euch
+    // NEU (20.09.2026): KI-Wissens-Check: was ChatGPT/Gemini über euch
     // wissen. War bisher nur als Funktion vorhanden, wurde aber in keinem
     // Tab tatsächlich angezeigt.
     var knowledgeSection = renderKnowledgeSection(detail);
@@ -7918,7 +7918,7 @@
 
     // VERSCHOBEN (20.09.2026): Die detaillierte Wettbewerber-Tabelle pro
     // Phase (mit Differenzierungs-Tipps) steht jetzt im Situation-Tab, gleich
-    // hinter dem Wettbewerbsvergleichs-Chart — dort ist sie sofort sichtbar
+    // hinter dem Wettbewerbsvergleichs-Chart, dort ist sie sofort sichtbar
     // statt hier hinter mehreren anderen Abschnitten versteckt.
 
     // Content-Lücken aus Gap-Analyse (GEAENDERT 17.09.2026: topicId + Phase-Filter)
@@ -8102,9 +8102,9 @@
     var ap = detail.action_plan || {};
     // DIAGNOSE-LOG (17.09.2026): zeigt im Browser-DevTools-Console was der Server liefert.
     // Kann nach Bestätigung dass alles funktioniert wieder entfernt werden.
-    console.log('[CVZ] renderAktionsplanTab — action_plan vom Server:', JSON.stringify(ap).slice(0, 500));
+    console.log('[CVZ] renderAktionsplanTab, action_plan vom Server:', JSON.stringify(ap).slice(0, 500));
     var items = ap.items || [];
-    // NEU (17.09.2026): erledigte Items — Array mit 0-basierten Original-Indizes
+    // NEU (17.09.2026): erledigte Items: Array mit 0-basierten Original-Indizes
     var completedIndices = ap.completed_item_indices || [];
 
     // ----- Empty / waiting state -----
@@ -8114,10 +8114,10 @@
       var emptyTxt = document.createElement('p');
       emptyTxt.className = 'cvz-card-placeholder-text';
       if (ap.generated_at) {
-        // Plan existiert, aber ohne Items — mehr Daten nötig
+        // Plan existiert, aber ohne Items: mehr Daten nötig
         emptyTxt.textContent = 'Der Aktionsplan wurde generiert, enthält aber noch keine konkreten Empfehlungen. Es werden mehr Daten benötigt (mindestens einige ausgewertete Prompts und GSC-Daten). Empfehlungen erscheinen nach dem nächsten Analyse-Lauf mit ausreichend Datenlage.';
       } else {
-        // Noch gar kein Plan — Generierung anbieten
+        // Noch gar kein Plan: Generierung anbieten
         emptyTxt.textContent = 'Für dieses Topic wurde noch kein Aktionsplan generiert.';
         // Manueller Trigger-Button: ruft POST /topics/{id}/generate-action-plan auf.
         // Der Endpunkt startet die KI-Generierung im Hintergrund (202) und dauert ~30–60 s.
@@ -8147,7 +8147,7 @@
                         render();
                       } else if (attempts >= 12) {
                         clearInterval(poller);
-                        statusEl.textContent = 'Generierung läuft noch oder ist fehlgeschlagen — bitte Seite manuell neu laden.';
+                        statusEl.textContent = 'Generierung läuft noch oder ist fehlgeschlagen. Bitte Seite manuell neu laden.';
                       }
                     })
                     .catch(function() {
@@ -8159,7 +8159,7 @@
                 btn.disabled = false;
                 btn.style.opacity = '1';
                 btn.textContent = 'Aktionsplan jetzt generieren';
-                statusEl.textContent = 'Fehler beim Starten der Generierung — bitte erneut versuchen.';
+                statusEl.textContent = 'Fehler beim Starten der Generierung. Bitte erneut versuchen.';
                 console.error('[CVZ] generate-action-plan Fehler:', err);
               });
           });
@@ -8182,7 +8182,7 @@
         wrap.appendChild(introEl);
       }
 
-      // Group by phase — NEU (17.09.2026): _origIdx merken, damit completed_item_indices korrekt sind
+      // Group by phase. NEU (17.09.2026): _origIdx merken, damit completed_item_indices korrekt sind
       var itemsWithIdx = items.map(function(item, idx) {
         return Object.assign({}, item, { _origIdx: idx });
       });
@@ -8251,7 +8251,7 @@
           catSp.textContent = catLabel;
           hdr.appendChild(catSp);
 
-          // NEU (17.09.2026): Erledigt-Toggle — rechts im Header
+          // NEU (17.09.2026): Erledigt-Toggle: rechts im Header
           var spacer = document.createElement('span');
           spacer.style.cssText = 'flex:1;';
           hdr.appendChild(spacer);
@@ -8275,7 +8275,7 @@
               var newComplete = !itemIsCompleted;
               apiFetch('/topics/' + topicId + '/action-plan/toggle-item', {
                 method: 'POST',
-                // apiFetch ruft selbst JSON.stringify(options.body) auf — kein manuelles Stringify hier!
+                // apiFetch ruft selbst JSON.stringify(options.body) auf, kein manuelles Stringify hier!
                 body: {
                   item_index: itemOrigIdx,
                   item_title: itemTitle || ('Item #' + (itemOrigIdx + 1)),
@@ -8297,7 +8297,7 @@
                 }
                 // NEU (18.09.2026): Beim Zurücksetzen entfernt das Backend die
                 // zugehörigen content_changes-/topic_changelog-Einträge wieder
-                // (siehe main.py toggle_action_plan_item_endpoint) — Caches
+                // (siehe main.py toggle_action_plan_item_endpoint): Caches
                 // hier entsprechend bereinigen, sonst bleiben die Einträge bis
                 // zum nächsten vollständigen Neuladen sichtbar.
                 if (resp.removed_content_change_ids && resp.removed_content_change_ids.length && state.contentChangesCache[topicId]) {
@@ -8326,7 +8326,7 @@
           var body = document.createElement('div');
           body.style.cssText = 'padding:14px 16px;display:flex;flex-direction:column;gap:14px;';
 
-          // Title — NEU (17.09.2026): durchgestrichen wenn erledigt
+          // Title. NEU (17.09.2026): durchgestrichen wenn erledigt
           if (item.title) {
             var titleEl = document.createElement('p');
             titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:700;line-height:1.4;color:var(--cvz-text-muted,#8b98a5);' + (isCompleted ? 'text-decoration:line-through;' : '');
@@ -8442,7 +8442,7 @@
           var dataTable = _buildSupportingDataTable(catKey, item.phase || 'alle_phasen', detail);
           if (dataTable) body.appendChild(dataTable);
 
-          // ---- EMPFEHLUNG — NEU (17.09.2026): durchgestrichen wenn erledigt ----
+          // ---- EMPFEHLUNG. NEU (17.09.2026): durchgestrichen wenn erledigt ----
           if (item.recommendation) {
             var recDiv = document.createElement('div');
             recDiv.style.cssText = 'background:rgba(79,209,197,.1);border-left:3px solid #4fd1c5;border-radius:0 4px 4px 0;padding:10px 12px;';
@@ -8468,7 +8468,7 @@
 
     // ENTFERNT (20.09.2026): "Plattformen mit Veröffentlichungs-Chance" stand
     // hier direkt über der neuen Outreach-Targets-Sektion und deckte im Kern
-    // dieselbe Frage ab ("wo können wir veröffentlichen") — nur aus einer
+    // dieselbe Frage ab ("wo können wir veröffentlichen"), nur aus einer
     // anderen, schmaleren Datenquelle (source_profiles statt der dedizierten
     // outreach_targets.py-Logik mit Bewertungsportale/Medien/Community-
     // Gruppierung). Zwei Listen mit vermutlich überlappenden Domains
@@ -8476,7 +8476,7 @@
     // strukturierte Sektion unten bleibt die einzige Quelle dafür.
 
     // NEU (20.09.2026): Mögliche Ziele für Bewertungen und Digital PR
-    // (outreach_targets.py) — war bisher nur als Funktion vorhanden, wurde
+    // (outreach_targets.py), war bisher nur als Funktion vorhanden, wurde
     // aber in keinem Tab tatsächlich angezeigt.
     var outreachSection = renderOutreachTargetsSection(detail);
     if (outreachSection) wrap.appendChild(outreachSection);
@@ -8492,12 +8492,12 @@
 
     // GEÄNDERT (20.09.2026): Formular zum Eintragen einer Änderung steht
     // jetzt ganz oben im Tab (vorher stand es hinter Wirkungs-Analyse, Chart
-    // und Chronik — dadurch war es kaum auffindbar, obwohl es der einzige
+    // und Chronik, dadurch war es kaum auffindbar, obwohl es der einzige
     // Ort ist, an dem man aktiv etwas eintragen kann statt nur zu lesen).
     wrap.appendChild(renderContentChangesSection(topicId, detail.search_queries, detail.prompts));
 
     // NEU (20.09.2026): Bereits umgesetzte Änderungen und ihre gemessene
-    // Wirkung (change_history.py) — war bisher nur als Funktion vorhanden,
+    // Wirkung (change_history.py), war bisher nur als Funktion vorhanden,
     // wurde aber in keinem Tab tatsächlich angezeigt.
     var changeAssessmentSection = renderChangeAssessmentSection(detail);
     if (changeAssessmentSection) wrap.appendChild(changeAssessmentSection);
@@ -8547,7 +8547,7 @@
         return { label: PHASE_LABELS[phase] || phase, values: values, color: PHASE_COLORS[phase] };
       });
 
-      // NEU (18.09.2026): zweite, gestrichelte Linie pro Phase — die engere
+      // NEU (18.09.2026): zweite, gestrichelte Linie pro Phase: die engere
       // Definition own_domain_cited_with_url ("mit echtem Link zitiert"),
       // aus ts.series_with_url (dashboard.py: _compute_weekly_timeseries).
       // Gleiche Farbe wie die durchgezogene Linie derselben Phase, damit die
@@ -8599,7 +8599,7 @@
             return '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background:' + PHASE_COLORS[phase] + '"></span>' + escapeHtml(PHASE_LABELS[phase] || phase) + '</span>';
           }).join('') +
         '</div>' +
-        '<p class="cvz-chart-caption">Durchgezogene Linie: als Quelle genannt (own_domain_cited). Gestrichelte Linie: davon mit echtem Link zitiert (own_domain_cited_with_url) — beides 0–100 % pro Journey-Phase und Woche, gemittelt über alle KI-Kanäle. Senkrechte Linien markieren eingetragene Content-Änderungen.</p>';
+        '<p class="cvz-chart-caption">Durchgezogene Linie: als Quelle genannt (own_domain_cited). Gestrichelte Linie: davon mit echtem Link zitiert (own_domain_cited_with_url). Beides 0–100 % pro Journey-Phase und Woche, gemittelt über alle KI-Kanäle. Senkrechte Linien markieren eingetragene Content-Änderungen.</p>';
       chartSection.appendChild(chartCard);
     }
     wrap.appendChild(chartSection);
