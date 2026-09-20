@@ -460,11 +460,14 @@
   async function loadDashboardData(topicId) {
     if (CONFIG.useMockData) {
       return {
+        // GEÄNDERT (20.09.2026): 'google_organic' pro Phase entfernt — kein
+        // Feld, das die echte API (dashboard.py) je liefert, siehe
+        // CHANNEL_ORDER-Kommentar oben.
         phase_scores: {
-          exploration: { chat_gpt: { score: 62, cited: 5, total: 8 }, gemini: { score: 75, cited: 6, total: 8 }, google_ai: { score: 50, cited: 4, total: 8 }, google_organic: { score: 44, cited: 4, total: 9 } },
-          evaluation:  { chat_gpt: { score: 40, cited: 4, total: 10 }, gemini: { score: 55, cited: 6, total: 11 }, google_ai: { score: 36, cited: 4, total: 11 }, google_organic: { score: 39, cited: 4, total: 10 } },
-          comparison:  { chat_gpt: { score: 22, cited: 2, total: 9 }, gemini: { score: 33, cited: 3, total: 9 }, google_ai: { score: 11, cited: 1, total: 9 }, google_organic: { score: 28, cited: 3, total: 11 } },
-          decision:    { chat_gpt: { score: 14, cited: 1, total: 7 }, gemini: { score: 28, cited: 2, total: 7 }, google_ai: { score: 0, cited: 0, total: 7 }, google_organic: { score: 17, cited: 1, total: 6 } },
+          exploration: { chat_gpt: { score: 62, cited: 5, total: 8 }, gemini: { score: 75, cited: 6, total: 8 }, google_ai: { score: 50, cited: 4, total: 8 } },
+          evaluation:  { chat_gpt: { score: 40, cited: 4, total: 10 }, gemini: { score: 55, cited: 6, total: 11 }, google_ai: { score: 36, cited: 4, total: 11 } },
+          comparison:  { chat_gpt: { score: 22, cited: 2, total: 9 }, gemini: { score: 33, cited: 3, total: 9 }, google_ai: { score: 11, cited: 1, total: 9 } },
+          decision:    { chat_gpt: { score: 14, cited: 1, total: 7 }, gemini: { score: 28, cited: 2, total: 7 }, google_ai: { score: 0, cited: 0, total: 7 } },
         },
         weekly_timeseries: { weeks: [], series: {} },
         share_of_voice: {
@@ -978,12 +981,18 @@
     decision:    '#c98e2a',
   };
 
-  var CHANNEL_ORDER = ['chat_gpt', 'gemini', 'google_ai', 'google_organic'];
+  // GEÄNDERT (20.09.2026): 'google_organic' entfernt — dashboard.py:
+  // _compute_phase_scores() liefert pro Phase nur chat_gpt/gemini/
+  // google_ai (siehe AI_CHANNELS + "google_ai" dort). Ein "google_organic"-
+  // Kanal existierte nur in den Mock-Daten (CONFIG.useMockData) dieser
+  // Datei, nie in der echten API-Antwort — die Journey-Map-Karten zeigten
+  // dadurch pro Phase eine vierte Zeile "Google Organic: 0 %", die wie eine
+  // echte Messung aussah, aber nie etwas anderes als 0 anzeigen konnte.
+  var CHANNEL_ORDER = ['chat_gpt', 'gemini', 'google_ai'];
   var CHANNEL_LABELS = {
     chat_gpt:       'ChatGPT',
     gemini:         'Gemini',
     google_ai:      'Google AI Overview',
-    google_organic: 'Google Organic',
   };
 
   var CONTENT_CHANGE_TYPE_LABELS = {
@@ -1070,6 +1079,16 @@
     keyword_suggestions:  'Keyword-Idee',
     paa:                  'Häufig gefragt (von Google)',
     gsc_near_miss:        'Google Search Console',
+  };
+
+  // NEU (20.09.2026): Farben für die Keyword-Einschätzung, die main.py
+  // jetzt pro Zeile mitliefert (keyword_status/keyword_status_label, siehe
+  // keyword_status.py). Reihenfolge/Bedeutung siehe dort.
+  var KEYWORD_STATUS_COLORS = {
+    rankt_bereits:          '#35a86b',
+    knapp_seite_1:          '#c98e2a',
+    nachfrage_unsichtbar:   '#5aacd2',
+    reine_idee:             '#8b98a5',
   };
 
   var MODEL_LABELS = {
@@ -4725,6 +4744,16 @@
         '<span class="cvz-prompt-citation-count">' +
           (kw.search_volume == null ? '–' : escapeHtml(kw.search_volume) + '/Monat') +
         '</span>' +
+        // NEU (20.09.2026): Einschätzung (rankt bereits/knapp an Seite 1/
+        // Nachfrage unsichtbar/reine Idee), einheitlich aus dem Backend
+        // (keyword_status.py) statt einer eigenen Frontend-Schwelle.
+        (kw.keyword_status_label
+          ? '<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;' +
+            'letter-spacing:.04em;padding:3px 8px;border-radius:9999px;white-space:nowrap;' +
+            'color:' + (KEYWORD_STATUS_COLORS[kw.keyword_status] || '#8b98a5') + ';' +
+            'background:' + (KEYWORD_STATUS_COLORS[kw.keyword_status] || '#8b98a5') + '1a;">' +
+            escapeHtml(kw.keyword_status_label) + '</span>'
+          : '') +
         '<span class="cvz-prompt-source">' + escapeHtml(KEYWORD_SOURCE_LABELS[kw.source] || kw.source) + '</span>' +
         (kw.id
           ? '<button type="button" class="cvz-prompt-delete-btn" data-cvz-keyword-deactivate="' + kw.id + '" aria-label="Keyword deaktivieren" title="Keyword deaktivieren">\u00d7</button>'
@@ -7180,7 +7209,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt ALLE Domains \u2013 nicht nur manuell ausgew\u00e4hlte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck.';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). ';
     section.appendChild(sub);
 
     // Favicon-Hilfsfunktion
