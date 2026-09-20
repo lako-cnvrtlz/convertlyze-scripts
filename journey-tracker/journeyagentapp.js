@@ -1139,7 +1139,7 @@
     { id: 'situation', label: 'Situation' },
     { id: 'journey', label: 'Journey Map' },
     { id: 'aktionsplan', label: 'Aktionsplan' },
-    { id: 'verlauf', label: 'Verlauf' },
+    { id: 'verlauf', label: 'Verlauf & Änderungen' },
     { id: 'daten', label: 'Daten' },
   ];
 
@@ -6123,49 +6123,22 @@
       return p.prompt_text && p.prompt_text.length > 60 ? p.prompt_text.slice(0, 57) + '…' : (p.prompt_text || '');
     }));
 
-    // Lookup-Maps für die Anzeige verknüpfter Items in der Liste
-    var _kwById = {};
-    _thKws.forEach(function (q) { if (q.id) _kwById[q.id] = q.keyword; });
-    var _promptById = {};
-    (prompts || []).forEach(function (p) { if (p.id) _promptById[p.id] = p.prompt_text; });
-
-    // List
-    var changes = state.contentChangesCache[topicId] || [];
+    // GEÄNDERT (20.09.2026): Die separate Liste eingetragener Änderungen an
+    // dieser Stelle wurde entfernt — sie duplizierte 1:1 die weiter unten im
+    // Verlauf-Tab gerenderte "Änderungs-Chronik" (die zusätzlich auch
+    // System-Erkennungen zeigt, also die vollständigere Ansicht ist).
     if (state.isLoadingContentChanges) {
       var loadEl = document.createElement('p');
       loadEl.className = 'cvz-card-placeholder-text';
       loadEl.style.marginTop = '12px';
       loadEl.innerHTML = '<span class="cvz-spinner"></span>Lädt…';
       section.appendChild(loadEl);
-    } else if (changes.length === 0) {
-      var emptyEl = document.createElement('p');
-      emptyEl.className = 'cvz-card-placeholder-text';
-      emptyEl.style.marginTop = '12px';
-      emptyEl.textContent = 'Noch keine Änderungen eingetragen.';
-      section.appendChild(emptyEl);
     } else {
-      var list = document.createElement('div');
-      list.className = 'cvz-content-change-list';
-      changes.forEach(function (ch) {
-        var item = document.createElement('div');
-        item.className = 'cvz-content-change-item';
-        var dateStr = ch.changed_at ? ch.changed_at.slice(0, 10) : '';
-        var typeLabel = CONTENT_CHANGE_TYPE_LABELS[ch.change_type] || ch.change_type || '';
-        item.innerHTML =
-          '<span class="cvz-content-change-date">' + escapeHtml(dateStr) + '</span>' +
-          '<span class="cvz-opportunity-type">' + escapeHtml(typeLabel) + '</span>' +
-          '<span class="cvz-content-change-desc">' + escapeHtml(ch.description || '') + '</span>' +
-          (ch.url ? '<a class="cvz-content-change-url" href="' + escapeHtml(ch.url) + '" target="_blank" rel="noopener">Link ↗</a>' : '') +
-          (function () {
-            var linked = (ch.linked_search_query_ids || []).map(function (id) { return _kwById[id]; }).filter(Boolean)
-              .concat((ch.linked_prompt_ids || []).map(function (id) {
-                var t = _promptById[id]; return t ? (t.length > 40 ? t.slice(0, 37) + '…' : t) : null;
-              }).filter(Boolean));
-            return linked.length ? '<span class="cvz-content-change-linked">Verknüpft: ' + escapeHtml(linked.join(', ')) + '</span>' : '';
-          })();
-        list.appendChild(item);
-      });
-      section.appendChild(list);
+      var hintEl = document.createElement('p');
+      hintEl.className = 'cvz-card-placeholder-text';
+      hintEl.style.marginTop = '12px';
+      hintEl.textContent = 'Eingetragene Änderungen erscheinen unten in der Änderungs-Chronik.';
+      section.appendChild(hintEl);
     }
 
     return section;
@@ -7205,7 +7178,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %).';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt ALLE Domains \u2013 nicht nur manuell ausgew\u00e4hlte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck.';
     section.appendChild(sub);
 
     // Favicon-Hilfsfunktion
@@ -7500,95 +7473,29 @@
         '<button type="button" data-cvz-journey-retry="' + escapeHtml(topicId) + '" ' +
         'class="cvz-link-btn" style="font-size:inherit;">Erneut versuchen</button>';
       wrap.appendChild(errEl);
-    } else if (dashData && dashData.phase_scores) {
-      // Kompakte Phasen-Scorecard (eigene Zitierrate als Balken)
-      var phaseSection = document.createElement('div');
-      phaseSection.className = 'cvz-section';
-      var phaseHeadRow = document.createElement('div');
-      phaseHeadRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:4px;';
-      var phaseHeading = document.createElement('p');
-      phaseHeading.className = 'cvz-section-label';
-      phaseHeading.style.margin = '0';
-      phaseHeading.textContent = 'KI-Sichtbarkeit nach Journey-Phase';
-      phaseHeadRow.appendChild(phaseHeading);
-      phaseHeadRow.appendChild(makeTip(
-        'Anteil der Prompts in jeder Phase, in denen eure Domain in der KI-Antwort vorkommt. 0 % = nie zitiert, 100 % = immer zitiert. Werte ueber 40 % gelten als stark. Klickt auf den Tab "Prompts nach Phase", um die einzelnen Prompts und Antworten zu sehen.'
-      ));
-      phaseSection.appendChild(phaseHeadRow);
-      var phaseSub = document.createElement('p');
-      phaseSub.className = 'cvz-card-placeholder-text';
-      phaseSub.style.marginBottom = '12px';
-      phaseSub.textContent = 'Anteil der KI-Prompts pro Phase, in denen eure Domain zitiert wird (0–10 = schwach, 40+ = stark).';
-      phaseSection.appendChild(phaseSub);
-      var phaseGrid = document.createElement('div');
-      phaseGrid.className = 'cvz-journey-phase-grid';
-      PHASE_ORDER.forEach(function (phase) {
-        var scores = (dashData.phase_scores || {})[phase] || {};
-        var color = PHASE_COLORS[phase] || '#8b98a5';
-        // Top competitor for this phase
-        var topComp = ((dashData.share_of_voice || {})[phase] || [])[0];
-        var card = document.createElement('div');
-        card.className = 'cvz-journey-phase-card';
-        card.style.borderTopColor = color;
-        var nameEl = document.createElement('p');
-        nameEl.className = 'cvz-journey-phase-name';
-        nameEl.style.color = color;
-        nameEl.textContent = PHASE_LABELS[phase] || phase;
-        card.appendChild(nameEl);
-        // Own score: average across channels
-        var totalScore = 0, channelCount = 0;
-        CHANNEL_ORDER.forEach(function (ch) {
-          var s = scores[ch];
-          if (s && s.total > 0) { totalScore += (s.score || 0); channelCount++; }
-        });
-        var avgScore = channelCount > 0 ? Math.round(totalScore / channelCount) : 0;
-        var ownRow = document.createElement('div');
-        ownRow.className = 'cvz-journey-channel-row';
-        if (channelCount === 0) {
-          // Phase hatte in diesem Zeitraum keine KI-Laeufe - "Noch keine Daten" zeigen
-          ownRow.innerHTML =
-            '<span class="cvz-journey-channel-label" style="font-weight:600;color:var(--cvz-text-muted,#8b98a5);">Noch keine Daten</span>' +
-            '<div class="cvz-journey-bar-wrap"><div class="cvz-journey-bar-fill" style="width:0%;background:' + color + ';opacity:.3;"></div></div>' +
-            '<span class="cvz-journey-channel-num" style="color:var(--cvz-text-muted,#8b98a5);">–</span>';
-        } else {
-          ownRow.innerHTML =
-            '<span class="cvz-journey-channel-label" style="font-weight:600;">Eure Domain</span>' +
-            '<div class="cvz-journey-bar-wrap"><div class="cvz-journey-bar-fill" style="width:' + avgScore + '%;background:' + color + '"></div></div>' +
-            '<span class="cvz-journey-channel-num" style="font-weight:600;">' + avgScore + '%</span>';
-        }
-        card.appendChild(ownRow);
-        // Top competitor bar
-        if (topComp) {
-          var compPct = Math.round(topComp.citation_rate || 0);
-          var compRow = document.createElement('div');
-          compRow.className = 'cvz-journey-channel-row';
-          compRow.innerHTML =
-            '<span class="cvz-journey-channel-label" style="color:var(--cvz-text-muted,#6b7280);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(topComp.domain) + '">' + escapeHtml(topComp.domain) + '</span>' +
-            '<div class="cvz-journey-bar-wrap"><div class="cvz-journey-bar-fill" style="width:' + compPct + '%;background:#e5e7eb"></div></div>' +
-            '<span class="cvz-journey-channel-num" style="color:var(--cvz-text-muted,#6b7280);">' + compPct + '%</span>';
-          card.appendChild(compRow);
-          var vsLabel = document.createElement('p');
-          vsLabel.style.cssText = 'margin:4px 0 0;font-size:10px;color:var(--cvz-text-muted,#6b7280);';
-          var diff = avgScore - compPct;
-          vsLabel.textContent = diff >= 0
-            ? '+' + diff + 'pp vor Top-Wettbewerber'
-            : diff + 'pp hinter ' + topComp.domain;
-          vsLabel.style.color = diff >= 0 ? '#35a86b' : '#de5b50';
-          card.appendChild(vsLabel);
-        }
-        phaseGrid.appendChild(card);
-      });
-      phaseSection.appendChild(phaseGrid);
-      wrap.appendChild(phaseSection);
     } else if (!dashData || dashError) {
       // Fallback: Phasen-Rollup aus den Prompts des Topic-Detaildatensatzes
       var rollup = renderPhaseRollup(detail.prompts);
       if (rollup) wrap.appendChild(rollup);
     }
+    // GEÄNDERT (20.09.2026): Die kompakte Phasen-Scorecard, die hier stand,
+    // ist entfernt — sie zeigte dieselbe Kennzahl (Zitierrate pro Phase inkl.
+    // Top-Wettbewerber) doppelt: einmal hier als Karten, direkt darunter noch
+    // einmal als vollständiger Chart (Wettbewerbsvergleich). Die identische
+    // Karten-Variante gab es außerdem nochmal im Journey-Map-Tab. Diese
+    // zweite Version bleibt dort (inkl. Kanal-Aufschlüsselung), hier reicht
+    // der Chart als einzige Quelle für "Zitierrate pro Phase".
 
     // Wettbewerbs-Sichtbarkeitsvergleich (Chart)
     var compChart = renderVisibilityComparisonChart(topicId, detail);
     if (compChart) wrap.appendChild(compChart);
+
+    // VERSCHOBEN (20.09.2026): Die Wettbewerber-Tabelle mit Differenzierungs-
+    // Tipps pro Phase stand bisher nur im Journey-Map-Tab, war dort aber
+    // eingeklappt und stand hinter mehreren anderen Abschnitten — für eine
+    // so wichtige Analyse zu gut versteckt. Sie steht jetzt direkt hier,
+    // gleich hinter dem Wettbewerbsvergleich, im ersten Tab.
+    wrap.appendChild(renderJourneyShareOfVoice(dashData && dashData.share_of_voice));
 
     // Beste Content-Chancen
     var bestChances = renderBestContentChancesSection(detail.best_content_chances);
@@ -7978,8 +7885,10 @@
     phaseSection.appendChild(phaseGrid);
     wrap.appendChild(phaseSection);
 
-    // Detaillierte Wettbewerber-Tabellen pro Phase (aufklappbar)
-    wrap.appendChild(renderJourneyShareOfVoice(data.share_of_voice));
+    // VERSCHOBEN (20.09.2026): Die detaillierte Wettbewerber-Tabelle pro
+    // Phase (mit Differenzierungs-Tipps) steht jetzt im Situation-Tab, gleich
+    // hinter dem Wettbewerbsvergleichs-Chart — dort ist sie sofort sichtbar
+    // statt hier hinter mehreren anderen Abschnitten versteckt.
 
     // Content-Lücken aus Gap-Analyse (GEAENDERT 17.09.2026: topicId + Phase-Filter)
     wrap.appendChild(renderContentGapsSection(detail.content_gaps, topicId));
@@ -8526,40 +8435,14 @@
       });
     }
 
-    // Plattformen mit Veröffentlichungs-Chance (immer zeigen wenn vorhanden)
-    var publishable = (detail.source_profiles || []).filter(function (p) { return p.can_publish === true; });
-    if (publishable.length > 0) {
-      var platSection = document.createElement('div');
-      platSection.className = 'cvz-section';
-      platSection.style.marginTop = '28px';
-      var platHeading = document.createElement('p');
-      platHeading.className = 'cvz-section-label';
-      platHeading.textContent = 'Plattformen mit Veröffentlichungs-Chance';
-      platSection.appendChild(platHeading);
-      var platSub = document.createElement('p');
-      platSub.className = 'cvz-card-placeholder-text';
-      platSub.style.marginBottom = '12px';
-      platSub.textContent = 'Von KI-Modellen zitierte Plattformen, auf denen Nutzer eigene Inhalte veröffentlichen können (Foren, Bewertungsportale, YouTube etc.).';
-      platSection.appendChild(platSub);
-      var platGrid = document.createElement('div');
-      platGrid.className = 'cvz-opportunity-grid';
-      publishable.forEach(function (p) {
-        var platCard = document.createElement('div');
-        platCard.className = 'cvz-card cvz-idea-card';
-        platCard.innerHTML =
-          '<p class="cvz-opportunity-type">' +
-            '<img src="https://www.google.com/s2/favicons?sz=16&domain=' + encodeURIComponent(p.domain) + '" ' +
-            'style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">' +
-            escapeHtml(p.domain) +
-          '</p>' +
-          (p.content_type ? '<p class="cvz-opportunity-description" style="font-size:12px;color:#888;margin-bottom:4px;">' + escapeHtml(CONTENT_TYPE_LABELS[p.content_type] || p.content_type) + '</p>' : '') +
-          (p.summary ? '<p class="cvz-opportunity-description">' + escapeHtml(p.summary) + '</p>' : '') +
-          (p.differentiation_suggestion ? '<div class="cvz-action-recommendation"><p class="cvz-changelog-guided-label">Abgrenzung</p><p class="cvz-opportunity-description">' + escapeHtml(p.differentiation_suggestion) + '</p></div>' : '');
-        platGrid.appendChild(platCard);
-      });
-      platSection.appendChild(platGrid);
-      wrap.appendChild(platSection);
-    }
+    // ENTFERNT (20.09.2026): "Plattformen mit Veröffentlichungs-Chance" stand
+    // hier direkt über der neuen Outreach-Targets-Sektion und deckte im Kern
+    // dieselbe Frage ab ("wo können wir veröffentlichen") — nur aus einer
+    // anderen, schmaleren Datenquelle (source_profiles statt der dedizierten
+    // outreach_targets.py-Logik mit Bewertungsportale/Medien/Community-
+    // Gruppierung). Zwei Listen mit vermutlich überlappenden Domains
+    // nebeneinander wirkten nicht vollständiger, sondern unklar. Die
+    // strukturierte Sektion unten bleibt die einzige Quelle dafür.
 
     // NEU (20.09.2026): Mögliche Ziele für Bewertungen und Digital PR
     // (outreach_targets.py) — war bisher nur als Funktion vorhanden, wurde
@@ -8575,6 +8458,12 @@
   // Ziel: Marketer kann Aenderungen schnell mit Sichtbarkeits-Effekten korrelieren.
   function renderVerlaufTab(topicId, detail) {
     var wrap = document.createElement('div');
+
+    // GEÄNDERT (20.09.2026): Formular zum Eintragen einer Änderung steht
+    // jetzt ganz oben im Tab (vorher stand es hinter Wirkungs-Analyse, Chart
+    // und Chronik — dadurch war es kaum auffindbar, obwohl es der einzige
+    // Ort ist, an dem man aktiv etwas eintragen kann statt nur zu lesen).
+    wrap.appendChild(renderContentChangesSection(topicId, detail.search_queries, detail.prompts));
 
     // NEU (20.09.2026): Bereits umgesetzte Änderungen und ihre gemessene
     // Wirkung (change_history.py) — war bisher nur als Funktion vorhanden,
@@ -8679,7 +8568,7 @@
             return '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background:' + PHASE_COLORS[phase] + '"></span>' + escapeHtml(PHASE_LABELS[phase] || phase) + '</span>';
           }).join('') +
         '</div>' +
-        '<p class="cvz-chart-caption">Durchgezogene Linie: als Quelle genannt (ohne Link). Gestrichelte Linie: davon mit echtem Link zitiert. Beides 0–100 % pro Journey-Phase und Woche, gemittelt über alle KI-Kanäle. Senkrechte Linien markieren eingetragene Content-Änderungen.</p>';
+        '<p class="cvz-chart-caption">Durchgezogene Linie: als Quelle genannt (own_domain_cited). Gestrichelte Linie: davon mit echtem Link zitiert (own_domain_cited_with_url) — beides 0–100 % pro Journey-Phase und Woche, gemittelt über alle KI-Kanäle. Senkrechte Linien markieren eingetragene Content-Änderungen.</p>';
       chartSection.appendChild(chartCard);
     }
     wrap.appendChild(chartSection);
@@ -8769,9 +8658,6 @@
       timelineSection.appendChild(timeline);
       wrap.appendChild(timelineSection);
     }
-
-    // Form to add new content change
-    wrap.appendChild(renderContentChangesSection(topicId, detail.search_queries, detail.prompts));
 
     // Visibility trend from prompt data (weekly cite/mention rates)
     var visWeeks = state.visibilityTrendCache[topicId];
