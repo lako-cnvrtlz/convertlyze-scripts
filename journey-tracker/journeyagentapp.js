@@ -6368,7 +6368,7 @@
       blockLabel.textContent = 'Das fehlt für einen vollständigen Vergleich mit Wettbewerbern';
       section.appendChild(blockLabel);
       var grid = document.createElement('div');
-      grid.className = 'cvz-opportunity-grid';
+      grid.className = 'cvz-opportunity-grid cvz-opportunity-grid-stacked';
       blockers.forEach(function (b) {
         var color = KNOWLEDGE_PRIORITY_COLORS[b.priority] || '#8b98a5';
         var c = document.createElement('div');
@@ -6802,6 +6802,7 @@
       '.cvz-thin-data-note { font-size: 12px; color: var(--cvz-text-muted); font-style: italic; margin: 6px 0 0; }' +
 
       '.cvz-opportunity-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }' +
+      '.cvz-opportunity-grid-stacked { grid-template-columns: 1fr; }' +
       '.cvz-opportunity-card { border-left: 3px solid var(--cvz-red); padding: 16px; }' +
       '.cvz-idea-card { border-left: 3px solid var(--cvz-teal); padding: 16px; }' +
       '.cvz-opportunity-type { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--cvz-red); }' +
