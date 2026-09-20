@@ -1156,7 +1156,7 @@
   // bewahrt den Zugang zu Keywords, Prompts und GSC).
   var TOPIC_TABS = [
     { id: 'situation', label: 'Situation' },
-    { id: 'journey', label: 'Journey Map' },
+    { id: 'journey', label: 'Journey Map & Wettbewerb' },
     { id: 'aktionsplan', label: 'Aktionsplan' },
     { id: 'verlauf', label: 'Verlauf & Änderungen' },
     { id: 'daten', label: 'Daten' },
