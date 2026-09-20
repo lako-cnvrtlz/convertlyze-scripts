@@ -7205,7 +7205,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt ALLE Domains \u2013 nicht nur manuell ausgew\u00e4hlte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck.';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %).';
     section.appendChild(sub);
 
     // Favicon-Hilfsfunktion
@@ -8679,7 +8679,7 @@
             return '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background:' + PHASE_COLORS[phase] + '"></span>' + escapeHtml(PHASE_LABELS[phase] || phase) + '</span>';
           }).join('') +
         '</div>' +
-        '<p class="cvz-chart-caption">Durchgezogene Linie: als Quelle genannt (own_domain_cited). Gestrichelte Linie: davon mit echtem Link zitiert (own_domain_cited_with_url) — beides 0–100 % pro Journey-Phase und Woche, gemittelt über alle KI-Kanäle. Senkrechte Linien markieren eingetragene Content-Änderungen.</p>';
+        '<p class="cvz-chart-caption">Durchgezogene Linie: als Quelle genannt (ohne Link). Gestrichelte Linie: davon mit echtem Link zitiert. Beides 0–100 % pro Journey-Phase und Woche, gemittelt über alle KI-Kanäle. Senkrechte Linien markieren eingetragene Content-Änderungen.</p>';
       chartSection.appendChild(chartCard);
     }
     wrap.appendChild(chartSection);
