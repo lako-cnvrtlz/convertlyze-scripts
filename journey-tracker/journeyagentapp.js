@@ -5,8 +5,12 @@
   // KONFIGURATION
   // =========================================================================
   var CONFIG = {
-    apiBaseUrl: 'https://visibility–-tracker-production-741c.up.railway.app',
-    stripeCheckoutUrl: 'https://<euer-supabase-projekt>.supabase.co/functions/v1/stripe-topic-slot-checkout',
+    // GEFIXT (20.09.2026): Es stand ein En-Dash (–) statt eines normalen
+    // Bindestrichs in der Domain ("visibility–-tracker"), dadurch liefen
+    // ALLE apiFetch()-Calls gegen eine nicht existierende Adresse.
+    apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
+    // GEFIXT (20.09.2026): Platzhalter durch die echte Supabase-Projekt-URL ersetzt.
+    stripeCheckoutUrl: 'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/stripe-topic-slot-checkout',
     useMockData: false,  // TODO: für den echten Test
   };
 
@@ -115,6 +119,11 @@
     sourcePhaseFilter: null,
     // NEU (17.09.2026): Pro-Topic gepinnte Wettbewerber fuer den Vergleichs-Chart
     chartPinnedComps: {},
+    // NEU (20.09.2026): Gezielter Retry einzelner Schritte (retryStep/renderStepNotice).
+    // Fehlte bisher hier, dadurch crashte retryStep beim ersten Klick
+    // ("Cannot read properties of undefined").
+    retryingSteps: {},
+    stepPollTimer: null,
   };
 
   function getProjectById(id) {
@@ -312,6 +321,18 @@
       // NEU (17.09.2026): KI-generierter Aktionsplan — FEHLTE bisher hier,
       // deshalb war detail.action_plan immer undefined und der Tab immer leer.
       action_plan: data.action_plan || null,
+      // GEFIXT (20.09.2026): fehlten bisher komplett hier, genau wie
+      // vorher schon bei action_plan (siehe Kommentar oben) — dadurch
+      // waren detail.ai_knowledge / .change_assessment / .step_status /
+      // .outreach_targets immer undefined und renderKnowledgeSection,
+      // renderChangeAssessmentSection, renderStepNotice und
+      // renderOutreachTargetsSection zeigten nie etwas an, obwohl das
+      // Backend (ai_knowledge.py, change_history.py, step_tracker.py,
+      // outreach_targets.py) diese Daten längst liefert.
+      ai_knowledge: data.ai_knowledge || null,
+      change_assessment: data.change_assessment || { summary: { anzahl: 0 }, items: [] },
+      step_status: data.step_status || [],
+      outreach_targets: data.outreach_targets || null,
       competitors: [],
       gsc_rows: (data.search_queries || [])
         .filter(function (q) { return q.source === 'gsc_near_miss'; })
@@ -1323,6 +1344,14 @@
     var changelogToggleDeleted = event.target.closest('[data-cvz-changelog-toggle-deleted]');
     if (changelogToggleDeleted) {
       toggleDeletedChangelog(state.activeTopicId);
+      return;
+    }
+    // NEU (20.09.2026): Klick-Handler für den "Jetzt erstellen"/"Erneut
+    // erstellen"-Button aus renderStepNotice — fehlte bisher komplett,
+    // der Button (data-cvz-retry-step) tat also nichts.
+    var retryStepBtn = event.target.closest('[data-cvz-retry-step]');
+    if (retryStepBtn) {
+      retryStep(state.activeTopicId, retryStepBtn.getAttribute('data-cvz-retry-step'));
       return;
     }
     var weekDetailPoint = event.target.closest('[data-cvz-week-detail]');
@@ -2547,6 +2576,10 @@
         tabContent.appendChild(renderVerlaufTab(state.activeTopicId, detail));
         break;
       case 'daten': {
+        // NEU (20.09.2026): Retry-Hinweis, falls die GSC-Daten fehlen oder
+        // der letzte Nachzieh-Versuch fehlgeschlagen ist.
+        var datenStepNotice = renderStepNotice(detail, ['gsc']);
+        if (datenStepNotice) tabContent.appendChild(datenStepNotice);
         // Content-Änderungen (mit verlinkten Keywords/Prompts) als Marker aufbereiten
         var _ccMarkers = (state.contentChangesCache[state.activeTopicId] || []).map(function (ch) {
           return {
@@ -7441,6 +7474,12 @@
   function renderSituationTab(topicId, detail) {
     var wrap = document.createElement('div');
 
+    // NEU (20.09.2026): Hinweis + Retry-Button für Schritte, die hier auf
+    // dieser Seite auftauchen (Zusammenfassung, Handlungsfelder,
+    // KI-Wissens-Check) und fehlgeschlagen sind, fehlen oder gerade laufen.
+    var situationStepNotice = renderStepNotice(detail, ['summary', 'opportunities', 'ai_knowledge']);
+    if (situationStepNotice) wrap.appendChild(situationStepNotice);
+
     // Phase-Score-Übersicht (Dashboard-Daten, falls geladen)
     // dashData === { _error: true }  → Ladefehler, einmalig gespeichert damit kein Endlos-Retry
     // dashData === undefined          → noch nicht geladen (kommt nie hier an, da maybeLoad vorher)
@@ -7799,6 +7838,12 @@
       wrap.appendChild(oppSection);
     }
 
+    // NEU (20.09.2026): KI-Wissens-Check — was ChatGPT/Gemini über euch
+    // wissen. War bisher nur als Funktion vorhanden, wurde aber in keinem
+    // Tab tatsächlich angezeigt.
+    var knowledgeSection = renderKnowledgeSection(detail);
+    if (knowledgeSection) wrap.appendChild(knowledgeSection);
+
     return wrap;
   }
 
@@ -7807,6 +7852,12 @@
   // Inhalte dominieren pro Phase + Wettbewerber-Detailtabellen.
   function renderJourneyMapTab(topicId, detail) {
     var wrap = document.createElement('div');
+
+    // NEU (20.09.2026): Retry-Hinweis für die Schritte, die in diesem Tab
+    // dargestellt werden (Content-Lücken, Quellen-Analyse, SERP-Check,
+    // Wettbewerber-Vorschläge).
+    var journeyStepNotice = renderStepNotice(detail, ['gap_analysis', 'source_analysis', 'serp_check', 'competitor_suggestions']);
+    if (journeyStepNotice) wrap.appendChild(journeyStepNotice);
 
     if (state.isLoadingDashboard) {
       var loadEl = document.createElement('p');
@@ -8077,6 +8128,11 @@
   // phasengerecht mit typisierten Evidence-Bloecken.
   function renderAktionsplanTab(detail) {
     var wrap = document.createElement('div');
+
+    // NEU (20.09.2026): Retry-Hinweis, falls die Aktionsplan-Generierung
+    // fehlgeschlagen ist oder noch fehlt.
+    var apStepNotice = renderStepNotice(detail, ['action_plan']);
+    if (apStepNotice) wrap.appendChild(apStepNotice);
 
     var PHASE_ORDER = ['alle_phasen', 'exploration', 'evaluation', 'comparison', 'decision'];
     var PHASE_LABEL_MAP = {
@@ -8504,6 +8560,12 @@
       wrap.appendChild(platSection);
     }
 
+    // NEU (20.09.2026): Mögliche Ziele für Bewertungen und Digital PR
+    // (outreach_targets.py) — war bisher nur als Funktion vorhanden, wurde
+    // aber in keinem Tab tatsächlich angezeigt.
+    var outreachSection = renderOutreachTargetsSection(detail);
+    if (outreachSection) wrap.appendChild(outreachSection);
+
     return wrap;
   }
 
@@ -8512,6 +8574,12 @@
   // Ziel: Marketer kann Aenderungen schnell mit Sichtbarkeits-Effekten korrelieren.
   function renderVerlaufTab(topicId, detail) {
     var wrap = document.createElement('div');
+
+    // NEU (20.09.2026): Bereits umgesetzte Änderungen und ihre gemessene
+    // Wirkung (change_history.py) — war bisher nur als Funktion vorhanden,
+    // wurde aber in keinem Tab tatsächlich angezeigt.
+    var changeAssessmentSection = renderChangeAssessmentSection(detail);
+    if (changeAssessmentSection) wrap.appendChild(changeAssessmentSection);
 
     // Chart section
     var data = state.dashboardDataCache[topicId];
