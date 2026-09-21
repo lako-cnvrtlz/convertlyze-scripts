@@ -133,6 +133,122 @@
     return state.allTopics.filter(function (t) { return t.id === id; })[0] || null;
   }
 
+  // =========================================================================
+  // NEU (21.09.2026): Report erst oeffnen, wenn die Analyse wirklich fertig ist
+  // =========================================================================
+
+  // Ab dieser Laufzeit gilt ein Lauf als hängengeblieben (gleicher Wert wie im
+  // Backend: STUCK_COLLECTING_THRESHOLD_MINUTES in main.py).
+  var RUN_STUCK_MINUTES = 45;
+
+  // true, solange der Report noch NICHT geöffnet werden darf.
+  function isPendingStatus(status) {
+    return status === 'queued' || status === 'collecting' || status === 'analyzing';
+  }
+
+  // Löscht alles, was für ein Thema zwischengespeichert wurde. Wichtig, weil
+  // diese Daten während des Laufs oft leer geladen wurden (z. B. ohne
+  // Wettbewerber) und sonst nach dem Ende des Laufs weiter angezeigt würden.
+  function purgeTopicCaches(topicId) {
+    delete state.topicDetailCache[topicId];
+    delete state.dashboardDataCache[topicId];
+    delete state.contentChangesCache[topicId];
+    delete state.visibilityTrendCache[topicId];
+    delete state.monthlyOverviewTrendCache[topicId];
+    delete state.topicRankHistoryCache[topicId];
+    delete state.citationTrendCache[topicId];
+
+    // Auch die Domain-Übersicht (Opportunities über alle Themen) ist dann veraltet.
+    var topic = getTopicById(topicId);
+    if (topic) delete state.domainDashboardCache[topic.project_id];
+  }
+
+  // Lädt die Zusatzdaten für den gerade offenen Tab. Steckte vorher direkt in
+  // openTopicDetail und wird jetzt auch nach einer Neu-Analyse gebraucht.
+  function loadTabData(topicId) {
+    if (state.activeSubTab === 'situation') {
+      maybeLoadVisibilityTrend(topicId);
+      maybeLoadTopicRankHistory(topicId);
+      maybeLoadMonthlyOverviewTrend(topicId);
+      maybeLoadDashboardData(topicId);
+      maybeLoadContentChanges(topicId);
+    }
+    if (state.activeSubTab === 'journey' || state.activeSubTab === 'verlauf') {
+      maybeLoadDashboardData(topicId);
+      maybeLoadContentChanges(topicId);
+    }
+    if (state.activeSubTab === 'verlauf') {
+      maybeLoadVisibilityTrend(topicId);
+    }
+  }
+
+  // Banner für Themen, deren Report noch nicht geöffnet werden darf.
+  // Gibt null zurück, wenn der Report offen sein darf.
+  function renderTopicRunBanner(topic) {
+    var status = topic.status;
+    if (!isPendingStatus(status)) return null;
+
+    var banner = document.createElement('div');
+    banner.className = 'cvz-card cvz-collecting-banner';
+
+    if (status === 'queued') {
+      banner.innerHTML =
+        '<p class="cvz-collecting-banner-text">' +
+          'Dieses Thema wartet auf einen freien Themen-Slot. ' +
+          'Der Report erscheint hier, sobald der erste Lauf abgeschlossen ist.' +
+        '</p>';
+      return banner;
+    }
+
+    var startedAtRaw = topic.collecting_started_at || topic.created_at;
+    var startedAtMs = startedAtRaw ? new Date(startedAtRaw).getTime() : NaN;
+    var isStuck = !isNaN(startedAtMs) && (Date.now() - startedAtMs) / 60000 >= RUN_STUCK_MINUTES;
+    var isRetrying = state.retryingTopicId === topic.id;
+
+    if (isStuck) {
+      banner.innerHTML =
+        '<p class="cvz-collecting-banner-text">' +
+          '\u26a0\ufe0f L\u00e4uft ungew\u00f6hnlich lange, wirkt h\u00e4ngengeblieben ' +
+          '(z. B. durch einen Server-Neustart mittendrin).' +
+        '</p>' +
+        '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + escapeHtml(topic.id) + '"' +
+          (isRetrying ? ' disabled' : '') + '>' +
+          (isRetrying ? 'Wird erneut versucht \u2026' : 'Erneut versuchen') +
+        '</button>';
+      return banner;
+    }
+
+    var text = status === 'collecting'
+      ? 'Schritt 1 von 2: Daten werden gesammelt (KI-Antworten, Keywords, Google-Rankings). ' +
+        'Das kann mehrere Minuten dauern. Der Report \u00f6ffnet sich automatisch, sobald die komplette Analyse fertig ist.'
+      : 'Schritt 2 von 2: Wettbewerber, Content-L\u00fccken, Aktionsplan und Zusammenfassung werden erstellt. ' +
+        'Der Report \u00f6ffnet sich automatisch, sobald alles fertig ist.';
+
+    banner.innerHTML =
+      '<p class="cvz-collecting-banner-text"><span class="cvz-spinner"></span>' + text + '</p>';
+    return banner;
+  }
+
+  // Info-Balken für Themen, die schon "aktiv" sind, bei denen aber gerade
+  // einzelne Analysen neu laufen (z. B. nach dem Ändern der Wettbewerber).
+  // Der Report bleibt hier bewusst sichtbar, damit er nicht für jede kleine
+  // Änderung komplett verschwindet.
+  function renderRunningStepsBanner(detail) {
+    var running = (detail.step_status || []).filter(function (s) { return s.state === 'running'; });
+    if (running.length === 0) return null;
+
+    var labels = running.map(function (s) { return s.label; }).join(', ');
+    var banner = document.createElement('div');
+    banner.className = 'cvz-card cvz-collecting-banner';
+    banner.innerHTML =
+      '<p class="cvz-collecting-banner-text"><span class="cvz-spinner"></span>' +
+        'Die Analyse wird gerade aktualisiert (' + escapeHtml(labels) + '). ' +
+        'Einzelne Bereiche k\u00f6nnen bis dahin noch alte Werte zeigen. ' +
+        'Diese Seite aktualisiert sich automatisch.' +
+      '</p>';
+    return banner;
+  }
+
   function updateUrlParams(params) {
     var url = new URL(window.location.href);
     Object.keys(params).forEach(function (key) {
@@ -242,13 +358,22 @@
     }
   }
 
+  // GEÄNDERT: gibt jetzt eine Liste der Themen zurück, deren Status sich seit
+  // dem letzten Laden geändert hat. Die Liste braucht das Polling weiter unten.
   async function loadTopics() {
     if (CONFIG.useMockData) {
       state.allTopics = MOCK_TOPICS;
-      return;
+      return [];
     }
+    var previousStatus = {};
+    state.allTopics.forEach(function (t) { previousStatus[t.id] = t.status; });
+
     var data = await apiFetch('/topics');
     state.allTopics = data.topics || [];
+
+    return state.allTopics
+      .filter(function (t) { return previousStatus[t.id] && previousStatus[t.id] !== t.status; })
+      .map(function (t) { return t.id; });
   }
 
   async function loadTopicUsage() {
@@ -260,42 +385,40 @@
     state.topicUsage = data;
   }
 
+  // GEÄNDERT: räumt bei jedem Statuswechsel die Zwischenspeicher des Themas auf,
+  // egal ob es gerade offen ist oder nicht. Vorher passierte das nur für das
+  // gerade geöffnete Thema. Wer zwischendurch die Übersicht angeschaut hat,
+  // bekam danach einen "fertigen" Report mit leeren, veralteten Wettbewerber-Daten.
   function maybeStartPolling() {
-  if (CONFIG.useMockData || state.pollTimer) return;
+    if (CONFIG.useMockData || state.pollTimer) return;
 
-  var hasCollecting = state.allTopics.some(function (t) { return t.status === 'collecting' || t.status === 'analyzing'; });
-  if (!hasCollecting) return;
+    var hasBusyTopic = state.allTopics.some(function (t) {
+      return t.status === 'collecting' || t.status === 'analyzing';
+    });
+    if (!hasBusyTopic) return;
 
-  state.pollTimer = setInterval(async function () {
-    try {
-      await loadTopics();
-      if (state.activeView === 'topic-detail' && state.activeTopicId) {
-        var current = getTopicById(state.activeTopicId);
-        if (current && current.status !== 'collecting' && current.status !== 'analyzing' && state.topicDetailCache[state.activeTopicId]) {
-          var cachedTopic = state.topicDetailCache[state.activeTopicId].topic;
-          if (cachedTopic && (cachedTopic.status === 'collecting' || cachedTopic.status === 'analyzing')) {
-            delete state.topicDetailCache[state.activeTopicId];
-            delete state.dashboardDataCache[state.activeTopicId];
-            delete state.contentChangesCache[state.activeTopicId];
-            delete state.visibilityTrendCache[state.activeTopicId];
-            delete state.monthlyOverviewTrendCache[state.activeTopicId];
-            delete state.topicRankHistoryCache[state.activeTopicId];
-            await openTopicDetail(state.activeTopicId, false);
-          }
+    state.pollTimer = setInterval(async function () {
+      try {
+        var changedIds = await loadTopics();
+        changedIds.forEach(function (id) { purgeTopicCaches(id); });
+
+        if (state.activeView === 'topic-detail' && changedIds.indexOf(state.activeTopicId) !== -1) {
+          await openTopicDetail(state.activeTopicId, false);
         }
+      } catch (e) {
+        console.error('[CVZ Visibility] Polling fehlgeschlagen:', e);
       }
-    } catch (e) {
-      console.error('[CVZ Visibility] Polling fehlgeschlagen:', e);
-    }
 
-    var stillCollecting = state.allTopics.some(function (t) { return t.status === 'collecting' || t.status === 'analyzing'; });
-    if (!stillCollecting) {
-      clearInterval(state.pollTimer);
-      state.pollTimer = null;
-    }
-    render();
-  }, 5000);
-}
+      var stillBusy = state.allTopics.some(function (t) {
+        return t.status === 'collecting' || t.status === 'analyzing';
+      });
+      if (!stillBusy) {
+        clearInterval(state.pollTimer);
+        state.pollTimer = null;
+      }
+      render();
+    }, 5000);
+  }
   async function loadTopicDetail(topicId) {
     if (CONFIG.useMockData) {
       return MOCK_TOPIC_DETAIL[topicId] || null;
@@ -835,6 +958,14 @@
     render();
   }
 
+  // GEÄNDERT:
+  // 1. Lädt das Detail neu, wenn der zwischengespeicherte Status nicht mehr zum
+  //    Status in der Themenliste passt.
+  // 2. Startet die Zusatz-Abfragen (Wettbewerbs-Chart, Verlauf, ...) NUR, wenn
+  //    der Report auch wirklich geöffnet werden darf. Vorher liefen sie schon
+  //    während des Laufs, lieferten leere Daten und diese leeren Daten blieben
+  //    danach im Zwischenspeicher.
+  // 3. Startet das Polling, wenn beim Öffnen noch Einzel-Analysen laufen.
   async function openTopicDetail(topicId, resetTab) {
     if (resetTab !== false) {
       state.activeSubTab = 'situation';
@@ -863,7 +994,11 @@
 
     try {
       var cachedDetail = state.topicDetailCache[topicId];
-      if (!cachedDetail || (cachedDetail.topic && (cachedDetail.topic.status === 'collecting' || cachedDetail.topic.status === 'analyzing'))) {
+      var liveTopic = getTopicById(topicId);
+      var cacheIsStale = !cachedDetail
+        || (cachedDetail.topic && isPendingStatus(cachedDetail.topic.status))
+        || (cachedDetail.topic && liveTopic && liveTopic.status !== cachedDetail.topic.status);
+      if (cacheIsStale) {
         state.topicDetailCache[topicId] = await loadTopicDetail(topicId);
       }
     } catch (e) {
@@ -874,20 +1009,15 @@
     state.isLoadingDetail = false;
     render();
 
-    if (state.activeSubTab === 'situation') {
-      maybeLoadVisibilityTrend(topicId);
-      maybeLoadTopicRankHistory(topicId);
-      maybeLoadMonthlyOverviewTrend(topicId);
-      maybeLoadDashboardData(topicId);
-      maybeLoadContentChanges(topicId);
+    var loadedDetail = state.topicDetailCache[topicId];
+    if (!loadedDetail || !loadedDetail.topic || isPendingStatus(loadedDetail.topic.status)) {
+      return; // Report noch nicht bereit: nichts nachladen
     }
-    if (state.activeSubTab === 'journey' || state.activeSubTab === 'verlauf') {
-      maybeLoadDashboardData(topicId);
-      maybeLoadContentChanges(topicId);
-    }
-    if (state.activeSubTab === 'verlauf') {
-      maybeLoadVisibilityTrend(topicId);
-    }
+
+    var hasRunningStep = (loadedDetail.step_status || []).some(function (s) { return s.state === 'running'; });
+    if (hasRunningStep) startStepPolling(topicId);
+
+    loadTabData(topicId);
   }
 
   function backToOverview() {
@@ -920,7 +1050,8 @@
   var STATUS_LABELS = {
     active:     { label: 'Aktiv',         className: 'cvz-status-active' },
     collecting: { label: 'Sammelt Daten', className: 'cvz-status-collecting' },
-    analyzing:  { label: 'Analysiert',    className: 'cvz-status-analyzing' },
+    // GEAENDERT (21.09.2026): hiess "Analysiert" und las sich wie "fertig".
+    analyzing:  { label: 'Wird analysiert', className: 'cvz-status-analyzing' },
     error:      { label: 'Fehler',        className: 'cvz-status-error' },
     archived:   { label: 'Archiviert',    className: 'cvz-status-archived' },
     queued:     { label: 'Wartet',        className: 'cvz-status-queued' },
@@ -1895,7 +2026,8 @@
           method: 'POST',
           body: { competitor_domains: domains },
         });
-        delete state.topicDetailCache[topicId];
+        // GEAENDERT (21.09.2026): leert ALLE Zwischenspeicher des Themas, nicht nur das Detail.
+        purgeTopicCaches(topicId);
         state.competitorManageOpen[topicId] = false;
         delete state.competitorDraftDomains[topicId];
         delete state.competitorSuggestionsCache[topicId];
@@ -2410,7 +2542,8 @@
       }
       var STUCK_COLLECTING_THRESHOLD_MINUTES = 45;
       var isStuckCollecting = false;
-      if (topic.status === 'collecting') {
+      // GEAENDERT (21.09.2026): gilt jetzt auch fuer 'analyzing'.
+      if (topic.status === 'collecting' || topic.status === 'analyzing') {
         var startedAtRaw = topic.collecting_started_at || topic.created_at;
         var startedAtMs = startedAtRaw ? new Date(startedAtRaw).getTime() : NaN;
         if (!isNaN(startedAtMs)) {
@@ -2422,9 +2555,10 @@
       tr.innerHTML =
         '<td>' + escapeHtml(topic.name) + '</td>' +
         '<td><span class="cvz-status-badge ' + status.className + '">' +
-          (topic.status === 'collecting' ? '<span class="cvz-spinner"></span>' : '') +
+          ((topic.status === 'collecting' || topic.status === 'analyzing') ? '<span class="cvz-spinner"></span>' : '') +
           status.label + '</span>' +
           (topic.status === 'collecting' && !isStuckCollecting ? '<span class="cvz-status-hint">Das wird mehrere Minuten dauern. Sobald der Lauf fertig ist, aktualisiert sich die Seite automatisch.</span>' : '') +
+          (topic.status === 'analyzing' && !isStuckCollecting ? '<span class="cvz-status-hint">Die Analyse l\u00e4uft noch. Sobald sie fertig ist, kannst du den Report \u00f6ffnen.</span>' : '') +
           (isStuckCollecting ? '<span class="cvz-status-hint">L\u00e4uft ungew\u00f6hnlich lange, wirkt h\u00e4ngengeblieben (z. B. durch einen Server-Neustart mittendrin).</span>' : '') +
           extraStatusHint +
           (topic.status === 'error' || isStuckCollecting ? (
@@ -2516,48 +2650,16 @@
 
     wrap.appendChild(renderSummaryCard(detail.topic));
 
-    if (detail.topic.status === 'analyzing') {
-      var analyzingBanner = document.createElement('div');
-      analyzingBanner.className = 'cvz-card cvz-collecting-banner';
-      analyzingBanner.innerHTML =
-        '<p class="cvz-collecting-banner-text">' +
-          '<span class="cvz-spinner"></span>' +
-          'Daten gesammelt. Aktionsplan, Zusammenfassung und Lükenanalyse werden jetzt erstellt. ' +
-          'Diese Seite aktualisiert sich automatisch.' +
-        '</p>';
-      wrap.appendChild(analyzingBanner);
+    // GEAENDERT (21.09.2026): ein gemeinsamer Banner fuer "wartet", "sammelt Daten" und
+    // "wird analysiert". Solange er erscheint, wird der Report (Tabs) NICHT gezeigt.
+    // Danach: Info-Balken, falls einzelne Analysen gerade neu laufen.
+    var runBanner = renderTopicRunBanner(detail.topic);
+    if (runBanner) {
+      wrap.appendChild(runBanner);
       return wrap;
     }
-
-    if (detail.topic.status === 'collecting') {
-      var STUCK_COLLECTING_THRESHOLD_MINUTES_DETAIL = 45;
-      var detailStartedAtRaw = detail.topic.collecting_started_at || detail.topic.created_at;
-      var detailStartedAtMs = detailStartedAtRaw ? new Date(detailStartedAtRaw).getTime() : NaN;
-      var isDetailStuck = !isNaN(detailStartedAtMs) &&
-        (Date.now() - detailStartedAtMs) / 60000 >= STUCK_COLLECTING_THRESHOLD_MINUTES_DETAIL;
-
-      var loadingBanner = document.createElement('div');
-      loadingBanner.className = 'cvz-card cvz-collecting-banner';
-      if (isDetailStuck) {
-        loadingBanner.innerHTML =
-          '<p class="cvz-collecting-banner-text">' +
-            '\u26a0\ufe0f L\u00e4uft ungew\u00f6hnlich lange, wirkt h\u00e4ngengeblieben (z. B. durch einen Server-Neustart mittendrin).' +
-          '</p>' +
-          '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + detail.topic.id + '"' +
-            (state.retryingTopicId === detail.topic.id ? ' disabled' : '') + '>' +
-            (state.retryingTopicId === detail.topic.id ? 'Wird erneut versucht \u2026' : 'Erneut versuchen') +
-          '</button>';
-      } else {
-        loadingBanner.innerHTML =
-          '<p class="cvz-collecting-banner-text">' +
-            '<span class="cvz-spinner"></span>' +
-            'Erster Datenlauf l\u00e4uft noch, kann mehrere Minuten dauern. ' +
-            'Diese Seite aktualisiert sich automatisch, sobald der Lauf fertig ist.' +
-          '</p>';
-      }
-      wrap.appendChild(loadingBanner);
-      return wrap;
-    }
+    var runningStepsBanner = renderRunningStepsBanner(detail);
+    if (runningStepsBanner) wrap.appendChild(runningStepsBanner);
 
     if (detail.topic.status === 'error') {
       var errorBanner = document.createElement('div');
@@ -6222,26 +6324,49 @@
     render();
   }
 
-  // Lädt das Topic-Detail alle 5 Sekunden neu, solange ein Schritt läuft.
-  // Sobald ein Schritt erfolgreich war, fehlt er in step_status und sein Button verschwindet.
+  // GEÄNDERT: Wenn keine Einzel-Analyse mehr läuft, werden jetzt auch die
+  // abgeleiteten Daten (Wettbewerbs-Chart, Verlauf, ...) neu geladen. Vorher
+  // blieb z. B. der Chart nach einer Neu-Analyse auf dem alten Stand.
   function startStepPolling(topicId) {
     if (state.stepPollTimer) return;
     var attempts = 0;
+
     state.stepPollTimer = setInterval(async function () {
       attempts++;
+      var fresh = null;
       try {
-        var fresh = await loadTopicDetail(topicId);
-        if (fresh) state.topicDetailCache[topicId] = fresh;
+        fresh = await loadTopicDetail(topicId);
       } catch (e) {
-        console.error('[CVZ Visibility] Aktualisierung während eines Schritts fehlgeschlagen:', e);
+        console.error('[CVZ Visibility] Aktualisierung während einer Analyse fehlgeschlagen:', e);
       }
-      var cachedNow = state.topicDetailCache[topicId];
-      var stillRunning = !!cachedNow && (cachedNow.step_status || []).some(function (s) { return s.state === 'running'; });
-      if (!stillRunning || attempts >= 40) {
-        clearInterval(state.stepPollTimer);
-        state.stepPollTimer = null;
+
+      if (fresh) {
+        state.topicDetailCache[topicId] = fresh;
+      } else if (attempts < 60) {
+        return; // Netzwerkfehler: beim nächsten Durchlauf erneut versuchen
       }
+
+      var stillRunning = !!fresh && (fresh.step_status || []).some(function (s) { return s.state === 'running'; });
+
+      if (stillRunning && attempts < 60) {
+        render();
+        return;
+      }
+
+      clearInterval(state.stepPollTimer);
+      state.stepPollTimer = null;
+
+      // Analyse fertig (oder Zeitlimit erreicht): abgeleitete Daten neu laden.
+      delete state.dashboardDataCache[topicId];
+      delete state.contentChangesCache[topicId];
+      delete state.visibilityTrendCache[topicId];
+      delete state.monthlyOverviewTrendCache[topicId];
+      delete state.topicRankHistoryCache[topicId];
+
       render();
+      if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
+        loadTabData(topicId);
+      }
     }, 5000);
   }
 
@@ -7101,7 +7226,8 @@
 
       /* Tooltip-Komponente: [?] Icon mit Hover-Popup */
       '.cvz-tip {' +
-        'position:relative;display:inline-block;' +
+        'position:relative;display:inline-flex;align-items:center;justify-content:center;' +
+        'box-sizing:border-box;padding:0;' +
         'font-size:11px;font-weight:700;line-height:1;' +
         'width:16px;height:16px;text-align:center;' +
         'border-radius:50%;border:1px solid var(--cvz-border,#232b36);' +
