@@ -1156,7 +1156,7 @@
   // bewahrt den Zugang zu Keywords, Prompts und GSC).
   var TOPIC_TABS = [
     { id: 'situation', label: 'Situation' },
-    { id: 'journey', label: 'Journey Map & Wettbewerb' },
+    { id: 'journey', label: 'Journey Map' },
     { id: 'aktionsplan', label: 'Aktionsplan' },
     { id: 'verlauf', label: 'Verlauf & Änderungen' },
     { id: 'daten', label: 'Daten' },
@@ -2340,7 +2340,7 @@
 
     var table = document.createElement('table');
     table.className = 'cvz-table cvz-table-clickable';
-    table.innerHTML = '<thead><tr><th>Thema</th><th>Status</th><th>Gestartet</th><th>Opportunities</th><th>Aktion</th></tr></thead>';
+    table.innerHTML = '<thead><tr><th>Thema</th><th>Status</th><th>Gestartet</th><th>Aktion</th></tr></thead>';
     var tbody = document.createElement('tbody');
     topics.forEach(function (topic) {
       var status = STATUS_LABELS[topic.status] || { label: topic.status, className: '' };
@@ -2417,7 +2417,6 @@
           ) : '') +
         '</td>' +
         '<td>' + formatRelativeTime(topic.created_at) + '</td>' +
-        '<td>' + (topic.opportunities_count === null ? '–' : escapeHtml(topic.opportunities_count)) + '</td>' +
         '<td>' + actionCell + '</td>';
         tbody.appendChild(tr);
     });
@@ -6776,7 +6775,16 @@
       '.cvz-create-info { width: 100%; font-size: 13px; color: var(--cvz-text-muted); margin: 6px 0 0; }' +
       '.cvz-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 16px; }' +
       '.cvz-modal-box { background: #141b24; border: 1px solid #232b36; border-radius: 4px; padding: 20px; max-width: 380px; width: 100%; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }' +
-      '.cvz-modal-title { font-family: "Geist", sans-serif; font-size: 15px; font-weight: 600; color: var(--cvz-text-muted); margin: 0 0 8px; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
+      // GEFIXT (21.09.2026): var(--cvz-text-muted) ohne Fallback zeigte hier
+      // hell/weiss statt grau. Grund: die --cvz-*-Variablen sind auf
+      // #cvz-visibility-app gescoped (siehe weiter oben), der Modal-Overlay
+      // haengt aber direkt an document.documentElement (siehe showCvzModal),
+      // liegt also ausserhalb dieses Scopes und erbt die Variable nicht -
+      // var() ohne gueltigen Wert macht die color-Deklaration ungueltig,
+      // die Schrift faellt auf die geerbte (helle) Seitenfarbe zurueck.
+      // Fester Hex-Wert statt var(), analog zu .cvz-modal-text direkt
+      // darunter, die aus demselben Grund schon fest kodiert ist.
+      '.cvz-modal-title { font-family: "Geist", sans-serif; font-size: 15px; font-weight: 600; color: #8b98a5; margin: 0 0 8px; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
       '.cvz-modal-text { font-family: "Geist", sans-serif; font-size: 13px; color: #8b98a5; margin: 0 0 20px; line-height: 1.5; }' +
       '.cvz-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }' +
       '.cvz-modal-btn { font-family: "Geist", sans-serif; font-size: 12px; padding: 6px 14px; border-radius: 0; cursor: pointer; border: 1px solid transparent; }' +
