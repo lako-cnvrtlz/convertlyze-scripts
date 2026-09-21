@@ -2170,8 +2170,20 @@
     topicInput.maxLength = TOPIC_MAX_CHARS;
 
     var topicHint = document.createElement('p');
-    topicHint.style.cssText = 'margin:-2px 0 6px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    topicHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
     topicHint.textContent = 'max. ' + TOPIC_MAX_CHARS + ' Zeichen';
+
+    // GEFIXT (21.09.2026): topicInput/topicHint hingen bisher als zwei
+    // eigenstaendige Flex-Items direkt in .cvz-create-form-fields (einer
+    // Flex-Row), dadurch stand der Hinweis oben neben statt unter dem
+    // Eingabefeld. Gemeinsamer Wrapper haelt beide zusammen als EIN
+    // Flex-Item der Row, Eingabefeld und Hinweis stehen darin normal
+    // untereinander.
+    var topicFieldWrap = document.createElement('div');
+    topicFieldWrap.style.cssText = 'flex:1;min-width:180px;';
+    topicInput.style.width = '100%';
+    topicFieldWrap.appendChild(topicInput);
+    topicFieldWrap.appendChild(topicHint);
 
     var submitBtn = document.createElement('button');
     submitBtn.type = 'button';
@@ -2182,8 +2194,7 @@
 
     form.appendChild(domainSelect);
     form.appendChild(newDomainInput);
-    form.appendChild(topicInput);
-    form.appendChild(topicHint);
+    form.appendChild(topicFieldWrap);
     form.appendChild(submitBtn);
 
     if (state.createError) {
@@ -2259,9 +2270,16 @@
 
     var header = document.createElement('div');
     header.className = 'cvz-domain-header';
+    // GEFIXT (21.09.2026): project.name ist bei den meisten Domains
+    // identisch zu project.domain (kein eigener Anzeigename vergeben),
+    // dadurch stand hier zweimal derselbe Domain-Name untereinander.
+    // Die zweite Zeile nur zeigen, wenn sie wirklich einen zusätzlichen
+    // Namen trägt.
     header.innerHTML =
       '<h3 class="cvz-section-title">' + escapeHtml(project.name) + '</h3>' +
-      '<p class="cvz-card-eyebrow">' + escapeHtml(project.domain) + '</p>';
+      (project.name !== project.domain
+        ? '<p class="cvz-card-eyebrow">' + escapeHtml(project.domain) + '</p>'
+        : '');
     wrap.appendChild(header);
 
     wrap.appendChild(renderTabNav(DOMAIN_TABS, state.activeSubTab));
@@ -6504,13 +6522,18 @@
     bewertungsportale: 'Bewertungsportale (für Bewertungen und Kundenstimmen)',
     medien: 'Medien und Fachartikel (für Digital PR, Gastbeiträge, Listungen)',
     community: 'Community und Video (für aktive Beteiligung)',
+    // NEU (21.09.2026, siehe Chat-Verlauf 21.09.2026): eigene Gruppe für
+    // Domains, die zwar oft zitiert werden, aber kein realistisches
+    // Gastbeitrags-/Digital-PR-Ziel sind (z.B. offizielle Hersteller-
+    // Dokumentation wie help.sap.com), siehe outreach_targets.py: pitchable.
+    recherche: 'Rechercheziele (kein Gastbeitrag realistisch, aber hilfreich für eigene FAQs/Wissensartikel)',
   };
 
   function renderOutreachTargetsSection(detail) {
     var o = detail.outreach_targets;
     if (!o) return null;
     var groups = o.groups || {};
-    var hasAny = ['bewertungsportale', 'medien', 'community'].some(function (g) { return (groups[g] || []).length; }) ||
+    var hasAny = ['bewertungsportale', 'medien', 'community', 'recherche'].some(function (g) { return (groups[g] || []).length; }) ||
       (o.zu_pruefen || []).length;
     if (!hasAny) return null;
 
@@ -6539,7 +6562,7 @@
       (o.nicht_eingeordnet_anzahl ? ' ' + o.nicht_eingeordnet_anzahl + ' weitere zitierte Quellen sind noch nicht eingeordnet und werden mit dem nächsten Monatslauf geprüft.' : '');
     section.appendChild(sub);
 
-    ['bewertungsportale', 'medien', 'community'].forEach(function (g) {
+    ['bewertungsportale', 'medien', 'community', 'recherche'].forEach(function (g) {
       var list = renderTargetList(groups[g]);
       if (!list) return;
       var card = document.createElement('div');
