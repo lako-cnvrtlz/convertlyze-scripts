@@ -1080,7 +1080,7 @@
   // Farb- und Hinweis-Konfiguration fuer Beste-Content-Chancen-Typen.
   var CONTENT_CHANCE_CONFIG = {
     erste_ki_zitierung: {
-      label: 'Erste KI-Zitierung, ausbaufaehig',
+      label: 'Erste KI-Zitierung, ausbaufähig',
       color: '#4fd1c5',
       bg: 'rgba(79,209,197,.08)',
       border: 'rgba(79,209,197,.3)',
