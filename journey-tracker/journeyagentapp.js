@@ -1177,6 +1177,8 @@
     // funktioniert's"-Seiten ohne Verkaufsabsicht ab, die vorher
     // zwangsläufig auf 'fachartikel' oder 'produktseite' fielen.
     erklaerseite:      'Erklärseite',
+    // NEU (21.09.2026): Hersteller-Dokumentation und Hilfe-Portale (siehe source_analysis.py).
+    dokumentation:     'Dokumentation',
     fachartikel:       'Fachartikel',
     video:             'Video',
     forum:             'Forum',
