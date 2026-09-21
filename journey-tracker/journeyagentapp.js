@@ -1080,7 +1080,7 @@
   // Farb- und Hinweis-Konfiguration fuer Beste-Content-Chancen-Typen.
   var CONTENT_CHANCE_CONFIG = {
     erste_ki_zitierung: {
-      label: 'Erste KI-Zitierung, ausbaufähig',
+      label: 'Erste KI-Zitierung, ausbaufaehig',
       color: '#4fd1c5',
       bg: 'rgba(79,209,197,.08)',
       border: 'rgba(79,209,197,.3)',
@@ -1289,7 +1289,7 @@
   // bewahrt den Zugang zu Keywords, Prompts und GSC).
   var TOPIC_TABS = [
     { id: 'situation', label: 'Situation' },
-    { id: 'journey', label: 'Journey Map & Wettbewerb' },
+    { id: 'journey', label: 'Journey Map' },
     { id: 'aktionsplan', label: 'Aktionsplan' },
     { id: 'verlauf', label: 'Verlauf & Änderungen' },
     { id: 'daten', label: 'Daten' },
@@ -3912,7 +3912,7 @@
     toggleBtn.textContent = (isOpen ? '\u2212 ' : '+ ') + 'Wettbewerber bearbeiten (' + activeDomains.length + ' aktiv)';
     competitorToggleRow.appendChild(toggleBtn);
     competitorToggleRow.appendChild(makeTip(
-      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden f\u00fcr den hochpriorit\u00e4ren Alert \u201eWettbewerber \u00fcberholt euch\u201c genutzt und unter Journey Map & Wettbewerb analysiert. Die Grafik \u201eSichtbarkeit im Wettbewerbsvergleich\u201c zeigt dagegen ALLE Domains, die KI-Systeme tats\u00e4chlich zitiert haben \u2013 auch bisher nicht best\u00e4tigte. Bereits zitierte Domains werden als Vorschl\u00e4ge angezeigt.'
+      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden f\u00fcr den hochpriorit\u00e4ren Alert \u201eWettbewerber \u00fcberholt euch\u201c genutzt und in der Journey Map als Share of Voice analysiert. Die Grafik \u201eSichtbarkeit im Wettbewerbsvergleich\u201c zeigt dagegen ALLE Domains, die KI-Systeme tats\u00e4chlich zitiert haben \u2013 auch bisher nicht best\u00e4tigte. Bereits zitierte Domains werden als Vorschl\u00e4ge angezeigt.'
     ));
     section.appendChild(competitorToggleRow);
 
@@ -6529,8 +6529,8 @@
             ? '<div class="cvz-action-recommendation"><p class="cvz-changelog-guided-label">Wo veröffentlichen</p>' +
               '<p class="cvz-opportunity-description">' + escapeHtml(b.where_to_publish) + '</p></div>'
             : '');
-        var targetList = renderTargetList(b.targets);
-        if (targetList) c.appendChild(targetList);
+        // GEAENDERT (21.09.2026): keine konkreten Ziele (Domains) mehr im Wissens-Check.
+        // Die Zielliste steht weiterhin im Aktionsplan, siehe renderOutreachTargetsSection.
         grid.appendChild(c);
       });
       section.appendChild(grid);
@@ -7368,7 +7368,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt ALLE Domains. Nicht nur manuell ausgew\u00e4hlte Wettbewerber.';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt ALLE Domains \u2013 nicht nur manuell ausgew\u00e4hlte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck.';
     section.appendChild(sub);
 
     // Favicon-Hilfsfunktion
@@ -8117,7 +8117,36 @@
   // Baut eine kleine Datentabelle (DOM), die die Rohdaten hinter einem
   // Aktionsplan-Item auflistet: je nach Kategorie Prompts, Keywords oder
   // Wettbewerber.
-  function _buildSupportingDataTable(catKey, phase, detail) {
+  // GEAENDERT (21.09.2026): 4. Parameter "item" (das Aktionsplan-Item selbst).
+  // Die Google-Tabelle zeigte bisher ALLE GSC-Keywords der Domain (auch aus anderen
+  // Geschaeftsbereichen, z.B. 55 Zeilen mit brownfield/BTP unter "SAP Archivierung").
+  // Jetzt nur noch die Zeilen, die zu diesem Item gehoeren (siehe _pickGscRowsForItem).
+  // Laesst sich keine Zeile eindeutig zuordnen, erscheint keine Tabelle.
+  function _normalizeUrlForMatch(u) {
+    return String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/[#?].*$/, '').replace(/\/+$/, '');
+  }
+  function _pickGscRowsForItem(kws, item) {
+    var ev = (item && item.evidence) || {};
+    // 1) Keywords, die auf dieselbe URL zeigen wie der Beleg des Items
+    var evUrl = ev.page_url ? _normalizeUrlForMatch(ev.page_url) : '';
+    if (evUrl) {
+      var byUrl = kws.filter(function (q) { return _normalizeUrlForMatch(q.page_url) === evUrl; });
+      if (byUrl.length) return byUrl;
+    }
+    // 2) Keywords, die im Text des Items vorkommen
+    var text = [item && item.title, item && item.situation, item && item.recommendation].join(' ').toLowerCase();
+    var byText = kws.filter(function (q) { return q.keyword && text.indexOf(String(q.keyword).toLowerCase()) !== -1; });
+    if (byText.length) return byText;
+    // 3) Die Zeile mit genau der Position und den Impressionen aus dem Beleg
+    if (ev.position != null && ev.impressions != null) {
+      var byNum = kws.filter(function (q) {
+        return Math.abs(Number(q.gsc_position) - Number(ev.position)) < 0.06 && Number(q.gsc_impressions) === Number(ev.impressions);
+      });
+      if (byNum.length) return byNum;
+    }
+    return [];
+  }
+  function _buildSupportingDataTable(catKey, phase, detail, item) {
     var rows = [];
     var headers = [];
 
@@ -8142,6 +8171,7 @@
         return (phase === 'alle_phasen' || q.messymiddle_phase === phase)
           && q.gsc_position != null;
       }).sort(function (a, b) { return (a.gsc_position || 999) - (b.gsc_position || 999); });
+      kws = _pickGscRowsForItem(kws, item);
       if (kws.length === 0) return null;
       headers = ['Keyword', 'Position', 'Impressionen'];
       rows = kws.map(function (q) {
@@ -8598,7 +8628,7 @@
           }
 
           // ---- ZUGRUNDE LIEGENDE DATEN ----
-          var dataTable = _buildSupportingDataTable(catKey, item.phase || 'alle_phasen', detail);
+          var dataTable = _buildSupportingDataTable(catKey, item.phase || 'alle_phasen', detail, item);
           if (dataTable) body.appendChild(dataTable);
 
           // ---- EMPFEHLUNG. NEU (17.09.2026): durchgestrichen wenn erledigt ----
