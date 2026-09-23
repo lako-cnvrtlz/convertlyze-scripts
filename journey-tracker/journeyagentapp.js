@@ -1105,7 +1105,7 @@
   // Farb- und Hinweis-Konfiguration fuer Beste-Content-Chancen-Typen.
   var CONTENT_CHANCE_CONFIG = {
     erste_ki_zitierung: {
-      label: 'Erste KI-Zitierung, ausbaufaehig',
+      label: 'Erste KI-Zitierung, ausbaufähig',
       color: '#4fd1c5',
       bg: 'rgba(79,209,197,.08)',
       border: 'rgba(79,209,197,.3)',
@@ -4425,7 +4425,7 @@
       lbl.textContent = '„' + chance.label + '“';
       inner.appendChild(lbl);
 
-      // Zitierrate parsen ("N von M ausgewerteten Laeufen zitiert")
+      // Zitierrate parsen ("N von M ausgewerteten Läufen zitiert")
       var m = chance.detail ? chance.detail.match(/(\d+)\s+von\s+(\d+)/) : null;
       if (m) {
         var cited = parseInt(m[1], 10);
@@ -4439,7 +4439,7 @@
         statBox.style.cssText = 'flex-shrink:0;text-align:center;min-width:44px;';
         statBox.innerHTML =
           '<div style="font-size:22px;font-weight:800;line-height:1;color:' + cfg.color + ';">' + cited + '/' + total + '</div>' +
-          '<div style="font-size:10px;margin-top:2px;color:var(--cvz-text-muted,#8b98a5);">Laeufe</div>';
+          '<div style="font-size:10px;margin-top:2px;color:var(--cvz-text-muted,#8b98a5);">Läufe</div>';
         statRow.appendChild(statBox);
 
         var barCol = document.createElement('div');
@@ -8620,7 +8620,7 @@
     var SVG_W = 580, SVG_P = 32;
 
     // Nur Phasen mit tatsaechlichen Daten als X-Achse zeigen.
-    // Phasen ohne Laeufe (total=0 fuer alle Kanaele UND kein Wettbewerber) werden ausgeblendet.
+    // Phasen ohne Läufe (total=0 fuer alle Kanaele UND kein Wettbewerber) werden ausgeblendet.
     var PHASE_LABEL_MAP = { exploration: 'Exploration', evaluation: 'Evaluation', comparison: 'Vergleich', decision: 'Entscheidung' };
     var activePhases = PHASE_ORDER.filter(function (phase) {
       var scores = dashData.phase_scores[phase] || {};
