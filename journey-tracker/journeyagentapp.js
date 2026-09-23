@@ -59,6 +59,15 @@
     isSubmittingCompetitors: false,
     manualPromptDraftText: '',
     manualPromptDraftPhase: 'exploration',
+    manualPromptDraftRoleId: '',
+    // NEU (23.09.2026): Buying Center bestehender Themen
+    buyingCenterCache: {},
+    loadingBuyingCenter: {},
+    bcEditOpen: {},
+    bcEditDraft: {},
+    bcEditResult: {},
+    isSavingBc: false,
+    isSuggestingBcEdit: false,
     isSubmittingManualPrompt: false,
     manualKeywordDraftText: '',
     isSubmittingManualKeyword: false,
@@ -67,6 +76,15 @@
     showCreateForm: false,
     isCreating:     false,
     createError:    null,
+    // NEU (23.09.2026): zweistufiges Anlegen. Schritt 1: Domain, Thema,
+    // optional Angebotsseite. Schritt 2: vorgeschlagenes Buying Center und
+    // Zielgruppe bestätigen, anpassen oder austauschen.
+    createStep:     1,
+    createDraft:    { projectId: null, topicText: '', offerUrl: '' },
+    bcSuggestion:   null,
+    bcDraftRoles:   [],
+    bcTargetGroup:  '',
+    isSuggestingBc: false,
     limitReached:   false,
     isBuyingSlot:   false,
     topicUsage:     null,
@@ -157,6 +175,7 @@
     delete state.monthlyOverviewTrendCache[topicId];
     delete state.topicRankHistoryCache[topicId];
     delete state.citationTrendCache[topicId];
+    delete state.buyingCenterCache[topicId];
 
     // Auch die Domain-Übersicht (Opportunities über alle Themen) ist dann veraltet.
     var topic = getTopicById(topicId);
@@ -166,6 +185,9 @@
   // Lädt die Zusatzdaten für den gerade offenen Tab. Steckte vorher direkt in
   // openTopicDetail und wird jetzt auch nach einer Neu-Analyse gebraucht.
   function loadTabData(topicId) {
+    if (state.activeSubTab === 'situation' || state.activeSubTab === 'daten') {
+      maybeLoadBuyingCenter(topicId);
+    }
     if (state.activeSubTab === 'situation') {
       maybeLoadVisibilityTrend(topicId);
       maybeLoadTopicRankHistory(topicId);
@@ -456,6 +478,8 @@
       change_assessment: data.change_assessment || { summary: { anzahl: 0 }, items: [] },
       step_status: data.step_status || [],
       outreach_targets: data.outreach_targets || null,
+      // NEU (23.09.2026): freie Prompt-Plätze (gemeinsamer Topf von 20)
+      prompt_budget: data.prompt_budget || null,
       competitors: [],
       gsc_rows: (data.search_queries || [])
         .filter(function (q) { return q.source === 'gsc_near_miss'; })
@@ -1348,12 +1372,95 @@
       state.showCreateForm = !state.showCreateForm;
       state.createError = null;
       state.limitReached = false;
+      resetCreateFlow();
       render();
       return;
     }
+    // GEÄNDERT (23.09.2026): "Weiter" holt jetzt zuerst den Buying-Center-
+    // Vorschlag, statt das Thema direkt anzulegen.
     var createSubmit = event.target.closest('[data-cvz-create-submit]');
     if (createSubmit) {
-      submitCreateForm();
+      submitCreateStep1(true);
+      return;
+    }
+    var createSkipBc = event.target.closest('[data-cvz-create-skip-bc]');
+    if (createSkipBc) {
+      if (state.createStep === 2) {
+        submitCreateFinal(false);
+      } else {
+        submitCreateStep1(false);
+      }
+      return;
+    }
+    var createConfirm = event.target.closest('[data-cvz-create-confirm]');
+    if (createConfirm) {
+      submitCreateFinal(true);
+      return;
+    }
+    var createBack = event.target.closest('[data-cvz-create-back]');
+    if (createBack) {
+      state.createStep = 1;
+      state.createError = null;
+      render();
+      return;
+    }
+    // GEÄNDERT (23.09.2026): Rollen-Karten gibt es jetzt im Anlege-Dialog
+    // (ctx "create") und im Bearbeiten von bestehenden Themen (ctx "edit").
+    var bcRemove = event.target.closest('[data-cvz-bc-remove]');
+    if (bcRemove) {
+      var removeRoles = getRoleArray(bcRemove.getAttribute('data-cvz-bc-ctx'));
+      removeRoles.splice(parseInt(bcRemove.getAttribute('data-cvz-bc-remove'), 10), 1);
+      ensureOneChampion(removeRoles);
+      render();
+      return;
+    }
+    var bcChampion = event.target.closest('[data-cvz-bc-champion]');
+    if (bcChampion) {
+      var championIndex = parseInt(bcChampion.getAttribute('data-cvz-bc-champion'), 10);
+      getRoleArray(bcChampion.getAttribute('data-cvz-bc-ctx')).forEach(function (r, i) { r.ist_champion = (i === championIndex); });
+      render();
+      return;
+    }
+    var bcAdd = event.target.closest('[data-cvz-bc-add]');
+    if (bcAdd) {
+      var addRoles = getRoleArray(bcAdd.getAttribute('data-cvz-bc-ctx'));
+      if (addRoles.length < MAX_BC_ROLES) {
+        addRoles.push({
+          rolle: bcAdd.getAttribute('data-cvz-bc-add') || '',
+          ist_champion: false, motivation: '', einwand: '',
+        });
+        ensureOneChampion(addRoles);
+      }
+      render();
+      return;
+    }
+    var bcEditToggle = event.target.closest('[data-cvz-bc-edit-toggle]');
+    if (bcEditToggle) {
+      toggleRoleEditor(bcEditToggle.getAttribute('data-cvz-bc-edit-toggle'));
+      return;
+    }
+    var bcEditSave = event.target.closest('[data-cvz-bc-edit-save]');
+    if (bcEditSave) {
+      saveRoleEditor(bcEditSave.getAttribute('data-cvz-bc-edit-save'));
+      return;
+    }
+    var bcEditSuggest = event.target.closest('[data-cvz-bc-edit-suggest]');
+    if (bcEditSuggest) {
+      suggestRolesForExistingTopic(bcEditSuggest.getAttribute('data-cvz-bc-edit-suggest'));
+      return;
+    }
+    var bcFill = event.target.closest('[data-cvz-bc-fill]');
+    if (bcFill) {
+      fillMissingRolePrompts(bcFill.getAttribute('data-cvz-bc-fill'));
+      return;
+    }
+    var promptRoleSet = event.target.closest('[data-cvz-prompt-role-set]');
+    if (promptRoleSet) {
+      setPromptRole(
+        state.activeTopicId,
+        promptRoleSet.getAttribute('data-cvz-prompt-role-pid'),
+        promptRoleSet.getAttribute('data-cvz-prompt-role-set') || null,
+      );
       return;
     }
     var buySlot = event.target.closest('[data-cvz-buy-slot]');
@@ -1522,6 +1629,9 @@
       var newTab = tabBtn.getAttribute('data-cvz-tab');
       state.activeSubTab = newTab;
       updateUrlParams({ cvz_tab: newTab });
+      if ((newTab === 'situation' || newTab === 'daten') && state.activeView === 'topic-detail') {
+        maybeLoadBuyingCenter(state.activeTopicId);
+      }
       if (newTab === 'situation' && state.activeView === 'topic-detail') {
         maybeLoadVisibilityTrend(state.activeTopicId);
         maybeLoadTopicRankHistory(state.activeTopicId);
@@ -1765,58 +1875,217 @@
     return wrap;
   }
 
-  async function submitCreateForm() {
+  // =========================================================================
+  // NEU (23.09.2026): Anlegen in zwei Schritten mit Buying Center
+  // =========================================================================
+  // Schritt 1 legt nur (falls nötig) die Domain an und holt einen Vorschlag
+  // für Zielgruppe und Buying Center. Das Thema selbst wird erst in Schritt 2
+  // angelegt, weil die Prompts sofort danach im Hintergrund entstehen und
+  // die Rollen dann schon feststehen müssen.
+
+  var MAX_BC_ROLES = 4;
+  var BC_TEXT_MAX_CHARS = 200;
+
+  function resetCreateFlow() {
+    state.createStep = 1;
+    state.createDraft = { projectId: null, topicText: '', offerUrl: '' };
+    state.bcSuggestion = null;
+    state.bcDraftRoles = [];
+    state.bcTargetGroup = '';
+    state.isSuggestingBc = false;
+  }
+
+  function getRoleArray(ctx) {
+    if (ctx === 'edit') {
+      var topicId = state.activeTopicId;
+      if (!state.bcEditDraft[topicId]) state.bcEditDraft[topicId] = [];
+      return state.bcEditDraft[topicId];
+    }
+    return state.bcDraftRoles;
+  }
+
+  function ensureOneChampion(rolesArg) {
+    var roles = rolesArg || state.bcDraftRoles;
+    if (roles.length === 0) return;
+    var found = false;
+    roles.forEach(function (r) {
+      if (r.ist_champion && !found) { found = true; } else { r.ist_champion = false; }
+    });
+    if (!found) roles[0].ist_champion = true;
+  }
+
+  // Liest Domain-Auswahl aus Schritt 1 und legt eine neue Domain bei Bedarf an.
+  // Gibt das Projekt zurück oder null (dann steht der Fehler in state.createError).
+  async function resolveCreateProject() {
     var domainSelect = document.getElementById('cvz-create-domain-select');
     var newDomainInput = document.getElementById('cvz-create-domain-new');
+    var selectedValue = domainSelect ? domainSelect.value : null;
+
+    if (selectedValue !== '__new__') {
+      var existing = getProjectById(selectedValue);
+      if (!existing) state.createError = 'Ausgewählte Domain nicht gefunden, bitte Seite neu laden.';
+      return existing;
+    }
+
+    var newDomainText = ((newDomainInput && newDomainInput.value) || '').trim();
+    if (!newDomainText) {
+      state.createError = 'Bitte neue Domain und Thema ausfüllen.';
+      return null;
+    }
+    // Schon einmal angelegt (z. B. nach "Zurück")? Dann wiederverwenden.
+    var already = state.projects.filter(function (p) { return p.domain === newDomainText; })[0];
+    if (already) return already;
+
+    var project;
+    if (CONFIG.useMockData) {
+      project = { id: 'proj-' + Date.now(), name: newDomainText, domain: newDomainText };
+    } else {
+      var projectData = await apiFetch('/projects', {
+        method: 'POST',
+        body: { name: newDomainText, domain: newDomainText, language_code: 'de', location_name: 'Germany' },
+      });
+      project = { id: projectData.project_id, name: newDomainText, domain: newDomainText };
+    }
+    state.projects.push(project);
+    return project;
+  }
+
+  async function submitCreateStep1(withBuyingCenter) {
     var topicInput = document.getElementById('cvz-create-topic');
-    var topicText = (topicInput.value || '').trim();
+    var urlInput = document.getElementById('cvz-create-offer-url');
+    var topicText = ((topicInput && topicInput.value) || '').trim();
+    state.createDraft.topicText = topicText;
+    state.createDraft.offerUrl = ((urlInput && urlInput.value) || '').trim();
 
-    var selectedValue = domainSelect.value;
-    var isNewDomain = selectedValue === '__new__';
-    var newDomainText = (newDomainInput.value || '').trim();
-
-    if ((isNewDomain && !newDomainText) || !topicText) {
-      state.createError = isNewDomain
-        ? 'Bitte neue Domain und Thema ausf\u00fcllen.'
-        : 'Bitte Thema ausf\u00fcllen.';
+    if (!topicText) {
+      state.createError = 'Bitte Thema ausfüllen.';
       render();
       return;
+    }
+
+    state.createError = null;
+    state.isSuggestingBc = withBuyingCenter;
+    state.isCreating = !withBuyingCenter;
+    render();
+
+    try {
+      var project = await resolveCreateProject();
+      if (!project) {
+        state.isSuggestingBc = false;
+        state.isCreating = false;
+        render();
+        return;
+      }
+      state.createDraft.projectId = project.id;
+      state.activeProjectId = project.id;
+
+      if (!withBuyingCenter) {
+        await createTopicWithBuyingCenter(project, topicText, null, []);
+        return;
+      }
+
+      var suggestion;
+      if (CONFIG.useMockData) {
+        suggestion = {
+          ist_solo_zielgruppe: false,
+          zielgruppe_vorschlag: 'Mittelständische Unternehmen mit eigener IT-Abteilung, die ihre Infrastruktur auslagern wollen.',
+          rollen: [
+            { rolle: 'IT-Leitung', ist_champion: true, motivation: 'Ausfallsicherheit ohne eigenes zweites Rechenzentrum', einwand: 'Latenz und Anbindung zum eigenen Standort ungeklärt' },
+            { rolle: 'Geschäftsführung', ist_champion: false, motivation: 'Planbare Kosten statt Investitionen', einwand: 'Lange Vertragsbindung' },
+          ],
+          annahmen: ['Angenommen: Unternehmen mit 200 bis 1.000 Mitarbeitenden'],
+          grundlage_duenn: !state.createDraft.offerUrl,
+          seite_gelesen: !!state.createDraft.offerUrl,
+          seite_fehler: null,
+          bibliothek: ['Einkauf', 'IT-Leitung'],
+        };
+      } else {
+        suggestion = await apiFetch('/projects/' + project.id + '/buying-center/suggest', {
+          method: 'POST',
+          body: {
+            topic_name: topicText,
+            seed_keyword: topicText,
+            offer_url: state.createDraft.offerUrl || null,
+          },
+        });
+      }
+
+      state.bcSuggestion = suggestion;
+      state.bcTargetGroup = suggestion.zielgruppe_vorschlag || '';
+      state.bcDraftRoles = (suggestion.rollen || []).map(function (r) {
+        return { rolle: r.rolle || '', ist_champion: !!r.ist_champion, motivation: r.motivation || '', einwand: r.einwand || '' };
+      });
+      ensureOneChampion();
+      state.createStep = 2;
+    } catch (e) {
+      console.error('[CVZ Visibility] Buying-Center-Vorschlag fehlgeschlagen:', e);
+      state.createError = 'Der Vorschlag für die Rollen konnte nicht erstellt werden. ' +
+        'Ihr könnt es erneut versuchen oder das Thema ohne Rollen anlegen.';
+    }
+    state.isSuggestingBc = false;
+    state.isCreating = false;
+    render();
+  }
+
+  async function submitCreateFinal(withBuyingCenter) {
+    var project = getProjectById(state.createDraft.projectId);
+    if (!project) {
+      state.createError = 'Domain nicht gefunden, bitte Seite neu laden.';
+      render();
+      return;
+    }
+
+    var roles = [];
+    if (withBuyingCenter) {
+      roles = state.bcDraftRoles
+        .map(function (r) {
+          return {
+            rolle: (r.rolle || '').trim(),
+            ist_champion: !!r.ist_champion,
+            motivation: (r.motivation || '').trim() || null,
+            einwand: (r.einwand || '').trim() || null,
+          };
+        })
+        .filter(function (r) { return r.rolle; });
+
+      var isSolo = state.bcSuggestion && state.bcSuggestion.ist_solo_zielgruppe;
+      if (roles.length === 0 && !isSolo) {
+        state.createError = 'Bitte mindestens eine Rolle behalten oder "Ohne Rollen anlegen" wählen.';
+        render();
+        return;
+      }
+      var names = roles.map(function (r) { return r.rolle.toLowerCase(); });
+      var hasDuplicate = names.some(function (n, i) { return names.indexOf(n) !== i; });
+      if (hasDuplicate) {
+        state.createError = 'Jede Rolle darf nur einmal vorkommen.';
+        render();
+        return;
+      }
     }
 
     state.isCreating = true;
     state.createError = null;
     render();
+    var targetGroup = withBuyingCenter ? (state.bcTargetGroup || '').trim() || null : null;
+    await createTopicWithBuyingCenter(project, state.createDraft.topicText, targetGroup, roles);
+  }
 
+  async function createTopicWithBuyingCenter(project, topicText, targetGroup, roles) {
     try {
-      var project;
-      if (isNewDomain) {
-        if (CONFIG.useMockData) {
-          project = { id: 'proj-' + Date.now(), name: newDomainText, domain: newDomainText };
-        } else {
-          var projectData = await apiFetch('/projects', {
-            method: 'POST',
-            body: { name: newDomainText, domain: newDomainText, language_code: 'de', location_name: 'Germany' },
-          });
-          project = { id: projectData.project_id, name: newDomainText, domain: newDomainText };
-        }
-        state.projects.push(project);
-      } else {
-        project = getProjectById(selectedValue);
-        if (!project) {
-          state.isCreating = false;
-          state.createError = 'Ausgewählte Domain nicht gefunden, bitte Seite neu laden.';
-          render();
-          return;
-        }
-      }
-
       var newTopic;
       if (CONFIG.useMockData) {
         newTopic = { id: 'topic-' + Date.now(), project_id: project.id, name: topicText, seed_keyword: topicText, status: 'collecting', opportunities_count: 0 };
       } else {
         var topicData = await apiFetch('/topics', {
           method: 'POST',
-          body: { project_id: project.id, topic_name: topicText, seed_keyword: topicText, sample_prompts: [] },
+          body: {
+            project_id: project.id,
+            topic_name: topicText,
+            seed_keyword: topicText,
+            sample_prompts: [],
+            target_group: targetGroup,
+            buying_center: roles,
+          },
         });
         newTopic = { id: topicData.topic_id, project_id: project.id, name: topicText, seed_keyword: topicText, status: topicData.status || 'collecting', opportunities_count: 0 };
       }
@@ -1830,6 +2099,7 @@
 
       state.isCreating = false;
       state.showCreateForm = false;
+      resetCreateFlow();
       if (newTopic.status !== 'queued') {
         maybeStartPolling();
       }
@@ -2059,10 +2329,11 @@
       } else {
         await apiFetch('/topics/' + topicId + '/prompts', {
           method: 'POST',
-          body: { prompt_text: promptText, messymiddle_phase: phase },
+          body: { prompt_text: promptText, messymiddle_phase: phase, role_id: state.manualPromptDraftRoleId || null },
         });
         state.manualPromptDraftText = '';
         delete state.topicDetailCache[topicId];
+        delete state.buyingCenterCache[topicId];
         await openTopicDetail(topicId, false);
       }
     } catch (e) {
@@ -2090,6 +2361,7 @@
       await apiFetch('/topics/' + topicId + '/prompts/' + promptId + '/deactivate', { method: 'PATCH' });
       state.manualPromptDraftText = '';
       delete state.topicDetailCache[topicId];
+      delete state.buyingCenterCache[topicId];
       await openTopicDetail(topicId, false);
     } catch (e) {
       console.error('[CVZ Visibility] Prompt konnte nicht deaktiviert werden:', e);
@@ -2265,6 +2537,12 @@
       form.appendChild(queueMsg);
     }
 
+    // NEU (23.09.2026): Schritt 2 (Buying Center bestätigen)
+    if (state.createStep === 2) {
+      wrap.appendChild(renderBuyingCenterStep());
+      return wrap;
+    }
+
     var domainSelect = document.createElement('select');
     domainSelect.id = 'cvz-create-domain-select';
     domainSelect.className = 'cvz-create-input';
@@ -2302,6 +2580,7 @@
     topicInput.className = 'cvz-create-input';
     topicInput.placeholder = 'Thema / Seed-Keyword (z.B. landingpage optimierung)';
     topicInput.maxLength = TOPIC_MAX_CHARS;
+    topicInput.value = state.createDraft.topicText || '';
 
     var topicHint = document.createElement('p');
     topicHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
@@ -2319,17 +2598,46 @@
     topicFieldWrap.appendChild(topicInput);
     topicFieldWrap.appendChild(topicHint);
 
+    // NEU (23.09.2026): optionale Angebotsseite. Ersetzt die Abfrage von
+    // Branche/Zielgruppe: Claude liest die Seite und leitet daraus ab.
+    var urlFieldWrap = document.createElement('div');
+    urlFieldWrap.style.cssText = 'flex:1 1 100%;';
+    var urlInput = document.createElement('input');
+    urlInput.type = 'url';
+    urlInput.id = 'cvz-create-offer-url';
+    urlInput.className = 'cvz-create-input';
+    urlInput.style.width = '100%';
+    urlInput.placeholder = 'URL eurer Angebotsseite zu diesem Thema (optional)';
+    urlInput.value = state.createDraft.offerUrl || '';
+    var urlHint = document.createElement('p');
+    urlHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    urlHint.textContent = 'Muss auf eurer Domain liegen. Daraus leiten wir Zielgruppe und Buying Center deutlich treffender ab.';
+    urlFieldWrap.appendChild(urlInput);
+    urlFieldWrap.appendChild(urlHint);
+
+    var busy = state.isCreating || state.isSuggestingBc;
     var submitBtn = document.createElement('button');
     submitBtn.type = 'button';
     submitBtn.className = 'cvz-create-submit-btn';
     submitBtn.setAttribute('data-cvz-create-submit', '');
-    submitBtn.disabled = state.isCreating;
-    submitBtn.textContent = state.isCreating ? 'Wird angelegt \u2026' : 'Anlegen';
+    submitBtn.disabled = busy;
+    submitBtn.innerHTML = state.isSuggestingBc
+      ? '<span class="cvz-spinner"></span>Rollen werden vorgeschlagen \u2026'
+      : 'Weiter';
+
+    var skipBtn = document.createElement('button');
+    skipBtn.type = 'button';
+    skipBtn.className = 'cvz-delete-topic-btn';
+    skipBtn.setAttribute('data-cvz-create-skip-bc', '');
+    skipBtn.disabled = busy;
+    skipBtn.textContent = state.isCreating ? 'Wird angelegt \u2026' : 'Ohne Rollen anlegen';
 
     form.appendChild(domainSelect);
     form.appendChild(newDomainInput);
     form.appendChild(topicFieldWrap);
+    form.appendChild(urlFieldWrap);
     form.appendChild(submitBtn);
+    form.appendChild(skipBtn);
 
     if (state.createError) {
       var err = document.createElement('p');
@@ -2350,6 +2658,625 @@
 
     wrap.appendChild(form);
     return wrap;
+  }
+
+  // NEU (23.09.2026): Schritt 2 des Anlegens. Vorschlag prüfen, Rollen
+  // umbenennen, entfernen, austauschen (aus anderen Themen der Domain) oder
+  // ergänzen. Bewusst auf MAX_BC_ROLES begrenzt, weil sich die 16 Prompts
+  // sonst zu dünn auf die Rollen verteilen.
+  function renderBuyingCenterStep() {
+    var sug = state.bcSuggestion || {};
+    var box = document.createElement('div');
+    box.className = 'cvz-card';
+    box.style.cssText = 'margin-top:10px;display:flex;flex-direction:column;gap:14px;';
+
+    var headRow = document.createElement('div');
+    headRow.style.cssText = 'display:flex;align-items:center;';
+    var head = document.createElement('p');
+    head.className = 'cvz-section-label';
+    head.style.margin = '0';
+    head.textContent = 'Wer entscheidet beim Kauf von \u201e' + state.createDraft.topicText + '\u201c mit?';
+    headRow.appendChild(head);
+    headRow.appendChild(makeTip(
+      'Für jede Rolle formulieren wir die Prompts so, wie diese Person ChatGPT oder Gemini fragen würde. ' +
+      'Die Motivation prägt Fragen am Anfang der Journey, der Einwand die Fragen kurz vor der Entscheidung. ' +
+      'Später geänderte Rollen gelten nur für neue Prompts, damit euer Verlauf vergleichbar bleibt.'
+    ));
+    box.appendChild(headRow);
+
+    function note(text, color) {
+      var p = document.createElement('p');
+      p.style.cssText = 'margin:0;font-size:12px;line-height:1.5;color:' + (color || 'var(--cvz-text-muted,#8b98a5)') + ';';
+      p.textContent = text;
+      return p;
+    }
+    if (sug.grundlage_duenn) {
+      box.appendChild(note(
+        'Diese Rollen sind allgemein gehalten, weil wir weder eine Zielgruppe noch eure Angebotsseite kennen. ' +
+        'Ergänzt unten eine Zeile zur Zielgruppe oder geht zurück und tragt die URL der Angebotsseite ein.',
+        'var(--cvz-amber,#c98e2a)'
+      ));
+    }
+    if (sug.seite_fehler) box.appendChild(note('Angebotsseite nicht gelesen: ' + sug.seite_fehler, 'var(--cvz-amber,#c98e2a)'));
+    if (sug.seite_gelesen) box.appendChild(note('Eure Angebotsseite wurde für den Vorschlag gelesen.'));
+
+    // Zielgruppe
+    var tgLabel = document.createElement('p');
+    tgLabel.className = 'cvz-changelog-guided-label';
+    tgLabel.style.margin = '0';
+    tgLabel.textContent = 'Zielgruppe';
+    box.appendChild(tgLabel);
+    var tgInput = document.createElement('textarea');
+    tgInput.id = 'cvz-bc-target';
+    tgInput.className = 'cvz-changelog-input';
+    tgInput.rows = 2;
+    tgInput.maxLength = 300;
+    tgInput.value = state.bcTargetGroup || '';
+    tgInput.placeholder = 'An wen richtet sich das Angebot? (Branche, Größe, Situation)';
+    tgInput.addEventListener('input', function () { state.bcTargetGroup = tgInput.value; });
+    box.appendChild(tgInput);
+
+    if (sug.ist_solo_zielgruppe) {
+      box.appendChild(note('Das Angebot richtet sich an Selbstständige. Dort entscheidet eine Person allein, deshalb gibt es kein Buying Center.'));
+    }
+
+    box.appendChild(renderRoleCards('create', state.bcDraftRoles, sug.bibliothek || []));
+
+    // Annahmen
+    if (sug.annahmen && sug.annahmen.length) {
+      var aLabel = document.createElement('p');
+      aLabel.className = 'cvz-changelog-guided-label';
+      aLabel.style.margin = '0';
+      aLabel.textContent = 'Getroffene Annahmen, bitte kurz prüfen';
+      box.appendChild(aLabel);
+      var list = document.createElement('ul');
+      list.style.cssText = 'margin:0;padding-left:18px;font-size:12px;color:var(--cvz-text-muted,#8b98a5);line-height:1.5;';
+      sug.annahmen.forEach(function (a) {
+        var li = document.createElement('li');
+        li.textContent = a;
+        list.appendChild(li);
+      });
+      box.appendChild(list);
+    }
+
+    // Aktionen
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;';
+    var confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'cvz-create-submit-btn';
+    confirmBtn.setAttribute('data-cvz-create-confirm', '');
+    confirmBtn.disabled = state.isCreating;
+    confirmBtn.textContent = state.isCreating ? 'Wird angelegt \u2026' : 'Thema anlegen';
+    actions.appendChild(confirmBtn);
+    var backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'cvz-archive-btn';
+    backBtn.setAttribute('data-cvz-create-back', '');
+    backBtn.disabled = state.isCreating;
+    backBtn.textContent = 'Zurück';
+    actions.appendChild(backBtn);
+    var skip = document.createElement('button');
+    skip.type = 'button';
+    skip.className = 'cvz-delete-topic-btn';
+    skip.setAttribute('data-cvz-create-skip-bc', '');
+    skip.disabled = state.isCreating;
+    skip.textContent = 'Ohne Rollen anlegen';
+    actions.appendChild(skip);
+    box.appendChild(actions);
+
+    if (state.createError) {
+      var err = document.createElement('p');
+      err.className = 'cvz-create-error';
+      err.style.margin = '0';
+      err.textContent = state.createError;
+      box.appendChild(err);
+      if (state.limitReached) {
+        var buyBtn = document.createElement('button');
+        buyBtn.type = 'button';
+        buyBtn.className = 'cvz-create-buy-btn';
+        buyBtn.setAttribute('data-cvz-buy-slot', '');
+        buyBtn.disabled = state.isBuyingSlot;
+        buyBtn.textContent = state.isBuyingSlot ? 'Wird bearbeitet \u2026' : '+ 1 Topic-Slot kaufen';
+        box.appendChild(buyBtn);
+      }
+    }
+    return box;
+  }
+
+  // =========================================================================
+  // NEU (23.09.2026): Rollen-Karten (gemeinsam für Anlegen und Bearbeiten)
+  // =========================================================================
+  // ctx "create": Anlege-Dialog, ctx "edit": bestehendes Thema. Beim
+  // Bearbeiten sind Namen bestehender Rollen gesperrt: Ein neuer Name wäre
+  // für das Backend eine neue Rolle, die Prompts der alten würden
+  // deaktiviert. Wer umbenennen will, entfernt die Rolle und legt sie neu an.
+  function renderRoleCards(ctx, roles, library) {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-direction:column;gap:10px;';
+
+    var label = document.createElement('p');
+    label.className = 'cvz-changelog-guided-label';
+    label.style.margin = '0';
+    label.textContent = 'Rollen (' + roles.length + ' von max. ' + MAX_BC_ROLES + ')';
+    wrap.appendChild(label);
+
+    roles.forEach(function (role, i) {
+      var locked = ctx === 'edit' && !!role.role_id;
+      var card = document.createElement('div');
+      card.style.cssText = 'border:1px solid var(--cvz-border,#232b36);padding:12px;display:flex;flex-direction:column;gap:8px;' +
+        (role.ist_champion ? 'border-left:3px solid var(--cvz-teal,#4fd1c5);' : '');
+
+      var top = document.createElement('div');
+      top.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
+      var nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.id = 'cvz-bc-' + ctx + '-name-' + i;
+      nameInput.className = 'cvz-create-input';
+      nameInput.maxLength = 40;
+      nameInput.placeholder = 'Rolle (z. B. IT-Leitung)';
+      nameInput.value = role.rolle;
+      nameInput.readOnly = locked;
+      if (locked) {
+        nameInput.style.opacity = '0.75';
+        nameInput.title = 'Zum Umbenennen die Rolle entfernen und neu hinzufügen.';
+      }
+      nameInput.addEventListener('input', function () { roles[i].rolle = nameInput.value; });
+      top.appendChild(nameInput);
+
+      if (ctx === 'edit' && role.role_id) {
+        var count = document.createElement('span');
+        count.style.cssText = 'font-size:11px;color:var(--cvz-text-muted,#8b98a5);white-space:nowrap;';
+        count.textContent = (role.prompt_count || 0) + ' Prompts';
+        top.appendChild(count);
+      }
+
+      var champBtn = document.createElement('button');
+      champBtn.type = 'button';
+      champBtn.className = 'cvz-persona-chip' + (role.ist_champion ? ' cvz-persona-chip-active' : '');
+      champBtn.setAttribute('data-cvz-bc-champion', String(i));
+      champBtn.setAttribute('data-cvz-bc-ctx', ctx);
+      champBtn.title = 'Der Champion treibt den Kauf voran und bekommt mehr Prompts.';
+      champBtn.textContent = role.ist_champion ? '\u2713 Treibt den Kauf' : 'Treibt den Kauf';
+      top.appendChild(champBtn);
+
+      var removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'cvz-prompt-delete-btn';
+      removeBtn.setAttribute('data-cvz-bc-remove', String(i));
+      removeBtn.setAttribute('data-cvz-bc-ctx', ctx);
+      removeBtn.setAttribute('aria-label', 'Rolle entfernen');
+      removeBtn.title = 'Rolle entfernen';
+      removeBtn.textContent = '\u00d7';
+      top.appendChild(removeBtn);
+      card.appendChild(top);
+
+      [['motivation', 'Was will diese Rolle erreichen?', '-mot-'],
+       ['einwand', 'Woran kann der Kauf bei ihr scheitern?', '-obj-']].forEach(function (cfg) {
+        var ta = document.createElement('textarea');
+        ta.id = 'cvz-bc-' + ctx + cfg[2] + i;
+        ta.className = 'cvz-changelog-input';
+        ta.rows = 2;
+        ta.maxLength = BC_TEXT_MAX_CHARS;
+        ta.placeholder = cfg[1];
+        ta.value = role[cfg[0]] || '';
+        ta.addEventListener('input', function () { roles[i][cfg[0]] = ta.value; });
+        card.appendChild(ta);
+      });
+      wrap.appendChild(card);
+    });
+
+    if (roles.length < MAX_BC_ROLES) {
+      var addRow = document.createElement('div');
+      addRow.className = 'cvz-persona-filter';
+      addRow.style.margin = '0';
+      var used = roles.map(function (r) { return (r.rolle || '').trim().toLowerCase(); });
+      (library || []).forEach(function (name) {
+        if (used.indexOf(String(name).toLowerCase()) !== -1) return;
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'cvz-persona-chip';
+        chip.setAttribute('data-cvz-bc-add', name);
+        chip.setAttribute('data-cvz-bc-ctx', ctx);
+        chip.title = 'Aus anderen Themen dieser Domain übernehmen';
+        chip.textContent = '+ ' + name;
+        addRow.appendChild(chip);
+      });
+      var addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'cvz-persona-chip';
+      addBtn.setAttribute('data-cvz-bc-add', '');
+      addBtn.setAttribute('data-cvz-bc-ctx', ctx);
+      addBtn.textContent = '+ Eigene Rolle';
+      addRow.appendChild(addBtn);
+      wrap.appendChild(addRow);
+    } else {
+      var maxNote = document.createElement('p');
+      maxNote.style.cssText = 'margin:0;font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+      maxNote.textContent = 'Maximal ' + MAX_BC_ROLES + ' Rollen. Um eine Rolle auszutauschen, erst eine bestehende entfernen.';
+      wrap.appendChild(maxNote);
+    }
+    return wrap;
+  }
+
+  // =========================================================================
+  // NEU (23.09.2026): Buying Center bestehender Themen
+  // =========================================================================
+  async function maybeLoadBuyingCenter(topicId, force) {
+    if (!topicId || CONFIG.useMockData) return;
+    if (!force && (state.buyingCenterCache[topicId] || state.loadingBuyingCenter[topicId])) return;
+    state.loadingBuyingCenter[topicId] = true;
+    try {
+      state.buyingCenterCache[topicId] = await apiFetch('/topics/' + topicId + '/buying-center');
+    } catch (e) {
+      console.error('[CVZ Visibility] Buying Center konnte nicht geladen werden:', e);
+      state.buyingCenterCache[topicId] = { rollen: [], bibliothek: [], _error: true };
+    }
+    state.loadingBuyingCenter[topicId] = false;
+    render();
+  }
+
+  function toggleRoleEditor(topicId) {
+    var opening = !state.bcEditOpen[topicId];
+    state.bcEditOpen[topicId] = opening;
+    delete state.bcEditResult[topicId];
+    if (opening) {
+      var bc = state.buyingCenterCache[topicId] || { rollen: [] };
+      state.bcEditDraft[topicId] = (bc.rollen || []).map(function (r) {
+        return {
+          role_id: r.role_id, rolle: r.rolle, ist_champion: !!r.ist_champion,
+          motivation: r.motivation || '', einwand: r.einwand || '', prompt_count: r.prompt_count || 0,
+        };
+      });
+    }
+    render();
+  }
+
+  async function suggestRolesForExistingTopic(topicId) {
+    var topic = getTopicById(topicId);
+    if (!topic || state.isSuggestingBcEdit) return;
+    state.isSuggestingBcEdit = true;
+    render();
+    try {
+      var sug = await apiFetch('/projects/' + topic.project_id + '/buying-center/suggest', {
+        method: 'POST',
+        body: { topic_name: topic.name, seed_keyword: topic.seed_keyword || topic.name },
+      });
+      state.bcEditDraft[topicId] = (sug.rollen || []).map(function (r) {
+        return { rolle: r.rolle, ist_champion: !!r.ist_champion, motivation: r.motivation || '', einwand: r.einwand || '' };
+      });
+      ensureOneChampion(state.bcEditDraft[topicId]);
+    } catch (e) {
+      console.error('[CVZ Visibility] Rollen-Vorschlag fehlgeschlagen:', e);
+      await showCvzAlert('Der Vorschlag konnte nicht erstellt werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    state.isSuggestingBcEdit = false;
+    render();
+  }
+
+  function applyBuyingCenterResult(topicId, result) {
+    state.buyingCenterCache[topicId] = result;
+    state.bcEditResult[topicId] = { deaktiviert: result.deaktiviert || 0, ergaenzung: result.ergaenzung || {} };
+    // Prompt-Liste hat sich geändert: Detail beim nächsten Rendern neu laden.
+    delete state.topicDetailCache[topicId];
+    delete state.dashboardDataCache[topicId];
+  }
+
+  async function saveRoleEditor(topicId) {
+    if (state.isSavingBc) return;
+    var draft = (state.bcEditDraft[topicId] || []).map(function (r) {
+      return {
+        rolle: (r.rolle || '').trim(), ist_champion: !!r.ist_champion,
+        motivation: (r.motivation || '').trim() || null, einwand: (r.einwand || '').trim() || null,
+      };
+    }).filter(function (r) { return r.rolle; });
+
+    var names = draft.map(function (r) { return r.rolle.toLowerCase(); });
+    if (names.some(function (n, i) { return names.indexOf(n) !== i; })) {
+      await showCvzAlert('Jede Rolle darf nur einmal vorkommen.');
+      return;
+    }
+
+    // Vorab ehrlich anzeigen, welche Prompts wegfallen.
+    var before = (state.buyingCenterCache[topicId] || {}).rollen || [];
+    var removed = before.filter(function (r) { return names.indexOf(r.rolle.toLowerCase()) === -1; });
+    var removedPrompts = removed.reduce(function (sum, r) { return sum + (r.prompt_count || 0); }, 0);
+    if (removedPrompts > 0) {
+      var ok = await showCvzConfirm(
+        removedPrompts + ' Prompts der Rolle(n) ' + removed.map(function (r) { return r.rolle; }).join(', ') +
+        ' werden deaktiviert. Ihr bisheriger Verlauf bleibt einsehbar, sie werden aber nicht mehr abgefragt. ' +
+        'Für neue Rollen erstellen wir Prompts, die ab dem nächsten Lauf Daten bekommen.',
+        { title: 'Rollen austauschen?', confirmLabel: 'Speichern' }
+      );
+      if (!ok) return;
+    }
+
+    state.isSavingBc = true;
+    render();
+    try {
+      var result = await apiFetch('/topics/' + topicId + '/buying-center', { method: 'PUT', body: { rollen: draft } });
+      applyBuyingCenterResult(topicId, result);
+      state.bcEditOpen[topicId] = false;
+      await openTopicDetail(topicId, false);
+    } catch (e) {
+      console.error('[CVZ Visibility] Rollen konnten nicht gespeichert werden:', e);
+      await showCvzAlert('Rollen konnten nicht gespeichert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    state.isSavingBc = false;
+    render();
+  }
+
+  async function fillMissingRolePrompts(topicId) {
+    if (state.isSavingBc) return;
+    state.isSavingBc = true;
+    render();
+    try {
+      var result = await apiFetch('/topics/' + topicId + '/buying-center/fill', { method: 'POST' });
+      applyBuyingCenterResult(topicId, result);
+      await openTopicDetail(topicId, false);
+    } catch (e) {
+      console.error('[CVZ Visibility] Rollen-Prompts konnten nicht ergänzt werden:', e);
+      await showCvzAlert('Prompts konnten nicht ergänzt werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    state.isSavingBc = false;
+    render();
+  }
+
+  async function setPromptRole(topicId, promptId, roleId) {
+    try {
+      var resp = await apiFetch('/topics/' + topicId + '/prompts/' + promptId + '/role', {
+        method: 'PATCH', body: { role_id: roleId },
+      });
+      var detail = state.topicDetailCache[topicId];
+      var prompt = detail && (detail.prompts || []).filter(function (p) { return p.id === promptId; })[0];
+      if (prompt) {
+        prompt.role_id = resp.role_id;
+        prompt.persona = resp.persona;
+      }
+      maybeLoadBuyingCenter(topicId, true);
+    } catch (e) {
+      console.error('[CVZ Visibility] Rolle konnte nicht zugeordnet werden:', e);
+      await showCvzAlert('Rolle konnte nicht zugeordnet werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    render();
+  }
+
+  // Rollen-Chips zum Zuordnen, oben in der aufgeklappten Prompt-Zeile.
+  function renderPromptRoleChipsHtml(prompt) {
+    var bc = state.buyingCenterCache[state.activeTopicId];
+    var roles = (bc && bc.rollen) || [];
+    if (roles.length === 0) return '';
+    var chips = roles.map(function (r) {
+      var active = prompt.role_id === r.role_id;
+      return '<button type="button" class="cvz-persona-chip' + (active ? ' cvz-persona-chip-active' : '') + '" ' +
+        'data-cvz-prompt-role-set="' + escapeHtml(r.role_id) + '" data-cvz-prompt-role-pid="' + escapeHtml(prompt.id) + '">' +
+        escapeHtml(r.rolle) + '</button>';
+    }).join('') +
+      '<button type="button" class="cvz-persona-chip' + (!prompt.role_id ? ' cvz-persona-chip-active' : '') + '" ' +
+        'data-cvz-prompt-role-set="" data-cvz-prompt-role-pid="' + escapeHtml(prompt.id) + '">Keine Rolle</button>';
+    return '<p class="cvz-changelog-guided-label">Rolle (ändert den Prompt nicht, der Verlauf bleibt)</p>' +
+      '<div class="cvz-persona-filter">' + chips + '</div>';
+  }
+
+  // Ergebnis des letzten Speicherns / Ergänzens in Klartext.
+  function renderBcResultNote(topicId) {
+    var res = state.bcEditResult[topicId];
+    if (!res) return null;
+    var parts = [];
+    if (res.deaktiviert) parts.push(res.deaktiviert + ' Prompts entfernter Rollen deaktiviert.');
+    var created = res.ergaenzung.erstellt || {};
+    var createdText = Object.keys(created).filter(function (k) { return created[k] > 0; })
+      .map(function (k) { return k + ': ' + created[k]; }).join(', ');
+    if (createdText) parts.push('Neue Prompts erstellt (' + createdText + '). Sie bekommen ab dem nächsten Lauf Daten.');
+    if (res.ergaenzung.grund === 'fehler') parts.push('Neue Prompts konnten nicht erstellt werden. Bitte später erneut versuchen.');
+    var missing = res.ergaenzung.fehlende_plaetze || {};
+    var missingText = Object.keys(missing).map(function (k) { return k + ' (' + missing[k] + ')'; }).join(', ');
+    var box = document.createElement('div');
+    box.className = 'cvz-card';
+    box.style.cssText = 'padding:10px 14px;border-left:3px solid ' + (missingText ? 'var(--cvz-amber,#c98e2a)' : 'var(--cvz-teal,#4fd1c5)') + ';';
+    var p = document.createElement('p');
+    p.style.cssText = 'margin:0;font-size:12px;line-height:1.5;color:var(--cvz-text-muted,#8b98a5);';
+    p.textContent = (parts.join(' ') || 'Gespeichert.') + (missingText
+      ? ' Für ' + missingText + ' fehlen freie Plätze (das System erstellt max. 16 Prompts, insgesamt sind 20 möglich). ' +
+        'Deaktiviert im Daten-Tab Prompts, die ihr nicht braucht, und klickt dann auf "Fehlende Prompts ergänzen". ' +
+        'Alternativ könnt ihr für die Rolle eigene Prompts anlegen.'
+      : '');
+    box.appendChild(p);
+    return box;
+  }
+
+  function renderRoleEditor(topicId) {
+    var bc = state.buyingCenterCache[topicId] || {};
+    var draft = getRoleArray('edit');
+    var box = document.createElement('div');
+    box.className = 'cvz-card';
+    box.style.cssText = 'margin:12px 0;display:flex;flex-direction:column;gap:12px;';
+
+    var intro = document.createElement('p');
+    intro.style.cssText = 'margin:0;font-size:12px;line-height:1.5;color:var(--cvz-text-muted,#8b98a5);';
+    intro.textContent = 'Änderungen gelten ab dem nächsten Lauf. Entfernte Rollen: ihre Prompts werden deaktiviert. ' +
+      'Neue Rollen: wir erstellen je 2 Prompts, soweit Plätze frei sind. Motivation und Einwand ändern: bestehende Prompts bleiben unverändert.';
+    box.appendChild(intro);
+
+    if (draft.length === 0) {
+      var sugBtn = document.createElement('button');
+      sugBtn.type = 'button';
+      sugBtn.className = 'cvz-create-toggle-btn';
+      sugBtn.setAttribute('data-cvz-bc-edit-suggest', topicId);
+      sugBtn.disabled = state.isSuggestingBcEdit;
+      sugBtn.innerHTML = state.isSuggestingBcEdit
+        ? '<span class="cvz-spinner"></span>Rollen werden vorgeschlagen \u2026'
+        : 'Rollen vorschlagen lassen';
+      box.appendChild(sugBtn);
+    }
+
+    box.appendChild(renderRoleCards('edit', draft, bc.bibliothek || []));
+
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;';
+    var save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'cvz-create-submit-btn';
+    save.setAttribute('data-cvz-bc-edit-save', topicId);
+    save.disabled = state.isSavingBc;
+    save.innerHTML = state.isSavingBc ? '<span class="cvz-spinner"></span>Wird gespeichert \u2026' : 'Speichern';
+    actions.appendChild(save);
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'cvz-archive-btn';
+    cancel.setAttribute('data-cvz-bc-edit-toggle', topicId);
+    cancel.disabled = state.isSavingBc;
+    cancel.textContent = 'Abbrechen';
+    actions.appendChild(cancel);
+    box.appendChild(actions);
+    return box;
+  }
+
+  // =========================================================================
+  // NEU (23.09.2026): Sichtbarkeit je Rolle (Rolle × Journey-Phase)
+  // =========================================================================
+  // Basis: dieselben Zahlen wie in der Prompt-Liste (cited_count/total_runs
+  // pro Prompt), summiert je Rolle und Phase. Bewusst als Tabelle mit
+  // Klartext-Zahlen statt nur Farben: Eine Zelle beruht oft auf 1-2 Prompts.
+  function renderRoleVisibilitySection(topicId, detail) {
+    var bc = state.buyingCenterCache[topicId];
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    section.style.marginTop = '24px';
+
+    var headRow = document.createElement('div');
+    headRow.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Sichtbarkeit je Rolle';
+    headRow.appendChild(heading);
+    headRow.appendChild(makeTip(
+      'Jede Zelle zeigt, in wie vielen ausgewerteten KI-Antworten eure Domain zitiert wurde, für die Fragen dieser Rolle in dieser Phase. ' +
+      'Grundlage sind oft nur 1 bis 3 Prompts je Zelle. Lest die Tabelle als Hinweis, wo Content für eine Rolle fehlt, nicht als exakte Messung.'
+    ));
+    if (bc && !bc._error) {
+      var editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'cvz-create-toggle-btn';
+      editBtn.style.marginLeft = 'auto';
+      editBtn.setAttribute('data-cvz-bc-edit-toggle', topicId);
+      editBtn.textContent = state.bcEditOpen[topicId] ? '\u2212 Rollen bearbeiten' : ((bc.rollen || []).length ? 'Rollen bearbeiten' : 'Rollen festlegen');
+      headRow.appendChild(editBtn);
+    }
+    section.appendChild(headRow);
+
+    if (!bc) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.innerHTML = '<span class="cvz-spinner"></span>Rollen werden geladen \u2026';
+      section.appendChild(loading);
+      return section;
+    }
+
+    var resultNote = renderBcResultNote(topicId);
+    if (resultNote) section.appendChild(resultNote);
+    var missing = (state.bcEditResult[topicId] && state.bcEditResult[topicId].ergaenzung.fehlende_plaetze) || {};
+    if (Object.keys(missing).length) {
+      var fillBtn = document.createElement('button');
+      fillBtn.type = 'button';
+      fillBtn.className = 'cvz-retry-btn';
+      fillBtn.setAttribute('data-cvz-bc-fill', topicId);
+      fillBtn.disabled = state.isSavingBc;
+      fillBtn.textContent = state.isSavingBc ? 'Wird ergänzt \u2026' : 'Fehlende Prompts ergänzen';
+      section.appendChild(fillBtn);
+    }
+
+    if (state.bcEditOpen[topicId]) section.appendChild(renderRoleEditor(topicId));
+
+    var roles = bc.rollen || [];
+    if (roles.length === 0) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = 'Für dieses Thema sind noch keine Rollen festgelegt. Legt 2 bis 3 Rollen fest, um zu sehen, ' +
+        'ob z. B. die IT-Leitung euch in KI-Antworten findet, die Geschäftsführung aber nicht.';
+      section.appendChild(none);
+      return section;
+    }
+
+    var prompts = (detail.prompts || []).filter(function (p) { return p.is_active !== false; });
+    var rows = roles.map(function (r) { return { key: r.role_id, label: r.rolle, champion: r.ist_champion }; });
+    var unassigned = prompts.filter(function (p) { return !p.role_id; });
+    if (unassigned.length) rows.push({ key: null, label: 'Ohne Rolle', champion: false });
+
+    function cellStats(roleKey, phase) {
+      var cited = 0, total = 0, n = 0;
+      prompts.forEach(function (p) {
+        if ((p.role_id || null) !== roleKey) return;
+        if (phase && (p.messymiddle_phase || p.phase) !== phase) return;
+        n++;
+        cited += p.cited_count || 0;
+        total += p.total_runs || 0;
+      });
+      return { n: n, cited: cited, total: total };
+    }
+
+    function cellHtml(st, isTotal) {
+      if (st.n === 0) return '<span style="color:var(--cvz-text-muted,#8b98a5);opacity:.5;">\u2013</span>';
+      if (st.total === 0) {
+        return '<span style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);">neu, Daten ab<br>nächstem Lauf</span>';
+      }
+      var pct = Math.round((st.cited / st.total) * 100);
+      return '<div style="font-size:' + (isTotal ? '16px' : '14px') + ';font-weight:700;color:' +
+          (pct === 0 ? 'var(--cvz-red,#de5b50)' : 'var(--cvz-text,#e6edf3)') + ';">' + pct + '%</div>' +
+        '<div style="font-size:10px;color:var(--cvz-text-muted,#8b98a5);">' + st.cited + '/' + st.total + ' \u00b7 ' + st.n + ' Prompt' + (st.n === 1 ? '' : 's') + '</div>';
+    }
+
+    function cellBg(st) {
+      if (st.n === 0 || st.total === 0) return 'transparent';
+      var pct = st.cited / st.total;
+      return pct === 0 ? 'rgba(222,91,80,.10)' : 'rgba(79,209,197,' + (0.08 + pct * 0.42).toFixed(2) + ')';
+    }
+
+    var th = 'text-align:center;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
+      'color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#232b36);white-space:nowrap;';
+    var html = '<table style="width:100%;min-width:560px;border-collapse:collapse;font-size:13px;"><thead><tr>' +
+      '<th style="' + th + 'text-align:left;">Rolle</th>' +
+      PHASE_ORDER.map(function (ph) {
+        return '<th style="' + th + '"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;background:' +
+          PHASE_COLORS[ph] + ';"></span>' + escapeHtml(PHASE_LABELS[ph]) + '</th>';
+      }).join('') +
+      '<th style="' + th + '">Gesamt</th></tr></thead><tbody>';
+
+    rows.forEach(function (row) {
+      html += '<tr><td style="padding:10px;border-bottom:1px solid var(--cvz-border,#232b36);font-weight:600;white-space:nowrap;">' +
+        escapeHtml(row.label) +
+        (row.champion ? ' <span title="Treibt den Kauf" style="color:var(--cvz-teal,#4fd1c5);">\u2605</span>' : '') + '</td>';
+      PHASE_ORDER.forEach(function (ph) {
+        var st = cellStats(row.key, ph);
+        html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);background:' + cellBg(st) + ';">' + cellHtml(st, false) + '</td>';
+      });
+      var tot = cellStats(row.key, null);
+      html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);border-left:1px solid var(--cvz-border,#232b36);background:' +
+        cellBg(tot) + ';">' + cellHtml(tot, true) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+
+    var card = document.createElement('div');
+    card.className = 'cvz-card';
+    card.style.cssText = 'padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    card.innerHTML = html;
+    section.appendChild(card);
+
+    var caption = document.createElement('p');
+    caption.className = 'cvz-chart-caption';
+    caption.textContent = 'Anteil der ausgewerteten ChatGPT/Gemini-Antworten, in denen eure Domain zitiert wurde, je Rolle und Journey-Phase. ' +
+      'Rot: bisher nie zitiert. \u2013 heißt: keine Prompts dieser Rolle in dieser Phase.';
+    section.appendChild(caption);
+
+    if (unassigned.length) {
+      var hint = document.createElement('p');
+      hint.className = 'cvz-thin-data-note';
+      hint.textContent = unassigned.length + ' Prompts haben noch keine Rolle. Im Daten-Tab einen Prompt aufklappen und oben eine Rolle wählen, ' +
+        'der Verlauf des Prompts bleibt dabei erhalten.';
+      section.appendChild(hint);
+    }
+    return section;
   }
 
   function renderOverview() {
@@ -5107,6 +6034,9 @@
         }).join('') +
       '</div>';
     }
+    // NEU (23.09.2026): Rolle zuordnen, steht bewusst vor dem Laden der
+    // Antworten, damit es auch ohne Antwortdaten funktioniert.
+    linkedHtml = renderPromptRoleChipsHtml(prompt) + linkedHtml;
 
     if (state.loadingPromptCitations[prompt.id]) {
       wrap.innerHTML = linkedHtml + '<p class="cvz-card-placeholder-text">Lädt...</p>';
@@ -5391,18 +6321,31 @@
     return wrap;
   }
 
-  var MAX_MANUAL_PROMPTS = 4;
+  // ENTFERNT (23.09.2026): MAX_MANUAL_PROMPTS, siehe getPromptBudget.
+
+  // GEÄNDERT (23.09.2026): gemeinsamer Topf von 20 aktiven Prompts statt
+  // fester 4 eigener Plätze. Wer System-Prompts deaktiviert, bekommt
+  // entsprechend mehr Plätze für eigene. Werte kommen vom Backend
+  // (prompt_budget), Fallback-Rechnung nur, falls das Feld fehlt.
+  var MAX_TOTAL_PROMPTS = 20;
+
+  function getPromptBudget(prompts, topicId) {
+    var detail = state.topicDetailCache[topicId];
+    if (detail && detail.prompt_budget) return detail.prompt_budget;
+    var active = (prompts || []).filter(function (p) { return p.prompt_type === 'stable_core' && p.is_active !== false; }).length;
+    return { aktiv_gesamt: active, max_gesamt: MAX_TOTAL_PROMPTS, frei_eigene: Math.max(0, MAX_TOTAL_PROMPTS - active) };
+  }
 
   function renderManualPromptForm(prompts, topicId) {
-    var manualCount = (prompts || []).filter(function (p) { return p.source === 'manual'; }).length;
+    var budget = getPromptBudget(prompts, topicId);
     var wrap = document.createElement('div');
     wrap.className = 'cvz-changelog-form';
     wrap.style.marginBottom = '16px';
 
-    if (manualCount >= MAX_MANUAL_PROMPTS) {
+    if (budget.frei_eigene <= 0) {
       wrap.innerHTML =
-        '<p class="cvz-card-placeholder-text">Maximal ' + MAX_MANUAL_PROMPTS + ' manuell hinzugef\u00fcgte Prompts erreicht ' +
-        '(' + manualCount + '/' + MAX_MANUAL_PROMPTS + '). Erst einen bestehenden manuellen Prompt deaktivieren.</p>';
+        '<p class="cvz-card-placeholder-text">Alle ' + budget.max_gesamt + ' Prompt-Pl\u00e4tze sind belegt. ' +
+        'Deaktiviert einen Prompt, den ihr nicht braucht, dann k\u00f6nnt ihr hier einen eigenen hinzuf\u00fcgen.</p>';
       return wrap;
     }
 
@@ -5414,10 +6357,11 @@
     promptLabel.style.margin = '0';
     promptLabel.textContent = 'Eigenen Prompt hinzuf\u00fcgen';
     promptLabelRow.appendChild(promptLabel);
-    var promptAvail = MAX_MANUAL_PROMPTS - manualCount;
     var promptSlotBadge = document.createElement('span');
     promptSlotBadge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);font-weight:400;';
-    promptSlotBadge.textContent = 'noch\u202f' + promptAvail + '\u202fvon\u202f' + MAX_MANUAL_PROMPTS + ' frei';
+    promptSlotBadge.textContent = budget.aktiv_gesamt + '\u202fvon\u202f' + budget.max_gesamt + ' Prompts aktiv, noch\u202f' + budget.frei_eigene + '\u202ffrei';
+    promptSlotBadge.title = 'Bis zu 16 Prompts erstellt das System, insgesamt sind 20 m\u00f6glich. ' +
+      'Deaktivierte Prompts machen Platz f\u00fcr eigene.';
     promptLabelRow.appendChild(promptSlotBadge);
     promptLabelRow.appendChild(makeTip(
       'Prompts sind die konkreten Fragen, die potenzielle Kunden bei ChatGPT, Gemini & Co. stellen. Das System sendet sie in regelm\u00e4\u00dfigen Abst\u00e4nden an die KI-Systeme und pr\u00fcft, ob deine Domain in der Antwort vorkommt. Neue Prompts bekommen erst Daten nach dem n\u00e4chsten Lauf.'
@@ -5442,6 +6386,8 @@
     }).join('');
 
     var PROMPT_MAX_CHARS = 400;
+    var manualBc = state.buyingCenterCache[topicId];
+    var manualRoles = (manualBc && manualBc.rollen) || [];
     var promptInputRow = document.createElement('div');
     promptInputRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;';
     promptInputRow.innerHTML =
@@ -5453,6 +6399,16 @@
       '<select id="cvz-manual-prompt-phase" class="cvz-changelog-custom-input" style="max-width:160px;">' +
         phaseOptionsHtml +
       '</select>' +
+      // NEU (23.09.2026): optionale Rolle, nur wenn das Thema Rollen hat
+      (manualRoles.length
+        ? '<select id="cvz-manual-prompt-role" class="cvz-changelog-custom-input" style="max-width:180px;">' +
+            '<option value="">Ohne Rolle</option>' +
+            manualRoles.map(function (r) {
+              return '<option value="' + escapeHtml(r.role_id) + '"' + (state.manualPromptDraftRoleId === r.role_id ? ' selected' : '') + '>' +
+                escapeHtml(r.rolle) + '</option>';
+            }).join('') +
+          '</select>'
+        : '') +
       '<button type="button" class="cvz-changelog-submit-btn" data-cvz-manual-prompt-submit="' + topicId + '" ' +
         (state.isSubmittingManualPrompt ? 'disabled' : '') + '>' +
         (state.isSubmittingManualPrompt ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
@@ -5480,6 +6436,12 @@
     selectEl.addEventListener('change', function () {
       state.manualPromptDraftPhase = selectEl.value;
     });
+    var roleSelectEl = wrap.querySelector('#cvz-manual-prompt-role');
+    if (roleSelectEl) {
+      roleSelectEl.addEventListener('change', function () {
+        state.manualPromptDraftRoleId = roleSelectEl.value;
+      });
+    }
 
     return wrap;
   }
@@ -7679,6 +8641,9 @@
     // Wettbewerbs-Sichtbarkeitsvergleich (Chart)
     var compChart = renderVisibilityComparisonChart(topicId, detail);
     if (compChart) wrap.appendChild(compChart);
+
+    // NEU (23.09.2026): Sichtbarkeit je Rolle, inkl. Rollen bearbeiten
+    wrap.appendChild(renderRoleVisibilitySection(topicId, detail));
 
     // VERSCHOBEN (20.09.2026): Die Wettbewerber-Tabelle mit Differenzierungs-
     // Tipps pro Phase stand bisher nur im Journey-Map-Tab, war dort aber
