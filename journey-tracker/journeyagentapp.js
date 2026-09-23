@@ -5,8 +5,8 @@
   // KONFIGURATION
   // =========================================================================
   var CONFIG = {
-    // GEFIXT (20.09.2026): Es stand ein En-Dash (–) statt eines normalen
-    // Bindestrichs in der Domain ("visibility–-tracker"), dadurch liefen
+    // GEFIXT (20.09.2026): Es stand ein Sonderzeichen (U+2013) statt eines normalen
+    // Bindestrichs in der Domain, dadurch liefen
     // ALLE apiFetch()-Calls gegen eine nicht existierende Adresse.
     apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
     // GEFIXT (20.09.2026): Platzhalter durch die echte Supabase-Projekt-URL ersetzt.
@@ -1210,7 +1210,7 @@
     sonstiges:         'Sonstiges',
     // NEU (18.09.2026): zwei deterministisch (ohne Claude-Call) erkannte
     // Sonderfälle, siehe source_analysis.py _looks_like_asset/_analyze_url,
-    // ersetzen das bisherige leere "–", wenn eine zitierte URL entweder ein
+    // ersetzen das bisherige leere "-", wenn eine zitierte URL entweder ein
     // reiner Datei-Download ist oder automatisiert gar nicht auslesbar war
     // (z.B. Bot-Schutz). Ebenfalls bewusst NICHT in CONTENT_CHANGE_TYPE_ORDER/
     // manuell wählbar, da nie von Claude, sondern nur code-seitig gesetzt.
@@ -1237,6 +1237,9 @@
     keyword_suggestions:  'Keyword-Idee',
     paa:                  'Häufig gefragt (von Google)',
     gsc_near_miss:        'Google Search Console',
+    // NEU (23.09.2026): von Claude formulierte Fragen für Phasen ohne echte Keywords
+    problem_question:     'Problemfrage (KI-Vorschlag)',
+    manual:               'Eigenes Keyword',
   };
 
   // NEU (20.09.2026): Farben für die Keyword-Einschätzung, die main.py
@@ -1453,6 +1456,21 @@
     var bcFill = event.target.closest('[data-cvz-bc-fill]');
     if (bcFill) {
       fillMissingRolePrompts(bcFill.getAttribute('data-cvz-bc-fill'));
+      return;
+    }
+    var roleCellAdd = event.target.closest('[data-cvz-role-cell-add]');
+    if (roleCellAdd) {
+      state.manualPromptDraftRoleId = roleCellAdd.getAttribute('data-cvz-role-cell-add');
+      state.manualPromptDraftPhase = roleCellAdd.getAttribute('data-cvz-role-cell-phase');
+      state.activeSubTab = 'daten';
+      updateUrlParams({ cvz_tab: 'daten' });
+      loadTabData(state.activeTopicId);
+      render();
+      var manualInput = document.getElementById('cvz-manual-prompt-input');
+      if (manualInput) {
+        if (manualInput.scrollIntoView) manualInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        manualInput.focus();
+      }
       return;
     }
     var promptRoleSet = event.target.closest('[data-cvz-prompt-role-set]');
@@ -2630,7 +2648,7 @@
     });
     var urlHint = document.createElement('p');
     urlHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
-    urlHint.textContent = 'Muss auf eurer Domain liegen. Daraus leiten wir Zielgruppe und Buying Center deutlich treffender ab.';
+    urlHint.textContent = 'Muss auf eurer Domain liegen. Daraus leiten wir Zielgruppe und Buying Center ab.';
     urlFieldWrap.appendChild(urlInput);
     urlFieldWrap.appendChild(urlHint);
 
@@ -3199,8 +3217,9 @@
     heading.textContent = 'Sichtbarkeit je Rolle';
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
-      'Jede Zelle zeigt, in wie vielen ausgewerteten KI-Antworten eure Domain zitiert wurde, für die Fragen dieser Rolle in dieser Phase. ' +
-      'Grundlage sind oft nur 1 bis 3 Prompts je Zelle. Lest die Tabelle als Hinweis, wo Content für eine Rolle fehlt, nicht als exakte Messung.'
+      'Jede Zelle zeigt, bei wie vielen Fragen dieser Rolle in dieser Phase eure Domain in mindestens einer KI-Antwort zitiert wurde. ' +
+      'Grundlage sind oft nur 1 bis 3 Fragen je Zelle. Die Tabelle zeigt, wo Content für eine Rolle fehlt. Für eine exakte Messung ist die Datenbasis zu klein. ' +
+      'Nicht jede Rolle stellt in jeder Phase Fragen, deshalb bleiben manche Zellen bewusst leer.'
     ));
     if (bc && !bc._error) {
       var editBtn = document.createElement('button');
@@ -3251,32 +3270,45 @@
     var unassigned = prompts.filter(function (p) { return !p.role_id; });
     if (unassigned.length) rows.push({ key: null, label: 'Ohne Rolle', champion: false });
 
+    // GEÄNDERT (23.09.2026): zählt Fragen statt KI-Antworten, wie die
+    // Zusammenfassung. Eine Frage gilt als zitiert, wenn eure Domain in
+    // mindestens einer Antwort als Quelle genannt wurde.
     function cellStats(roleKey, phase) {
-      var cited = 0, total = 0, n = 0;
+      var n = 0, measured = 0, cited = 0;
       prompts.forEach(function (p) {
         if ((p.role_id || null) !== roleKey) return;
         if (phase && (p.messymiddle_phase || p.phase) !== phase) return;
         n++;
-        cited += p.cited_count || 0;
-        total += p.total_runs || 0;
+        if ((p.total_runs || 0) > 0) {
+          measured++;
+          if ((p.cited_count || 0) > 0) cited++;
+        }
       });
-      return { n: n, cited: cited, total: total };
+      return { n: n, measured: measured, cited: cited };
     }
 
-    function cellHtml(st, isTotal) {
-      if (st.n === 0) return '<span style="color:var(--cvz-text-muted,#8b98a5);opacity:.5;">\u2013</span>';
-      if (st.total === 0) {
+    function cellHtml(st, isTotal, roleKey, phase) {
+      if (st.n === 0) {
+        // NEU (23.09.2026): leere Zelle mit direktem Weg zu einem eigenen Prompt
+        var addBtn = (roleKey && phase)
+          ? '<button type="button" class="cvz-persona-chip" style="margin-top:4px;font-size:11px;padding:2px 8px;" ' +
+              'data-cvz-role-cell-add="' + escapeHtml(roleKey) + '" data-cvz-role-cell-phase="' + escapeHtml(phase) + '">+ Prompt</button>'
+          : '';
+        return '<div style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);opacity:.7;">nicht gemessen</div>' + addBtn;
+      }
+      if (st.measured === 0) {
         return '<span style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);">neu, Daten ab<br>nächstem Lauf</span>';
       }
-      var pct = Math.round((st.cited / st.total) * 100);
+      var pct = Math.round((st.cited / st.measured) * 100);
       return '<div style="font-size:' + (isTotal ? '16px' : '14px') + ';font-weight:700;color:' +
           (pct === 0 ? 'var(--cvz-red,#de5b50)' : 'var(--cvz-text,#e6edf3)') + ';">' + pct + '%</div>' +
-        '<div style="font-size:10px;color:var(--cvz-text-muted,#8b98a5);">' + st.cited + '/' + st.total + ' \u00b7 ' + st.n + ' Prompt' + (st.n === 1 ? '' : 's') + '</div>';
+        '<div style="font-size:10px;color:var(--cvz-text-muted,#8b98a5);">' + st.cited + ' von ' + st.measured +
+          (st.measured === 1 ? ' Frage' : ' Fragen') + '</div>';
     }
 
     function cellBg(st) {
-      if (st.n === 0 || st.total === 0) return 'transparent';
-      var pct = st.cited / st.total;
+      if (st.n === 0 || st.measured === 0) return 'transparent';
+      var pct = st.cited / st.measured;
       return pct === 0 ? 'rgba(222,91,80,.10)' : 'rgba(79,209,197,' + (0.08 + pct * 0.42).toFixed(2) + ')';
     }
 
@@ -3296,7 +3328,7 @@
         (row.champion ? ' <span title="Treibt den Kauf" style="color:var(--cvz-teal,#4fd1c5);">\u2605</span>' : '') + '</td>';
       PHASE_ORDER.forEach(function (ph) {
         var st = cellStats(row.key, ph);
-        html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);background:' + cellBg(st) + ';">' + cellHtml(st, false) + '</td>';
+        html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);background:' + cellBg(st) + ';">' + cellHtml(st, false, row.key, ph) + '</td>';
       });
       var tot = cellStats(row.key, null);
       html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);border-left:1px solid var(--cvz-border,#232b36);background:' +
@@ -3312,8 +3344,8 @@
 
     var caption = document.createElement('p');
     caption.className = 'cvz-chart-caption';
-    caption.textContent = 'Anteil der ausgewerteten ChatGPT/Gemini-Antworten, in denen eure Domain zitiert wurde, je Rolle und Journey-Phase. ' +
-      'Rot: bisher nie zitiert. \u2013 heißt: keine Prompts dieser Rolle in dieser Phase.';
+    caption.textContent = 'Anteil der Fragen, bei denen eure Domain in mindestens einer ChatGPT- oder Gemini-Antwort zitiert wurde, je Rolle und Journey-Phase. ' +
+      'Rot: bisher bei keiner Frage zitiert. „Nicht gemessen“: Für diese Rolle gibt es in dieser Phase keinen Prompt. Über „+ Prompt“ legt ihr einen eigenen an.';
     section.appendChild(caption);
 
     if (unassigned.length) {
@@ -3829,7 +3861,7 @@
         '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Zitiert</span>' +
         '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-red)"></span>Empfohlen</span>' +
       '</div>' +
-      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-L\u00e4ufe pro Woche (0\u2013100\u202f%), \u00fcber alle aktiven Themen dieser Domain aufsummiert, in dem die eigene Domain erw\u00e4hnt, zitiert bzw. aktiv empfohlen wurde.</p>';
+      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-L\u00e4ufe pro Woche (0 bis 100\u202f%), \u00fcber alle aktiven Themen dieser Domain aufsummiert, in dem die eigene Domain erw\u00e4hnt, zitiert bzw. aktiv empfohlen wurde.</p>';
     section.appendChild(card);
     return section;
   }
@@ -4040,7 +4072,7 @@
         (markers.length ? '<span class="cvz-chart-legend-item"><span class="cvz-legend-marker"></span>Eure Eintr\u00e4ge im \u00c4nderungsprotokoll</span>' : '') +
       '</div>' +
       '<p class="cvz-chart-caption">Zitationsrate: Anteil ausgewerteter ChatGPT/Gemini-L\u00e4ufe pro Woche, in dem eure Domain zitiert wurde. ' +
-      'Sichtbarkeits-Index: grobe, aus Google-Position/GSC-Position abgeleitete Kennzahl (0\u2013100, h\u00f6her ist besser), gemittelt \u00fcber alle ' +
+      'Sichtbarkeits-Index: grobe, aus Google-Position/GSC-Position abgeleitete Kennzahl (0 bis 100, h\u00f6her ist besser), gemittelt \u00fcber alle ' +
       'in dieser Woche erfassten Keywords, keine exakte Messgr\u00f6\u00dfe. Gestrichelte Linien markieren eure Eintr\u00e4ge im \u00c4nderungsprotokoll ' +
       '(Datum wird auf die n\u00e4chstgelegene Woche gerundet). Zeigt Korrelation, keine Kausalit\u00e4t. ' +
       'Klickt auf einen Punkt oder eine Markierung f\u00fcr die Details dieser Woche.</p>';
@@ -4084,13 +4116,13 @@
         var change;
         if (p.previous_collected_at) {
           var previousLabel = p.previous_cited ? 'zitiert' : (p.previous_mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden');
-          change = ' \u2013 davor am ' + formatShortDate(p.previous_collected_at) + ': ' + previousLabel;
+          change = ', davor am ' + formatShortDate(p.previous_collected_at) + ': ' + previousLabel;
         } else {
-          change = ' \u2013 erster erfasster Lauf';
+          change = ', erster erfasster Lauf';
         }
         html +=
           '<p class="cvz-week-detail-row"><strong>' + escapeHtml(MODEL_LABELS[p.engine] || p.engine) + ':</strong> ' +
-          escapeHtml(p.prompt_text) + ' \u2013 ' + statusLabel + escapeHtml(change) + '</p>';
+          escapeHtml(p.prompt_text) + ': ' + statusLabel + escapeHtml(change) + '</p>';
       });
     }
 
@@ -4105,13 +4137,13 @@
           var deltaLabel = delta > 0
             ? 'verbessert um ' + delta
             : (delta < 0 ? 'verschlechtert um ' + Math.abs(delta) : 'unver\u00e4ndert');
-          changeText = ' \u2013 davor Position ' + previous + ' am ' + formatShortDate(k.previous_snapshot_at) + ' (' + deltaLabel + ')';
+          changeText = ', davor Position ' + previous + ' am ' + formatShortDate(k.previous_snapshot_at) + ' (' + deltaLabel + ')';
         } else {
-          changeText = ' \u2013 erste Messung';
+          changeText = ', erste Messung';
         }
         html +=
           '<p class="cvz-week-detail-row">' + escapeHtml(k.keyword) + ': Position ' +
-          (current != null ? escapeHtml(current) : '\u2013') + escapeHtml(changeText) + '</p>';
+          (current != null ? escapeHtml(current) : '-') + escapeHtml(changeText) + '</p>';
       });
     }
 
@@ -4146,7 +4178,14 @@
     }
     card.innerHTML =
       '<h3 class="cvz-section-title">' + escapeHtml(topic.name) + '</h3>' +
-      '<p class="cvz-card-eyebrow">' + escapeHtml(topic.seed_keyword) + ' · ' + escapeHtml(topic.own_domain) + '</p>' +
+      // GEÄNDERT (23.09.2026): Das Thema steht schon in der Überschrift. Hier
+      // nur noch die Domain, das Seed-Keyword nur, falls es vom Thema abweicht.
+      '<p class="cvz-card-eyebrow">' +
+        ((topic.seed_keyword && String(topic.seed_keyword).trim().toLowerCase() !== String(topic.name || '').trim().toLowerCase())
+          ? escapeHtml(topic.seed_keyword) + ' · '
+          : '') +
+        escapeHtml(topic.own_domain) +
+      '</p>' +
       archivedNotice +
       '<p class="cvz-summary-text">' + escapeHtml(topic.latest_summary || 'Noch keine Zusammenfassung vorhanden.') + '</p>' +
       renderSummaryDetailSections(topic.summary_detail);
@@ -4160,6 +4199,34 @@
 
     var THIN_DATA_NOTE = '<p class="cvz-thin-data-note">Datenbasis hierf\u00fcr noch d\u00fcnn, die Einsch\u00e4tzung wird mit mehr gesammelten Daten pr\u00e4ziser.</p>';
 
+    // NEU (23.09.2026): alle zitierten Quellen mit Typ, unabhängig davon,
+    // ob Wettbewerber. Zahlen kommen direkt aus dem Backend, nicht von Claude.
+    var sources = detail.meistzitierte_quellen || [];
+    if (sources.length) {
+      var periodLabel = detail.meistzitierte_quellen_zeitraum === 'aktueller_monat' ? 'letzte 30 Tage' : 'seit Start des Themas';
+      html += '<div class="cvz-summary-subsection">' +
+        '<p class="cvz-section-label">Meistzitierte Quellen (' + periodLabel + ')</p>' +
+        '<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">' +
+        sources.map(function (q) {
+          var pct = q.von_fragen ? Math.round((q.anzahl_fragen / q.von_fragen) * 100) : 0;
+          var isComp = q.typ === 'wettbewerber';
+          return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;">' +
+            '<img class="cvz-inline-favicon" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(q.domain) + '" alt="">' +
+            '<strong style="min-width:150px;color:var(--cvz-text,#e6edf3);">' + escapeHtml(q.domain) + '</strong>' +
+            '<span class="cvz-persona-chip" style="cursor:default;' + (isComp ? 'color:var(--cvz-red,#de5b50);border-color:var(--cvz-red,#de5b50);' : '') + '">' +
+              escapeHtml(q.typ_label) + '</span>' +
+            '<span style="flex:1;min-width:120px;height:6px;background:var(--cvz-border,#232b36);border-radius:3px;overflow:hidden;">' +
+              '<span style="display:block;height:100%;width:' + pct + '%;background:' + (isComp ? 'var(--cvz-red,#de5b50)' : 'var(--cvz-text-muted,#8b98a5)') + ';"></span>' +
+            '</span>' +
+            '<span style="color:var(--cvz-text-muted,#8b98a5);white-space:nowrap;">bei ' + q.anzahl_fragen + ' von ' + q.von_fragen + ' Fragen</span>' +
+          '</div>';
+        }).join('') +
+        '</div>' +
+        '<p class="cvz-thin-data-note">KI-Antworten nennen meist mehrere Quellen. Ziel ist, neben diesen Quellen mitzitiert zu werden.</p>' +
+        '</div>';
+    }
+
+    // GEÄNDERT (23.09.2026): nur noch bestätigte Wettbewerber
     var strength = detail.competitor_strength;
     if (strength && strength.strongest_domain) {
       html += '<div class="cvz-summary-subsection">' +
@@ -4169,6 +4236,17 @@
         '</p>' +
         (maturity.wettbewerber_duenn ? THIN_DATA_NOTE : '') +
         '</div>';
+    } else if (maturity.keine_bestaetigten_wettbewerber) {
+      html += '<div class="cvz-summary-subsection">' +
+        '<p class="cvz-section-label">St\u00e4rkster Wettbewerber</p>' +
+        '<p class="cvz-summary-text">Noch keine Wettbewerber best\u00e4tigt. Legt sie im Tab \u201eJourney Map\u201c unter ' +
+        '\u201eBeobachtete Wettbewerber\u201c fest, dann bewerten wir sie hier gezielt.</p>' +
+        '</div>';
+    } else if (strength && strength.reasoning) {
+      html += '<div class="cvz-summary-subsection">' +
+        '<p class="cvz-section-label">St\u00e4rkster Wettbewerber</p>' +
+        '<p class="cvz-summary-text">' + escapeHtml(strength.reasoning) + '</p>' +
+        '</div>';
     }
 
     var phaseSummaries = detail.phase_summaries;
@@ -4177,7 +4255,7 @@
       // GEÄNDERT (15.09.2026): echte Tabelle statt gestapelter Blöcke,
       // Kundenwunsch: "eine Tabelle, die in die unterschiedlichen Phasen
       // geht und dort eine Einschätzung gibt".
-      // GE\u00c4NDERT (20.09.2026): Spalte "Empfohlene Content-Typen" entfernt \u2014
+      // GE\u00c4NDERT (20.09.2026): Spalte "Empfohlene Content-Typen" entfernt:
       // sie kam aus einer eigenen, von claude_summary.py unabh\u00e4ngigen
       // Claude-Generierung und konnte damit vom (separat generierten)
       // Aktionsplan abweichen. Die Zusammenfassungs-Card ist reine
@@ -4886,7 +4964,7 @@
     toggleBtn.textContent = (isOpen ? '\u2212 ' : '+ ') + 'Wettbewerber bearbeiten (' + activeDomains.length + ' aktiv)';
     competitorToggleRow.appendChild(toggleBtn);
     competitorToggleRow.appendChild(makeTip(
-      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden f\u00fcr den hochpriorit\u00e4ren Alert \u201eWettbewerber \u00fcberholt euch\u201c genutzt und in der Journey Map als Share of Voice analysiert. Die Grafik \u201eSichtbarkeit im Wettbewerbsvergleich\u201c zeigt dagegen ALLE Domains, die KI-Systeme tats\u00e4chlich zitiert haben \u2013 auch bisher nicht best\u00e4tigte. Bereits zitierte Domains werden als Vorschl\u00e4ge angezeigt.'
+      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden f\u00fcr den hochpriorit\u00e4ren Alert \u201eWettbewerber \u00fcberholt euch\u201c genutzt und in der Journey Map als Share of Voice analysiert. Die Grafik \u201eSichtbarkeit im Wettbewerbsvergleich\u201c zeigt dagegen ALLE Domains, die KI-Systeme tats\u00e4chlich zitiert haben, auch bisher nicht best\u00e4tigte. Bereits zitierte Domains werden als Vorschl\u00e4ge angezeigt.'
     ));
     section.appendChild(competitorToggleRow);
 
@@ -4961,7 +5039,7 @@
     dataWindowNote.textContent =
       'Hinweis: Eine neu hinzugef\u00fcgte Domain zeigt hier nur Daten, wenn sie in bisherigen L\u00e4ufen bereits ' +
       'zitiert wurde. Wurde sie bisher nie zitiert, erscheint sie erst ab dem n\u00e4chsten Datenlauf, in dem das ' +
-      'tats\u00e4chlich passiert \u2014 nicht sofort nach dem Speichern.';
+      'tats\u00e4chlich passiert, nicht sofort nach dem Speichern.';
     section.appendChild(dataWindowNote);
 
     var submitBtn = document.createElement('button');
@@ -5105,7 +5183,7 @@
     intro.className = 'cvz-card-placeholder-text';
     intro.style.marginBottom = '12px';
     intro.textContent =
-      'Alle in KI-Antworten zitierten Quellen zu diesem Thema, gruppiert nach Art der Plattform \u2014 ' +
+      'Alle in KI-Antworten zitierten Quellen zu diesem Thema, gruppiert nach Art der Plattform, ' +
       'unabh\u00e4ngig davon, ob es sich um einen best\u00e4tigten Wettbewerber handelt. Hilft einzusch\u00e4tzen, ' +
       'wo eine eigene Pr\u00e4senz (z.B. in Foren, auf Bewertungsplattformen, per Video) lohnt.';
     section.appendChild(intro);
@@ -5225,7 +5303,7 @@
       // Prioritaet
       var tdPrio = document.createElement('td');
       tdPrio.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';';
-      tdPrio.innerHTML = gap.priority ? '<span style="font-size:11px;font-weight:700;color:' + prioColor + ';">' + escapeHtml(GAP_PRIORITY_LABELS[gap.priority] || gap.priority) + '</span>' : '<span style="color:var(--cvz-text-muted,#8b98a5);font-size:11px;">–</span>';
+      tdPrio.innerHTML = gap.priority ? '<span style="font-size:11px;font-weight:700;color:' + prioColor + ';">' + escapeHtml(GAP_PRIORITY_LABELS[gap.priority] || gap.priority) + '</span>' : '<span style="color:var(--cvz-text-muted,#8b98a5);font-size:11px;">-</span>';
       tr.appendChild(tdPrio);
 
       // Phase (editable)
@@ -5233,7 +5311,7 @@
       tdPhase.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';';
       var sel = document.createElement('select');
       sel.style.cssText = 'font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid ' + phaseColor + ';background:var(--cvz-card,#161b22);color:var(--cvz-text,#e6edf3);cursor:pointer;width:100%;';
-      var phaseOpts = [{ value: '', label: '– keine Phase –' }];
+      var phaseOpts = [{ value: '', label: 'Keine Phase' }];
       PHASE_ORDER.forEach(function (p) { phaseOpts.push({ value: p, label: PHASE_LABELS[p] || p }); });
       phaseOpts.forEach(function (opt) {
         var o = document.createElement('option');
@@ -5383,7 +5461,7 @@
         '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Zitiert</span>' +
         '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-red)"></span>Empfohlen</span>' +
       '</div>' +
-      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-L\u00e4ufe pro Woche (0\u2013100\u202f%), in dem die eigene Domain erw\u00e4hnt, zitiert bzw. aktiv empfohlen wurde. Klickt auf einen Punkt f\u00fcr die Details dieser Woche (Kachel erscheint oben bei der Gesamtentwicklung).</p>';
+      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-L\u00e4ufe pro Woche (0 bis 100\u202f%), in dem die eigene Domain erw\u00e4hnt, zitiert bzw. aktiv empfohlen wurde. Klickt auf einen Punkt f\u00fcr die Details dieser Woche (Kachel erscheint oben bei der Gesamtentwicklung).</p>';
     section.appendChild(card);
     return section;
   }
@@ -5659,9 +5737,9 @@
         return (
           '<tr>' +
             '<td class="cvz-changelog-cell-text">' + escapeHtml(entry.entry_text) + '</td>' +
-            '<td class="cvz-changelog-cell-linked">' + (linkedHtml || '\u2013') + '</td>' +
+            '<td class="cvz-changelog-cell-linked">' + (linkedHtml || '-') + '</td>' +
             '<td class="cvz-changelog-cell-meta">' + formatRelativeTime(entry.created_at) + '</td>' +
-            '<td class="cvz-changelog-cell-meta">' + (entry.author_name ? escapeHtml(entry.author_name) : '\u2013') + '</td>' +
+            '<td class="cvz-changelog-cell-meta">' + (entry.author_name ? escapeHtml(entry.author_name) : '-') + '</td>' +
             '<td class="cvz-changelog-cell-action">' +
               '<button type="button" class="cvz-changelog-delete-btn" data-cvz-changelog-delete="' + escapeHtml(entry.id) + '" aria-label="L\u00f6schen">\u00d7</button>' +
             '</td>' +
@@ -5793,7 +5871,42 @@
     return section;
   }
 
+  // NEU (23.09.2026): dasselbe Keyword kann aus mehreren Quellen kommen
+  // (z. B. Seed, keyword_suggestions und keyword_ideas) und stand dann
+  // mehrfach in der Liste. Pro Keyword bleibt ein Eintrag, bevorzugt aus der
+  // aussagekräftigsten Quelle. Hat der behaltene Eintrag keine Phase, wird
+  // die Phase eines Duplikats übernommen.
+  var KEYWORD_SOURCE_PRIORITY = ['seed_keyword', 'manual', 'gsc_near_miss', 'related_keywords',
+    'keyword_suggestions', 'keyword_ideas', 'paa', 'problem_question'];
+
+  function dedupeKeywords(keywords) {
+    var byKey = {};
+    var order = [];
+    (keywords || []).forEach(function (kw) {
+      var key = String(kw.keyword || '').trim().toLowerCase();
+      if (!key) return;
+      var current = byKey[key];
+      if (!current) {
+        byKey[key] = kw;
+        order.push(key);
+        return;
+      }
+      var rank = function (k) {
+        var i = KEYWORD_SOURCE_PRIORITY.indexOf(k.source);
+        return i === -1 ? 99 : i;
+      };
+      var keep = rank(kw) < rank(current) ? kw : current;
+      var other = keep === kw ? current : kw;
+      if (!keep.messymiddle_phase && other.messymiddle_phase) {
+        keep = Object.assign({}, keep, { messymiddle_phase: other.messymiddle_phase });
+      }
+      byKey[key] = keep;
+    });
+    return order.map(function (k) { return byKey[k]; });
+  }
+
   function renderKeywordsTable(keywords, enableExpansion, changelogEntries) {
+    keywords = dedupeKeywords(keywords);
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
@@ -5837,7 +5950,7 @@
             : '') +
         '</span>' +
         '<span class="cvz-prompt-citation-count">' +
-          (kw.search_volume == null ? '–' : escapeHtml(kw.search_volume) + '/Monat') +
+          (kw.search_volume == null ? '-' : escapeHtml(kw.search_volume) + '/Monat') +
         '</span>' +
         // NEU (20.09.2026): Einschätzung (rankt bereits/knapp an Seite 1/
         // Nachfrage unsichtbar/reine Idee), einheitlich aus dem Backend
@@ -6159,7 +6272,7 @@
 
     var _statusText = run.own_domain_cited
       ? '\u2713 zitiert' + (run.own_domain_citation_position ? ' (Position ' + run.own_domain_citation_position + ')' : '')
-      : (run.own_domain_mentioned ? '\u2013 nur erw\u00e4hnt, nicht zitiert' : '');
+      : (run.own_domain_mentioned ? 'Nur erw\u00e4hnt, nicht zitiert' : '');
     if (run.own_domain_recommended === true) _statusText += ' \u00b7 aktiv empfohlen';
     if (_statusText) {
       var statusLine = document.createElement('p');
@@ -6541,7 +6654,7 @@
         // laut Kundenwunsch der entscheidende, priorisiert zu behebende
         // Unterschied ist.
         var unlinkedBadge = prompt.cited_without_link
-          ? '<span class="cvz-prompt-citation-count" style="color:var(--cvz-orange,#e0a030);border:1px solid var(--cvz-orange,#e0a030);border-radius:4px;padding:1px 6px;" title="Wird als Quelle genannt, aber die KI setzt keinen echten Link \u2014 priorisiert beheben (z.B. Struktur/Schema.org/Crawlability pruefen)">\u26a0 ohne Link zitiert</span>'
+          ? '<span class="cvz-prompt-citation-count" style="color:var(--cvz-orange,#e0a030);border:1px solid var(--cvz-orange,#e0a030);border-radius:4px;padding:1px 6px;" title="Wird als Quelle genannt, aber die KI setzt keinen echten Link. Priorisiert beheben (z.B. Struktur/Schema.org/Crawlability pruefen)">\u26a0 ohne Link zitiert</span>'
           : '';
 
         var contentTypeBadge = prompt.top_cited_content_type
@@ -6750,7 +6863,7 @@
       });
       var linkedCell = linkedEntries.length
         ? escapeHtml(linkedEntries.map(function (e) { return e.entry_text; }).join('; '))
-        : '\u2013';
+        : '-';
       var rowId = row.id || row.query;
       var isExpanded = state.expandedGscRowId === rowId;
       var tr = document.createElement('tr');
@@ -6760,7 +6873,7 @@
       var pageUrlHtml = row.page_url
         ? '<a href="' + escapeHtml(row.page_url) + '" target="_blank" rel="noopener" class="cvz-gsc-page-url" title="' + escapeHtml(row.page_url) + '">' +
             escapeHtml(row.page_url.replace(/^https?:\/\/[^\/]+/, '').slice(0, 40) || '/') + '</a>'
-        : '\u2013';
+        : '-';
       tr.innerHTML =
         '<td class="cvz-prompt-expand-chevron">' + (isExpanded ? '\u25be' : '\u25b8') + '</td>' +
         '<td>' + escapeHtml(row.query) + '</td>' +
@@ -6942,7 +7055,7 @@
   }
 
   function formatRelativeTime(isoString) {
-    if (!isoString) return '–';
+    if (!isoString) return '-';
     var diffSeconds = Math.round((Date.now() - new Date(isoString).getTime()) / 1000);
     if (diffSeconds < 5) return 'gerade eben';
     if (diffSeconds < 60) return 'vor ' + diffSeconds + ' Sek.';
@@ -7026,7 +7139,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '12px';
-    sub.textContent = 'Wie oft wird eure Domain pro Phase und Kanal als Quelle genannt (heller Balken) bzw. mit echtem Link zitiert (dunkler Balken), 0–100 %.';
+    sub.textContent = 'Wie oft wird eure Domain pro Phase und Kanal als Quelle genannt (heller Balken) bzw. mit echtem Link zitiert (dunkler Balken), 0 bis 100 %.';
     section.appendChild(sub);
 
     var grid = document.createElement('div');
@@ -7164,14 +7277,14 @@
           var tr = document.createElement('tr');
           tr.innerHTML =
             '<td class="cvz-sov-domain">' + escapeHtml(comp.domain || '') + '</td>' +
-            '<td><span class="cvz-opportunity-type">' + escapeHtml(CONTENT_TYPE_LABELS[comp.content_type] || comp.content_type || '–') + '</span></td>' +
+            '<td><span class="cvz-opportunity-type">' + escapeHtml(CONTENT_TYPE_LABELS[comp.content_type] || comp.content_type || '-') + '</span></td>' +
             '<td class="cvz-sov-rate">' +
               '<div class="cvz-journey-bar-wrap cvz-sov-bar-wrap">' +
                 '<div class="cvz-journey-bar-fill" style="width:' + pct + '%;background:' + phaseColor + '"></div>' +
               '</div>' +
               '<span>' + pct + '%</span>' +
             '</td>' +
-            '<td class="cvz-sov-tip">' + escapeHtml(comp.differentiation_suggestion || '–') + '</td>';
+            '<td class="cvz-sov-tip">' + escapeHtml(comp.differentiation_suggestion || '-') + '</td>';
           tbody.appendChild(tr);
         });
         table.appendChild(tbody);
@@ -7478,7 +7591,7 @@
       row.innerHTML =
         '<span class="cvz-journey-channel-label" style="font-weight:600;">' + pair[1] + '</span>' +
         '<div class="cvz-journey-bar-wrap"><div class="cvz-journey-bar-fill" style="width:' + (pct || 0) + '%;background:#4fd1c5"></div></div>' +
-        '<span class="cvz-journey-channel-num" style="font-weight:600;">' + (pct == null ? '\u2013' : pct + '%') + '</span>' + deltaHtml;
+        '<span class="cvz-journey-channel-num" style="font-weight:600;">' + (pct == null ? '-' : pct + '%') + '</span>' + deltaHtml;
       card.appendChild(row);
     });
 
@@ -8377,7 +8490,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt ALLE Domains \u2013 nicht nur manuell ausgew\u00e4hlte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck.';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt alle zitierten Domains, auch nicht best\u00e4tigte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck.';
     section.appendChild(sub);
 
     // Favicon-Hilfsfunktion
@@ -9321,7 +9434,7 @@
         // Noch gar kein Plan: Generierung anbieten
         emptyTxt.textContent = 'Für dieses Topic wurde noch kein Aktionsplan generiert.';
         // Manueller Trigger-Button: ruft POST /topics/{id}/generate-action-plan auf.
-        // Der Endpunkt startet die KI-Generierung im Hintergrund (202) und dauert ~30–60 s.
+        // Der Endpunkt startet die KI-Generierung im Hintergrund (202) und dauert etwa 30 bis 60 s.
         var genBtn = document.createElement('button');
         genBtn.style.cssText = 'display:inline-block;margin-top:16px;padding:10px 22px;background:var(--cvz-accent,#5aacd2);color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;';
         genBtn.textContent = 'Aktionsplan jetzt generieren';
@@ -9800,7 +9913,7 @@
             return '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background:' + PHASE_COLORS[phase] + '"></span>' + escapeHtml(PHASE_LABELS[phase] || phase) + '</span>';
           }).join('') +
         '</div>' +
-        '<p class="cvz-chart-caption">Durchgezogene Linie: als Quelle genannt (own_domain_cited). Gestrichelte Linie: davon mit echtem Link zitiert (own_domain_cited_with_url). Beides 0–100 % pro Journey-Phase und Woche, gemittelt über alle KI-Kanäle. Senkrechte Linien markieren eingetragene Content-Änderungen.</p>';
+        '<p class="cvz-chart-caption">Durchgezogene Linie: eure Domain wird als Quelle genannt. Gestrichelte Linie: davon mit echtem Link zitiert. Beides in Prozent (0 bis 100) je Journey-Phase und Woche, gemittelt über alle KI-Kanäle. Senkrechte Linien markieren eingetragene Content-Änderungen.</p>';
       chartSection.appendChild(chartCard);
     }
     wrap.appendChild(chartSection);
