@@ -2832,6 +2832,11 @@
       card.style.cssText = 'border:1px solid var(--cvz-border,#232b36);padding:12px;display:flex;flex-direction:column;gap:8px;' +
         (role.ist_champion ? 'border-left:3px solid var(--cvz-teal,#4fd1c5);' : '');
 
+      var nameLabel = document.createElement('span');
+      nameLabel.style.cssText = 'font-size:12px;color:var(--cvz-text-muted,#8b98a5);margin-bottom:-4px;';
+      nameLabel.innerHTML = '<strong style="color:var(--cvz-text,#e6edf3);font-weight:600;">Rolle</strong>';
+      card.appendChild(nameLabel);
+
       var top = document.createElement('div');
       top.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
       var nameInput = document.createElement('input');
@@ -2865,29 +2870,46 @@
       champBtn.textContent = role.ist_champion ? '\u2713 Treibt den Kauf' : 'Treibt den Kauf';
       top.appendChild(champBtn);
 
-      var removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.className = 'cvz-prompt-delete-btn';
-      removeBtn.setAttribute('data-cvz-bc-remove', String(i));
-      removeBtn.setAttribute('data-cvz-bc-ctx', ctx);
-      removeBtn.setAttribute('aria-label', 'Rolle entfernen');
-      removeBtn.title = 'Rolle entfernen';
-      removeBtn.textContent = '\u00d7';
-      top.appendChild(removeBtn);
       card.appendChild(top);
 
-      [['motivation', 'Was will diese Rolle erreichen?', '-mot-'],
-       ['einwand', 'Woran kann der Kauf bei ihr scheitern?', '-obj-']].forEach(function (cfg) {
+      // GEÄNDERT (23.09.2026): Beschriftung über den beiden Textfeldern.
+      // Vorher standen dort nur die Sätze, ohne erkennbar, was sie bedeuten.
+      [['motivation', 'Motivation', 'Was will diese Rolle mit dem Kauf erreichen?',
+        'Daraus entstehen die Fragen am Anfang der Journey (Exploration, Evaluation).', '-mot-'],
+       ['einwand', 'Einwand', 'Woran kann der Kauf bei dieser Rolle scheitern?',
+        'Daraus entstehen die Fragen kurz vor der Entscheidung (Vergleich, Entscheidung).', '-obj-']].forEach(function (cfg) {
+        var fieldLabel = document.createElement('div');
+        fieldLabel.style.cssText = 'display:flex;align-items:center;margin:4px 0 -4px;';
+        var fieldLabelText = document.createElement('span');
+        fieldLabelText.style.cssText = 'font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+        fieldLabelText.innerHTML = '<strong style="color:var(--cvz-text,#e6edf3);font-weight:600;">' + escapeHtml(cfg[1]) + ':</strong> ' + escapeHtml(cfg[2]);
+        fieldLabel.appendChild(fieldLabelText);
+        fieldLabel.appendChild(makeTip(cfg[3]));
+        card.appendChild(fieldLabel);
+
         var ta = document.createElement('textarea');
-        ta.id = 'cvz-bc-' + ctx + cfg[2] + i;
+        ta.id = 'cvz-bc-' + ctx + cfg[4] + i;
         ta.className = 'cvz-changelog-input';
         ta.rows = 2;
         ta.maxLength = BC_TEXT_MAX_CHARS;
-        ta.placeholder = cfg[1];
+        ta.placeholder = cfg[2];
         ta.value = role[cfg[0]] || '';
         ta.addEventListener('input', function () { roles[i][cfg[0]] = ta.value; });
         card.appendChild(ta);
       });
+
+      // GEÄNDERT (23.09.2026): beschrifteter Button statt kleinem x
+      var removeRow = document.createElement('div');
+      removeRow.style.cssText = 'display:flex;justify-content:flex-end;';
+      var removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'cvz-archive-btn';
+      removeBtn.setAttribute('data-cvz-bc-remove', String(i));
+      removeBtn.setAttribute('data-cvz-bc-ctx', ctx);
+      removeBtn.textContent = 'Rolle entfernen';
+      removeRow.appendChild(removeBtn);
+      card.appendChild(removeRow);
+
       wrap.appendChild(card);
     });
 
