@@ -1431,7 +1431,7 @@
       if (addRoles.length < MAX_BC_ROLES) {
         addRoles.push({
           rolle: bcAdd.getAttribute('data-cvz-bc-add') || '',
-          ist_champion: false, motivation: '', einwand: '',
+          ist_champion: false, motivation: '', einwand: '', einstiegsphase: 'exploration',
         });
         ensureOneChampion(addRoles);
       }
@@ -1902,7 +1902,14 @@
   // angelegt, weil die Prompts sofort danach im Hintergrund entstehen und
   // die Rollen dann schon feststehen müssen.
 
-  var MAX_BC_ROLES = 4;
+  // GEÄNDERT (23.09.2026): höchstens die 3 wichtigsten Rollen. Dafür bekommt
+  // jede ab ihrer Einstiegsphase in jeder Phase Prompts (siehe prompt_discovery.py).
+  var MAX_BC_ROLES = 3;
+
+  function entryIndex(phase) {
+    var i = PHASE_ORDER.indexOf(phase);
+    return i === -1 ? 0 : i;
+  }
   var BC_TEXT_MAX_CHARS = 200;
 
   function resetCreateFlow() {
@@ -2011,8 +2018,8 @@
           ist_solo_zielgruppe: false,
           zielgruppe_vorschlag: 'Mittelständische Unternehmen mit eigener IT-Abteilung, die ihre Infrastruktur auslagern wollen.',
           rollen: [
-            { rolle: 'IT-Leitung', ist_champion: true, motivation: 'Ausfallsicherheit ohne eigenes zweites Rechenzentrum', einwand: 'Latenz und Anbindung zum eigenen Standort ungeklärt' },
-            { rolle: 'Geschäftsführung', ist_champion: false, motivation: 'Planbare Kosten statt Investitionen', einwand: 'Lange Vertragsbindung' },
+            { rolle: 'IT-Leitung', ist_champion: true, einstiegsphase: 'exploration', motivation: 'Ausfallsicherheit ohne eigenes zweites Rechenzentrum', einwand: 'Latenz und Anbindung zum eigenen Standort ungeklärt' },
+            { rolle: 'Geschäftsführung', ist_champion: false, einstiegsphase: 'comparison', motivation: 'Planbare Kosten statt Investitionen', einwand: 'Lange Vertragsbindung' },
           ],
           annahmen: ['Angenommen: Unternehmen mit 200 bis 1.000 Mitarbeitenden'],
           grundlage_duenn: !state.createDraft.offerUrl,
@@ -2034,7 +2041,7 @@
       state.bcSuggestion = suggestion;
       state.bcTargetGroup = suggestion.zielgruppe_vorschlag || '';
       state.bcDraftRoles = (suggestion.rollen || []).map(function (r) {
-        return { rolle: r.rolle || '', ist_champion: !!r.ist_champion, motivation: r.motivation || '', einwand: r.einwand || '' };
+        return { rolle: r.rolle || '', ist_champion: !!r.ist_champion, motivation: r.motivation || '', einwand: r.einwand || '', einstiegsphase: r.einstiegsphase || 'exploration' };
       });
       ensureOneChampion();
       state.createStep = 2;
@@ -2066,6 +2073,7 @@
             ist_champion: !!r.ist_champion,
             motivation: (r.motivation || '').trim() || null,
             einwand: (r.einwand || '').trim() || null,
+            einstiegsphase: r.einstiegsphase || 'exploration',
           };
         })
         .filter(function (r) { return r.rolle; });
@@ -2841,8 +2849,18 @@
     var label = document.createElement('p');
     label.className = 'cvz-changelog-guided-label';
     label.style.margin = '0';
-    label.textContent = 'Rollen (' + roles.length + ' von max. ' + MAX_BC_ROLES + ')';
+    label.textContent = 'Die ' + MAX_BC_ROLES + ' wichtigsten Rollen (' + roles.length + ' von max. ' + MAX_BC_ROLES + ')';
     wrap.appendChild(label);
+
+    // NEU (23.09.2026): erklärt, warum auf 3 Rollen begrenzt ist
+    var whyThree = document.createElement('p');
+    whyThree.style.cssText = 'margin:0;font-size:12px;line-height:1.5;color:var(--cvz-text-muted,#8b98a5);';
+    whyThree.textContent =
+      'Wir messen bewusst nur die ' + MAX_BC_ROLES + ' wichtigsten Rollen: die Rolle, die den Kauf vorantreibt, ' +
+      'und die Rollen, die selbst recherchieren oder den Kauf mit einem Einwand kippen können. ' +
+      'Dafür bekommt jede dieser Rollen ab ihrer Einstiegsphase in jeder Phase eigene Prompts. ' +
+      'Mit mehr Rollen würden sich die Prompts so dünn verteilen, dass pro Rolle und Phase keine belastbare Aussage mehr möglich wäre.';
+    wrap.appendChild(whyThree);
 
     roles.forEach(function (role, i) {
       var locked = ctx === 'edit' && !!role.role_id;
@@ -2889,6 +2907,32 @@
       top.appendChild(champBtn);
 
       card.appendChild(top);
+
+      // NEU (23.09.2026): Einstiegsphase der Rolle
+      var entryRow = document.createElement('div');
+      entryRow.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+      var entryLabel = document.createElement('span');
+      entryLabel.style.cssText = 'font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+      entryLabel.innerHTML = '<strong style="color:var(--cvz-text,#e6edf3);font-weight:600;">Steigt ein in:</strong>';
+      entryRow.appendChild(entryLabel);
+      var entrySelect = document.createElement('select');
+      entrySelect.id = 'cvz-bc-' + ctx + '-entry-' + i;
+      entrySelect.className = 'cvz-changelog-custom-input';
+      entrySelect.style.cssText = 'max-width:200px;margin:0;';
+      PHASE_ORDER.forEach(function (ph) {
+        var opt = document.createElement('option');
+        opt.value = ph;
+        opt.textContent = PHASE_LABELS[ph] || ph;
+        if ((role.einstiegsphase || 'exploration') === ph) opt.selected = true;
+        entrySelect.appendChild(opt);
+      });
+      entrySelect.addEventListener('change', function () { roles[i].einstiegsphase = entrySelect.value; });
+      entryRow.appendChild(entrySelect);
+      entryRow.appendChild(makeTip(
+        'Ab dieser Phase recherchiert oder entscheidet die Rolle mit. Für jede Phase ab hier erstellen wir mindestens einen Prompt. ' +
+        'Davor wird für die Rolle nichts gemessen, in der Tabelle steht dort "steigt später ein".'
+      ));
+      card.appendChild(entryRow);
 
       // GEÄNDERT (23.09.2026): Beschriftung über den beiden Textfeldern.
       // Vorher standen dort nur die Sätze, ohne erkennbar, was sie bedeuten.
@@ -2958,7 +3002,7 @@
     } else {
       var maxNote = document.createElement('p');
       maxNote.style.cssText = 'margin:0;font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
-      maxNote.textContent = 'Maximal ' + MAX_BC_ROLES + ' Rollen. Um eine Rolle auszutauschen, erst eine bestehende entfernen.';
+      maxNote.textContent = 'Alle ' + MAX_BC_ROLES + ' Plätze sind belegt. Um eine Rolle auszutauschen, entfernt zuerst eine bestehende.';
       wrap.appendChild(maxNote);
     }
     return wrap;
@@ -2991,6 +3035,7 @@
         return {
           role_id: r.role_id, rolle: r.rolle, ist_champion: !!r.ist_champion,
           motivation: r.motivation || '', einwand: r.einwand || '', prompt_count: r.prompt_count || 0,
+          einstiegsphase: r.einstiegsphase || 'exploration', einstiegsphase_vorher: r.einstiegsphase || 'exploration',
         };
       });
     }
@@ -3008,7 +3053,7 @@
         body: { topic_name: topic.name, seed_keyword: topic.seed_keyword || topic.name },
       });
       state.bcEditDraft[topicId] = (sug.rollen || []).map(function (r) {
-        return { rolle: r.rolle, ist_champion: !!r.ist_champion, motivation: r.motivation || '', einwand: r.einwand || '' };
+        return { rolle: r.rolle, ist_champion: !!r.ist_champion, motivation: r.motivation || '', einwand: r.einwand || '', einstiegsphase: r.einstiegsphase || 'exploration' };
       });
       ensureOneChampion(state.bcEditDraft[topicId]);
     } catch (e) {
@@ -3033,6 +3078,7 @@
       return {
         rolle: (r.rolle || '').trim(), ist_champion: !!r.ist_champion,
         motivation: (r.motivation || '').trim() || null, einwand: (r.einwand || '').trim() || null,
+        einstiegsphase: r.einstiegsphase || 'exploration',
       };
     }).filter(function (r) { return r.rolle; });
 
@@ -3046,12 +3092,35 @@
     var before = (state.buyingCenterCache[topicId] || {}).rollen || [];
     var removed = before.filter(function (r) { return names.indexOf(r.rolle.toLowerCase()) === -1; });
     var removedPrompts = removed.reduce(function (sum, r) { return sum + (r.prompt_count || 0); }, 0);
-    if (removedPrompts > 0) {
+
+    // NEU (23.09.2026): nach hinten verschobene Einstiegsphasen. Prompts der
+    // Rolle in Phasen davor werden im Backend deaktiviert.
+    var detailPrompts = ((state.topicDetailCache[topicId] || {}).prompts) || [];
+    var laterParts = [];
+    var laterPrompts = 0;
+    (state.bcEditDraft[topicId] || []).forEach(function (r) {
+      if (!r.role_id) return;
+      var n = detailPrompts.filter(function (p) {
+        return p.role_id === r.role_id && entryIndex(p.messymiddle_phase || p.phase) < entryIndex(r.einstiegsphase);
+      }).length;
+      if (n > 0) {
+        laterPrompts += n;
+        laterParts.push(r.rolle + ' (' + n + ' vor ' + (PHASE_LABELS[r.einstiegsphase] || r.einstiegsphase) + ')');
+      }
+    });
+
+    if (removedPrompts > 0 || laterPrompts > 0) {
+      var parts = [];
+      if (removedPrompts > 0) {
+        parts.push(removedPrompts + ' Prompts der Rolle(n) ' + removed.map(function (r) { return r.rolle; }).join(', ') + ' werden deaktiviert.');
+      }
+      if (laterPrompts > 0) {
+        parts.push('Wegen späterer Einstiegsphasen werden ' + laterPrompts + ' Prompts deaktiviert: ' + laterParts.join(', ') + '.');
+      }
       var ok = await showCvzConfirm(
-        removedPrompts + ' Prompts der Rolle(n) ' + removed.map(function (r) { return r.rolle; }).join(', ') +
-        ' werden deaktiviert. Ihr bisheriger Verlauf bleibt einsehbar, sie werden aber nicht mehr abgefragt. ' +
-        'Für neue Rollen erstellen wir Prompts, die ab dem nächsten Lauf Daten bekommen.',
-        { title: 'Rollen austauschen?', confirmLabel: 'Speichern' }
+        parts.join(' ') + ' Ihr bisheriger Verlauf bleibt einsehbar, sie werden aber nicht mehr abgefragt. ' +
+        'Fehlende Prompts für neue Rollen oder vorgezogene Phasen erstellen wir, sie bekommen ab dem nächsten Lauf Daten.',
+        { title: 'Rollen ändern?', confirmLabel: 'Speichern' }
       );
       if (!ok) return;
     }
@@ -3128,7 +3197,7 @@
     var res = state.bcEditResult[topicId];
     if (!res) return null;
     var parts = [];
-    if (res.deaktiviert) parts.push(res.deaktiviert + ' Prompts entfernter Rollen deaktiviert.');
+    if (res.deaktiviert) parts.push(res.deaktiviert + ' Prompts deaktiviert (entfernte Rollen oder spätere Einstiegsphasen).');
     var created = res.ergaenzung.erstellt || {};
     var createdText = Object.keys(created).filter(function (k) { return created[k] > 0; })
       .map(function (k) { return k + ': ' + created[k]; }).join(', ');
@@ -3142,7 +3211,7 @@
     var p = document.createElement('p');
     p.style.cssText = 'margin:0;font-size:12px;line-height:1.5;color:var(--cvz-text-muted,#8b98a5);';
     p.textContent = (parts.join(' ') || 'Gespeichert.') + (missingText
-      ? ' Für ' + missingText + ' fehlen freie Plätze (das System erstellt max. 16 Prompts, insgesamt sind 20 möglich). ' +
+      ? ' Für ' + missingText + ' fehlen freie Plätze (das System erstellt max. 20 Prompts, insgesamt sind 24 möglich). ' +
         'Deaktiviert im Daten-Tab Prompts, die ihr nicht braucht, und klickt dann auf "Fehlende Prompts ergänzen". ' +
         'Alternativ könnt ihr für die Rolle eigene Prompts anlegen.'
       : '');
@@ -3160,7 +3229,7 @@
     var intro = document.createElement('p');
     intro.style.cssText = 'margin:0;font-size:12px;line-height:1.5;color:var(--cvz-text-muted,#8b98a5);';
     intro.textContent = 'Änderungen gelten ab dem nächsten Lauf. Entfernte Rollen: ihre Prompts werden deaktiviert. ' +
-      'Neue Rollen: wir erstellen je 2 Prompts, soweit Plätze frei sind. Motivation und Einwand ändern: bestehende Prompts bleiben unverändert.';
+      'Neue Rollen und vorgezogene Einstiegsphasen: Wir erstellen für jede fehlende Phase einen Prompt. Spätere Einstiegsphase: Prompts davor werden deaktiviert. Motivation und Einwand ändern: bestehende Prompts bleiben unverändert.';
     box.appendChild(intro);
 
     if (draft.length === 0) {
@@ -3219,7 +3288,7 @@
     headRow.appendChild(makeTip(
       'Jede Zelle zeigt, bei wie vielen Fragen dieser Rolle in dieser Phase eure Domain in mindestens einer KI-Antwort zitiert wurde. ' +
       'Grundlage sind oft nur 1 bis 3 Fragen je Zelle. Die Tabelle zeigt, wo Content für eine Rolle fehlt. Für eine exakte Messung ist die Datenbasis zu klein. ' +
-      'Nicht jede Rolle stellt in jeder Phase Fragen, deshalb bleiben manche Zellen bewusst leer.'
+      'Rollen, die später in den Kaufprozess einsteigen, werden erst ab ihrer Einstiegsphase gemessen.'
     ));
     if (bc && !bc._error) {
       var editBtn = document.createElement('button');
@@ -3266,7 +3335,7 @@
     }
 
     var prompts = (detail.prompts || []).filter(function (p) { return p.is_active !== false; });
-    var rows = roles.map(function (r) { return { key: r.role_id, label: r.rolle, champion: r.ist_champion }; });
+    var rows = roles.map(function (r) { return { key: r.role_id, label: r.rolle, champion: r.ist_champion, entry: r.einstiegsphase || 'exploration' }; });
     var unassigned = prompts.filter(function (p) { return !p.role_id; });
     if (unassigned.length) rows.push({ key: null, label: 'Ohne Rolle', champion: false });
 
@@ -3327,6 +3396,12 @@
         escapeHtml(row.label) +
         (row.champion ? ' <span title="Treibt den Kauf" style="color:var(--cvz-teal,#4fd1c5);">\u2605</span>' : '') + '</td>';
       PHASE_ORDER.forEach(function (ph) {
+        // NEU (23.09.2026): vor der Einstiegsphase wird für die Rolle nichts gemessen
+        if (row.entry && entryIndex(ph) < entryIndex(row.entry)) {
+          html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);">' +
+            '<div style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);opacity:.7;">steigt später ein</div></td>';
+          return;
+        }
         var st = cellStats(row.key, ph);
         html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);background:' + cellBg(st) + ';">' + cellHtml(st, false, row.key, ph) + '</td>';
       });
@@ -3345,7 +3420,8 @@
     var caption = document.createElement('p');
     caption.className = 'cvz-chart-caption';
     caption.textContent = 'Anteil der Fragen, bei denen eure Domain in mindestens einer ChatGPT- oder Gemini-Antwort zitiert wurde, je Rolle und Journey-Phase. ' +
-      'Rot: bisher bei keiner Frage zitiert. „Nicht gemessen“: Für diese Rolle gibt es in dieser Phase keinen Prompt. Über „+ Prompt“ legt ihr einen eigenen an.';
+      'Rot: bisher bei keiner Frage zitiert. „Steigt später ein“: Die Rolle recherchiert erst ab ihrer Einstiegsphase mit, änderbar unter „Rollen bearbeiten“. ' +
+      '„Nicht gemessen“: Der Prompt für diese Zelle fehlt noch (z. B. keine freien Plätze), über „+ Prompt“ legt ihr ihn selbst an.';
     section.appendChild(caption);
 
     if (unassigned.length) {
@@ -6487,7 +6563,7 @@
   // fester 4 eigener Plätze. Wer System-Prompts deaktiviert, bekommt
   // entsprechend mehr Plätze für eigene. Werte kommen vom Backend
   // (prompt_budget), Fallback-Rechnung nur, falls das Feld fehlt.
-  var MAX_TOTAL_PROMPTS = 20;
+  var MAX_TOTAL_PROMPTS = 24;
 
   function getPromptBudget(prompts, topicId) {
     var detail = state.topicDetailCache[topicId];
@@ -6520,7 +6596,7 @@
     var promptSlotBadge = document.createElement('span');
     promptSlotBadge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);font-weight:400;';
     promptSlotBadge.textContent = budget.aktiv_gesamt + '\u202fvon\u202f' + budget.max_gesamt + ' Prompts aktiv, noch\u202f' + budget.frei_eigene + '\u202ffrei';
-    promptSlotBadge.title = 'Bis zu 16 Prompts erstellt das System, insgesamt sind 20 m\u00f6glich. ' +
+    promptSlotBadge.title = 'Bis zu 20 Prompts erstellt das System, insgesamt sind 24 m\u00f6glich. ' +
       'Deaktivierte Prompts machen Platz f\u00fcr eigene.';
     promptLabelRow.appendChild(promptSlotBadge);
     promptLabelRow.appendChild(makeTip(
