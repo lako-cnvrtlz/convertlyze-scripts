@@ -80,7 +80,8 @@
     // optional Angebotsseite. Schritt 2: vorgeschlagenes Buying Center und
     // Zielgruppe bestätigen, anpassen oder austauschen.
     createStep:     1,
-    createDraft:    { projectId: null, topicText: '', offerUrl: '' },
+    createDraft:    { projectId: null, topicText: '', offerUrl: '', domainValue: null, newDomainText: '' },
+    bcSuggestFailed: false,
     bcSuggestion:   null,
     bcDraftRoles:   [],
     bcTargetGroup:  '',
@@ -1888,7 +1889,8 @@
 
   function resetCreateFlow() {
     state.createStep = 1;
-    state.createDraft = { projectId: null, topicText: '', offerUrl: '' };
+    state.createDraft = { projectId: null, topicText: '', offerUrl: '', domainValue: null, newDomainText: '' };
+    state.bcSuggestFailed = false;
     state.bcSuggestion = null;
     state.bcDraftRoles = [];
     state.bcTargetGroup = '';
@@ -1919,7 +1921,7 @@
   async function resolveCreateProject() {
     var domainSelect = document.getElementById('cvz-create-domain-select');
     var newDomainInput = document.getElementById('cvz-create-domain-new');
-    var selectedValue = domainSelect ? domainSelect.value : null;
+    var selectedValue = domainSelect ? domainSelect.value : state.createDraft.domainValue;
 
     if (selectedValue !== '__new__') {
       var existing = getProjectById(selectedValue);
@@ -1964,6 +1966,7 @@
     }
 
     state.createError = null;
+    state.bcSuggestFailed = false;
     state.isSuggestingBc = withBuyingCenter;
     state.isCreating = !withBuyingCenter;
     render();
@@ -2020,7 +2023,8 @@
     } catch (e) {
       console.error('[CVZ Visibility] Buying-Center-Vorschlag fehlgeschlagen:', e);
       state.createError = 'Der Vorschlag für die Rollen konnte nicht erstellt werden. ' +
-        'Ihr könnt es erneut versuchen oder das Thema ohne Rollen anlegen.';
+        'Versucht es erneut oder legt das Thema an und legt die Rollen später im Thema fest.';
+      state.bcSuggestFailed = true;
     }
     state.isSuggestingBc = false;
     state.isCreating = false;
@@ -2050,7 +2054,7 @@
 
       var isSolo = state.bcSuggestion && state.bcSuggestion.ist_solo_zielgruppe;
       if (roles.length === 0 && !isSolo) {
-        state.createError = 'Bitte mindestens eine Rolle behalten oder "Ohne Rollen anlegen" wählen.';
+        state.createError = 'Bitte mindestens eine Rolle behalten oder "Rollen später festlegen" wählen.';
         render();
         return;
       }
@@ -2547,18 +2551,25 @@
     domainSelect.id = 'cvz-create-domain-select';
     domainSelect.className = 'cvz-create-input';
 
+    // GEFIXT (23.09.2026): Alle Felder schreiben ihren Inhalt sofort in
+    // state.createDraft. Vorher wurde er erst beim Absenden gelesen, und
+    // jedes Neuzeichnen der Seite (z. B. Polling alle 5 s, solange ein Thema
+    // Daten sammelt) hat die Eingaben gelöscht.
+    var selectedDomain = state.createDraft.domainValue ||
+      (state.projects.length === 0 ? '__new__' : state.activeProjectId);
+
     state.projects.forEach(function (project) {
       var option = document.createElement('option');
       option.value = project.id;
       option.textContent = project.domain;
-      if (project.id === state.activeProjectId) option.selected = true;
+      if (project.id === selectedDomain) option.selected = true;
       domainSelect.appendChild(option);
     });
 
     var newOption = document.createElement('option');
     newOption.value = '__new__';
     newOption.textContent = '+ Neue Domain';
-    if (state.projects.length === 0) newOption.selected = true;
+    if (selectedDomain === '__new__') newOption.selected = true;
     domainSelect.appendChild(newOption);
 
     var newDomainInput = document.createElement('input');
@@ -2566,9 +2577,14 @@
     newDomainInput.id = 'cvz-create-domain-new';
     newDomainInput.className = 'cvz-create-input';
     newDomainInput.placeholder = 'Neue Domain (z.B. kunde-c.de)';
+    newDomainInput.value = state.createDraft.newDomainText || '';
     newDomainInput.style.display = (domainSelect.value === '__new__') ? '' : 'none';
+    newDomainInput.addEventListener('input', function () {
+      state.createDraft.newDomainText = newDomainInput.value;
+    });
 
     domainSelect.addEventListener('change', function () {
+      state.createDraft.domainValue = domainSelect.value;
       newDomainInput.style.display = (domainSelect.value === '__new__') ? '' : 'none';
       if (domainSelect.value === '__new__') newDomainInput.focus();
     });
@@ -2578,13 +2594,14 @@
     topicInput.type = 'text';
     topicInput.id = 'cvz-create-topic';
     topicInput.className = 'cvz-create-input';
-    topicInput.placeholder = 'Thema / Seed-Keyword (z.B. landingpage optimierung)';
+    // GEÄNDERT (23.09.2026): Zeichenlimit steht jetzt im Platzhalter statt
+    // als eigene Zeile darunter.
+    topicInput.placeholder = 'Thema / Seed-Keyword (z. B. landingpage optimierung, max. ' + TOPIC_MAX_CHARS + ' Zeichen)';
     topicInput.maxLength = TOPIC_MAX_CHARS;
     topicInput.value = state.createDraft.topicText || '';
-
-    var topicHint = document.createElement('p');
-    topicHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
-    topicHint.textContent = 'max. ' + TOPIC_MAX_CHARS + ' Zeichen';
+    topicInput.addEventListener('input', function () {
+      state.createDraft.topicText = topicInput.value;
+    });
 
     // GEFIXT (21.09.2026): topicInput/topicHint hingen bisher als zwei
     // eigenstaendige Flex-Items direkt in .cvz-create-form-fields (einer
@@ -2596,7 +2613,6 @@
     topicFieldWrap.style.cssText = 'flex:1;min-width:180px;';
     topicInput.style.width = '100%';
     topicFieldWrap.appendChild(topicInput);
-    topicFieldWrap.appendChild(topicHint);
 
     // NEU (23.09.2026): optionale Angebotsseite. Ersetzt die Abfrage von
     // Branche/Zielgruppe: Claude liest die Seite und leitet daraus ab.
@@ -2609,6 +2625,9 @@
     urlInput.style.width = '100%';
     urlInput.placeholder = 'URL eurer Angebotsseite zu diesem Thema (optional)';
     urlInput.value = state.createDraft.offerUrl || '';
+    urlInput.addEventListener('input', function () {
+      state.createDraft.offerUrl = urlInput.value;
+    });
     var urlHint = document.createElement('p');
     urlHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
     urlHint.textContent = 'Muss auf eurer Domain liegen. Daraus leiten wir Zielgruppe und Buying Center deutlich treffender ab.';
@@ -2625,19 +2644,24 @@
       ? '<span class="cvz-spinner"></span>Rollen werden vorgeschlagen \u2026'
       : 'Weiter';
 
-    var skipBtn = document.createElement('button');
-    skipBtn.type = 'button';
-    skipBtn.className = 'cvz-delete-topic-btn';
-    skipBtn.setAttribute('data-cvz-create-skip-bc', '');
-    skipBtn.disabled = busy;
-    skipBtn.textContent = state.isCreating ? 'Wird angelegt \u2026' : 'Ohne Rollen anlegen';
-
     form.appendChild(domainSelect);
     form.appendChild(newDomainInput);
     form.appendChild(topicFieldWrap);
     form.appendChild(urlFieldWrap);
     form.appendChild(submitBtn);
-    form.appendChild(skipBtn);
+
+    // GEÄNDERT (23.09.2026): Der Ausweg ohne Rollen erscheint nur noch, wenn
+    // der Rollen-Vorschlag fehlgeschlagen ist. Vorher stand er immer da, und
+    // es war nicht klar, warum man ihn wählen sollte.
+    if (state.bcSuggestFailed) {
+      var skipBtn = document.createElement('button');
+      skipBtn.type = 'button';
+      skipBtn.className = 'cvz-delete-topic-btn';
+      skipBtn.setAttribute('data-cvz-create-skip-bc', '');
+      skipBtn.disabled = busy;
+      skipBtn.textContent = state.isCreating ? 'Wird angelegt \u2026' : 'Thema trotzdem anlegen, Rollen später festlegen';
+      form.appendChild(skipBtn);
+    }
 
     if (state.createError) {
       var err = document.createElement('p');
@@ -2761,7 +2785,8 @@
     skip.className = 'cvz-delete-topic-btn';
     skip.setAttribute('data-cvz-create-skip-bc', '');
     skip.disabled = state.isCreating;
-    skip.textContent = 'Ohne Rollen anlegen';
+    skip.textContent = 'Rollen später festlegen';
+    skip.title = 'Das Thema startet ohne Rollen. Ihr könnt sie jederzeit im Thema unter "Sichtbarkeit je Rolle" festlegen und bestehende Prompts zuordnen.';
     actions.appendChild(skip);
     box.appendChild(actions);
 
