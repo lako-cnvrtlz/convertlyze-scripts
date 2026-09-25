@@ -1,89 +1,28 @@
 /**
- * Convertlyze – Report Script v7
+ * Convertlyze – Report Script v8
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
  *
- * ÄNDERUNGEN ggü. v6 (PDF-Zugriffsprüfung im Frontend):
- *   - NEU: PDF_ACCESS_SOURCES + canAccessPdf() (identische Liste/Logik wie
- *     dashboard-v6.js CONFIG.PDF_ACCESS_SOURCES / CONFIG.PAID_PLANS).
- *   - PDF-Button ist bei Analysen ohne Zugriff (analysis_source nicht in
- *     PDF_ACCESS_SOURCES) jetzt disabled + Tooltip "PDF-Report nur für
- *     Analysen aus kostenpflichtigen Plänen verfügbar". Der Klick-Handler
- *     (attachPdfDownloadHandler) wird in diesem Fall gar nicht erst
- *     angehängt.
- *   - NEU: attachPdfDownloadHandler() unterscheidet im catch-Block anhand
- *     von err.code === 'PLAN_RESTRICTED' (aus der generate-pdf-report Edge
- *     Function) zwischen Plan-Sperre und generischem Fehler - relevant für
- *     den Edge Case, dass die Sperre erst serverseitig greift (z.B. Plan-
- *     Downgrade waehrend die Seite noch offen war).
- *   - WHY doppelt abgesichert: Die eigentliche Sperre liegt in der
- *     generate-pdf-report Edge Function (serverseitiger Check, siehe dort).
- *     Dieser Frontend-Check ist reine UX (kein aktivierbarer Button, kein
- *     unnötiger Klick) - kein Ersatz für den Server-Check.
- *   - WHY dupliziert: PDF_ACCESS_SOURCES liegt zusätzlich in
- *     dashboard-v6.js (CONFIG.PDF_ACCESS_SOURCES) und in der
- *     generate-pdf-report Edge Function. Bei Änderung (neuer Plan-Name o.ä.)
- *     IMMER alle drei Stellen synchron halten.
- *   - BUGFIX: der PDF-Button nutzte bei fehlendem Zugriff das native
- *     disabled-Attribut - das unterdrückt in den meisten Browsern auch
- *     mouseover, wodurch der title-Tooltip nie erschien. Ersetzt durch
- *     aria-disabled="true" + Styling; Klickschutz bleibt bestehen, da der
- *     Handler ohnehin nur bei pdfAllowed angehängt wird (analog zum Fix
- *     in dashboard-v7.js, wo dieselbe Ursache über pointer-events:none lag).
- *   - NEU: showClickHint() - der deaktivierte PDF-Button zeigt seinen
- *     Hinweistext jetzt zusätzlich per Klick als kleine Sprechblase. WHY:
- *     title-Tooltips lösen nur bei Hover aus - auf Touch-Geräten kommt die
- *     Erklärung sonst nie an, und ein Klick auf den deaktivierten Button tat
- *     bisher schlicht gar nichts. Identische Logik wie in dashboard-v7.js.
- *
- * ÄNDERUNGEN ggü. v5 (Performance & AI Sichtbarkeit in Executive Summary):
- *   - renderExecSummary() rendert jetzt zusätzlich zwei Balken für
- *     Performance und AI Sichtbarkeit, getrennt durch eine Linie mit dem
- *     Label "Nicht im Gesamt-Score". Die Balken sind visuell zurückgenommen
- *     (grau statt Teal), damit klar bleibt, dass sie den Ring-Wert oben
- *     nicht beeinflussen.
- *   - Fehlender Score (PageSpeed-Timeout, alte Analyse ohne
- *     ai_readiness_score) -> Zeile wird ausgelassen. Fehlen beide, entfällt
- *     auch die Trennlinie.
- *   - NEU im CSS: .cvz-bars-divider, .cvz-bars-divider-t, .cvz-br-extra
- *   - Der PDF-Report (Playwright-Template) ist NICHT angepasst und zeigt
- *     die beiden Werte weiterhin nur im Deep Dive.
- *
- * ÄNDERUNGEN ggü. v4 (Dedup-Findings-Integration):
- *   - NEU: getDedupCategory() liest deduplizierte Findings aus
- *     analysis.dedup_findings (jsonb-Spalte, befüllt durch die neue
- *     Make.com-Cluster-Pipeline: Findings Collector -> Claude-Clustering ->
- *     Cluster Extractor -> Category/Roadmap Builder).
- *   - NEU: buildPrioCardFromDedup() rendert die deduplizierten Findings:
- *       - cross_reference: true  -> kompakte Verweis-Zeile ("Verwandtes
- *         Thema bereits unter X beschrieben") statt voller Karte
- *       - cross_category (Array) -> Badge "Betrifft auch: ..." an der Karte
- *   - Alle 9 Kategorie-Sektionen nutzen jetzt zuerst dedup_findings, falls
- *     vorhanden, und fallen sonst auf die alte buildPrioCard()-Logik mit
- *     den rohen *_schwaechen_prioritized_html-Feldern zurück (Kompatibilität
- *     mit alten Analysen, die noch kein dedup_findings haben).
- *   - content_gaps_html bleibt unverändert über buildPrioCard() gerendert,
- *     da dieses Feld nicht Teil der Dedup-Pipeline ist.
- *
- * ÄNDERUNGEN ggü. v3 (Schwächen-Feld-Konsolidierung):
- *   - Separate card('schwaechen', ...)-Karten für *_schwaechen_html ENTFERNT.
- *     Schwächen werden jetzt ausschließlich über buildPrioCard() gerendert.
- *   - buildPrioCard() behält den HTML-Fallback für ALTE Analysen, deren
- *     prioritized-Feld noch echtes HTML statt JSON enthält.
- *   - card()/sanitize() bleiben unverändert (card gibt bei leerem Content ''
- *     zurück, daher waren die entfernten Zeilen bei Neu-Analysen ohnehin leer).
- *
- * ÄNDERUNGEN ggü. v2:
- *   - toArray()-Helfer (robust gegen Objekt/Array/fehlend)
- *   - buildRoadmap(): rendert priority_matrix aus JSON, Fallback auf priority_matrix_html
- *   - .section-roadmap nutzt buildRoadmap() statt direktem HTML
- *   - CSS für .cvz-roadmap / .cvz-rm-* ergänzt
- *
- * ÄNDERUNGEN ggü. v3 (Team + Ersteller-Check):
- *   - KI-Agent-Button nur fuer den Ersteller der Analyse sichtbar.
- *     Team-Mitglieder sehen Report + PDF, aber NICHT den KI-Agent-Button
- *     (Backend erzwingt dies ohnehin via verifyAnalysisOwnership -> 403).
- *   - bootstrap() ermittelt die eigene user_id (users-Lookup) fuer den Vergleich.
- *   - PDF-Download-Handler in attachPdfDownloadHandler() ausgelagert (kein Duplikat).
+ * ÄNDERUNGEN ggü. v7 (Executive Summary läuft auf Mobile rechts raus):
+ *   - Flex-Kinder (.cvz-bars, .cvz-badge, .cvz-card, Badge-Text) bekommen
+ *     min-width:0. WHY: Flex-Elemente sind standardmäßig mindestens so breit
+ *     wie ihr längstes unteilbares Wort. Lange deutsche Komposita oder URLs
+ *     aus dem KI-Text haben die Karten dadurch breiter als den Screen gemacht.
+ *   - Texte brechen jetzt notfalls mitten im Wort um (overflow-wrap:anywhere)
+ *     und trennen mit Bindestrich, wo der Browser es kann (hyphens:auto,
+ *     lang="de" am Executive-Summary-Container).
+ *   - Mobile-Badge: min-width:100% ersetzt durch min-width:0 (100% plus
+ *     Padding war bei content-box-Sizing breiter als der Container).
+ *   - box-sizing:border-box für alles innerhalb von .cvz-section.
+ *   - Tabellen/Bilder/Code im KI-HTML: max-width:100%, Tabellen scrollen
+ *     intern statt die Seite zu verbreitern.
+ *   - Mobile: .cvz-exec-panel align-items:stretch statt center.
+ *   - Sektions-Überschriften skalieren jetzt mit der verfügbaren Breite,
+ *     sodass das längste Wort (PERFORMANCE) immer in eine Zeile passt,
+ *     ohne Silbentrennung. WHY: Syne ExtraBold ist extrem breit
+ *     (EXECUTIVE = ca. 9,7em). Bei der alten Mindestgröße von 36px war
+ *     EXECUTIVE 348px breit und passte auf keinen Standard-Handyscreen.
+ *     overflow-wrap:anywhere bleibt nur als Notbremse für künftige,
+ *     noch längere Überschriften.
  *
  * Embed in Webflow Before </body>:
  * <script src="https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js"></script>
@@ -190,6 +129,31 @@
         max-width:1200px;margin:0 auto;padding:0 24px 32px;
         font-family:'Geist','DM Sans','Segoe UI',sans-serif;color:#e2e8f0;
       }
+
+      /* Overflow-Schutz: nichts darf breiter als der Screen werden */
+      .cvz-section,
+      .cvz-section *,
+      .cvz-section *::before,
+      .cvz-section *::after{box-sizing:border-box;}
+      .cvz-section{width:100%;min-width:0;}
+      .cvz-exec-panel > *,
+      .cvz-bars,
+      .cvz-badge,
+      .cvz-cards,
+      .cvz-card,
+      .cvz-card-body,
+      .cvz-badge-tx{min-width:0;max-width:100%;}
+      .cvz-card-body,
+      .cvz-badge-tx,
+      .cvz-card-body *{
+        overflow-wrap:anywhere;word-break:normal;hyphens:auto;-webkit-hyphens:auto;
+      }
+      .cvz-card-body img,
+      .cvz-card-body video,
+      .cvz-card-body iframe,
+      .cvz-card-body pre{max-width:100%;}
+      .cvz-card-body pre{white-space:pre-wrap;}
+      .cvz-card-body table{display:block;max-width:100%;overflow-x:auto;}
 
       /* Reduced motion */
       @media(prefers-reduced-motion:reduce){
@@ -372,7 +336,11 @@
       .cvz-heading-wrap.cvz-heading-top{border-top:none!important;}
       .cvz-heading-title{
         font-family:'Syne',sans-serif;
-        font-size:clamp(36px,6vw,80px);font-weight:800;letter-spacing:-.02em;
+        /* Schriftgröße so gewählt, dass das längste Wort (PERFORMANCE, ca. 13,5em
+           breit in Syne 800) immer in eine Zeile passt: verfügbare Breite / 14.
+           Auf Desktop greift weiterhin 6vw, weil das dort kleiner ist. */
+        font-size:clamp(20px,min(6vw,calc((100vw - 48px) / 14)),80px);
+        font-weight:800;letter-spacing:-.02em;overflow-wrap:anywhere;
         color:rgba(148,163,184,.25);text-transform:uppercase;line-height:1!important;margin-bottom:12px;
       }
       .cvz-heading-wrap,.cvz-heading-wrap *{line-height:1.2!important;}
@@ -521,15 +489,20 @@
       /* Responsive */
       @media(max-width:768px){
         .cvz-section{padding:16px;}
-        .cvz-exec-panel{flex-direction:column;align-items:center;padding:20px 16px;gap:20px;}
+        .cvz-exec-panel{flex-direction:column;align-items:stretch;padding:20px 16px;gap:20px;}
         .cvz-ring{width:100%;display:flex;flex-direction:column;align-items:center;}
         .cvz-bars{width:100%;}
         .cvz-badges{flex-direction:column;}
-        .cvz-badge{min-width:100%;flex:1 1 100%;}
+        .cvz-badge{min-width:0;flex:1 1 100%;}
+        .cvz-bars{min-width:0;}
         .cvz-bl{width:76px;}
         .cvz-info-grid{grid-template-columns:1fr;}
         .cvz-info-row:nth-last-child(-n+2){border-bottom:1px solid rgba(255,255,255,.05);}
         .cvz-info-row:last-child{border-bottom:none;}
+      }
+      @media(max-width:480px){
+        .cvz-heading-wrap{padding-left:16px;padding-right:16px;}
+        .cvz-heading-title{font-size:clamp(20px,calc((100vw - 32px) / 14),36px);}
       }
 
       /* KI-Disclaimer */
@@ -1125,7 +1098,7 @@
     }
 
     container.innerHTML = `
-      <div class="cvz-section">
+      <div class="cvz-section" lang="de">
         <div class="cvz-exec-panel cvz-fi cvz-fi-2">
           <div class="cvz-ring">
             <div class="cvz-ring-c" style="border:3px solid ${rColor};background:${rBg};">
