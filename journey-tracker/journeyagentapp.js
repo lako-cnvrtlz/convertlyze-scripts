@@ -136,7 +136,7 @@
     // NEU (17.09.2026): Phase-Filter fuer Content-Luecken und Quellen-Analyse
     gapPhaseFilter: null,
     sourcePhaseFilter: null,
-    // NEU (17.09.2026): Pro-Topic gepinnte Wettbewerber fuer den Vergleichs-Chart
+    // NEU (20.09.2026): Pro-Topic gepinnte Wettbewerber fuer den Vergleichs-Chart
     chartPinnedComps: {},
     // NEU (20.09.2026): Gezielter Retry einzelner Schritte (retryStep/renderStepNotice).
     // Fehlte bisher hier, dadurch crashte retryStep beim ersten Klick
@@ -4482,289 +4482,6 @@
     return section;
   }
 
-
-  // GEÄNDERT (16.09.2026 II): Zwei fokussierte Tabellen statt Einheitstabelle.
-  // Tabelle 1: Keywords mit bestehendem Ranking, gewichtet nach Suchvolumen.
-  // Tabelle 2: Prompts / Chancen, bei denen Wettbewerber zitiert werden, nicht wir.
-  // Tabelle 3: Content-Ideen.
-  // Keine Em-Dashes. Kein "Naechster Schritt" fuer Opportunities (immer leer).
-  function renderActionTab(opportunities, contentIdeas, keywords, sourceProfiles) {
-    var wrap = document.createElement('div');
-
-    // ── Tabelle 1: Keyword-Chancen ───────────────────────────────────────────
-    (function () {
-      var heading = document.createElement('p');
-      heading.className = 'cvz-section-label';
-      heading.textContent = 'Keywords mit bestehendem Ranking';
-      wrap.appendChild(heading);
-
-      var intro = document.createElement('p');
-      intro.className = 'cvz-card-placeholder-text';
-      intro.style.marginBottom = '12px';
-      intro.textContent =
-        'Keywords, für die Google eure Domain bereits rankt (GSC oder organisch), sortiert nach Suchvolumen. ' +
-        'Aufklappen zeigt die Top-SERP-Ergebnisse.';
-      wrap.appendChild(intro);
-
-      var rankedKws = (keywords || []).filter(function (kw) {
-        return kw.organic_rank != null || kw.gsc_position != null;
-      }).sort(function (a, b) {
-        return (b.search_volume || 0) - (a.search_volume || 0);
-      });
-
-      if (rankedKws.length === 0) {
-        var empty = document.createElement('p');
-        empty.className = 'cvz-card-placeholder-text';
-        empty.textContent = 'Noch keine Keywords mit Ranking vorhanden.';
-        wrap.appendChild(empty);
-      } else {
-        var list = document.createElement('div');
-        list.className = 'cvz-prompt-list';
-        list.style.marginBottom = '4px';
-
-        // Table header row
-        var headerRow = document.createElement('div');
-        headerRow.style.cssText =
-          'display:flex;gap:8px;padding:4px 12px 6px;font-size:11px;font-weight:600;' +
-          'text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#6b7280);' +
-          'border-bottom:1px solid var(--cvz-border,#e5e7eb);';
-        headerRow.innerHTML =
-          '<span style="flex:1 1 0;">Keyword</span>' +
-          '<span style="width:110px;text-align:right;">Suchen/Mo.</span>' +
-          '<span style="width:100px;text-align:right;">Eigene Pos.</span>' +
-          '<span style="width:24px;"></span>';
-        list.appendChild(headerRow);
-
-        rankedKws.forEach(function (kw) {
-          var rowId = 'action-kw-' + (kw.id || kw.keyword);
-          var ownPos = kw.organic_rank != null ? kw.organic_rank : kw.gsc_position;
-          var posStr = ownPos != null ? String(Math.round(ownPos * 10) / 10) : '';
-          var hasSerpData = kw.top_serp_results && kw.top_serp_results.length > 0;
-          var expanded = state.expandedKeywordId === rowId;
-
-          // Main row
-          var row = document.createElement('div');
-          row.className = 'cvz-prompt-row' + (hasSerpData ? ' cvz-prompt-row-clickable' : '');
-          row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px;';
-          if (hasSerpData) {
-            row.setAttribute('data-cvz-keyword-toggle', rowId);
-            row.setAttribute('data-cvz-keyword-text', kw.keyword);
-          }
-          row.innerHTML =
-            '<span class="cvz-prompt-text" style="flex:1 1 0;">' + escapeHtml(kw.keyword) + '</span>' +
-            '<span style="width:110px;text-align:right;font-size:13px;color:var(--cvz-text-muted,#6b7280);">' +
-              (kw.search_volume != null
-                ? Number(kw.search_volume).toLocaleString('de-DE')
-                : '<span style="opacity:.4;">-</span>') +
-            '</span>' +
-            '<span style="width:100px;text-align:right;font-size:13px;' +
-              (ownPos != null && ownPos <= 10 ? 'color:#35a86b;font-weight:600;' : 'color:var(--cvz-text-muted,#6b7280);') + '">' +
-              (posStr ? 'Pos. ' + posStr : '<span style="opacity:.4;">-</span>') +
-            '</span>' +
-            '<span style="width:24px;text-align:center;font-size:11px;color:var(--cvz-text-muted,#6b7280);">' +
-              (hasSerpData ? (expanded ? '▾' : '▸') : '') +
-            '</span>';
-          list.appendChild(row);
-
-          // SERP expansion
-          if (hasSerpData && expanded) {
-            var expRow = document.createElement('div');
-            expRow.className = 'cvz-keyword-expansion';
-            expRow.style.cssText = 'padding:8px 12px 12px 12px;background:var(--cvz-card-bg,#f9fafb);border-bottom:1px solid var(--cvz-border,#e5e7eb);';
-            expRow.innerHTML = renderSerpSummaryBlock(kw);
-            list.appendChild(expRow);
-          }
-        });
-
-        wrap.appendChild(list);
-      }
-    })();
-
-    // ── Tabelle 2: Zitierungs-Luecken ────────────────────────────────────────
-    // GEÄNDERT (16.09.2026): Zeigt jetzt Beschreibung + Empfehlung als
-    // Hauptinhalt; Wettbewerber-Domains nur kompakt als kleine Chips darunter.
-    // Vorher wurde nur die Domain-Liste als Blob gezeigt ohne Kontext.
-    (function () {
-      var citationTypes = ['competitor_citation', 'ai_visible_competitor_dominates'];
-      var citationOpps = (opportunities || []).filter(function (o) {
-        return citationTypes.indexOf(o.opportunity_type) !== -1 &&
-               (o.status === 'new' || o.status === 'reviewed');
-      });
-
-      if (citationOpps.length === 0) return;
-
-      var heading = document.createElement('p');
-      heading.className = 'cvz-section-label';
-      heading.style.marginTop = '28px';
-      heading.textContent = 'Chancen: Zitierungs-Lücken';
-      wrap.appendChild(heading);
-
-      citationOpps.forEach(function (opp) {
-        var sd = opp.supporting_data || {};
-        var compDomains = opp.opportunity_type === 'competitor_citation'
-          ? (sd.cited_domains || [])
-          : (sd.competitor_domains_cited || []);
-
-        // Show max 5 domains to keep card compact
-        var domainsToShow = compDomains.slice(0, 5);
-        var moreCount = compDomains.length - domainsToShow.length;
-
-        var typeLabel = OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type;
-
-        // Description: keep full text (it contains the actionable insight)
-        var desc = (opp.description || '').trim();
-
-        // Content recommendation
-        var rec = (opp.content_recommendation || '').trim();
-
-        var domainsChipsHtml = domainsToShow.map(function (d) {
-          return '<span style="display:inline-flex;align-items:center;gap:3px;' +
-            'background:var(--cvz-chip-bg,#f3f4f6);border-radius:4px;' +
-            'padding:2px 6px;font-size:11px;margin:2px 4px 2px 0;">' +
-            '<img src="https://www.google.com/s2/favicons?sz=12&domain=' + encodeURIComponent(d) + '" ' +
-            'style="width:12px;height:12px;">' +
-            escapeHtml(d) + '</span>';
-        }).join('') + (moreCount > 0
-          ? '<span style="font-size:11px;color:var(--cvz-text-muted,#6b7280);padding:2px 4px;">+' + moreCount + ' weitere</span>'
-          : '');
-
-        var card = document.createElement('div');
-        card.className = 'cvz-card';
-        card.style.marginBottom = '8px';
-
-        card.innerHTML =
-          '<p style="margin:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;' +
-              'letter-spacing:.05em;color:var(--cvz-text-muted,#6b7280);">' + escapeHtml(typeLabel) + '</p>' +
-          (desc
-            ? '<p style="margin:0 0 8px;font-size:13px;line-height:1.5;">' + escapeHtml(desc) + '</p>'
-            : '') +
-          (rec
-            ? '<p style="margin:0 0 8px;font-size:13px;font-weight:600;' +
-              'color:var(--cvz-teal,#0d9488);">' + escapeHtml(rec) + '</p>'
-            : '') +
-          (domainsChipsHtml
-            ? '<p style="margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#6b7280);font-weight:600;' +
-              'text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Zitierte Wettbewerber</p>' +
-              '<div style="display:flex;flex-wrap:wrap;gap:2px;">' + domainsChipsHtml + '</div>'
-            : '');
-
-        wrap.appendChild(card);
-      });
-    })();
-
-    // ── Tabelle 3: Content-Ideen ─────────────────────────────────────────────
-    (function () {
-      if (!contentIdeas || contentIdeas.length === 0) return;
-
-      var heading = document.createElement('p');
-      heading.className = 'cvz-section-label';
-      heading.style.marginTop = '28px';
-      heading.textContent = 'Content-Ideen aus KI-Analysen';
-      wrap.appendChild(heading);
-
-      var grid = document.createElement('div');
-      grid.className = 'cvz-opportunity-grid';
-
-      contentIdeas.forEach(function (idea) {
-        var phaseLabel    = idea.phase    ? (PHASE_LABELS[idea.phase]       || idea.phase)    : '';
-        var providerLabel = idea.provider ? (MODEL_LABELS[idea.provider]    || idea.provider) : '';
-
-        var colonIdx   = (idea.description || '').indexOf(': ');
-        var ideaTitle  = colonIdx >= 0 ? idea.description.substring(0, colonIdx) : (idea.description || '');
-        var ideaReason = colonIdx >= 0 ? idea.description.substring(colonIdx + 2) : '';
-
-        var card = document.createElement('div');
-        card.className = 'cvz-card cvz-idea-card';
-        card.innerHTML =
-          (phaseLabel
-            ? '<p class="cvz-opportunity-type">' + escapeHtml(phaseLabel) + '</p>'
-            : '') +
-          '<p style="margin:0 0 4px;font-weight:600;font-size:13px;">' + escapeHtml(ideaTitle) + '</p>' +
-          (ideaReason
-            ? '<p class="cvz-opportunity-description">' + escapeHtml(ideaReason) + '</p>'
-            : '') +
-          (providerLabel
-            ? '<p style="margin:6px 0 0;font-size:12px;color:#6b7280;">Quelle: ' + escapeHtml(providerLabel) + '</p>'
-            : '');
-        grid.appendChild(card);
-      });
-
-      wrap.appendChild(grid);
-    })();
-
-    // ── Plattformen mit Veroeffentlichungs-Chance ────────────────────────────
-    var publishable = (sourceProfiles || []).filter(function (p) { return p.can_publish === true; });
-    if (publishable.length > 0) {
-      var platHeading = document.createElement('p');
-      platHeading.className = 'cvz-section-label';
-      platHeading.style.marginTop = '32px';
-      platHeading.textContent = 'Plattformen mit Veröffentlichungs-Chance';
-      wrap.appendChild(platHeading);
-
-      var platIntro = document.createElement('p');
-      platIntro.className = 'cvz-card-placeholder-text';
-      platIntro.style.marginBottom = '16px';
-      platIntro.textContent =
-        'Diese Plattformen wurden von KI-Modellen als Quellen zitiert und normale Nutzer können dort eigene Inhalte veröffentlichen (z. B. Foren, Bewertungsportale, YouTube, Wikipedia).';
-      wrap.appendChild(platIntro);
-
-      var platGrid = document.createElement('div');
-      platGrid.className = 'cvz-opportunity-grid';
-      publishable.forEach(function (p) {
-        var card = document.createElement('div');
-        card.className = 'cvz-card cvz-idea-card';
-        card.innerHTML =
-          '<p class="cvz-opportunity-type">' +
-            '<img src="https://www.google.com/s2/favicons?sz=16&domain=' + encodeURIComponent(p.domain) + '" ' +
-            'style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">' +
-            escapeHtml(p.domain) +
-          '</p>' +
-          '<p class="cvz-opportunity-description" style="font-size:12px;color:#888;margin-bottom:4px;">' +
-            escapeHtml(p.content_type || '') +
-          '</p>' +
-          (p.summary ? '<p class="cvz-opportunity-description">' + escapeHtml(p.summary) + '</p>' : '') +
-          (p.differentiation_suggestion
-            ? '<div class="cvz-action-recommendation"><p class="cvz-changelog-guided-label">Abgrenzung</p>' +
-              '<p class="cvz-opportunity-description">' + escapeHtml(p.differentiation_suggestion) + '</p></div>'
-            : '');
-        platGrid.appendChild(card);
-      });
-      wrap.appendChild(platGrid);
-    }
-
-    return wrap;
-  }
-  function renderOpportunitySection(opportunities) {
-    var section = document.createElement('div');
-    section.className = 'cvz-section';
-
-    var heading = document.createElement('p');
-    heading.className = 'cvz-section-label';
-    heading.textContent = 'Opportunities';
-    section.appendChild(heading);
-
-    if (opportunities.length === 0) {
-      var empty = document.createElement('p');
-      empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Aktuell keine offenen Opportunities für dieses Thema.';
-      section.appendChild(empty);
-      return section;
-    }
-
-    var grid = document.createElement('div');
-    grid.className = 'cvz-opportunity-grid';
-    opportunities.forEach(function (opp) {
-      var card = document.createElement('div');
-      card.className = 'cvz-card cvz-opportunity-card';
-      card.innerHTML =
-        '<p class="cvz-opportunity-type">' + escapeHtml(OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type) + '</p>' +
-        '<p class="cvz-opportunity-description">' + escapeHtml(opp.description || '') + '</p>';
-      grid.appendChild(card);
-    });
-    section.appendChild(grid);
-    return section;
-  }
-
   // --- NEU (17.09.2026): Phase-Heuristik + localStorage-Overrides ---
   function _detectGapPhase(description) {
     if (!description) return null;
@@ -5981,6 +5698,11 @@
     return order.map(function (k) { return byKey[k]; });
   }
 
+  // GEÄNDERT (25.09.2026, Kundenwunsch): Keywords-Liste jetzt als echte
+  // <table> mit Kopfzeile statt Flex-Divs ohne Header (gleiches Muster wie
+  // renderGscBlock/renderContentGapsSection). PAA-Fragen zeigen keine
+  // "Einschätzung" mehr: Sie kommen direkt aus Google, die Nachfrage gilt
+  // damit als bestätigt, eine zusätzliche Einschätzung wäre irreführend.
   function renderKeywordsTable(keywords, enableExpansion, changelogEntries) {
     keywords = dedupeKeywords(keywords);
     var section = document.createElement('div');
@@ -6004,54 +5726,6 @@
       return section;
     }
 
-    // Helper: render one keyword row + optional expansion
-    function _renderKwRow(kw, list) {
-      var rowId = kw.id || (kw.keyword + '|' + kw.source);
-      var linkedCount = (changelogEntries || []).filter(function (entry) {
-        return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
-      }).length;
-      var hasDetail = kw.organic_rank != null || kw.gsc_impressions != null || kw.gsc_position != null || kw.first_seen_at || linkedCount > 0 || (kw.top_serp_results && kw.top_serp_results.length > 0) || !!kw.messymiddle_phase;
-      var canExpand = !!(enableExpansion && hasDetail);
-
-      var row = document.createElement('div');
-      row.className = 'cvz-prompt-row' + (canExpand ? ' cvz-prompt-row-clickable' : '');
-      if (canExpand) {
-        row.setAttribute('data-cvz-keyword-toggle', rowId);
-        row.setAttribute('data-cvz-keyword-text', kw.keyword);
-      }
-      row.innerHTML =
-        '<span class="cvz-prompt-text">' + escapeHtml(kw.keyword) +
-          (linkedCount > 0
-            ? ' <span class="cvz-changelog-linked-badge" title="' + linkedCount + ' verknüpfte Änderung(en)">✎</span>'
-            : '') +
-        '</span>' +
-        '<span class="cvz-prompt-citation-count">' +
-          (kw.search_volume == null ? '-' : escapeHtml(kw.search_volume) + '/Monat') +
-        '</span>' +
-        // NEU (20.09.2026): Einschätzung (rankt bereits/knapp an Seite 1/
-        // Nachfrage unsichtbar/reine Idee), einheitlich aus dem Backend
-        // (keyword_status.py) statt einer eigenen Frontend-Schwelle.
-        (kw.keyword_status_label
-          ? '<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;' +
-            'letter-spacing:.04em;padding:3px 8px;border-radius:9999px;white-space:nowrap;' +
-            'color:' + (KEYWORD_STATUS_COLORS[kw.keyword_status] || '#8b98a5') + ';' +
-            'background:' + (KEYWORD_STATUS_COLORS[kw.keyword_status] || '#8b98a5') + '1a;">' +
-            escapeHtml(kw.keyword_status_label) + '</span>'
-          : '') +
-        '<span class="cvz-prompt-source">' + escapeHtml(KEYWORD_SOURCE_LABELS[kw.source] || kw.source) + '</span>' +
-        (kw.id
-          ? '<button type="button" class="cvz-prompt-delete-btn" data-cvz-keyword-deactivate="' + kw.id + '" aria-label="Keyword deaktivieren" title="Keyword deaktivieren">\u00d7</button>'
-          : '') +
-        (canExpand
-          ? '<span class="cvz-prompt-expand-chevron">' + (state.expandedKeywordId === rowId ? '▾' : '▸') + '</span>'
-          : '');
-      list.appendChild(row);
-
-      if (canExpand && state.expandedKeywordId === rowId) {
-        list.appendChild(renderKeywordExpansion(kw, rowId, changelogEntries));
-      }
-    }
-
     // Group keywords by messymiddle_phase
     var grouped = {};
     PHASE_ORDER.forEach(function (p) { grouped[p] = []; });
@@ -6065,50 +5739,111 @@
       }
     });
 
-    // Check if any keywords have a phase assigned
     var hasAnyPhase = PHASE_ORDER.some(function (p) { return grouped[p].length > 0; });
 
     if (!hasAnyPhase) {
-      // No phase data yet: render flat list as before
-      var flatList = document.createElement('div');
-      flatList.className = 'cvz-prompt-list';
-      keywords.forEach(function (kw) { _renderKwRow(kw, flatList); });
-      section.appendChild(flatList);
+      section.appendChild(_buildKeywordTable(keywords, enableExpansion, changelogEntries));
       return section;
     }
 
-    // Render phase groups
     PHASE_ORDER.forEach(function (phase) {
       if (grouped[phase].length === 0) return;
       var phaseColor = PHASE_COLORS[phase] || '#4a5568';
-
       var groupHeading = document.createElement('p');
       groupHeading.className = 'cvz-prompt-phase-heading';
       groupHeading.style.borderLeftColor = phaseColor;
       groupHeading.textContent = PHASE_LABELS[phase] || phase;
       section.appendChild(groupHeading);
-
-      var phaseList = document.createElement('div');
-      phaseList.className = 'cvz-prompt-list';
-      grouped[phase].forEach(function (kw) { _renderKwRow(kw, phaseList); });
-      section.appendChild(phaseList);
+      section.appendChild(_buildKeywordTable(grouped[phase], enableExpansion, changelogEntries));
     });
 
-    // "Nicht zugeordnet" group
     if (grouped['__none__'].length > 0) {
       var noneHeading = document.createElement('p');
       noneHeading.className = 'cvz-prompt-phase-heading';
       noneHeading.style.borderLeftColor = '#4a5568';
       noneHeading.textContent = 'Nicht zugeordnet';
       section.appendChild(noneHeading);
-
-      var noneList = document.createElement('div');
-      noneList.className = 'cvz-prompt-list';
-      grouped['__none__'].forEach(function (kw) { _renderKwRow(kw, noneList); });
-      section.appendChild(noneList);
+      section.appendChild(_buildKeywordTable(grouped['__none__'], enableExpansion, changelogEntries));
     }
 
     return section;
+  }
+
+  // NEU (25.09.2026): Baut eine <table> für eine Keyword-Liste, inkl.
+  // aufklappbarer Detail-Zeile (gleiches Prinzip wie renderGscBlock:
+  // <tr><td colspan> direkt unter der Zeile).
+  function _buildKeywordTable(kwList, enableExpansion, changelogEntries) {
+    var table = document.createElement('table');
+    table.className = 'cvz-table' + (enableExpansion ? ' cvz-table-clickable' : '');
+    table.innerHTML =
+      '<thead><tr>' +
+        '<th>Keyword</th>' +
+        '<th style="text-align:right;">Suchvolumen/Monat</th>' +
+        '<th>Einschätzung</th>' +
+        '<th>Quelle</th>' +
+        '<th></th>' +
+      '</tr></thead>';
+
+    var tbody = document.createElement('tbody');
+
+    kwList.forEach(function (kw) {
+      var rowId = kw.id || (kw.keyword + '|' + kw.source);
+      var linkedCount = (changelogEntries || []).filter(function (entry) {
+        return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
+      }).length;
+      var hasDetail = kw.organic_rank != null || kw.gsc_impressions != null || kw.gsc_position != null ||
+        kw.first_seen_at || linkedCount > 0 || (kw.top_serp_results && kw.top_serp_results.length > 0) || !!kw.messymiddle_phase;
+      var canExpand = !!(enableExpansion && hasDetail);
+
+      // GEÄNDERT (25.09.2026): PAA-Fragen (People Also Ask) kommen direkt
+      // von Google, die Nachfrage gilt damit als bestätigt. Die
+      // Einschätzung ("reine Idee" usw.) bezieht sich nur auf Keywords
+      // ohne diese Bestätigung, bleibt bei PAA-Fragen also leer.
+      var showStatus = !!kw.keyword_status_label && kw.source !== 'paa';
+
+      var tr = document.createElement('tr');
+      if (canExpand) {
+        tr.setAttribute('data-cvz-keyword-toggle', rowId);
+        tr.setAttribute('data-cvz-keyword-text', kw.keyword);
+      }
+      tr.innerHTML =
+        '<td>' + escapeHtml(kw.keyword) +
+          (linkedCount > 0 ? ' <span class="cvz-changelog-linked-badge" title="' + linkedCount + ' verknüpfte Änderung(en)">✎</span>' : '') +
+        '</td>' +
+        '<td style="text-align:right;color:var(--cvz-text-muted,#8b98a5);">' +
+          (kw.search_volume == null ? '\u2013' : escapeHtml(kw.search_volume)) +
+        '</td>' +
+        '<td>' +
+          (showStatus
+            ? '<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;' +
+              'letter-spacing:.04em;padding:3px 8px;border-radius:9999px;white-space:nowrap;' +
+              'color:' + (KEYWORD_STATUS_COLORS[kw.keyword_status] || '#8b98a5') + ';' +
+              'background:' + (KEYWORD_STATUS_COLORS[kw.keyword_status] || '#8b98a5') + '1a;">' +
+              escapeHtml(kw.keyword_status_label) + '</span>'
+            : '') +
+        '</td>' +
+        '<td style="color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(KEYWORD_SOURCE_LABELS[kw.source] || kw.source) + '</td>' +
+        '<td style="white-space:nowrap;text-align:right;">' +
+          (kw.id ? '<button type="button" class="cvz-prompt-delete-btn" data-cvz-keyword-deactivate="' + kw.id + '" aria-label="Keyword deaktivieren" title="Keyword deaktivieren">\u00d7</button>' : '') +
+          (canExpand ? '<span class="cvz-prompt-expand-chevron">' + (state.expandedKeywordId === rowId ? '▾' : '▸') + '</span>' : '') +
+        '</td>';
+      tbody.appendChild(tr);
+
+      if (canExpand && state.expandedKeywordId === rowId) {
+        var expTr = document.createElement('tr');
+        var expTd = document.createElement('td');
+        expTd.colSpan = 5;
+        expTd.appendChild(renderKeywordExpansion(kw, rowId, changelogEntries));
+        expTr.appendChild(expTd);
+        tbody.appendChild(expTr);
+      }
+    });
+
+    table.appendChild(tbody);
+    var scrollWrap = document.createElement('div');
+    scrollWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    scrollWrap.appendChild(table);
+    return scrollWrap;
   }
 
   // NEU (15.09.2026): manuelle Korrektur der Messy-Middle-Phase eines
@@ -6682,6 +6417,9 @@
     return wrap;
   }
 
+  // GEÄNDERT (25.09.2026, Kundenwunsch): Prompt-Liste jetzt als echte
+  // <table> mit Kopfzeile statt Flex-Divs ohne Header, gleiches Muster wie
+  // renderKeywordsTable/_buildKeywordTable.
   function renderPromptsByPhase(prompts, enableCitations, changelogEntries) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -6712,95 +6450,115 @@
       phaseHeading.textContent = PHASE_LABELS[phase] || phase;
       section.appendChild(phaseHeading);
 
-      var list = document.createElement('div');
-      list.className = 'cvz-prompt-list';
-      promptsInPhase.forEach(function (prompt) {
-        var dotClass = prompt.visibility_status ? 'cvz-dot-' + prompt.visibility_status : 'cvz-dot-unknown';
-        var statusLabel = prompt.visibility_status ? VISIBILITY_LABELS[prompt.visibility_status] : 'Unbekannt';
-        var citationBadge = (prompt.total_runs !== null && prompt.total_runs !== undefined && prompt.total_runs > 0)
-          ? (prompt.cited_count > 0
-              ? '<span class="cvz-prompt-citation-count">' + prompt.cited_count + '/' + prompt.total_runs + ' zitiert</span>'
-              : '<span class="cvz-prompt-citation-count" style="color:var(--cvz-text-muted,#8b98a5);">Eigene Domain nicht sichtbar</span>')
-          : '';
-
-        // NEU (18.09.2026): priorisierter Marker fuer Prompts, bei denen die
-        // eigene Domain zwar als Quelle genannt wird, aber ohne echten Link
-        // (siehe main.py: _compute_unlinked_citation_by_prompt). Bewusst
-        // visuell auffaelliger als contentTypeBadge (Warn-Farbe), weil das
-        // laut Kundenwunsch der entscheidende, priorisiert zu behebende
-        // Unterschied ist.
-        var unlinkedBadge = prompt.cited_without_link
-          ? '<span class="cvz-prompt-citation-count" style="color:var(--cvz-orange,#e0a030);border:1px solid var(--cvz-orange,#e0a030);border-radius:4px;padding:1px 6px;" title="Wird als Quelle genannt, aber die KI setzt keinen echten Link. Priorisiert beheben (z.B. Struktur/Schema.org/Crawlability pruefen)">\u26a0 ohne Link zitiert</span>'
-          : '';
-
-        var contentTypeBadge = prompt.top_cited_content_type
-          ? '<span class="cvz-prompt-content-type" title="Typ der meistzitierten Quelle: ' + escapeHtml(CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || prompt.top_cited_content_type) + ' (' + escapeHtml(prompt.top_cited_domain || '') + ')">' +
-              (CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || escapeHtml(prompt.top_cited_content_type)) +
-            '</span>'
-          : '';
-
-        var personaBadge = prompt.persona
-          ? '<span class="cvz-prompt-persona">' + escapeHtml(prompt.persona) + '</span>'
-          : '';
-
-        var aiSearchVolumeBadge = prompt.ai_search_volume != null
-          ? '<span class="cvz-prompt-persona" title="Echte AI-Overview-Frage, laut DataForSEO ca. ' +
-              escapeHtml(prompt.ai_search_volume) + 'x/Monat gestellt">\u2713 ' +
-              escapeHtml(prompt.ai_search_volume) + '/Monat</span>'
-          : '';
-
-        // Changelog-Badge: shows an edit icon when this prompt is linked to changelog entries.
-        var promptLinkedCount = (changelogEntries || []).filter(function (entry) {
-          return (entry.linked_prompt_ids || []).indexOf(prompt.id) !== -1;
-        }).length;
-        var changelogBadgeHtml = promptLinkedCount > 0
-          ? ' <span class="cvz-changelog-linked-badge" title="' + promptLinkedCount + ' verknüpfte Änderung(en)">✎</span>'
-          : '';
-
-        // Favicons: cited_domains kommt direkt vom Backend (alle zitierten Domains
-        // sortiert nach Häufigkeit). Fallback auf top_cited_domain für ältere Responses.
-        var _favDomains = (prompt.cited_domains && prompt.cited_domains.length > 0)
-          ? prompt.cited_domains.slice(0, 6)
-          : (prompt.top_cited_domain ? [prompt.top_cited_domain] : []);
-        var faviconHtml = _favDomains.length > 0
-          ? '<span style="display:inline-flex;align-items:center;gap:2px;flex-shrink:0;">' +
-              _favDomains.map(function (d) {
-                return '<img src="https://www.google.com/s2/favicons?sz=14&domain=' + encodeURIComponent(d) + '" ' +
-                  'style="width:14px;height:14px;border-radius:2px;" ' +
-                  'onerror="this.style.display=\'none\'" ' +
-                  'title="' + escapeHtml(d) + '">';
-              }).join('') +
-            '</span>'
-          : '';
-
-        var row = document.createElement('div');
-        row.className = 'cvz-prompt-row' + (enableCitations ? ' cvz-prompt-row-clickable' : '');
-        if (enableCitations) row.setAttribute('data-cvz-prompt-toggle', prompt.id);
-        row.innerHTML =
-          '<span class="cvz-dot ' + dotClass + '" title="' + escapeHtml(statusLabel) + '"></span>' +
-          '<span class="cvz-prompt-text">' + escapeHtml(prompt.prompt_text) + changelogBadgeHtml + '</span>' +
-          faviconHtml +
-          citationBadge +
-          unlinkedBadge +
-          contentTypeBadge +
-          personaBadge +
-          aiSearchVolumeBadge +
-          '<span class="cvz-prompt-source">' +
-            (prompt.prompt_type === 'stable_core' ? '' : 'Discovery') +
-            (prompt.topic_name ? ' · ' + escapeHtml(prompt.topic_name) : '') +
-          '</span>' +
-          '<button type="button" class="cvz-prompt-delete-btn" data-cvz-prompt-delete="' + prompt.id + '" aria-label="Prompt deaktivieren" title="Prompt deaktivieren">\u00d7</button>' +
-          (enableCitations ? '<span class="cvz-prompt-expand-chevron">' + (state.expandedPromptId === prompt.id ? '\u25be' : '\u25b8') + '</span>' : '');
-        list.appendChild(row);
-
-        if (enableCitations && state.expandedPromptId === prompt.id) {
-          list.appendChild(renderPromptExpansion(prompt, changelogEntries));
-        }
-      });
-      section.appendChild(list);
+      section.appendChild(_buildPromptTable(promptsInPhase, enableCitations, changelogEntries));
     });
 
     return section;
+  }
+
+  // NEU (25.09.2026): Baut eine <table> für eine Prompt-Liste einer Phase,
+  // inkl. aufklappbarer Antwort-Zeile (gleiches Prinzip wie _buildKeywordTable).
+  function _buildPromptTable(promptsInPhase, enableCitations, changelogEntries) {
+    var table = document.createElement('table');
+    table.className = 'cvz-table' + (enableCitations ? ' cvz-table-clickable' : '');
+    table.innerHTML =
+      '<thead><tr>' +
+        '<th>Prompt</th>' +
+        '<th>Zitiert</th>' +
+        '<th>Typ / Rolle</th>' +
+        '<th>Quelle</th>' +
+        '<th></th>' +
+      '</tr></thead>';
+
+    var tbody = document.createElement('tbody');
+
+    promptsInPhase.forEach(function (prompt) {
+      var dotClass = prompt.visibility_status ? 'cvz-dot-' + prompt.visibility_status : 'cvz-dot-unknown';
+      var statusLabel = prompt.visibility_status ? VISIBILITY_LABELS[prompt.visibility_status] : 'Unbekannt';
+      var citationBadge = (prompt.total_runs !== null && prompt.total_runs !== undefined && prompt.total_runs > 0)
+        ? (prompt.cited_count > 0
+            ? '<span class="cvz-prompt-citation-count">' + prompt.cited_count + '/' + prompt.total_runs + ' zitiert</span>'
+            : '<span class="cvz-prompt-citation-count" style="color:var(--cvz-text-muted,#8b98a5);">nicht sichtbar</span>')
+        : '';
+
+      // NEU (18.09.2026): priorisierter Marker fuer Prompts, bei denen die
+      // eigene Domain zwar als Quelle genannt wird, aber ohne echten Link
+      // (siehe main.py: _compute_unlinked_citation_by_prompt).
+      var unlinkedBadge = prompt.cited_without_link
+        ? '<br><span class="cvz-prompt-citation-count" style="color:var(--cvz-orange,#e0a030);border:1px solid var(--cvz-orange,#e0a030);border-radius:4px;padding:1px 6px;" title="Wird als Quelle genannt, aber die KI setzt keinen echten Link. Priorisiert beheben (z.B. Struktur/Schema.org/Crawlability pruefen)">\u26a0 ohne Link zitiert</span>'
+        : '';
+
+      var contentTypeBadge = prompt.top_cited_content_type
+        ? '<span class="cvz-prompt-content-type" title="Typ der meistzitierten Quelle: ' + escapeHtml(CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || prompt.top_cited_content_type) + ' (' + escapeHtml(prompt.top_cited_domain || '') + ')">' +
+            (CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || escapeHtml(prompt.top_cited_content_type)) +
+          '</span>'
+        : '';
+
+      var personaBadge = prompt.persona
+        ? '<br><span class="cvz-prompt-persona">' + escapeHtml(prompt.persona) + '</span>'
+        : '';
+
+      var aiSearchVolumeBadge = prompt.ai_search_volume != null
+        ? '<br><span class="cvz-prompt-persona" title="Echte AI-Overview-Frage, laut DataForSEO ca. ' +
+            escapeHtml(prompt.ai_search_volume) + 'x/Monat gestellt">\u2713 ' +
+            escapeHtml(prompt.ai_search_volume) + '/Monat</span>'
+        : '';
+
+      // Changelog-Badge: shows an edit icon when this prompt is linked to changelog entries.
+      var promptLinkedCount = (changelogEntries || []).filter(function (entry) {
+        return (entry.linked_prompt_ids || []).indexOf(prompt.id) !== -1;
+      }).length;
+      var changelogBadgeHtml = promptLinkedCount > 0
+        ? ' <span class="cvz-changelog-linked-badge" title="' + promptLinkedCount + ' verknüpfte Änderung(en)">✎</span>'
+        : '';
+
+      // Favicons: cited_domains kommt direkt vom Backend (alle zitierten Domains
+      // sortiert nach Häufigkeit). Fallback auf top_cited_domain für ältere Responses.
+      var _favDomains = (prompt.cited_domains && prompt.cited_domains.length > 0)
+        ? prompt.cited_domains.slice(0, 6)
+        : (prompt.top_cited_domain ? [prompt.top_cited_domain] : []);
+      var faviconHtml = _favDomains.length > 0
+        ? '<span style="display:inline-flex;align-items:center;gap:2px;margin-left:6px;">' +
+            _favDomains.map(function (d) {
+              return '<img src="https://www.google.com/s2/favicons?sz=14&domain=' + encodeURIComponent(d) + '" style="width:14px;height:14px;border-radius:2px;" onerror="this.style.display=\'none\'" title="' + escapeHtml(d) + '">';
+            }).join('') +
+          '</span>'
+        : '';
+
+      var tr = document.createElement('tr');
+      if (enableCitations) tr.setAttribute('data-cvz-prompt-toggle', prompt.id);
+      tr.innerHTML =
+        '<td>' +
+          '<span class="cvz-dot ' + dotClass + '" title="' + escapeHtml(statusLabel) + '"></span> ' +
+          escapeHtml(prompt.prompt_text) + changelogBadgeHtml + faviconHtml +
+        '</td>' +
+        '<td style="white-space:nowrap;">' + citationBadge + unlinkedBadge + '</td>' +
+        '<td style="white-space:nowrap;">' + contentTypeBadge + personaBadge + aiSearchVolumeBadge + '</td>' +
+        '<td style="color:var(--cvz-text-muted,#8b98a5);white-space:nowrap;">' +
+          (prompt.prompt_type === 'stable_core' ? '' : 'Discovery') +
+          (prompt.topic_name ? ' · ' + escapeHtml(prompt.topic_name) : '') +
+        '</td>' +
+        '<td style="white-space:nowrap;text-align:right;">' +
+          '<button type="button" class="cvz-prompt-delete-btn" data-cvz-prompt-delete="' + prompt.id + '" aria-label="Prompt deaktivieren" title="Prompt deaktivieren">\u00d7</button>' +
+          (enableCitations ? '<span class="cvz-prompt-expand-chevron">' + (state.expandedPromptId === prompt.id ? '\u25be' : '\u25b8') + '</span>' : '') +
+        '</td>';
+      tbody.appendChild(tr);
+
+      if (enableCitations && state.expandedPromptId === prompt.id) {
+        var expTr = document.createElement('tr');
+        var expTd = document.createElement('td');
+        expTd.colSpan = 5;
+        expTd.appendChild(renderPromptExpansion(prompt, changelogEntries));
+        expTr.appendChild(expTd);
+        tbody.appendChild(expTr);
+      }
+    });
+
+    table.appendChild(tbody);
+    var scrollWrap = document.createElement('div');
+    scrollWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    scrollWrap.appendChild(table);
+    return scrollWrap;
   }
 
   // GSC-Keywords auf Themen-Relevanz filtern.
@@ -7493,7 +7251,8 @@
 
     return section;
   }
-    // =========================================================================
+
+  // =========================================================================
   // NEU (20.09.2026): Gezielter Retry einzelner Felder, KI-Wissens-Check,
   // Wirkung der Änderungen. Backend: step_tracker.py, ai_knowledge.py,
   // change_history.py, POST /topics/{id}/retry-step.
@@ -7971,8 +7730,6 @@
     });
     return section;
   }
-
-
 
   function injectStyles() {
     if (document.getElementById('cvz-visibility-styles')) return;
