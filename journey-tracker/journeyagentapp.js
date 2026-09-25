@@ -1,5044 +1,9910 @@
-"""
-Convertlyze Visibility Tracker – Railway-Service
+(function () {
+  'use strict';
 
-Endpunkte:
-    GET  /health                        – simpler Erreichbarkeits-Check
-    POST /topics                        – NEU: Topic anlegen (mit Limit-Check),
-                                           Datensammlung läuft im Hintergrund,
-                                           so wie ein echter Nutzer es später aufrufen würde
-    POST /run-topic                     – alte, synchrone Variante (Topic anlegen
-                                           UND sofort Daten sammeln, blockiert
-                                           10-20s). Für lokale Tests noch nutzbar,
-                                           nicht mehr der empfohlene Weg fürs Frontend.
-    GET  /topics                        – Liste aller Topics für die Dashboard-Übersicht
-    GET  /topics/{topic_id}             – Detail: Topic + Opportunities + Keyword-Übersicht
-                                           + Content-Ideen (siehe content_ideas.py, NEU:
-                                           erkannte Personalisierungs-Angebote aus AI-Antworten)
-    GET  /topics/{topic_id}/prompts/{prompt_id}/citations
-                                         – NEU (13.09.2026): letzte Läufe (ChatGPT/Gemini) für
-                                           EINEN Prompt inkl. voller Antwort + zitierter Quellen,
-                                           siehe _extract_run_answer. Lazy geladen vom Frontend
-                                           beim Aufklappen eines Prompts im Prompts-Tab.
-    GET  /topics/{topic_id}/competitor-citations
-                                         – NEU: wöchentlicher Verlauf, wer wie oft zitiert wurde,
-                                           eigener Endpunkt, vom Frontend nur bei Bedarf geladen.
-                                           GEÄNDERT (13.09.2026): liefert jetzt zusätzlich
-                                           Modell (chat_gpt/gemini) und die zugehörigen Prompts
-                                           pro Domain und Woche, siehe _get_competitor_citation_trend.
-    GET  /account/topic-status          – NEU: aktueller Stand + Limit, damit das Frontend VOR
-                                           dem Anlege-Versuch weiß, ob noch Platz ist
-    POST /generate-opportunities/{id}   – Opportunity-Analyse manuell erneut anstoßen
-    POST /topics/{id}/generate-action-plan
-                                         – NEU (17.09.2026): Aktionsplan manuell (neu)
-                                           generieren, z.B. wenn der erste automatische
-                                           Lauf kein Ergebnis produziert hat.
-    POST /topics/{id}/retry-step        – NEU (20.09.2026): startet GENAU EINEN fehlgeschlagenen oder
-                                           fehlenden Analyse-Schritt neu (z.B. Zusammenfassung,
-                                           Aktionsplan), nicht den ganzen Lauf, siehe step_tracker.py.
-                                           Der Status pro Schritt kommt als step_status in GET /topics/{id}.
-    POST /cron/weekly                   – von Supabase pg_cron angestoßen, ChatGPT-Refresh
-                                           für alle fälligen Topics (Header X-Cron-Secret statt
-                                           Authorization)
-    POST /cron/monthly                  – wie oben, Related Keywords + Google AI Overview
-    POST /cron/retry-failed             – NEU (14.09.2026): arbeitet die Retry-Queue
-                                           (Tabelle failed_tasks) ab, siehe retry_failed_tasks()
-                                           in run_topic.py. Sollte HÄUFIGER laufen als
-                                           weekly/monthly (empfohlen alle 15-30 Min), Header
-                                           X-Cron-Secret wie bei den anderen Cron-Endpunkten.
-    GET  /topics/{topic_id}/competitor-suggestions
-                                         – NEU (14.09.2026): automatisch aus SERP-Rankings +
-                                           AI-Zitationen abgeleitete Wettbewerber-Kandidaten für
-                                           dieses Topic, siehe competitor_suggestions.py. Vom
-                                           Frontend zur Bestätigung/Auswahl angezeigt, siehe
-                                           POST .../confirm-competitors.
-    POST /topics/{topic_id}/confirm-competitors
-                                         – NEU (14.09.2026): übernimmt die vom User bestätigte
-                                           Wettbewerber-Auswahl aus den obigen Vorschlägen.
-                                           GEÄNDERT (15.09.2026): schreibt auf ai_visibility_topics.
-                                           competitor_domains DIESES Topics (siehe
-                                           _get_topic_competitor_domains unten, vorher auf
-                                           projects.competitor_domains, zurückgenommen weil ein
-                                           Projekt fachlich unabhängige Themen mit unterschiedlichen
-                                           Wettbewerbern haben kann), und stößt danach die
-                                           Quellen-Analyse sowie Opportunities/Lücken-Analyse für
-                                           dieses Topic erneut an.
+  // =========================================================================
+  // KONFIGURATION
+  // =========================================================================
+  var CONFIG = {
+    // GEFIXT (20.09.2026): Es stand ein Sonderzeichen (U+2013) statt eines normalen
+    // Bindestrichs in der Domain, dadurch liefen
+    // ALLE apiFetch()-Calls gegen eine nicht existierende Adresse.
+    apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
+    // GEFIXT (20.09.2026): Platzhalter durch die echte Supabase-Projekt-URL ersetzt.
+    stripeCheckoutUrl: 'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/stripe-topic-slot-checkout',
+    useMockData: false,  // TODO: für den echten Test
+  };
 
-Alle Endpunkte außer /health und /cron/* erfordern EINEN Header:
-    Authorization  – "Bearer <memberstack-jwt>", wird über require_member
-                     (siehe memberstack_auth.py) echt gegen die Memberstack-API
-                     verifiziert, nicht mehr nur als Header-Wert vertraut. Aus
-                     der verifizierten Antwort wird die Member-ID gelesen,
-                     daraus wird automatisch das Team aufgelöst (users.team_id),
-                     genau wie bei euren bestehenden RLS-Policies. Keine
-                     Team-ID mehr fest im Code/in den Env-Vars, jeder
-                     Request bekommt sein eigenes Team.
+  var CHANGELOG_DELETED_RETENTION_DAYS = 90;
 
-Logging: jede Anfrage wird geloggt (Methode, Pfad, Dauer, Status). Ein
-globaler Exception-Handler sorgt dafür, dass JEDE unerwartete Exception mit
-vollem Traceback geloggt wird, bevor eine 500-Antwort rausgeht, damit nichts
-still im Hintergrund fehlschlägt, ohne dass es in den Railway-Logs auftaucht.
-"""
+  var MOCK_PROJECTS = [
+    { id: 'proj-1', name: 'Kunde A GmbH', domain: 'kunde-a.de' },
+    { id: 'proj-2', name: 'Kunde B AG', domain: 'kunde-b.de' },
+  ];
 
-import json
-import logging
-import os
-import sys
-import time
-from datetime import datetime, timedelta, timezone
-from typing import Literal
+  var MOCK_TOPICS = [
+    { id: 'topic-1', project_id: 'proj-1', name: 'Landingpage-Optimierung', seed_keyword: 'landingpage optimierung', status: 'active', opportunities_count: 4, created_at: '2026-08-20T09:00:00Z' },
+    { id: 'topic-2', project_id: 'proj-1', name: 'CRO Beratung', seed_keyword: 'cro beratung', status: 'active', opportunities_count: 1, created_at: '2026-08-25T14:30:00Z' },
+    { id: 'topic-3', project_id: 'proj-1', name: 'Conversion Funnel', seed_keyword: 'conversion funnel b2b', status: 'collecting', opportunities_count: 0, created_at: new Date(Date.now() - 15000).toISOString() },
+    { id: 'topic-4', project_id: 'proj-2', name: 'SaaS Onboarding', seed_keyword: 'saas onboarding optimierung', status: 'error', opportunities_count: 0, created_at: '2026-09-01T11:00:00Z' },
+  ];
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+  var MOCK_TOPIC_DETAIL = {};
 
-from memberstack_auth import require_member
-from run_topic import (
-    run, supabase, get_team_id_for_member, check_topic_limit, get_topic_usage, create_topic,
-    collect_topic_data, collect_weekly_data, collect_monthly_data, refresh_gsc_data,
-    get_due_topics, get_topic_prompts, find_or_create_prompt, get_owner_user_row_for_billing,
-    enforce_expired_downgrades, create_project, get_project, get_team_projects, _normalize_search_domain,
-    retry_failed_tasks, send_failure_alert_email,
-    enforce_scheduled_archivals, get_next_reservable_slot_at, _looks_like_bare_keyword,
-)
-from opportunities import generate_opportunities, generate_content_recommendations
-from keyword_status import STRONG_RANK_MAX, classify_keyword, to_number
-from claude_summary import generate_summary
-# NEU (20.09.2026): Schritt-Tracking mit gezieltem Retry, KI-Wissens-Check,
-# Wirkungsmessung der Nutzer-Änderungen, Bereinigung interner Feldnamen.
-from ai_knowledge import get_ai_knowledge_for_topic
-from change_history import build_change_assessment_for_ui, get_change_assessment
-from outreach_targets import get_outreach_targets, targets_for_ui
-from step_tracker import (
-    STEPS, get_step_states, is_step_running, log_pipeline_error, mark_step_running, retry_step, run_step, run_tracked,
-)
-from text_style import sanitize_user_payload, sanitize_user_text
-from prompt_discovery import generate_prompts_for_topic, fill_underrepresented_roles, get_prompt_budget
-from buying_center import suggest_buying_center, save_topic_buying_center, get_topic_buying_center
-from content_ideas import get_content_ideas_for_topic
-from source_analysis import get_source_profiles_for_topic, analyze_sources_for_topic
-from dashboard import get_dashboard_data
-from gap_analysis import generate_gap_analysis, get_content_gaps_for_topic, get_competitor_insights_for_topic
-# NEU (16.09.2026): Claude-generierter Aktionsplan ersetzt die statische
-# Opportunities-Analyse als zentrales Handlungsempfehlungs-Modul.
-# Integriert KI-Sichtbarkeit, GSC-Rankings, Wettbewerb und Content-Lücken
-# in einem einzigen, priorisierten Aktionsplan pro Topic.
-from action_plan import generate_action_plan, get_action_plan_for_topic
-from competitor_suggestions import (
-    generate_competitor_suggestions, get_competitor_suggestions_for_topic, mark_suggestions_reviewed,
-)
+  var MOCK_DOMAIN_TREND = {
+    'proj-1': { total_prompts: 17, weeks: [] },
+    'proj-2': { total_prompts: 0, weeks: [] },
+  };
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-    stream=sys.stdout,
-)
-logger = logging.getLogger("visibility_tracker.api")
+  var MOCK_CITATION_TREND = {};
 
-# API-Key-Check komplett entfernt (siehe memberstack_auth.py): das Frontend
-# liegt jetzt in einem öffentlichen GitHub-Repo, ein dort eingebetteter Key
-# wäre kein Geheimnis mehr. Schutz läuft ausschließlich über das
-# Bearer-JWT (require_member), CRON_SECRET bleibt getrennt und rein
-# server-seitig.
-CRON_SECRET = os.environ["CRON_SECRET"]
+  var state = {
+    memberstackId: null,
+    memberToken:   null,
+    projects:      [],
+    activeProjectId: null,
+    allTopics:     [],
+    activeView:       'overview',
+    activeTopicId:    null,
+    activeSubTab:     'themen',
+    topicDetailCache: {},
+    isLoadingDetail:  false,
+    activePersonaFilter: null,
+    domainDashboardCache: {},
+    isLoadingDomainDashboard: false,
+    isRefreshingGsc: false,
+    competitorSuggestionsCache: {},
+    isLoadingCompetitorSuggestions: false,
+    competitorManageOpen: {},
+    competitorDraftDomains: {},
+    isSubmittingCompetitors: false,
+    manualPromptDraftText: '',
+    manualPromptDraftPhase: 'exploration',
+    manualPromptDraftRoleId: '',
+    // NEU (23.09.2026): Buying Center bestehender Themen
+    buyingCenterCache: {},
+    loadingBuyingCenter: {},
+    bcEditOpen: {},
+    bcEditDraft: {},
+    bcEditResult: {},
+    isSavingBc: false,
+    isSuggestingBcEdit: false,
+    isSubmittingManualPrompt: false,
+    manualKeywordDraftText: '',
+    isSubmittingManualKeyword: false,
+    citationTrendCache: {},
+    isLoadingCitationTrend: false,
+    // NEU (25.09.2026, Kundenwunsch): Zeitraum-Presets (4/12/26 Wochen) für
+    // "Sichtbarkeits-Verlauf pro Phase". Nur für die Sitzung (kein
+    // localStorage, geht beim Neuladen verloren -- analog zum Domain-
+    // Toggle in den Grafiken). 12 Wochen ist der bisherige Default und
+    // nutzt weiterhin den bereits vorhandenen dashboardDataCache, siehe
+    // renderVerlaufTab -- phaseTrendCache wird nur für abweichende
+    // Presets (4/26) befüllt, damit ein Preset-Wechsel hier NICHT den
+    // von Journey-Map/Opportunities mitgenutzten dashboardDataCache
+    // überschreibt.
+    phaseTrendWeeksByTopic: {},
+    phaseTrendCache: {},
+    isLoadingPhaseTrend: {},
+    // NEU (25.09.2026, Kundenwunsch): welche Domains in der Wettbewerbs-
+    // vergleichs-Grafik gerade ausgeblendet sind. Nur für die Sitzung (kein
+    // localStorage) -- bewusst getrennt von den "gepinnten" Wettbewerbern
+    // (cvz_chart_pins_<topicId> in localStorage), die eine ANDERE Frage
+    // beantworten ("welche Domains sollen zusätzlich zu den Top-5
+    // erscheinen"), nicht "welche der gerade gezeigten blende ich
+    // temporär aus". { [topicId]: { [domain]: true } }
+    hiddenChartDomains: {},
+    showCreateForm: false,
+    isCreating:     false,
+    createError:    null,
+    // NEU (23.09.2026): zweistufiges Anlegen. Schritt 1: Domain, Thema,
+    // optional Angebotsseite. Schritt 2: vorgeschlagenes Buying Center und
+    // Zielgruppe bestätigen, anpassen oder austauschen.
+    createStep:     1,
+    createDraft:    { projectId: null, topicText: '', offerUrl: '', domainValue: null, newDomainText: '' },
+    bcSuggestFailed: false,
+    bcSuggestion:   null,
+    bcDraftRoles:   [],
+    bcTargetGroup:  '',
+    isSuggestingBc: false,
+    limitReached:   false,
+    isBuyingSlot:   false,
+    topicUsage:     null,
+    pollTimer:      null,
+    retryingTopicId: null,
+    archivingTopicId: null,
+    promptCitationsCache: {},
+    loadingPromptCitations: {},
+    expandedPromptId: null,
+    expandedPromptEngine: {},
+    expandedPromptRunIndex: {},
+    keywordRankHistoryCache: {},
+    loadingKeywordRankHistory: {},
+    expandedKeywordId: null,
+    topicRankHistoryCache: {},
+    isLoadingTopicRankHistory: false,
+    weekDetailCache: {},
+    isLoadingWeekDetail: false,
+    selectedWeekDetailKey: null,
+    isSubmittingChangelog: false,
+    changelogVisibleCount: {},
+    showDeletedChangelog: {},
+    deletedChangelogCache: {},
+    isLoadingDeletedChangelog: false,
+    changelogDraft: '',
+    changelogLocationDraft: null,
+    changelogEffectDraft: null,
+    changelogLocationCustomText: '',
+    changelogEffectCustomText: '',
+    changelogLinkSectionOpen: { keywords: false, prompts: false },
+    changelogDraftLinkedIds: { keywords: [], prompts: [] },
+    visibilityTrendCache: {},
+    monthlyOverviewTrendCache: {},
+    isLoadingMonthlyOverviewTrend: false,
+    isLoadingVisibilityTrend: false,
+    gscRankHistoryCache: {},
+    loadingGscRankHistory: {},
+    expandedGscRowId: null,
+    expandedOppId: null,
+    // NEU (16.09.2026): Journey-Map-Tab
+    dashboardDataCache: {},
+    isLoadingDashboard: false,
+    isSubmittingContentChange: false,
+    contentChangeDraft: { changed_at: '', change_type: 'neue_seite', description: '', url: '' },
+    contentChangesCache: {},
+    isLoadingContentChanges: false,
+    journeyActivePhase: null,
+    // NEU (17.09.2026): Phase-Filter fuer Content-Luecken und Quellen-Analyse
+    gapPhaseFilter: null,
+    sourcePhaseFilter: null,
+    // NEU (20.09.2026): Pro-Topic gepinnte Wettbewerber fuer den Vergleichs-Chart
+    chartPinnedComps: {},
+    // NEU (20.09.2026): Gezielter Retry einzelner Schritte (retryStep/renderStepNotice).
+    // Fehlte bisher hier, dadurch crashte retryStep beim ersten Klick
+    // ("Cannot read properties of undefined").
+    retryingSteps: {},
+    stepPollTimer: null,
+  };
 
-# Ab diesem Faktor gilt ein anderes erfasstes Keyword als "deutlich
-# höheres Suchvolumen" als das seed_keyword des Topics, und wird als
-# Positionierungs-Hinweis vorgeschlagen. Willkürlich gewählter Startwert,
-# nicht an echten Daten kalibriert, siehe _compute_positioning_insight.
-POSITIONING_VOLUME_FACTOR = 1.5
+  function getProjectById(id) {
+    return state.projects.filter(function (p) { return p.id === id; })[0] || null;
+  }
+  function getTopicById(id) {
+    return state.allTopics.filter(function (t) { return t.id === id; })[0] || null;
+  }
 
-# Wie viele historische Läufe je Engine (ChatGPT/Gemini) im Prompt-Detail
-# (GET /topics/{id}/prompts/{id}/citations) abrufbar sind. Nutzerentscheid
-# (13.09.2026): die letzten 5 reichen, kein Deckel im Frontend nötig, siehe
-# renderPromptExpansion in script.js.
-PROMPT_CITATION_RUN_LIMIT = 5
+  // =========================================================================
+  // NEU (21.09.2026): Report erst oeffnen, wenn die Analyse wirklich fertig ist
+  // =========================================================================
 
-# NEU (14.09.2026): ab wann gilt ein Thema in status='collecting' als
-# hängengeblieben statt "läuft noch normal" (siehe retry_topic_endpoint).
-# Nach der Parallelisierung von collect_weekly_data (siehe run_topic.py)
-# sollte ein normaler Erstlauf deutlich darunter liegen, das hier ist
-# bewusst mit Puffer gewählt, nicht scharf an der neuen Erwartungszeit.
-STUCK_COLLECTING_THRESHOLD_MINUTES = 45
+  // Ab dieser Laufzeit gilt ein Lauf als hängengeblieben (gleicher Wert wie im
+  // Backend: STUCK_COLLECTING_THRESHOLD_MINUTES in main.py).
+  var RUN_STUCK_MINUTES = 45;
 
-# NEU (15.09.2026): siehe _auto_confirm_top_competitor_suggestions. Wie
-# viele der automatisch erkannten Wettbewerber-Vorschläge ohne manuelle
-# Bestätigung direkt in ai_visibility_topics.competitor_domains (pro
-# Topic) übernommen werden.
-MAX_AUTO_CONFIRMED_COMPETITORS = 5
+  // true, solange der Report noch NICHT geöffnet werden darf.
+  function isPendingStatus(status) {
+    return status === 'queued' || status === 'collecting' || status === 'analyzing';
+  }
 
-# NEU (15.09.2026): manuell hinzugefügte Prompts (siehe CreateManualPromptRequest,
-# create_manual_prompt_endpoint) sind ein EIGENES, zusätzliches Kontingent
-# zu den bis zu 16 automatisch generierten Stable-Core-Prompts (siehe
-# prompt_discovery.py: MAX_STABLE_CORE_PROMPTS) — macht zusammen bis zu 20,
-# wie vom Kunden am 15.09.2026 gewünscht. Bewusst getrennt gezählt (über
-# prompts.source = 'manual'), NICHT einfach das bestehende 16er-Limit für
-# stable_core auf 20 angehoben: das hätte auch das automatische Promoten
-# eines Discovery-Prompts (siehe set_prompt_type_endpoint) auf bis zu 20
-# erlaubt, was hier nicht gefragt war.
-MAX_MANUAL_PROMPTS = 4
-# GEÄNDERT (23.09.2026): MAX_MANUAL_PROMPTS ist nur noch der Normalfall
-# (20 System-Prompts + 4 eigene). Maßgeblich ist der gemeinsame Topf von
-# 24 aktiven Stable-Core-Prompts, siehe prompt_discovery.get_prompt_budget.
-# Deaktivierte System-Prompts machen also Platz für mehr eigene.
+  // Löscht alles, was für ein Thema zwischengespeichert wurde. Wichtig, weil
+  // diese Daten während des Laufs oft leer geladen wurden (z. B. ohne
+  // Wettbewerber) und sonst nach dem Ende des Laufs weiter angezeigt würden.
+  function purgeTopicCaches(topicId) {
+    delete state.topicDetailCache[topicId];
+    delete state.dashboardDataCache[topicId];
+    delete state.contentChangesCache[topicId];
+    delete state.visibilityTrendCache[topicId];
+    delete state.monthlyOverviewTrendCache[topicId];
+    delete state.topicRankHistoryCache[topicId];
+    delete state.citationTrendCache[topicId];
+    delete state.buyingCenterCache[topicId];
 
-# NEU (16.09.2026): analoges Limit für manuell hinzugefügte Keywords (siehe
-# Chat-Verlauf 16.09.2026 — "bei Prompts, Keywords und GSC-Performance-
-# Keywords sollten User die Möglichkeit haben, diese zu entfernen und
-# eigene hinzuzufügen"). Über search_queries.source = 'manual' gezählt,
-# unabhängig von den automatisch gesammelten Keywords/PAA/GSC-Zeilen.
-MAX_MANUAL_KEYWORDS = 10
+    // Auch die Domain-Übersicht (Opportunities über alle Themen) ist dann veraltet.
+    var topic = getTopicById(topicId);
+    if (topic) delete state.domainDashboardCache[topic.project_id];
+  }
 
-# Dieselben vier Phasen wie prompt_discovery.py: exploration (Verständnis
-# des Problems), evaluation (Bewertung von Lösungsansätzen), comparison
-# (Vergleich von Anbietern), decision (kaufnahe Fragen). Absichtlich hier
-# dupliziert statt importiert, um main.py <-> prompt_discovery.py nicht zu
-# einem Zirkelbezug zu machen (main.py importiert bereits
-# generate_prompts_for_topic aus prompt_discovery.py).
-MESSYMIDDLE_PHASES = ("exploration", "evaluation", "comparison", "decision")
-
-
-def _stuck_collecting_minutes(topic: dict) -> float:
-    """
-    Wie lange hängt ein Topic schon in status='collecting'? Gemeinsam
-    genutzt von archive_topic_endpoint und retry_topic_endpoint (siehe
-    Chat-Verlauf 14.09.2026), damit beide dieselbe Definition von
-    "hängengeblieben" verwenden, statt sie zweimal leicht unterschiedlich
-    zu implementieren.
-
-    Fallback auf created_at für Themen, die schon vor Einführung von
-    collecting_started_at angelegt/zuletzt gestartet wurden (siehe
-    create_topic in run_topic.py) — sonst könnten gerade die Themen, die
-    JETZT hängen, mangels Zeitstempel nie erkannt werden. Ist auch das
-    nicht lesbar, wird ein Wert über der Schwelle zurückgegeben (im
-    Zweifel als hängengeblieben behandeln, nicht blockieren).
-    """
-    started_at_raw = topic.get("collecting_started_at") or topic.get("created_at")
-    try:
-        started_at = datetime.fromisoformat(started_at_raw.replace("Z", "+00:00"))
-        return (datetime.now(timezone.utc) - started_at).total_seconds() / 60
-    except Exception:
-        return STUCK_COLLECTING_THRESHOLD_MINUTES + 1
-
-app = FastAPI(title="Convertlyze Visibility Tracker")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    # KORRIGIERT (14.09.2026): DELETE fehlte hier — jeder DELETE-Aufruf
-    # (Changelog-Eintrag löschen, seit 13.09.2026, und jetzt auch Thema
-    # ganz löschen) scheiterte dadurch schon am CORS-Preflight (OPTIONS),
-    # bevor die Anfrage den Server überhaupt erreichte. Zeigte sich im
-    # Frontend nur als generisches "Failed to fetch" (siehe Chat-Verlauf
-    # 14.09.2026), nicht als normaler Fehler-Response vom Server.
-    # KORRIGIERT (16.09.2026): dasselbe Muster jetzt bei PATCH — seit
-    # /topics/{topic_id}/keywords/{keyword_id}/phase (15.09.2026) gibt es
-    # den ersten PATCH-Endpunkt, PATCH stand aber nie in dieser Liste,
-    # exakt derselbe CORS-Preflight-Fehler wie beim DELETE-Fund oben,
-    # siehe Chat-Verlauf 16.09.2026 (Screenshot "Failed to fetch" beim
-    # Phase-Ändern eines Keywords).
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
-    allow_headers=["*"],
-)
-
-
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start = time.monotonic()
-    try:
-        response = await call_next(request)
-    except Exception:
-        # Sicherheitsnetz: sollte durch den Exception-Handler unten schon
-        # abgefangen werden, aber falls doch etwas durchrutscht, hier noch
-        # einmal explizit geloggt statt komplett zu verschwinden.
-        logger.exception("Unbehandelte Exception in %s %s", request.method, request.url.path)
-        raise
-    duration_ms = (time.monotonic() - start) * 1000
-    logger.info("%s %s -> %d (%.0f ms)", request.method, request.url.path, response.status_code, duration_ms)
-    return response
-
-
-@app.exception_handler(Exception)
-async def log_unhandled_exceptions(request: Request, exc: Exception):
-    logger.exception("Unbehandelte Exception bei %s %s: %s", request.method, request.url.path, exc)
-    return JSONResponse(status_code=500, content={"detail": f"Interner Fehler: {exc}"})
-
-
-def _check_cron_secret(x_cron_secret: str) -> None:
-    """
-    Eigenes Secret statt Memberstack-Auth: Der Cron ruft nicht im Namen
-    eines eingeloggten Users auf, sondern verarbeitet Topics über ALLE
-    Teams hinweg. Ein Team-Scope ergibt hier keinen Sinn.
-    """
-    if x_cron_secret != CRON_SECRET:
-        logger.warning("Ungültiger Cron-Secret-Versuch")
-        raise HTTPException(status_code=401, detail="Ungültiges Cron-Secret")
-
-
-def _resolve_team_id(member_id: str) -> str:
-    """
-    Löst die (jetzt bereits verifizierte) Member-ID auf ein Team auf.
-    Wandelt ein ValueError (kein User/Team gefunden) in eine 403-Antwort
-    um, statt eine 500er-Exception hochzureichen, das ist ein
-    Berechtigungsfall, kein interner Fehler.
-    """
-    try:
-        return get_team_id_for_member(member_id)
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-
-
-def _check_topic_belongs_to_team(topic: dict, team_id: str) -> None:
-    if not topic or topic.get("team_id") != team_id:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-
-
-def _week_start_label(iso_timestamp: str) -> str:
-    """Montag der Kalenderwoche, als YYYY-MM-DD. Menschenlesbarer und robuster als reine ISO-Wochennummern."""
-    dt = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
-    monday = dt.date() - timedelta(days=dt.weekday())
-    return monday.isoformat()
-
-
-def _get_competitor_citation_trend(topic_id: str, weeks: int = 12) -> list[dict]:
-    """
-    Gruppiert ai_sources (über ai_runs.collected_at) nach Kalenderwoche und
-    Domain, zählt Zitationen pro Woche. Nutzt ECHTE historische Daten:
-    jeder wöchentliche Lauf legt NEUE ai_runs-Zeilen an (save_llm_run macht
-    immer insert, nie update), die Historie ist also bereits vorhanden, nur
-    bisher nicht aggregiert abgefragt worden.
-
-    GEÄNDERT (13.09.2026): liefert pro (Woche, Domain) jetzt zusätzlich
-    eine Aufschlüsselung nach Modell (chat_gpt/gemini, über ai_runs.source)
-    und die Liste der Prompt-Texte, bei denen die Domain zitiert wurde
-    (über ai_runs.prompt_id -> prompts.prompt_text). Vorher wusste das
-    Frontend nur "diese Domain wurde X-mal zitiert", nicht "bei welchem
-    Modell/Thema", und konnte deshalb im Wettbewerber-Tab nur eine
-    unstrukturierte Logo-Liste zeigen.
-
-    GEÄNDERT (13.09.2026), zweite Korrektur: filterte zunächst zusätzlich
-    auf ai_sources.is_competitor = true, eine Spalte, die schon beim
-    Speichern eines Laufs berechnet wird (siehe _save_ai_run_with_sources
-    in run_topic.py). Vorher zählte diese Funktion JEDE zitierte Domain,
-    auch neutrale Wissensquellen wie SAP-Hilfeportal oder Reddit, die keine
-    Wettbewerber sind (sichtbar im Screenshot vom 13.09., wo diese Domains
-    als "häufigste Wettbewerber" auftauchten).
-
-    GEÄNDERT (14.09.2026), dritte Korrektur: is_competitor wird EINMALIG
-    beim Speichern gegen den zu diesem Zeitpunkt gültigen Wettbewerber-
-    Stand berechnet und NIE rückwirkend aktualisiert. Jede Zitation, die
-    VOR dem Bestätigen einer Wettbewerber-Domain gespeichert wurde, blieb
-    dadurch für immer is_competitor=false, selbst nachdem der Kunde die
-    Domain bestätigt hat (siehe Chat-Verlauf 14.09.2026, derselbe Bug wie
-    in gap_analysis.py: _compute_top_competitor_domains, dort schon
-    behoben). Filtert jetzt LIVE gegen _get_topic_competitor_domains
-    statt gegen das eingefrorene Flag, dadurch sofort korrekt für jede
-    schon gesammelte Zitation.
-
-    GEÄNDERT (15.09.2026): liest jetzt direkt ai_visibility_topics.
-    competitor_domains statt über den Umweg project_id -> projects.
-    competitor_domains (siehe _get_topic_competitor_domains, Wettbewerber
-    sind jetzt ein Topic-Attribut, kein Projekt-Attribut mehr).
-    """
-    cutoff = (datetime.now(timezone.utc) - timedelta(weeks=weeks)).isoformat()
-
-    try:
-        topic = supabase.table("ai_visibility_topics").select("competitor_domains").eq("id", topic_id).single().execute().data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden von competitor_domains für Topic %s", topic_id)
-        raise
-    competitor_norms = {
-        _normalize_search_domain(d) for d in ((topic or {}).get("competitor_domains") or [])
+  // Lädt die Zusatzdaten für den gerade offenen Tab. Steckte vorher direkt in
+  // openTopicDetail und wird jetzt auch nach einer Neu-Analyse gebraucht.
+  function loadTabData(topicId) {
+    if (state.activeSubTab === 'situation' || state.activeSubTab === 'daten') {
+      maybeLoadBuyingCenter(topicId);
     }
-    if not competitor_norms:
-        return []
+    if (state.activeSubTab === 'situation') {
+      maybeLoadVisibilityTrend(topicId);
+      maybeLoadTopicRankHistory(topicId);
+      maybeLoadMonthlyOverviewTrend(topicId);
+      maybeLoadDashboardData(topicId);
+      maybeLoadContentChanges(topicId);
+    }
+    if (state.activeSubTab === 'journey' || state.activeSubTab === 'verlauf') {
+      maybeLoadDashboardData(topicId);
+      maybeLoadContentChanges(topicId);
+    }
+    if (state.activeSubTab === 'verlauf') {
+      maybeLoadVisibilityTrend(topicId);
+    }
+  }
 
-    try:
-        runs = (
-            supabase.table("ai_runs")
-            .select("id, collected_at, source, prompt_id, prompts(prompt_text)")
-            .eq("topic_id", topic_id)
-            .gte("collected_at", cutoff)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden der ai_runs-Historie für Topic %s", topic_id)
-        raise
+  // Banner für Themen, deren Report noch nicht geöffnet werden darf.
+  // Gibt null zurück, wenn der Report offen sein darf.
+  function renderTopicRunBanner(topic) {
+    var status = topic.status;
+    if (!isPendingStatus(status)) return null;
 
-    # run_id -> {week, model, prompt_text}. "prompts" kommt hier als
-    # eingebettetes Objekt zurück (dict), nicht als Liste, weil jeder
-    # ai_run genau EINEN prompt_id hat (n:1-Beziehung). Kann None sein
-    # (z.B. bei google_ai_overview-Runs, die über search_query_id statt
-    # prompt_id verknüpft sind).
-    run_meta = {
-        r["id"]: {
-            "week": _week_start_label(r["collected_at"]),
-            "model": r.get("source"),
-            "prompt_text": (r.get("prompts") or {}).get("prompt_text"),
+    var banner = document.createElement('div');
+    banner.className = 'cvz-card cvz-collecting-banner';
+
+    if (status === 'queued') {
+      banner.innerHTML =
+        '<p class="cvz-collecting-banner-text">' +
+          'Dieses Thema wartet auf einen freien Themen-Slot. ' +
+          'Der Report erscheint hier, sobald der erste Lauf abgeschlossen ist.' +
+        '</p>';
+      return banner;
+    }
+
+    var startedAtRaw = topic.collecting_started_at || topic.created_at;
+    var startedAtMs = startedAtRaw ? new Date(startedAtRaw).getTime() : NaN;
+    var isStuck = !isNaN(startedAtMs) && (Date.now() - startedAtMs) / 60000 >= RUN_STUCK_MINUTES;
+    var isRetrying = state.retryingTopicId === topic.id;
+
+    if (isStuck) {
+      banner.innerHTML =
+        '<p class="cvz-collecting-banner-text">' +
+          '\u26a0\ufe0f L\u00e4uft ungew\u00f6hnlich lange, wirkt h\u00e4ngengeblieben ' +
+          '(z. B. durch einen Server-Neustart mittendrin).' +
+        '</p>' +
+        '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + escapeHtml(topic.id) + '"' +
+          (isRetrying ? ' disabled' : '') + '>' +
+          (isRetrying ? 'Wird erneut versucht \u2026' : 'Erneut versuchen') +
+        '</button>';
+      return banner;
+    }
+
+    var text = status === 'collecting'
+      ? 'Schritt 1 von 2: Daten werden gesammelt (KI-Antworten, Keywords, Google-Rankings). ' +
+        'Das kann mehrere Minuten dauern. Der Report \u00f6ffnet sich automatisch, sobald die komplette Analyse fertig ist.'
+      : 'Schritt 2 von 2: Wettbewerber, Content-L\u00fccken, Aktionsplan und Zusammenfassung werden erstellt. ' +
+        'Der Report \u00f6ffnet sich automatisch, sobald alles fertig ist.';
+
+    banner.innerHTML =
+      '<p class="cvz-collecting-banner-text"><span class="cvz-spinner"></span>' + text + '</p>';
+    return banner;
+  }
+
+  // Info-Balken für Themen, die schon "aktiv" sind, bei denen aber gerade
+  // einzelne Analysen neu laufen (z. B. nach dem Ändern der Wettbewerber).
+  // Der Report bleibt hier bewusst sichtbar, damit er nicht für jede kleine
+  // Änderung komplett verschwindet.
+  function renderRunningStepsBanner(detail) {
+    var running = (detail.step_status || []).filter(function (s) { return s.state === 'running'; });
+    if (running.length === 0) return null;
+
+    var labels = running.map(function (s) { return s.label; }).join(', ');
+    var banner = document.createElement('div');
+    banner.className = 'cvz-card cvz-collecting-banner';
+    banner.innerHTML =
+      '<p class="cvz-collecting-banner-text"><span class="cvz-spinner"></span>' +
+        'Die Analyse wird gerade aktualisiert (' + escapeHtml(labels) + '). ' +
+        'Einzelne Bereiche k\u00f6nnen bis dahin noch alte Werte zeigen. ' +
+        'Diese Seite aktualisiert sich automatisch.' +
+      '</p>';
+    return banner;
+  }
+
+  function updateUrlParams(params) {
+    var url = new URL(window.location.href);
+    Object.keys(params).forEach(function (key) {
+      var value = params[key];
+      if (value === null || value === undefined) {
+        url.searchParams.delete(key);
+      } else {
+        url.searchParams.set(key, value);
+      }
+    });
+    window.history.replaceState({}, '', url);
+  }
+
+  async function init() {
+    injectStyles();
+    renderInitialLoadingState();
+
+    var memberstackId = null;
+
+    try {
+      var member = await window.$memberstackDom.getCurrentMember();
+      memberstackId = (member && member.data && member.data.id) ? member.data.id : null;
+      state.memberToken = await window.$memberstackDom.getMemberCookie();
+    } catch (e) {
+      console.error('[CVZ Visibility] Memberstack Fehler:', e);
+    }
+
+    if (!memberstackId) {
+      showNoUserMessage();
+      return;
+    }
+
+    state.memberstackId = memberstackId;
+
+    try {
+      await loadProjects();
+      await loadTopics();
+      await loadTopicUsage();
+    } catch (e) {
+      console.error('[CVZ Visibility] Daten konnten nicht geladen werden:', e);
+      showErrorMessage('Deine Daten konnten nicht geladen werden. Bitte lade die Seite neu.');
+      return;
+    }
+
+    maybeStartPolling();
+
+    var paramTab = new URLSearchParams(window.location.search).get('cvz_tab');
+    if (paramTab) state.activeSubTab = paramTab;
+
+    var paramTopicId = new URLSearchParams(window.location.search).get('cvz_topic');
+    if (paramTopicId && getTopicById(paramTopicId)) {
+      await openTopicDetail(paramTopicId, false);
+      if (state.activeSubTab === 'wettbewerber') {
+        maybeLoadCitationTrend(paramTopicId);
+      }
+      return;
+    }
+
+    render();
+    loadDomainDashboard(state.activeProjectId);
+  }
+
+  async function apiFetch(path, options) {
+    options = options || {};
+    var headers = Object.assign(
+      {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + state.memberToken,
+      },
+      options.headers || {}
+    );
+
+    var response = await fetch(CONFIG.apiBaseUrl + path, {
+      method: options.method || 'GET',
+      headers: headers,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+
+    if (!response.ok) {
+      var errBody = {};
+      try { errBody = await response.json(); } catch (e) {}
+      var err = new Error(errBody.detail || errBody.error || ('Request fehlgeschlagen (' + response.status + ')'));
+      err.status = response.status;
+      err.code = errBody.code;
+      throw err;
+    }
+
+    return response.json();
+  }
+
+  async function loadProjects() {
+    var projects;
+    if (CONFIG.useMockData) {
+      projects = MOCK_PROJECTS;
+    } else {
+      var data = await apiFetch('/projects');
+      projects = data.projects || [];
+    }
+    state.projects = projects;
+
+    var paramProjectId = new URLSearchParams(window.location.search).get('cvz_project');
+    var validParamProject = projects.some(function (p) { return p.id === paramProjectId; });
+    if (validParamProject) {
+      state.activeProjectId = paramProjectId;
+    } else if (projects.length > 0) {
+      state.activeProjectId = projects[0].id;
+    }
+  }
+
+  // GEÄNDERT: gibt jetzt eine Liste der Themen zurück, deren Status sich seit
+  // dem letzten Laden geändert hat. Die Liste braucht das Polling weiter unten.
+  async function loadTopics() {
+    if (CONFIG.useMockData) {
+      state.allTopics = MOCK_TOPICS;
+      return [];
+    }
+    var previousStatus = {};
+    state.allTopics.forEach(function (t) { previousStatus[t.id] = t.status; });
+
+    var data = await apiFetch('/topics');
+    state.allTopics = data.topics || [];
+
+    return state.allTopics
+      .filter(function (t) { return previousStatus[t.id] && previousStatus[t.id] !== t.status; })
+      .map(function (t) { return t.id; });
+  }
+
+  async function loadTopicUsage() {
+    if (CONFIG.useMockData) {
+      state.topicUsage = { current_count: state.allTopics.length, limit: 5, can_create: state.allTopics.length < 5 };
+      return;
+    }
+    var data = await apiFetch('/account/topic-status');
+    state.topicUsage = data;
+  }
+
+  // GEÄNDERT: räumt bei jedem Statuswechsel die Zwischenspeicher des Themas auf,
+  // egal ob es gerade offen ist oder nicht. Vorher passierte das nur für das
+  // gerade geöffnete Thema. Wer zwischendurch die Übersicht angeschaut hat,
+  // bekam danach einen "fertigen" Report mit leeren, veralteten Wettbewerber-Daten.
+  function maybeStartPolling() {
+    if (CONFIG.useMockData || state.pollTimer) return;
+
+    var hasBusyTopic = state.allTopics.some(function (t) {
+      return t.status === 'collecting' || t.status === 'analyzing';
+    });
+    if (!hasBusyTopic) return;
+
+    state.pollTimer = setInterval(async function () {
+      try {
+        var changedIds = await loadTopics();
+        changedIds.forEach(function (id) { purgeTopicCaches(id); });
+
+        if (state.activeView === 'topic-detail' && changedIds.indexOf(state.activeTopicId) !== -1) {
+          await openTopicDetail(state.activeTopicId, false);
         }
-        for r in runs if r.get("collected_at")
+      } catch (e) {
+        console.error('[CVZ Visibility] Polling fehlgeschlagen:', e);
+      }
+
+      var stillBusy = state.allTopics.some(function (t) {
+        return t.status === 'collecting' || t.status === 'analyzing';
+      });
+      if (!stillBusy) {
+        clearInterval(state.pollTimer);
+        state.pollTimer = null;
+      }
+      render();
+    }, 5000);
+  }
+  async function loadTopicDetail(topicId) {
+    if (CONFIG.useMockData) {
+      return MOCK_TOPIC_DETAIL[topicId] || null;
     }
-    run_ids = list(run_meta.keys())
-    if not run_ids:
-        return []
-
-    try:
-        sources = (
-            supabase.table("ai_sources")
-            .select("ai_run_id, domain, url")
-            .in_("ai_run_id", run_ids)
-            .eq("cited", True)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden der ai_sources-Historie für Topic %s", topic_id)
-        raise
-
-    # week -> domain -> {citations, url, by_model, prompts}
-    counts: dict[str, dict[str, dict]] = {}
-    for s in sources:
-        meta = run_meta.get(s["ai_run_id"])
-        domain = s.get("domain")
-        if not meta or not domain:
-            continue
-        # Live-Filter statt des eingefrorenen is_competitor-Flags, siehe
-        # Docstring oben.
-        if _normalize_search_domain(domain) not in competitor_norms:
-            continue
-        week = meta["week"]
-        bucket = counts.setdefault(week, {}).setdefault(domain, {
-            "citations": 0,
-            "url": s.get("url"),
-            "by_model": {},    # z.B. {"chat_gpt": 3, "gemini": 1}
-            "prompts": set(),  # welche Prompt-Texte zu dieser Zitation geführt haben
-        })
-        bucket["citations"] += 1
-        model = meta["model"] or "unbekannt"
-        bucket["by_model"][model] = bucket["by_model"].get(model, 0) + 1
-        if meta["prompt_text"]:
-            bucket["prompts"].add(meta["prompt_text"])
-
-    return [
-        {
-            "week": week,
-            "domains": [
-                {
-                    "domain": d,
-                    "citations": v["citations"],
-                    "url": v["url"],
-                    "by_model": v["by_model"],
-                    "prompts": sorted(v["prompts"]),  # set() ist nicht JSON-fähig, deshalb sortierte Liste
-                }
-                for d, v in sorted(domains.items(), key=lambda kv: -kv[1]["citations"])
-            ],
-        }
-        for week, domains in sorted(counts.items())
-    ]
-
-
-def _get_cited_platforms_overview(topic_id: str, weeks: int = 12) -> list[dict]:
-    """
-    NEU (16.09.2026): Kundenwunsch (siehe Chat-Verlauf 16.09.2026) — zeigt
-    ALLE zitierten Domains dieses Themas, gruppiert nach Content-Typ
-    (siehe source_analysis.py: content_type — review_plattform,
-    vergleichsartikel, produktseite, erklaerseite, fachartikel, video,
-    forum, sonstiges), NICHT nur die als Wettbewerber bestätigten (siehe
-    _get_competitor_citation_trend für die Wettbewerber-spezifische
-    Variante mit Wochen-Historie). Ziel: sichtbar machen, welche ART von
-    Plattformen für dieses Thema überhaupt zitiert wird (z.B. Reddit/
-    Foren, YouTube/Video, OMR Reviews/Bewertungsplattformen) —
-    unabhängig davon, ob das "Wettbewerber" sind — als Grundlage für eine
-    eigene Off-Page-/On-Page-Strategie (z.B. gezielt in Foren/auf
-    Bewertungsplattformen präsent werden, wenn genau diese Plattform-
-    Typen hier oft zitiert werden).
-
-    Bewusst eine reine Gesamt-Aggregation über den Lookback-Zeitraum
-    (keine Wochen-Historie wie beim Wettbewerber-Tab) — hier geht es um
-    "welche Plattform-Arten insgesamt", nicht um einen zeitlichen
-    Verlauf.
-
-    GEÄNDERT (18.09.2026): Gruppierung erfolgt jetzt pro (domain,
-    content_type)-Kombination statt nur pro Domain (siehe Chat-Verlauf
-    18.09.2026: source_content_profiles cacht jetzt pro URL statt pro
-    Domain, weil eine Domain mehrere Content-Typen gleichzeitig haben
-    kann, z.B. Blog UND Preisseite). Eine Domain kann dadurch in
-    mehreren Gruppen auftauchen — das ist gewollt: zeigt z.B. korrekt,
-    dass hubspot.com sowohl als Fachartikel-Quelle als auch als
-    Produktseite zitiert wird, statt einen der beiden Typen zu
-    unterschlagen.
-
-    URLs ohne Quellen-Analyse (source_analysis.py noch nicht gelaufen,
-    z.B. weil der nächste Monatslauf das erst nachholt) bekommen
-    content_type=None und landen in einer eigenen Gruppe im Frontend,
-    statt zu verschwinden.
-    """
-    cutoff = (datetime.now(timezone.utc) - timedelta(weeks=weeks)).isoformat()
-
-    try:
-        runs = (
-            supabase.table("ai_runs")
-            .select("id, prompt_id, prompts(prompt_text)")
-            .eq("topic_id", topic_id)
-            .gte("collected_at", cutoff)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden der ai_runs für Plattform-Übersicht (topic_id=%s)", topic_id)
-        raise
-
-    prompt_text_by_run = {r["id"]: (r.get("prompts") or {}).get("prompt_text") for r in runs}
-    run_ids = list(prompt_text_by_run.keys())
-    if not run_ids:
-        return []
-
-    try:
-        sources = (
-            supabase.table("ai_sources")
-            .select("ai_run_id, domain, url")
-            .in_("ai_run_id", run_ids)
-            .eq("cited", True)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden der ai_sources für Plattform-Übersicht (topic_id=%s)", topic_id)
-        raise
-
-    if not sources:
-        return []
-
-    urls = list({
-        (s.get("url") or f"https://{s['domain']}")
-        for s in sources
-        if s.get("domain")
-    })
-
-    try:
-        profiles = (
-            supabase.table("source_content_profiles")
-            .select("analyzed_url, content_type")
-            .in_("analyzed_url", urls)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden der Quellen-Analysen für Plattform-Übersicht (topic_id=%s)", topic_id)
-        profiles = []
-    content_type_by_url = {p["analyzed_url"]: p.get("content_type") for p in profiles}
-
-    combo_stats: dict[tuple[str, str | None], dict] = {}
-    for s in sources:
-        domain = s.get("domain")
-        if not domain:
-            continue
-        url = s.get("url") or f"https://{domain}"
-        content_type = content_type_by_url.get(url)
-        prompt_text = prompt_text_by_run.get(s["ai_run_id"])
-        bucket = combo_stats.setdefault((domain, content_type), {"citations": 0, "prompts": set()})
-        bucket["citations"] += 1
-        if prompt_text:
-            bucket["prompts"].add(prompt_text)
-
-    by_type: dict = {}
-    for (domain, content_type), stats in combo_stats.items():
-        by_type.setdefault(content_type, []).append({
-            "domain": domain,
-            "citations": stats["citations"],
-            "prompts": sorted(stats["prompts"]),
-        })
-
-    result = []
-    for content_type, domains in by_type.items():
-        domains.sort(key=lambda d: -d["citations"])
-        result.append({"content_type": content_type, "domains": domains})
-    result.sort(key=lambda g: -sum(d["citations"] for d in g["domains"]))
-    return result
-
-
-def _get_topic_competitor_domains(topic_id: str | None) -> list[str]:
-    """
-    GEÄNDERT (15.09.2026): Wettbewerber-Domains leben jetzt PRO TOPIC
-    (ai_visibility_topics.competitor_domains), nicht mehr auf
-    projects.competitor_domains. Grund (siehe Chat-Verlauf 15.09.2026):
-    ein Projekt/Kunde kann mehrere fachlich völlig unabhängige Themen
-    haben (z.B. bei AKQUINET: Colocation vs. SAP-Beratung), deren
-    Wettbewerber sich nicht überschneiden — eine gemeinsame, projektweite
-    Liste hätte bedeutet, dass ein für Thema A bewusst ausgeschlossener
-    Wettbewerber bei Thema B trotzdem wieder auftaucht, sobald er dort
-    unter den Top-Zitationen landet. Das war der Stand vom 13./14.09.2026
-    ("einzige Quelle der Wahrheit" auf Projekt-Ebene), wird hiermit
-    zurückgenommen.
-
-    Betrifft auch run_topic.py: _get_topic_competitor_domains (identische
-    Umstellung, dort bisher trotz des Namens fälschlich vom Projekt
-    gelesen), gap_analysis.py und opportunities.py (jeweils eigene lokale
-    Kopie dieser Funktion) sowie competitor_suggestions.py:
-    _get_already_competitor_norms.
-
-    ────────────────────────────────────────────────────────────────────
-    NOCH NICHT AUSGEFÜHRTE MIGRATION, bitte gegen euer Schema prüfen:
-
-        alter table ai_visibility_topics
-          add column competitor_domains text[] not null default '{}';
-
-        -- Einmalige Datenübernahme, damit schon kuratierte Projekt-Listen
-        -- nicht verloren gehen: kopiert den bisherigen Projekt-Stand auf
-        -- alle zugehörigen Topics.
-        update ai_visibility_topics t
-        set competitor_domains = p.competitor_domains
-        from projects p
-        where t.project_id = p.id
-          and coalesce(array_length(p.competitor_domains, 1), 0) > 0;
-
-    projects.competitor_domains und projects.excluded_competitor_domains
-    werden ab jetzt nirgends mehr gelesen oder geschrieben — könnt ihr
-    behalten (harmlos) oder bei Gelegenheit per Migration entfernen, ganz
-    wie ihr wollt, eilt nicht.
-    ────────────────────────────────────────────────────────────────────
-
-    Gibt bei fehlendem/ungültigem Topic bewusst eine leere Liste zurück
-    (kein Fehler), der Aufrufer entscheidet dann selbst, wie er mit
-    "keine Wettbewerber hinterlegt" umgeht.
-    """
-    if not topic_id:
-        return []
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("competitor_domains")
-            .eq("id", topic_id)
-            .single()
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Fehler beim Laden der Wettbewerber-Domains für Topic %s", topic_id)
-        return []
-    return (topic or {}).get("competitor_domains") or []
-
-
-def _extract_run_answer(run: dict, own_domain_normalized: str | None) -> dict | None:
-    """
-    raw_response ist bei chat_gpt/gemini eine Liste mit GENAU EINEM Element,
-    das 'markdown' (voller Antworttext) trägt (DataForSEO llm_scraper-
-    Format). Die Quellenliste kommt NICHT mehr aus raw_response, sondern
-    aus den echten ai_sources-Zeilen (siehe run["_sources"], befüllt in
-    _get_recent_runs_for_prompt unten).
-
-    GEÄNDERT (13.09.2026), Korrektur: `cited`, `mentioned`, `recommended`
-    und `is_competitor` werden bereits beim Speichern des Laufs in
-    ai_sources berechnet (siehe _save_ai_run_with_sources in run_topic.py),
-    inklusive einer echten Claude-Klassifizierung für "mentioned" bei
-    Wettbewerber-/eigenen Domains, nicht nur einer Substring-Heuristik.
-    Frühere Version dieser Funktion hat das selbst aus raw_response neu
-    (und schlechter) hergeleitet, das war unnötig, jetzt entfernt.
-
-    own_domain_normalized wird nur genutzt, um die eigene Domain aus der
-    "sources"-Liste herauszufiltern: sie taucht dort sonst als weitere
-    Zeile auf, obwohl sie schon separat über own_domain_cited/mentioned/
-    recommended abgedeckt ist, das wäre eine doppelte Anzeige im Frontend.
-    """
-    raw = run.get("raw_response")
-    if not raw or not isinstance(raw, list) or not raw:
-        return None
-    item = raw[0]
-
-    sources = []
-    for s in run.get("_sources", []):
-        domain_norm = _normalize_search_domain(s.get("domain"))
-        if own_domain_normalized and domain_norm == own_domain_normalized:
-            continue  # eigene Domain: schon über own_domain_* abgedeckt, nicht doppelt zeigen
-        sources.append({
-            "domain": s.get("domain"),
-            "url": s.get("url"),
-            "title": s.get("title"),
-            "cited": s.get("cited"),
-            "mentioned": s.get("mentioned"),
-            "recommended": s.get("recommended"),
-            "is_competitor": s.get("is_competitor"),
-        })
-
+    var data = await apiFetch('/topics/' + topicId);
     return {
-        "run_id": run["id"],
-        "collected_at": run["collected_at"],
-        "answer_markdown": item.get("markdown"),
-        "sources": sources,
-        "own_domain_mentioned": run.get("own_domain_mentioned"),
-        "own_domain_cited": run.get("own_domain_cited"),
-        "own_domain_citation_position": run.get("own_domain_citation_position"),
-        "own_domain_recommended": run.get("own_domain_recommended"),
-    }
+      topic: data.topic,
+      opportunities: data.opportunities || [],
+      content_ideas: data.content_ideas || [],
+      positioning_insight: data.positioning_insight || null,
+      source_profiles: data.source_profiles || [],
+      competitor_domains: data.competitor_domains || [],
+      content_gaps: data.content_gaps || [],
+      competitor_insights: data.competitor_insights || [],
+      changelog: data.changelog || [],
+      search_queries: data.search_queries || [],
+      // NEU (15.09.2026): "beste Content-Chancen", siehe main.py:
+      // _compute_best_content_chances.
+      best_content_chances: data.best_content_chances || [],
+      // NEU (16.09.2026): Plattform-Übersicht, siehe main.py:
+      // _get_cited_platforms_overview.
+      cited_platforms: data.cited_platforms || [],
+      // NEU (17.09.2026): KI-generierter Aktionsplan fehlte bisher hier,
+      // deshalb war detail.action_plan immer undefined und der Tab immer leer.
+      action_plan: data.action_plan || null,
+      // GEFIXT (20.09.2026): fehlten bisher komplett hier, genau wie
+      // vorher schon bei action_plan (siehe Kommentar oben), dadurch
+      // waren detail.ai_knowledge / .change_assessment / .step_status /
+      // .outreach_targets immer undefined und renderKnowledgeSection,
+      // renderChangeAssessmentSection, renderStepNotice und
+      // renderOutreachTargetsSection zeigten nie etwas an, obwohl das
+      // Backend (ai_knowledge.py, change_history.py, step_tracker.py,
+      // outreach_targets.py) diese Daten längst liefert.
+      ai_knowledge: data.ai_knowledge || null,
+      change_assessment: data.change_assessment || { summary: { anzahl: 0 }, items: [] },
+      step_status: data.step_status || [],
+      outreach_targets: data.outreach_targets || null,
+      // NEU (23.09.2026): freie Prompt-Plätze (gemeinsamer Topf von 20)
+      prompt_budget: data.prompt_budget || null,
+      competitors: [],
+      gsc_rows: (data.search_queries || [])
+        .filter(function (q) { return q.source === 'gsc_near_miss'; })
+        .map(function (q) {
+          var impressions = q.gsc_impressions || 0;
+          var clicks = q.gsc_clicks || 0;
+          return {
+            id: q.id,
+            query: q.keyword,
+            clicks: clicks,
+            impressions: impressions,
+            ctr: impressions > 0 ? clicks / impressions : 0,
+            position: q.gsc_position || 0,
+            // NEU (15.09.2026): SERP-Ergebnisse/-Features auch für
+            // GSC-Zeilen durchreichen, siehe renderGscRowExpansion.
+            top_serp_results: q.top_serp_results || null,
+            serp_features: q.serp_features || null,
+            serp_checked_at: q.serp_checked_at || null,
+            // NEU (16.09.2026): URL der rankenden Seite durchreichen.
+            // Verschiedene Backend-Feldnamen probieren (gsc_page, page_url, top_url).
+            page_url: q.page_url || q.gsc_page || q.top_url || q.ranking_url || null,
+          };
+        }),
+      prompts: (data.prompts || []).map(function (p) {
+        return Object.assign({ visibility_status: null }, p, { phase: p.messymiddle_phase || null });
+      }),
+    };
+  }
 
-
-def _get_recent_runs_for_prompt(topic_id: str, prompt_id: str, source: str, limit: int = PROMPT_CITATION_RUN_LIMIT) -> list:
-    """
-    GEÄNDERT (13.09.2026): lädt zusätzlich die echten ai_sources-Zeilen pro
-    Lauf (ein zweiter Query über die eingesammelten ai_run_ids, kein Join
-    nötig) und hängt sie unter "_sources" an jeden Lauf. _extract_run_answer
-    liest daraus die Quellenliste, statt sie aus raw_response neu
-    herzuleiten.
-    """
-    try:
-        runs = (
-            supabase.table("ai_runs")
-            .select(
-                "id, collected_at, raw_response, own_domain_mentioned, own_domain_cited, "
-                "own_domain_citation_position, own_domain_recommended"
-            )
-            .eq("topic_id", topic_id)
-            .eq("prompt_id", prompt_id)
-            .eq("source", source)
-            .order("collected_at", desc=True)
-            .limit(limit)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden der Läufe für Prompt %s (source=%s)", prompt_id, source)
-        raise
-
-    if not runs:
-        return runs
-
-    run_ids = [r["id"] for r in runs]
-    try:
-        sources = (
-            supabase.table("ai_sources")
-            .select("ai_run_id, domain, url, title, position, cited, mentioned, recommended, is_competitor")
-            .in_("ai_run_id", run_ids)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden der Quellen für Prompt %s", prompt_id)
-        sources = []
-
-    sources_by_run: dict[str, list] = {}
-    for s in sources:
-        sources_by_run.setdefault(s["ai_run_id"], []).append(s)
-
-    for r in runs:
-        run_sources = sources_by_run.get(r["id"], [])
-        # Zitierte Quellen zuerst (nach Position), nur-erwähnte (position
-        # ist bei denen None) danach.
-        run_sources.sort(key=lambda s: (s.get("position") is None, s.get("position") or 0))
-        r["_sources"] = run_sources
-
-    return runs
-
-
-def _compute_visibility_status_by_prompt(topic_id: str, prompt_ids: list[str]) -> dict[str, str]:
-    """
-    NEU (13.09.2026): visibility_status pro Prompt stand im Frontend bisher
-    IMMER fest auf null (siehe script.js loadTopicDetail, hartcodiert), weil
-    es serverseitig nie berechnet wurde. Berechnet hier aus own_domain_cited/
-    own_domain_mentioned auf ai_runs, exakt derselben Datenbasis, die auch
-    der neue /citations-Endpoint nutzt.
-
-    Nimmt bewusst den JEWEILS NEUESTEN Lauf pro Prompt (über beide Engines
-    hinweg, nach collected_at DESC sortiert): die Liste wird absteigend
-    geladen, daher zählt nur der ERSTE Treffer je prompt_id. Google AI
-    Overview (source='google_ai_overview') bleibt außen vor, da dort
-    prompt_id null ist (hängt an search_query_id statt am Prompt, siehe
-    Datenmodell in run_topic.py).
-
-    GEÄNDERT NICHT (18.09.2026): grün bleibt bewusst die breite Definition
-    (own_domain_cited, "als Quelle genannt"), unabhängig davon ob mit Link.
-    Die engere "mit Link zitiert"-Unterscheidung liefert stattdessen
-    _compute_unlinked_citation_by_prompt separat, siehe dort — damit die
-    Ampel-Farben stabil bleiben und nicht rückwirkend strenger werden.
-    """
-    if not prompt_ids:
-        return {}
-
-    try:
-        status_runs = (
-            supabase.table("ai_runs")
-            .select("prompt_id, own_domain_cited, own_domain_mentioned, collected_at")
-            .eq("topic_id", topic_id)
-            .in_("prompt_id", prompt_ids)
-            .in_("source", ["chat_gpt", "gemini"])
-            .order("collected_at", desc=True)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Berechnen der Sichtbarkeits-Status für Topic %s", topic_id)
-        return {}
-
-    status_by_prompt: dict[str, str] = {}
-    for run in status_runs:
-        pid = run.get("prompt_id")
-        if not pid or pid in status_by_prompt:
-            continue  # bereits vom neuesten Lauf dieses Prompts belegt (Liste ist DESC sortiert)
-        if run.get("own_domain_cited"):
-            status_by_prompt[pid] = "green"
-        elif run.get("own_domain_mentioned"):
-            status_by_prompt[pid] = "yellow"
-        else:
-            status_by_prompt[pid] = "red"
-
-    return status_by_prompt
-
-
-def _compute_unlinked_citation_by_prompt(topic_id: str, prompt_ids: list[str]) -> dict[str, bool]:
-    """
-    NEU (18.09.2026): Markiert Prompts, bei denen der JEWEILS NEUESTE Lauf
-    die eigene Domain zwar als Quelle nennt (own_domain_cited=true), aber
-    OHNE dass die KI einen echten Link gesetzt hat (own_domain_cited_
-    with_url=false) — siehe Chat-Verlauf 18.09.2026: "das ist der
-    entscheidende Unterschied", diese Prompts sollen im Frontend als
-    priorisierter Marker sichtbar sein.
-
-    Gleiches "neuester Lauf pro Prompt"-Muster wie
-    _compute_visibility_status_by_prompt (separate Funktion statt Erweiterung
-    von dort, damit deren Rückgabewert/Signatur für bestehende Aufrufer
-    unverändert bleibt).
-
-    Rückgabe: nur Prompts, bei denen der Marker zutrifft (True) — Prompts
-    ohne Zitierung oder mit Link-Zitierung fehlen im Dict, statt explizit
-    auf False zu stehen (schlanker fürs Frontend, das ohnehin nur auf
-    Vorhandensein prüft).
-    """
-    if not prompt_ids:
-        return {}
-
-    try:
-        status_runs = (
-            supabase.table("ai_runs")
-            .select("prompt_id, own_domain_cited, own_domain_cited_with_url, collected_at")
-            .eq("topic_id", topic_id)
-            .in_("prompt_id", prompt_ids)
-            .in_("source", ["chat_gpt", "gemini"])
-            .order("collected_at", desc=True)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Berechnen der Ohne-Link-Markierung für Topic %s", topic_id)
-        return {}
-
-    seen: set[str] = set()
-    unlinked_by_prompt: dict[str, bool] = {}
-    for run in status_runs:
-        pid = run.get("prompt_id")
-        if not pid or pid in seen:
-            continue
-        seen.add(pid)
-        if run.get("own_domain_cited") and not run.get("own_domain_cited_with_url"):
-            unlinked_by_prompt[pid] = True
-
-    return unlinked_by_prompt
-
-
-def _compute_citation_counts_by_prompt(topic_id: str, prompt_ids: list[str]) -> dict[str, dict]:
-    """
-    NEU (13.09.2026): anders als _compute_visibility_status_by_prompt (nur
-    der NEUESTE Lauf) zählt diese Funktion über ALLE ausgewerteten Läufe
-    hinweg, wie oft own_domain tatsächlich zitiert wurde. Für die direkte
-    Anzeige "3 von 5 Läufen zitiert" in der Prompt-Liste, ohne dass man
-    dafür erst den Prompt aufklappen muss.
-    """
-    if not prompt_ids:
-        return {}
-
-    try:
-        runs = (
-            supabase.table("ai_runs")
-            .select("prompt_id, own_domain_cited")
-            .eq("topic_id", topic_id)
-            .in_("prompt_id", prompt_ids)
-            .in_("source", ["chat_gpt", "gemini"])
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Zählen der Zitierungen pro Prompt für Topic %s", topic_id)
-        return {}
-
-    counts: dict[str, dict] = {}
-    for run in runs:
-        pid = run.get("prompt_id")
-        if not pid:
-            continue
-        entry = counts.setdefault(pid, {"cited_count": 0, "total_runs": 0})
-        entry["total_runs"] += 1
-        if run.get("own_domain_cited"):
-            entry["cited_count"] += 1
-    return counts
-
-
-def _compute_top_cited_domain_by_prompt(topic_id: str, prompt_ids: list[str]) -> dict[str, str]:
-    """
-    NEU (14.09.2026): für die Anreicherung der Prompt-Zeile mit "welche
-    Quelle wird hier am häufigsten zitiert, und was für ein Content-Typ ist
-    das" (siehe source_analysis.py: source_content_profiles, im Frontend
-    als Badge in renderPromptsByPhase). Zählt Zitationen PRO Domain über
-    ALLE ausgewerteten Läufe eines Prompts hinweg (anders als
-    _compute_visibility_status_by_prompt, das nur den neuesten Lauf nimmt),
-    gibt pro Prompt die Domain mit den meisten Zitationen zurück.
-
-    Bewusst NICHT auf Wettbewerber-Domains beschränkt: eine neutrale, oft
-    zitierte Quelle (z.B. ein Fachportal) ist für "welcher Content-Typ
-    funktioniert hier" genauso aufschlussreich wie ein bestätigter
-    Wettbewerber, und die Einschränkung auf Wettbewerber würde bei Themen
-    ohne bestätigte Wettbewerber-Domains immer leer bleiben.
-
-    GEÄNDERT (18.09.2026): zählt zusätzlich Zitationen pro URL (nicht nur
-    pro Domain) und gibt in "top_url" die meistzitierte URL INNERHALB der
-    Top-Domain zurück. Grund: source_content_profiles cacht jetzt pro URL
-    (siehe source_analysis.py), eine Domain kann also mehrere Content-Typen
-    haben — der Aufrufer muss das Content-Typ-Badge über top_url auflösen,
-    nicht mehr pauschal über die Domain, sonst zeigt das Badge ggf. den
-    Content-Typ einer ganz anderen Seite derselben Domain.
-    """
-    if not prompt_ids:
-        return {}
-
-    try:
-        runs = (
-            supabase.table("ai_runs")
-            .select("id, prompt_id")
-            .eq("topic_id", topic_id)
-            .in_("prompt_id", prompt_ids)
-            .in_("source", ["chat_gpt", "gemini"])
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden der Läufe für Top-Zitations-Domain, Topic %s", topic_id)
-        return {}
-
-    prompt_by_run_id = {r["id"]: r["prompt_id"] for r in runs if r.get("prompt_id")}
-    run_ids = list(prompt_by_run_id.keys())
-    if not run_ids:
-        return {}
-
-    try:
-        sources = (
-            supabase.table("ai_sources")
-            .select("ai_run_id, domain, url")
-            .in_("ai_run_id", run_ids)
-            .eq("cited", True)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden der Quellen für Top-Zitations-Domain, Topic %s", topic_id)
-        return {}
-
-    # prompt_id -> {domain -> {"count": int, "urls": {url: count}}}
-    counts: dict[str, dict[str, dict]] = {}
-    for s in sources:
-        prompt_id = prompt_by_run_id.get(s.get("ai_run_id"))
-        domain = s.get("domain")
-        if not prompt_id or not domain:
-            continue
-        url = s.get("url") or f"https://{domain}"
-        bucket = counts.setdefault(prompt_id, {})
-        domain_bucket = bucket.setdefault(domain, {"count": 0, "urls": {}})
-        domain_bucket["count"] += 1
-        domain_bucket["urls"][url] = domain_bucket["urls"].get(url, 0) + 1
-
-    # Gibt pro Prompt die nach Zitations-Häufigkeit sortierten Top-Domains
-    # zurück. "top" ist die meistzitierte Domain (bisheriges Verhalten),
-    # "all" ist die vollständige sortierte Liste (für das Frontend, um
-    # mehrere Favicons anzuzeigen), "top_url" die meistzitierte URL
-    # innerhalb der Top-Domain (für die korrekte Content-Typ-Auflösung).
-    result = {}
-    for prompt_id, domains in counts.items():
-        if not domains:
-            continue
-        sorted_domains = [
-            d for d, _ in sorted(domains.items(), key=lambda kv: kv[1]["count"], reverse=True)
-        ]
-        top_domain = sorted_domains[0]
-        top_domain_urls = domains[top_domain]["urls"]
-        top_url = max(top_domain_urls.items(), key=lambda kv: kv[1])[0] if top_domain_urls else None
-        result[prompt_id] = {"top": top_domain, "all": sorted_domains, "top_url": top_url}
-    return result
-
-
-def _compute_positioning_insight(topic: dict, search_queries: list[dict]) -> dict | None:
-    """
-    Vergleicht das Suchvolumen des seed_keyword mit allen anderen für dieses
-    Topic erfassten Keywords (related_keywords/keyword_ideas/keyword_suggestions,
-    also NICHT gsc/paa/seed_keyword selbst, das sind andere Quellen mit
-    anderer Bedeutung). Findet sich ein thematisch verwandtes Keyword mit
-    deutlich höherem Suchvolumen, ist das ein Hinweis, dass die
-    Topic-Positionierung ggf. am falschen Begriff hängt, z.B. "AI as a
-    Service" vs. "KI-Beratung", wenn Letzteres viel mehr gesucht wird.
-
-    Bewusst reine Zahlen-Auswertung bereits vorliegender Daten, kein neuer
-    API-Call, keine Claude-Klassifizierung, also deutlich geringeres
-    Hallunzinationsrisiko als bei den Content-Ideen. Die "thematische
-    Verwandtschaft" kommt dabei nicht von uns, sondern steckt schon in der
-    DataForSEO-Auswahl (related_keywords/keyword_ideas/keyword_suggestions
-    sind bereits algorithmisch auf das seed_keyword bezogen generiert),
-    wir werten hier nur ihre Suchvolumen aus, wir bewerten nicht selbst,
-    ob zwei Begriffe wirklich zusammengehören.
-
-    Gibt None zurück, wenn kein Kandidat gefunden wird oder das
-    seed_keyword selbst kein erfasstes Suchvolumen hat (dann fehlt die
-    Vergleichsbasis). Seit dem Fix in run_topic.py (get_keyword_overview,
-    13.09.2026) hat das seed_keyword nach einem neuen monatlichen Lauf
-    tatsächlich ein search_volume, vorher stand hier immer None.
-    """
-    seed_keyword_norm = (topic.get("seed_keyword") or "").strip().lower()
-    seed_volume = None
-    for q in search_queries:
-        if (q.get("keyword") or "").strip().lower() == seed_keyword_norm:
-            seed_volume = q.get("search_volume")
-            break
-
-    if seed_volume is None:
-        return None
-
-    candidates = [
-        q for q in search_queries
-        if (q.get("keyword") or "").strip().lower() != seed_keyword_norm
-        and q.get("search_volume") is not None
-        # GEÄNDERT (23.09.2026): keyword_ideas ausgenommen. Das ist bei DataforSEO
-        # eine Kategorie-Suche und schlug bei "Infor Schulungen" allen Ernstes
-        # "SAP Schulungen" als treffendere Positionierung vor. related_keywords
-        # (SERP-Nähe) und keyword_suggestions (enthalten das Seed) bleiben.
-        and q.get("source") in ("related_keywords", "keyword_suggestions")
-    ]
-    if not candidates:
-        return None
-
-    best = max(candidates, key=lambda q: q["search_volume"])
-    threshold = seed_volume * POSITIONING_VOLUME_FACTOR
-    if best["search_volume"] <= threshold:
-        return None
-
+  async function loadDomainDashboardData(projectId) {
+    var data = await apiFetch('/projects/' + projectId + '/dashboard');
     return {
-        "seed_keyword": topic.get("seed_keyword"),
-        "seed_volume": seed_volume,
-        "suggested_keyword": best["keyword"],
-        "suggested_volume": best["search_volume"],
-        "factor": round(best["search_volume"] / seed_volume, 1) if seed_volume else None,
+      trend: data.trend || [],
+      opportunities: data.opportunities || [],
+      contentIdeas: data.content_ideas || [],
+    };
+  }
+
+  async function loadDomainDashboard(projectId, force) {
+    if (!projectId || CONFIG.useMockData) return;
+    if (!force && (state.domainDashboardCache[projectId] || state.isLoadingDomainDashboard)) return;
+
+    state.isLoadingDomainDashboard = true;
+    render();
+
+    try {
+      state.domainDashboardCache[projectId] = await loadDomainDashboardData(projectId);
+    } catch (e) {
+      console.error('[CVZ Visibility] Domain-Dashboard konnte nicht geladen werden:', e);
+      state.domainDashboardCache[projectId] = { trend: [], opportunities: [], contentIdeas: [] };
     }
 
+    state.isLoadingDomainDashboard = false;
+    render();
+  }
 
-class RunTopicRequest(BaseModel):
-    topic_name: str
-    seed_keyword: str
-    own_domain: str
-    sample_prompts: list[str]
+  async function loadCompetitorCitationTrend(topicId) {
+    if (CONFIG.useMockData) {
+      return MOCK_CITATION_TREND[topicId] || [];
+    }
+    var data = await apiFetch('/topics/' + topicId + '/competitor-citations');
+    return data.weeks || [];
+  }
 
+  async function maybeLoadCitationTrend(topicId) {
+    if (!topicId || state.citationTrendCache[topicId]) return;
+    state.isLoadingCitationTrend = true;
+    render();
+    try {
+      state.citationTrendCache[topicId] = await loadCompetitorCitationTrend(topicId);
+    } catch (e) {
+      console.error('[CVZ Visibility] Zitations-Verlauf konnte nicht geladen werden:', e);
+      state.citationTrendCache[topicId] = [];
+    }
+    state.isLoadingCitationTrend = false;
+    render();
+  }
 
-class CreateProjectRequest(BaseModel):
-    name: str
-    domain: str
-    language_code: str = "de"
-    location_name: str = "Germany"
-    target_group: str | None = None      # fließt in die Claude-Prompt-Generierung ein
-    conversion_goal: str | None = None   # fließt in die Claude-Prompt-Generierung ein
-    competitor_domains: list[str] = []
+  async function loadVisibilityTrend(topicId) {
+    if (CONFIG.useMockData) {
+      return [];
+    }
+    var data = await apiFetch('/topics/' + topicId + '/visibility-trend');
+    return data.weeks || [];
+  }
 
+  async function maybeLoadVisibilityTrend(topicId) {
+    if (!topicId || state.visibilityTrendCache[topicId]) return;
+    state.isLoadingVisibilityTrend = true;
+    render();
+    try {
+      state.visibilityTrendCache[topicId] = await loadVisibilityTrend(topicId);
+    } catch (e) {
+      console.error('[CVZ Visibility] Sichtbarkeits-Verlauf konnte nicht geladen werden:', e);
+      state.visibilityTrendCache[topicId] = [];
+    }
+    state.isLoadingVisibilityTrend = false;
+    render();
+  }
 
-class BuyingCenterRoleInput(BaseModel):
-    # NEU (23.09.2026): eine vom Nutzer bestätigte Buying-Center-Rolle,
-    # siehe buying_center.py. Feldnamen wie im Vorschlag, damit das Frontend
-    # den Vorschlag unverändert zurückschicken kann.
-    rolle: str
-    ist_champion: bool = False
-    motivation: str | None = None
-    einwand: str | None = None
-    # NEU (23.09.2026): exploration|evaluation|comparison|decision, Standard exploration
-    einstiegsphase: str | None = None
+  async function loadMonthlyOverviewTrend(topicId) {
+    if (CONFIG.useMockData) {
+      return [];
+    }
+    var data = await apiFetch('/topics/' + topicId + '/monthly-overview-trend');
+    return data.months || [];
+  }
 
+  async function maybeLoadMonthlyOverviewTrend(topicId) {
+    if (!topicId || state.monthlyOverviewTrendCache[topicId]) return;
+    state.isLoadingMonthlyOverviewTrend = true;
+    render();
+    try {
+      state.monthlyOverviewTrendCache[topicId] = await loadMonthlyOverviewTrend(topicId);
+    } catch (e) {
+      console.error('[CVZ Visibility] Monatsübersicht konnte nicht geladen werden:', e);
+      state.monthlyOverviewTrendCache[topicId] = [];
+    }
+    state.isLoadingMonthlyOverviewTrend = false;
+    render();
+  }
 
-class CreateTopicRequest(BaseModel):
-    project_id: str  # NEU: Topics gehören jetzt zu einem Projekt (Agentur-Anwendungsfall, mehrere Kunden pro Team)
-    topic_name: str
-    seed_keyword: str
-    sample_prompts: list[str] = []  # leer = automatische Stable-Core-Generierung (siehe prompt_discovery.py)
-    # NEU (23.09.2026): Zielgruppe und Buying Center pro Topic. Werden VOR dem
-    # Hintergrund-Datenlauf gespeichert, damit die Prompt-Generierung sie nutzen kann.
-    target_group: str | None = None
-    buying_center: list[BuyingCenterRoleInput] = []
+  // NEU (16.09.2026): Journey-Map-Tab: lädt aggregierte Phase-Scores,
+  // Share-of-Voice und Content-Changes in einem einzigen API-Call.
+  async function loadDashboardData(topicId) {
+    if (CONFIG.useMockData) {
+      return {
+        // GEÄNDERT (20.09.2026): 'google_organic' pro Phase entfernt, kein
+        // Feld, das die echte API (dashboard.py) je liefert, siehe
+        // CHANNEL_ORDER-Kommentar oben.
+        phase_scores: {
+          exploration: { chat_gpt: { score: 62, cited: 5, total: 8 }, gemini: { score: 75, cited: 6, total: 8 }, google_ai: { score: 50, cited: 4, total: 8 } },
+          evaluation:  { chat_gpt: { score: 40, cited: 4, total: 10 }, gemini: { score: 55, cited: 6, total: 11 }, google_ai: { score: 36, cited: 4, total: 11 } },
+          comparison:  { chat_gpt: { score: 22, cited: 2, total: 9 }, gemini: { score: 33, cited: 3, total: 9 }, google_ai: { score: 11, cited: 1, total: 9 } },
+          decision:    { chat_gpt: { score: 14, cited: 1, total: 7 }, gemini: { score: 28, cited: 2, total: 7 }, google_ai: { score: 0, cited: 0, total: 7 } },
+        },
+        weekly_timeseries: { weeks: [], series: {} },
+        share_of_voice: {
+          exploration: [{ domain: 'hotjar.com', citation_rate: 75.0, cited_count: 6, total_runs: 8, content_type: 'produktseite', summary: 'Heatmap-Tool mit Fokus auf Nutzerverhaltensanalyse.', differentiation_suggestion: 'KI-gestützte Interpretation der Heatmap-Daten hervorheben.' }],
+          evaluation:  [{ domain: 'optimizely.com', citation_rate: 60.0, cited_count: 6, total_runs: 10, content_type: 'produktseite', summary: 'Enterprise A/B-Testing Plattform.', differentiation_suggestion: 'Einstiegshürde und Self-Service-Fokus betonen.' }],
+          comparison:  [{ domain: 'vwo.com', citation_rate: 55.0, cited_count: 5, total_runs: 9, content_type: 'vergleichsartikel', summary: 'Vergleichsseiten für CRO-Tools.', differentiation_suggestion: 'Eigene Vergleichsseite mit neutralem Ton aufbauen.' }],
+          decision:    [{ domain: 'capterra.de', citation_rate: 42.0, cited_count: 3, total_runs: 7, content_type: 'review_plattform', summary: 'Software-Bewertungsplattform.', differentiation_suggestion: 'Mehr verifizierte Reviews für höhere Sichtbarkeit auf Review-Plattformen sammeln.' }],
+        },
+        google_organic: { score: 32, keyword_count: 6, top_keyword: 'conversion rate optimierung software' },
+        content_changes: [],
+      };
+    }
+    var data = await apiFetch('/topics/' + topicId + '/dashboard-data');
+    return data;
+  }
 
+  async function maybeLoadDashboardData(topicId) {
+    if (!topicId || state.dashboardDataCache[topicId]) return;
+    state.isLoadingDashboard = true;
+    render();
+    try {
+      state.dashboardDataCache[topicId] = await loadDashboardData(topicId);
+    } catch (e) {
+      console.error('[CVZ Visibility] Journey-Map-Daten konnten nicht geladen werden:', e);
+      // Sentinel-Objekt statt null: truthy, damit maybeLoadDashboardData nicht bei
+      // jedem Render einen neuen Request startet (null wäre falsy -> Endlosschleife).
+      state.dashboardDataCache[topicId] = { _error: true };
+    }
+    state.isLoadingDashboard = false;
+    render();
+  }
 
-class BuyingCenterSuggestRequest(BaseModel):
-    topic_name: str
-    seed_keyword: str
-    target_group: str | None = None
-    offer_url: str | None = None  # optionale Angebotsseite, muss auf der Projekt-Domain liegen
+  // NEU (25.09.2026, Kundenwunsch): wie loadDashboardData, aber mit
+  // wählbarem weeks-Preset -- Backend unterstützt seit heute
+  // Literal[4, 12, 26] auf GET /topics/{id}/dashboard-data.
+  async function loadDashboardDataForWeeks(topicId, weeks) {
+    if (CONFIG.useMockData) return loadDashboardData(topicId);
+    return await apiFetch('/topics/' + topicId + '/dashboard-data?weeks=' + weeks);
+  }
 
+  // NEU (25.09.2026, Kundenwunsch): eigener, expliziter Trigger statt
+  // "während render() nachladen" (anders als maybeLoadDashboardData oben,
+  // das über loadTabData beim Tab-Wechsel angestoßen wird) -- ein Preset-
+  // Wechsel ist ein direkter Nutzer-Klick, kein Tab-Wechsel, deshalb wird
+  // hier explizit aus dem Klick-Handler heraus geladen (siehe unten,
+  // data-cvz-phase-trend-weeks).
+  async function maybeLoadPhaseTrend(topicId, weeks) {
+    var key = topicId + ':' + weeks;
+    if (state.phaseTrendCache[key] || state.isLoadingPhaseTrend[key]) return;
+    state.isLoadingPhaseTrend[key] = true;
+    render();
+    try {
+      state.phaseTrendCache[key] = await loadDashboardDataForWeeks(topicId, weeks);
+    } catch (e) {
+      console.error('[CVZ Visibility] Phasen-Verlauf (weeks=' + weeks + ') konnte nicht geladen werden:', e);
+      state.phaseTrendCache[key] = { _error: true };
+    }
+    state.isLoadingPhaseTrend[key] = false;
+    render();
+  }
 
-class SaveBuyingCenterRequest(BaseModel):
-    rollen: list[BuyingCenterRoleInput]
+  async function loadContentChanges(topicId) {
+    if (CONFIG.useMockData) return [];
+    var data = await apiFetch('/topics/' + topicId + '/content-changes');
+    return data.changes || [];
+  }
 
+  async function maybeLoadContentChanges(topicId) {
+    if (!topicId || state.contentChangesCache[topicId]) return;
+    state.isLoadingContentChanges = true;
+    render();
+    try {
+      state.contentChangesCache[topicId] = await loadContentChanges(topicId);
+    } catch (e) {
+      console.error('[CVZ Visibility] Content-Änderungen konnten nicht geladen werden:', e);
+      state.contentChangesCache[topicId] = [];
+    }
+    state.isLoadingContentChanges = false;
+    render();
+  }
 
-class SetPromptRoleRequest(BaseModel):
-    role_id: str | None = None  # None = Rolle entfernen
+  async function submitContentChange(topicId) {
+    var d = state.contentChangeDraft;
+    if (!d.description || !d.description.trim()) return;
+    if (!d.changed_at) {
+      d.changed_at = new Date().toISOString().slice(0, 10);
+    }
+    state.isSubmittingContentChange = true;
+    render();
+    try {
+      if (!CONFIG.useMockData) {
+        var created = await apiFetch('/topics/' + topicId + '/content-changes', {
+          method: 'POST',
+          body: {
+            changed_at: d.changed_at,
+            change_type: d.change_type,
+            description: d.description.trim(),
+            url: d.url ? d.url.trim() : null,
+            linked_search_query_ids: state.changelogDraftLinkedIds.keywords.slice(),
+            linked_prompt_ids: state.changelogDraftLinkedIds.prompts.slice(),
+          },
+        });
+        var existing = state.contentChangesCache[topicId] || [];
+        state.contentChangesCache[topicId] = [created.change || created].concat(existing);
+      } else {
+        var mockChange = {
+          id: 'mock-' + Date.now(),
+          changed_at: d.changed_at,
+          change_type: d.change_type,
+          description: d.description.trim(),
+          url: d.url ? d.url.trim() : null,
+          created_at: new Date().toISOString(),
+          linked_search_query_ids: state.changelogDraftLinkedIds.keywords.slice(),
+          linked_prompt_ids: state.changelogDraftLinkedIds.prompts.slice(),
+        };
+        state.changelogDraftLinkedIds = { keywords: [], prompts: [] };
+        state.changelogLinkSectionOpen = { keywords: false, prompts: false };
+        state.contentChangesCache[topicId] = [mockChange].concat(state.contentChangesCache[topicId] || []);
+      }
+      state.contentChangeDraft = { changed_at: '', change_type: 'neue_seite', description: '', url: '' };
+      state.changelogDraftLinkedIds = { keywords: [], prompts: [] };
+      state.changelogLinkSectionOpen = { keywords: false, prompts: false };
+    } catch (e) {
+      console.error('[CVZ Visibility] Content-Änderung konnte nicht gespeichert werden:', e);
+    }
+    state.isSubmittingContentChange = false;
+    render();
+  }
 
+  async function loadKeywordRankHistory(topicId, keyword) {
+    if (CONFIG.useMockData) return [];
+    var data = await apiFetch('/topics/' + topicId + '/rank-history?keyword=' + encodeURIComponent(keyword));
+    return data.snapshots || [];
+  }
 
-class CreateChangelogEntryRequest(BaseModel):
-    entry_text: str
-    # NEU (14.09.2026): optionale Verknüpfung mit konkreten Keywords/Prompts
-    # dieses Topics (siehe Chat-Verlauf 14.09.2026: "wann hat sich WELCHES
-    # Keyword/WELCHER Prompt durch diese Änderung verändert" statt nur
-    # eines zeitlichen Zufallstreffers über alle Charts hinweg). Mehrere
-    # Änderungen pro Keyword/Prompt sind normal und explizit erwünscht,
-    # daher ein Array-Feld statt einer 1:1-Beziehung.
-    #
-    # ────────────────────────────────────────────────────────────────────
-    # NOCH NICHT AUSGEFÜHRTE MIGRATION, bitte gegen euer Schema prüfen:
-    #
-    #     alter table topic_changelog
-    #       add column linked_search_query_ids uuid[] not null default '{}';
-    #     alter table topic_changelog
-    #       add column linked_prompt_ids uuid[] not null default '{}';
-    # ────────────────────────────────────────────────────────────────────
-    linked_search_query_ids: list[str] = []
-    linked_prompt_ids: list[str] = []
+  async function loadTopicRankHistory(topicId) {
+    if (CONFIG.useMockData) return [];
+    var data = await apiFetch('/topics/' + topicId + '/rank-history');
+    return data.snapshots || [];
+  }
 
+  async function maybeLoadTopicRankHistory(topicId) {
+    if (!topicId || state.topicRankHistoryCache[topicId]) return;
+    state.isLoadingTopicRankHistory = true;
+    render();
+    try {
+      state.topicRankHistoryCache[topicId] = await loadTopicRankHistory(topicId);
+    } catch (e) {
+      console.error('[CVZ Visibility] Topic-weite Rank-Historie konnte nicht geladen werden:', e);
+      state.topicRankHistoryCache[topicId] = [];
+    }
+    state.isLoadingTopicRankHistory = false;
+    render();
+  }
 
-class CreateManualPromptRequest(BaseModel):
-    # NEU (15.09.2026): manuelles Hinzufügen von Prompts, siehe Chat-
-    # Verlauf 15.09.2026 — zusätzlich zu den bis zu 16 automatisch von
-    # Claude generierten Stable-Core-Prompts (prompt_discovery.py) sollen
-    # Nutzer bis zu MAX_MANUAL_PROMPTS eigene Prompts anlegen können, mit
-    # frei gewählter Phase statt Claudes automatischer Einordnung.
-    prompt_text: str
-    messymiddle_phase: str  # exploration|evaluation|comparison|decision, siehe MESSYMIDDLE_PHASES
-    # NEU (23.09.2026): optionale Buying-Center-Rolle des Topics
-    role_id: str | None = None
-    # NEU (16.09.2026): siehe _looks_like_bare_keyword in run_topic.py —
-    # der Endpunkt lehnt kurze, keyword-artige Eingaben standardmäßig ab
-    # (422), damit nicht versehentlich ein SEO-Keyword statt einer echten
-    # AI-Prompt-Frage gespeichert wird. Falls das Frontend dem Nutzer
-    # später eine "trotzdem speichern"-Bestätigung anbietet, kann es das
-    # hierüber erzwingen.
-    force: bool = False
+  async function loadWeekDetail(topicId, week) {
+    if (CONFIG.useMockData) return null;
+    return apiFetch('/topics/' + topicId + '/week-detail?week=' + encodeURIComponent(week));
+  }
 
+  async function showWeekDetail(topicId, week) {
+    var key = topicId + '|' + week;
+    if (state.selectedWeekDetailKey === key) {
+      state.selectedWeekDetailKey = null;
+      render();
+      return;
+    }
+    state.selectedWeekDetailKey = key;
+    if (!state.weekDetailCache[key]) {
+      state.isLoadingWeekDetail = true;
+      render();
+      try {
+        state.weekDetailCache[key] = await loadWeekDetail(topicId, week);
+      } catch (e) {
+        console.error('[CVZ Visibility] Wochendetail konnte nicht geladen werden:', e);
+        state.weekDetailCache[key] = null;
+      }
+      state.isLoadingWeekDetail = false;
+    }
+    render();
+  }
 
-class CreateManualKeywordRequest(BaseModel):
-    # NEU (16.09.2026): manuelles Hinzufügen eines Keywords, analog zu
-    # CreateManualPromptRequest oben, siehe Chat-Verlauf 16.09.2026.
-    # messymiddle_phase optional: anders als bei Prompts kennt ein
-    # manuell eingetragenes Keyword seine Phase evtl. noch nicht, dann
-    # bleibt sie leer, bis der Nutzer sie später über
-    # update_keyword_phase_endpoint setzt (dasselbe Formular, das es für
-    # automatisch gesammelte Keywords schon gibt).
-    keyword: str
-    messymiddle_phase: str | None = None
+  async function toggleKeywordExpansion(topicId, keywordRowId, keywordText) {
+    if (state.expandedKeywordId === keywordRowId) {
+      state.expandedKeywordId = null;
+      render();
+      return;
+    }
+    state.expandedKeywordId = keywordRowId;
+    if (!state.keywordRankHistoryCache[keywordRowId]) {
+      state.loadingKeywordRankHistory[keywordRowId] = true;
+      render();
+      try {
+        state.keywordRankHistoryCache[keywordRowId] = await loadKeywordRankHistory(topicId, keywordText);
+      } catch (e) {
+        console.error('[CVZ Visibility] Rank-Verlauf konnte nicht geladen werden:', e);
+        state.keywordRankHistoryCache[keywordRowId] = [];
+      }
+      state.loadingKeywordRankHistory[keywordRowId] = false;
+    }
+    render();
+  }
 
+  // NEU (15.09.2026): GSC-Zeilen im selben Auf-/Zuklapp-Stil wie Keywords
+  // (siehe toggleKeywordExpansion), damit auch hier die Entwicklung über
+  // die Zeit sichtbar wird (Kundenwunsch: "GSC-Daten ... in dem Stil, nur
+  // mit den zusätzlichen Tabellendaten"). Nutzt denselben rank-history-
+  // Endpunkt wie Keywords, dieselben Suchanfrage-Texte, dieselbe
+  // Datenquelle (search_rank_snapshots), kein neuer Endpunkt nötig.
+  async function toggleGscRowExpansion(topicId, rowId, keywordText) {
+    if (state.expandedGscRowId === rowId) {
+      state.expandedGscRowId = null;
+      render();
+      return;
+    }
+    state.expandedGscRowId = rowId;
+    if (!state.gscRankHistoryCache[rowId]) {
+      state.loadingGscRankHistory[rowId] = true;
+      render();
+      try {
+        state.gscRankHistoryCache[rowId] = await loadKeywordRankHistory(topicId, keywordText);
+      } catch (e) {
+        console.error('[CVZ Visibility] GSC-Verlauf konnte nicht geladen werden:', e);
+        state.gscRankHistoryCache[rowId] = [];
+      }
+      state.loadingGscRankHistory[rowId] = false;
+    }
+    render();
+  }
 
-class CreateContentChangeRequest(BaseModel):
-    # NEU (16.09.2026): Content-Änderungen für den Dashboard Change Log.
-    # Nutzer tragen ein, wann sie welchen Inhalt veröffentlicht/geändert haben,
-    # damit diese Ereignisse als Marker in den Trend-Charts erscheinen und man
-    # Korrelationen zwischen Inhaltsänderungen und Visibility-Verläufen sehen kann.
-    #
-    # ────────────────────────────────────────────────────────────────────
-    # MIGRATION (ausführen vor dem ersten POST auf diesen Endpoint):
-    #
-    #     create table content_changes (
-    #         id uuid primary key default gen_random_uuid(),
-    #         topic_id uuid not null references ai_visibility_topics(id) on delete cascade,
-    #         changed_at date not null,
-    #         change_type text not null check (
-    #             change_type in ('neue_seite', 'ueberarbeitung', 'kampagne', 'sonstiges')
-    #         ),
-    #         description text not null,
-    #         url text,
-    #         created_at timestamptz not null default now()
-    #     );
-    #     create index content_changes_topic_id_idx on content_changes(topic_id);
-    # ────────────────────────────────────────────────────────────────────
-    changed_at: str       # ISO-Datum: "2026-09-10"
-    change_type: str      # "neue_seite" | "ueberarbeitung" | "kampagne" | "sonstiges"
-    description: str      # was wurde geändert / veröffentlicht
-    url: str | None = None  # optional: die betroffene URL
-    # NEU (20.09.2026): Verknüpfung mit konkreten Keywords/Prompts. Das
-    # Frontend schickt diese Felder schon lange mit, das Backend hat sie bisher
-    # verworfen. Ohne sie lässt sich die Wirkung einer Änderung nicht auf die
-    # betroffenen Prompts/Keywords messen (siehe change_history.py). Braucht die
-    # Migration migration_2026_09_20.sql.
-    linked_search_query_ids: list[str] = []
-    linked_prompt_ids: list[str] = []
+  function toggleOppExpansion(oppId) {
+    state.expandedOppId = (state.expandedOppId === oppId) ? null : oppId;
+    render();
+  }
 
+  function composeChangelogEntryText(rawText, location, effect, locationCustom, effectCustom) {
+    var locationLabel = location === 'sonstiges' && (locationCustom || '').trim()
+      ? locationCustom.trim()
+      : (CHANGELOG_LOCATION_LABELS[location] || location);
+    var effectLabel = effect === 'sonstiges' && (effectCustom || '').trim()
+      ? effectCustom.trim()
+      : (CHANGELOG_EFFECT_LABELS[effect] || effect);
+    var prefix = location ? '[' + locationLabel + '] ' : '';
+    var suffix = effect ? ' \u00b7 Erwarteter Effekt: ' + effectLabel : '';
+    return prefix + rawText + suffix;
+  }
 
-class UpdateKeywordPhaseRequest(BaseModel):
-    # NEU (15.09.2026): manuelle Korrektur einer automatisch zugeordneten
-    # Messy-Middle-Phase bei Keywords/PAA-Fragen (siehe Chat-Verlauf
-    # 15.09.2026: "Keywords und PAA auch den Messy Middle Phasen
-    # zuordnen, die dann von den Usern aber geändert werden können, falls
-    # falsch zugeordnet"). Setzt zusätzlich phase_manually_set=true (siehe
-    # run_topic.py: save_search_queries), damit ein künftiger Sammel-Lauf
-    # diese Korrektur nicht wieder überschreibt.
-    messymiddle_phase: str  # exploration|evaluation|comparison|decision, siehe MESSYMIDDLE_PHASES
+  async function submitChangelogEntry(topicId) {
+    var textarea = document.getElementById('cvz-changelog-input');
+    var rawText = ((textarea && textarea.value) || '').trim();
+    if (!rawText || state.isSubmittingChangelog) return;
 
+    var entryText = composeChangelogEntryText(
+      rawText, state.changelogLocationDraft, state.changelogEffectDraft,
+      state.changelogLocationCustomText, state.changelogEffectCustomText,
+    );
+    var linkedKeywordIds = state.changelogDraftLinkedIds.keywords.slice();
+    var linkedPromptIds = state.changelogDraftLinkedIds.prompts.slice();
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+    state.changelogDraft = rawText;
+    state.isSubmittingChangelog = true;
+    render();
 
-
-@app.post("/projects")
-def create_project_endpoint(payload: CreateProjectRequest, member_id: str = Depends(require_member)):
-    team_id = _resolve_team_id(member_id)
-    try:
-        project_id = create_project(
-            team_id, payload.name, payload.domain, payload.language_code, payload.location_name,
-            target_group=payload.target_group, conversion_goal=payload.conversion_goal,
-            competitor_domains=payload.competitor_domains,
-        )
-    except Exception as e:
-        logger.exception("Fehler beim Anlegen des Projekts '%s'", payload.name)
-        raise HTTPException(status_code=500, detail=f"Projekt konnte nicht angelegt werden: {e}")
-    return {"status": "ok", "project_id": project_id}
-
-
-@app.get("/projects")
-def list_projects_endpoint(member_id: str = Depends(require_member)):
-    team_id = _resolve_team_id(member_id)
-    try:
-        projects = get_team_projects(team_id)
-    except Exception as e:
-        logger.exception("Fehler beim Laden der Projekte für Team %s", team_id)
-        raise HTTPException(status_code=500, detail=f"Projekte konnten nicht geladen werden: {e}")
-    return {"projects": projects}
-
-
-@app.get("/account/topic-status")
-def get_topic_status_endpoint(member_id: str = Depends(require_member)):
-    """
-    NEU: Liefert aktuellen Stand + Limit, damit das Frontend VOR dem
-    Öffnen des Anlege-Formulars weiß, ob überhaupt noch Platz ist, statt
-    das erst beim Absenden per 403 zu erfahren (siehe check_topic_limit
-    in run_topic.py, nutzt intern dieselbe get_topic_usage()-Funktion,
-    damit beide Stellen garantiert dieselbe Zahl sehen).
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        usage = get_topic_usage(team_id)
-    except Exception as e:
-        logger.exception("Fehler beim Laden des Topic-Status für Team %s", team_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Topic-Status nicht laden: {e}")
-
-    # GEÄNDERT (14.09.2026): can_queue + next_slot_at mit ausliefern, siehe
-    # get_topic_usage/get_next_reservable_slot_at in run_topic.py.
-    can_create = usage["current_count"] < usage["limit"]
-    next_slot_at = None
-    if not can_create and usage.get("queueable"):
-        try:
-            next_slot_at = get_next_reservable_slot_at(team_id)
-        except Exception:
-            logger.exception("Fehler beim Ermitteln des nächsten freien Slots für Team %s", team_id)
-
-    return {
-        "current_count": usage["current_count"],
-        "limit": usage["limit"],
-        "can_create": can_create,
-        "can_queue": bool(usage.get("queueable")),
-        "next_slot_at": next_slot_at,
+    try {
+      if (CONFIG.useMockData) {
+        var mockEntry = {
+          id: 'entry-' + Date.now(), entry_text: entryText, author_name: null, created_at: new Date().toISOString(),
+          linked_search_query_ids: linkedKeywordIds, linked_prompt_ids: linkedPromptIds,
+        };
+        _prependChangelogEntry(topicId, mockEntry);
+      } else {
+        var data = await apiFetch('/topics/' + topicId + '/changelog', {
+          method: 'POST',
+          body: {
+            entry_text: entryText,
+            linked_search_query_ids: linkedKeywordIds,
+            linked_prompt_ids: linkedPromptIds,
+          },
+        });
+        _prependChangelogEntry(topicId, data.entry);
+      }
+      state.changelogDraft = '';
+      state.changelogLocationDraft = null;
+      state.changelogEffectDraft = null;
+      state.changelogLocationCustomText = '';
+      state.changelogEffectCustomText = '';
+      state.changelogDraftLinkedIds = { keywords: [], prompts: [] };
+      state.changelogLinkSectionOpen = { keywords: false, prompts: false };
+    } catch (e) {
+      console.error('[CVZ Visibility] Changelog-Eintrag konnte nicht gespeichert werden:', e);
     }
 
+    state.isSubmittingChangelog = false;
+    render();
+  }
 
-def _record_topic_run_error(topic_id: str, step: str, error: Exception) -> None:
-    """
-    NEU (16.09.2026): Kundenwunsch (siehe Chat-Verlauf 16.09.2026) —
-    speichert die tatsächliche Fehlermeldung eines fehlgeschlagenen
-    Hintergrund-Schritts direkt auf der Topic-Zeile, nicht nur im
-    Railway-Log. Vorher war ein fehlgeschlagener Lauf (egal ob kompletter
-    Abbruch oder nur ein einzelner Analyse-Schritt) für den User im
-    Frontend nicht diagnostizierbar, ohne Zugriff auf die Server-Logs zu
-    haben.
+  function _prependChangelogEntry(topicId, entry) {
+    var cached = state.topicDetailCache[topicId];
+    if (!cached) return;
+    cached.changelog = [entry].concat(cached.changelog || []);
+  }
 
-    Überschreibt einen evtl. vorherigen Fehler — nur der ZULETZT in einem
-    Lauf aufgetretene Fehler bleibt erhalten, kein vollständiges
-    Audit-Log (dafür bleiben die Log-Zeilen selbst da). Reicht für die
-    eigentliche Absicht: ohne Log-Zugriff sehen können, WARUM der letzte
-    Lauf (teilweise) fehlgeschlagen ist. step benennt, welcher Teilschritt
-    betroffen war (z.B. "collect_monthly_data", "generate_summary"),
-    damit die Meldung im Frontend einordbar ist, statt nur ein rohes
-    Python-Exception-Text zu sein.
+  async function deleteChangelogEntry(topicId, entryId) {
+    if (!window.confirm('Diesen Eintrag l\u00f6schen? Er bleibt ' + CHANGELOG_DELETED_RETENTION_DAYS + ' Tage lang unter "Gel\u00f6schte Eintr\u00e4ge" wiederherstellbar.')) {
+      return;
+    }
+    try {
+      await apiFetch('/topics/' + topicId + '/changelog/' + entryId, { method: 'DELETE' });
+      var cached = state.topicDetailCache[topicId];
+      if (cached && cached.changelog) {
+        cached.changelog = cached.changelog.filter(function (e) { return e.id !== entryId; });
+      }
+      delete state.deletedChangelogCache[topicId];
+    } catch (e) {
+      console.error('[CVZ Visibility] Eintrag konnte nicht gel\u00f6scht werden:', e);
+      await showCvzAlert('Eintrag konnte nicht gel\u00f6scht werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    render();
+  }
 
-    Best effort: schlägt sogar dieses Update fehl, wird das nur geloggt,
-    nie weitergeworfen — ein Fehler beim Fehler-Speichern soll den
-    eigentlichen Hintergrund-Lauf nicht zusätzlich stören.
+  async function restoreChangelogEntry(topicId, entryId) {
+    try {
+      await apiFetch('/topics/' + topicId + '/changelog/' + entryId + '/restore', { method: 'POST' });
+      var deletedList = state.deletedChangelogCache[topicId] || [];
+      var restored = deletedList.filter(function (e) { return e.id === entryId; })[0];
+      state.deletedChangelogCache[topicId] = deletedList.filter(function (e) { return e.id !== entryId; });
+      var cached = state.topicDetailCache[topicId];
+      if (cached && restored) {
+        cached.changelog = [
+          {
+            id: restored.id, entry_text: restored.entry_text, author_name: restored.author_name,
+            created_at: restored.created_at,
+            linked_search_query_ids: restored.linked_search_query_ids || [],
+            linked_prompt_ids: restored.linked_prompt_ids || [],
+          },
+        ].concat(cached.changelog || []).sort(function (a, b) {
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        });
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Eintrag konnte nicht wiederhergestellt werden:', e);
+      await showCvzAlert('Eintrag konnte nicht wiederhergestellt werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    render();
+  }
 
-    ──────────────────────────────────────────────────────────────────
-    NOCH NICHT AUSGEFÜHRTE MIGRATION, bitte gegen euer Schema prüfen:
+  async function toggleDeletedChangelog(topicId) {
+    state.showDeletedChangelog[topicId] = !state.showDeletedChangelog[topicId];
+    if (state.showDeletedChangelog[topicId] && !state.deletedChangelogCache[topicId]) {
+      state.isLoadingDeletedChangelog = true;
+      render();
+      try {
+        var data = await apiFetch('/topics/' + topicId + '/changelog/deleted');
+        state.deletedChangelogCache[topicId] = data.entries || [];
+      } catch (e) {
+        console.error('[CVZ Visibility] Gel\u00f6schte Eintr\u00e4ge konnten nicht geladen werden:', e);
+        state.deletedChangelogCache[topicId] = [];
+      }
+      state.isLoadingDeletedChangelog = false;
+    }
+    render();
+  }
 
-        alter table ai_visibility_topics add column last_run_error text;
-        alter table ai_visibility_topics add column last_run_error_at timestamptz;
-    ──────────────────────────────────────────────────────────────────
-    """
-    message = f"[{step}] {error}"[:2000]  # gedeckelt, falls eine Exception-Message unerwartet riesig ist (z.B. eine komplette HTML-Fehlerseite in einer requests-Exception)
-    try:
-        supabase.table("ai_visibility_topics").update({
-            "last_run_error": message,
-            "last_run_error_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", topic_id).execute()
-    except Exception:
-        logger.exception("Konnte Fehlermeldung für Topic %s nicht speichern (step=%s)", topic_id, step)
+  async function loadPromptCitations(topicId, promptId) {
+    if (CONFIG.useMockData) {
+      return { prompt_id: promptId, prompt_text: '', chat_gpt: [], gemini: [] };
+    }
+    return apiFetch('/topics/' + topicId + '/prompts/' + promptId + '/citations');
+  }
 
+  async function togglePromptExpansion(promptId) {
+    if (state.expandedPromptId === promptId) {
+      state.expandedPromptId = null;
+      render();
+      return;
+    }
+    state.expandedPromptId = promptId;
+    if (!state.promptCitationsCache[promptId]) {
+      state.loadingPromptCitations[promptId] = true;
+      render();
+      try {
+        var data = await loadPromptCitations(state.activeTopicId, promptId);
+        state.promptCitationsCache[promptId] = data;
+        state.expandedPromptEngine[promptId] =
+          (data.chat_gpt && data.chat_gpt.length) ? 'chat_gpt' :
+          (data.gemini && data.gemini.length) ? 'gemini' : 'chat_gpt';
+        state.expandedPromptRunIndex[promptId] = 0;
+      } catch (e) {
+        console.error('[CVZ Visibility] Prompt-Zitationen konnten nicht geladen werden:', e);
+        state.promptCitationsCache[promptId] = null;
+      }
+      state.loadingPromptCitations[promptId] = false;
+    }
+    render();
+  }
 
-def _clear_topic_run_error(topic_id: str) -> None:
-    """
-    Wird nach einem VOLLSTÄNDIG fehlerfreien Lauf aufgerufen (siehe
-    _record_topic_run_error) — ein alter, längst behobener Fehler soll
-    nicht für immer im Frontend stehen bleiben, nur weil seitdem kein
-    neuer Fehler aufgetreten ist.
-    """
-    try:
-        supabase.table("ai_visibility_topics").update({
-            "last_run_error": None,
-            "last_run_error_at": None,
-        }).eq("id", topic_id).execute()
-    except Exception:
-        logger.exception("Konnte last_run_error für Topic %s nicht zurücksetzen", topic_id)
+  // GEÄNDERT:
+  // 1. Lädt das Detail neu, wenn der zwischengespeicherte Status nicht mehr zum
+  //    Status in der Themenliste passt.
+  // 2. Startet die Zusatz-Abfragen (Wettbewerbs-Chart, Verlauf, ...) NUR, wenn
+  //    der Report auch wirklich geöffnet werden darf. Vorher liefen sie schon
+  //    während des Laufs, lieferten leere Daten und diese leeren Daten blieben
+  //    danach im Zwischenspeicher.
+  // 3. Startet das Polling, wenn beim Öffnen noch Einzel-Analysen laufen.
+  async function openTopicDetail(topicId, resetTab) {
+    if (resetTab !== false) {
+      state.activeSubTab = 'situation';
+    } else if (TOPIC_TABS.every(function (t) { return t.id !== state.activeSubTab; })) {
+      state.activeSubTab = 'situation';
+    }
+    state.activeView = 'topic-detail';
+    if (state.activeTopicId !== topicId) {
+      state.activePersonaFilter = null;
+      state.changelogDraftLinkedIds = { keywords: [], prompts: [] };
+      state.changelogLinkSectionOpen = { keywords: false, prompts: false };
+      state.changelogLocationDraft = null;
+      state.changelogEffectDraft = null;
+      state.changelogLocationCustomText = '';
+      state.changelogEffectCustomText = '';
+    }
+    state.activeTopicId = topicId;
+    var topic = getTopicById(topicId);
+    if (topic) state.activeProjectId = topic.project_id;
+    if (topic && (topic.status === 'collecting' || topic.status === 'analyzing')) {
+      maybeStartPolling();
+    }
+    state.isLoadingDetail = true;
+    updateUrlParams({ cvz_topic: topicId, cvz_project: state.activeProjectId, cvz_tab: resetTab !== false ? null : state.activeSubTab });
+    render();
 
-
-def _collect_and_analyze_background(topic_id: str, seed_keyword: str, own_domain: str,
-                                     language_code: str, location_name: str,
-                                     sample_prompts: list[str], team_id: str | None) -> None:
-    """
-    Läuft als FastAPI-BackgroundTask NACH dem Response an den Client, also
-    kann kein HTTPException mehr beim User ankommen. Jeder Fehler MUSS hier
-    daher explizit geloggt werden, sonst verschwindet er spurlos, das ist
-    genau der Fall, vor dem das Logging-Setup schützen soll.
-
-    language_code/location_name kommen jetzt vom Projekt statt hartcodiert
-    "de"/"Germany" zu sein, das war vorher eine Vereinfachung, die mit
-    mehrsprachigen Agentur-Projekten nicht mehr passt.
-
-    GEÄNDERT (14.09.2026): letzter Parameter hieß vorher billing_user_id
-    (ein einzelner, per get_team_owner_id aufgelöster User), siehe
-    run_topic.py: collect_monthly_data für die Begründung der Umstellung
-    auf team_id.
-
-    GEÄNDERT (16.09.2026): jeder Fehlschlag (kompletter Abbruch ODER ein
-    einzelner Analyse-Schritt) wird jetzt zusätzlich per
-    _record_topic_run_error auf der Topic-Zeile gespeichert, siehe dort.
-    Lief der komplette Durchlauf fehlerfrei durch, wird ein evtl. alter
-    Fehler am Ende gelöscht (_clear_topic_run_error).
-    """
-    # GEÄNDERT (20.09.2026), siehe Chat-Verlauf 20.09.2026: alle Analyse-
-    # Schritte laufen jetzt über run_step (step_tracker.py). Jeder Schritt
-    # bekommt so einen eigenen Status und jeder Fehler landet mit Traceback in
-    # pipeline_error_log. Ein fehlgeschlagener Schritt zeigt dem Nutzer einen
-    # "Erneut erstellen"-Button genau für dieses Feld, statt nur eine
-    # Sammel-Fehlermeldung (last_run_error) zu hinterlassen. Reihenfolge und
-    # Abhängigkeiten sind unverändert, neu ist nur der KI-Wissens-Check vor
-    # Aktionsplan und Zusammenfassung.
-    had_any_error = False
-
-    try:
-        collect_topic_data(topic_id, seed_keyword, own_domain, language_code, location_name, sample_prompts, team_id)
-        # Rohdaten fertig — Analysen laufen jetzt noch (generate_opportunities,
-        # gap_analysis, action_plan, summary). "analyzing" hält das Frontend
-        # davon ab, den Report zu öffnen, bis wirklich alles vorliegt.
-        # "active" wird erst ganz am Ende dieser Funktion gesetzt.
-        supabase.table("ai_visibility_topics").update({"status": "analyzing"}).eq("id", topic_id).execute()
-    except Exception as e:
-        logger.exception("Hintergrund-Datenlauf fehlgeschlagen für Topic %s", topic_id)
-        _record_topic_run_error(topic_id, "collect_topic_data", e)
-        try:
-            supabase.table("ai_visibility_topics").update({"status": "error"}).eq("id", topic_id).execute()
-        except Exception:
-            logger.exception("Konnte Fehler-Status für Topic %s nicht einmal speichern", topic_id)
-        return
-
-    def _step(step: str):
-        nonlocal had_any_error
-        result = run_step(topic_id, step, triggered_by="first_run")
-        if not result.ok:
-            had_any_error = True
-        return result
-
-    _step("opportunities")
-    _step("gap_analysis")
-
-    # NEU (14.09.2026): Wettbewerber-Vorschläge aus den gerade gesammelten
-    # Daten (SERP-Rankings + AI-Zitationen), siehe competitor_suggestions.py.
-    # Ein Fehlschlag hier blockiert nichts anderes, betrifft nur die
-    # Bestätigungs-UI im Frontend.
-    if _step("competitor_suggestions").ok:
-        # NEU (15.09.2026): siehe _auto_confirm_top_competitor_suggestions für
-        # die ausführliche Begründung. Kurz: ohne das blieb die Wettbewerber-
-        # Liste des Topics für immer leer, und gap_analysis/Opportunity 4
-        # liefen oben bereits OHNE Wettbewerber-Domains durch, deshalb hier
-        # per _reanalyze_after_competitor_confirmation nachholen.
-        try:
-            got_new_domains = _auto_confirm_top_competitor_suggestions(topic_id)
-            if got_new_domains:
-                # GEÄNDERT (20.09.2026): ohne Aktionsplan. Der wird unten
-                # ohnehin nach dem KI-Wissens-Check erzeugt, ein zweiter
-                # Claude-Aufruf hier wäre reine Verschwendung.
-                if not _reanalyze_after_competitor_confirmation(
-                    topic_id, include_action_plan=False, triggered_by="first_run",
-                ):
-                    had_any_error = True
-        except Exception as e:
-            had_any_error = True
-            logger.exception("Automatische Wettbewerber-Übernahme fehlgeschlagen für Topic %s", topic_id)
-            log_pipeline_error(topic_id, "competitor_suggestions", "first_run", e)
-
-    # NEU (20.09.2026): KI-Wissens-Check. Bewusst NACH der Wettbewerber-
-    # Übernahme (der Vergleichs-Prompt nennt die Wettbewerber) und VOR
-    # Aktionsplan und Zusammenfassung, die beide sein Ergebnis nutzen.
-    _step("ai_knowledge")
-    _step("action_plan")
-
-    # GEÄNDERT (15.09.2026): generate_summary bewusst ans ENDE verschoben,
-    # NACH der automatischen Wettbewerber-Übernahme oben, weil die
-    # Zusammenfassung competitor_insights/content_gaps braucht.
-    _step("summary")
-
-    if not had_any_error:
-        _clear_topic_run_error(topic_id)
-
-    # Alle Analysen abgeschlossen — jetzt erst "active" setzen, damit das
-    # Frontend den Report erst öffnet, wenn auch Aktionsplan, Summary und
-    # Lückenanalyse vollständig vorliegen (vorher stand "active" schon nach
-    # collect_topic_data, was zu einem leeren Report geführt hat).
-    try:
-        supabase.table("ai_visibility_topics").update({"status": "active"}).eq("id", topic_id).execute()
-    except Exception:
-        logger.exception("Konnte Status für Topic %s nicht auf \"active\" setzen", topic_id)
-
-
-def _auto_confirm_top_competitor_suggestions(topic_id: str) -> bool:
-    """
-    NEU (15.09.2026): übernimmt bis zu MAX_AUTO_CONFIRMED_COMPETITORS der
-    automatisch erkannten Wettbewerber-Vorschläge (die am häufigsten
-    zitierten ECHTEN Wettbewerber-Domains, siehe competitor_suggestions.py:
-    likely_competitor) direkt in ai_visibility_topics.competitor_domains
-    DIESES Topics — OHNE auf eine manuelle Bestätigung durch den Nutzer zu
-    warten.
-
-    Grund (siehe Chat-Verlauf 15.09.2026): Der ursprüngliche Plan war "im
-    Erstlauf automatisch bis zu 5 Wettbewerber setzen, Nutzer kann sie
-    danach austauschen" — vorher passierte aber gar nichts von selbst,
-    die Liste blieb leer, bis JEMAND von Hand POST /confirm-competitors
-    aufruft. Ohne Frontend-UI dafür (die gibt es aktuell nicht, siehe
-    Chat-Verlauf) hieß das: für immer leer, und damit liefen gap_analysis
-    und Opportunity 4 (ai_visible_competitor_dominates) dauerhaft ins Leere.
-
-    GEÄNDERT (15.09.2026), zweite Änderung: Wettbewerber sind jetzt ein
-    Topic-Attribut, kein Projekt-Attribut mehr (siehe
-    _get_topic_competitor_domains) — braucht deshalb keine project_id
-    mehr als Parameter, und die vorherige projects.
-    excluded_competitor_domains-Zwischenlösung entfällt ersatzlos: das
-    Problem, das sie lösen sollte (ein für Thema A entfernter Wettbewerber
-    taucht bei Thema B wieder auf), kann strukturell gar nicht mehr
-    auftreten, wenn jedes Thema seine eigene Liste hat.
-
-    WICHTIG, Unterschied zu confirm_competitors_endpoint: ruft bewusst
-    NICHT mark_suggestions_reviewed auf. Der Endpunkt dort markiert alle
-    NICHT ausgewählten offenen Vorschläge als 'dismissed' — das ist beim
-    MANUELLEN Review korrekt (der Nutzer hat sie sich angesehen und
-    bewusst nicht gewählt), wäre hier aber falsch: die übrigen Kandidaten
-    sollen weiterhin als Alternativen sichtbar bleiben, damit der Nutzer
-    die automatische Auswahl später über GET .../competitor-suggestions
-    einsehen und einzelne Domains austauschen kann, ohne dass der Rest
-    schon unwiderruflich verworfen wurde.
-
-    Gibt zurück, ob mindestens eine neue Domain übernommen wurde (der
-    Aufrufer nutzt das, um zu entscheiden, ob sich eine erneute Analyse
-    überhaupt lohnt).
-    """
-    try:
-        suggestions = get_competitor_suggestions_for_topic(topic_id)
-    except Exception:
-        logger.exception(
-            "Fehler beim Laden der Wettbewerber-Vorschläge für Topic %s (automatische Übernahme)", topic_id,
-        )
-        return False
-
-    likely = [s for s in suggestions if s.get("likely_competitor") and s.get("domain")]
-    # Häufigste Zitation zuerst — die repräsentativsten Wettbewerber für
-    # dieses Thema, keine willkürliche Reihenfolge.
-    likely.sort(key=lambda s: s.get("citation_count") or 0, reverse=True)
-    top_domains = [s["domain"] for s in likely[:MAX_AUTO_CONFIRMED_COMPETITORS]]
-
-    if not top_domains:
-        logger.info("Keine geeigneten Wettbewerber-Vorschläge zur automatischen Übernahme für Topic %s", topic_id)
-        return False
-
-    try:
-        topic_row = (
-            supabase.table("ai_visibility_topics")
-            .select("competitor_domains")
-            .eq("id", topic_id)
-            .single()
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Fehler beim Laden von Topic %s für automatische Wettbewerber-Übernahme", topic_id)
-        return False
-
-    # Ergänzt die bestehende Topic-Liste, ersetzt sie nicht (z.B. falls
-    # generate_competitor_suggestions ein zweites Mal für dasselbe Topic
-    # läuft und schon vorher etwas übernommen wurde).
-    existing = (topic_row or {}).get("competitor_domains") or []
-    existing_normed = {_normalize_search_domain(d) for d in existing}
-    merged = list(existing)
-    for d in top_domains:
-        normed = _normalize_search_domain(d)
-        if normed not in existing_normed:
-            merged.append(d)
-            existing_normed.add(normed)
-
-    if merged == existing:
-        logger.info(
-            "Automatisch ausgewählte Wettbewerber für Topic %s waren schon bekannt, nichts zu tun", topic_id,
-        )
-        return False
-
-    try:
-        supabase.table("ai_visibility_topics").update({"competitor_domains": merged}).eq("id", topic_id).execute()
-    except Exception:
-        logger.exception("Fehler beim automatischen Speichern der Wettbewerber für Topic %s", topic_id)
-        return False
-
-    logger.info(
-        "Automatisch %d Wettbewerber-Domain(s) für Topic %s übernommen: %s",
-        len(top_domains), topic_id, ", ".join(top_domains),
-    )
-    return True
-
-
-def _reanalyze_after_competitor_confirmation(
-    topic_id: str, include_action_plan: bool = True, triggered_by: str = "reanalysis",
-) -> bool:
-    """
-    NEU (14.09.2026): Läuft als Background-Task NACH POST
-    /topics/{id}/confirm-competitors. Holt KEINE neuen Rohdaten (die sind
-    schon da, aus dem ersten Sammel-Lauf), stößt nur die Analysen erneut
-    an, die von der Wettbewerber-Liste abhängen:
-
-    1. analyze_sources_for_topic: baut Content-Profile für die gerade
-       bestätigten Domains, falls die noch fehlen (siehe source_analysis.py,
-       dort gecacht pro Domain, ein zweiter Aufruf hier kostet für schon
-       analysierte Domains nichts).
-    2. generate_opportunities: Opportunity 4 (ai_visible_competitor_
-       dominates) kann jetzt erst greifen, weil sie die bestätigten
-       Wettbewerber-Domains braucht.
-    3. generate_gap_analysis: competitor_insights war bis jetzt leer
-       (siehe generate_gap_analysis-Guard "keine Wettbewerber-Daten"),
-       kann jetzt erst etwas liefern.
-
-    generate_summary wird HIER bewusst NICHT erneut angestoßen: dieser
-    Endpunkt kann jederzeit durch eine MANUELLE Bestätigung ausgelöst
-    werden (POST /confirm-competitors), nicht nur beim Erstlauf, und die
-    Zusammenfassung soll laut Kundenentscheid vom 15.09.2026 NUR monatlich
-    laufen (siehe claude_summary.py), nicht bei jeder Wettbewerber-
-    Anpassung neu. Sie zieht mit der nächsten monatlichen Generierung
-    nach. GEÄNDERT (15.09.2026): seit demselben Tag hängt generate_summary
-    inhaltlich SEHR WOHL an competitor_domains (competitor_strength/
-    phase_summaries brauchen competitor_insights/content_gaps) — deshalb
-    ruft _collect_and_analyze_background (main.py) generate_summary jetzt
-    bewusst ERST NACH dieser Funktion auf, einmalig beim Erstlauf, siehe
-    dort.
-    
-    GEÄNDERT (20.09.2026): läuft über den Step-Tracker (siehe step_tracker.py),
-    jeder Teilschritt hat damit einen eigenen Status und einen gezielten Retry.
-    include_action_plan=False wird vom Erstlauf genutzt, der den Aktionsplan
-    danach ohnehin selbst erzeugt. Gibt True zurück, wenn alle Schritte
-    erfolgreich waren.
-    """
-    steps = ["source_analysis", "opportunities", "gap_analysis"]
-    # NEU (16.09.2026): Aktionsplan nach Wettbewerber-Bestätigung neu
-    # generieren, damit die frisch bestätigten Wettbewerber sofort in den
-    # Empfehlungen berücksichtigt werden.
-    if include_action_plan:
-        steps.append("action_plan")
-    all_ok = True
-    for step in steps:
-        if not run_step(topic_id, step, triggered_by=triggered_by).ok:
-            all_ok = False
-    return all_ok
-
-
-@app.post("/topics")
-def create_topic_endpoint(
-    payload: CreateTopicRequest,
-    background_tasks: BackgroundTasks,
-    member_id: str = Depends(require_member),
-):
-    """
-    So wie ein echter Nutzer es später aufrufen würde: Topic sofort anlegen
-    (inkl. Limit-Check), Datensammlung + Opportunity-Analyse laufen im
-    Hintergrund weiter. Antwort kommt in Millisekunden, nicht erst nach
-    10-20 Sekunden.
-
-    GEÄNDERT (14.09.2026): ist kein Slot mehr frei, wird nicht mehr sofort
-    mit 403 abgelehnt, sondern geprüft, ob sich zumindest ein Platz
-    reservieren lässt (usage['queueable'], siehe get_topic_usage in
-    run_topic.py: mehr anstehende Deaktivierungen als bereits wartende
-    Themen). Wenn ja: Thema wird mit status='queued' angelegt, KEIN
-    Hintergrund-Datenlauf wird gestartet (das passiert erst bei der
-    Beförderung, siehe enforce_scheduled_archivals in run_topic.py).
-    Beförderung erfolgt, sobald ein Slot wirklich frei ist: entweder weil ein
-    deaktiviertes Thema am Ende seines Monatszyklus archiviert wurde (bis dahin
-    läuft es weiter und hält den Slot) oder weil ein Slot dazugekauft wurde
-    (dann beim nächsten Lauf des Retry-Crons, ohne Verzögerung). Ist
-    wirklich gar nichts reservierbar, bleibt es beim bisherigen 403.
-
-    GEÄNDERT: ruft dafür get_topic_usage() jetzt direkt auf statt wie
-    vorher check_topic_limit() (das intern dieselbe Funktion aufruft, aber
-    nur wirft/nicht wirft, ohne den usage-dict inkl. queueable
-    zurückzugeben) — vermeidet einen zweiten, redundanten Datenbank-Call im
-    "kein Slot frei"-Fall. Fehlertext ist bewusst identisch zu vorher
-    (check_topic_limit's ValueError-Text), damit sich am Frontend
-    (state.createError = e.message) nichts ändert.
-    """
-    team_id = _resolve_team_id(member_id)
-
-    try:
-        usage = get_topic_usage(team_id)
-    except Exception as e:
-        logger.exception("Fehler beim Limit-Check für Team %s", team_id)
-        raise HTTPException(status_code=500, detail=f"Limit-Check fehlgeschlagen: {e}")
-
-    is_queued = False
-    if usage["current_count"] >= usage["limit"]:
-        if not usage.get("queueable"):
-            raise HTTPException(
-                status_code=403,
-                detail=f"Topic-Limit erreicht ({usage['current_count']}/{usage['limit']}). Weiteres Topic-Slot nötig.",
-            )
-        is_queued = True
-
-    try:
-        project = get_project(payload.project_id)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.exception("Fehler beim Laden des Projekts %s", payload.project_id)
-        raise HTTPException(status_code=500, detail=f"Projekt konnte nicht geladen werden: {e}")
-
-    if project["team_id"] != team_id:
-        raise HTTPException(status_code=404, detail="Projekt nicht gefunden")
-
-    try:
-        topic_id = create_topic(
-            team_id, payload.project_id, payload.topic_name, payload.seed_keyword,
-            status="queued" if is_queued else "collecting",
-        )
-    except Exception as e:
-        logger.exception("Fehler beim Anlegen des Topics '%s'", payload.topic_name)
-        raise HTTPException(status_code=500, detail=f"Topic konnte nicht angelegt werden: {e}")
-
-    # NEU (23.09.2026): Zielgruppe und Buying Center speichern, BEVOR der
-    # Hintergrund-Lauf die Prompts generiert. Ein Fehler hier bricht das
-    # Anlegen nicht ab, das Topic läuft dann ohne Rollen (bisheriges Verhalten).
-    if payload.target_group:
-        try:
-            supabase.table("ai_visibility_topics").update(
-                {"target_group": payload.target_group}
-            ).eq("id", topic_id).execute()
-        except Exception:
-            logger.exception("Konnte target_group für Topic %s nicht speichern", topic_id)
-    if payload.buying_center:
-        try:
-            save_topic_buying_center(
-                topic_id, payload.project_id, [r.model_dump() for r in payload.buying_center],
-            )
-        except Exception:
-            logger.exception("Konnte Buying Center für Topic %s nicht speichern", topic_id)
-
-    if is_queued:
-        return {"status": "queued", "topic_id": topic_id}
-
-    # GEÄNDERT (14.09.2026): früher wurde hier erst der Team-Owner aufgelöst
-    # (get_team_owner_id) und NUR dessen GSC-Verbindung berücksichtigt. Das
-    # schlug fehl, wenn ein anderes Team-Mitglied die GSC-Verbindung
-    # hergestellt hatte (siehe Chat-Verlauf 14.09.2026). google_search_console.py
-    # berücksichtigt jetzt Verbindungen ALLER Team-Mitglieder, deshalb reicht
-    # hier direkt team_id, kein Auflösen/Fehlerfall mehr nötig.
-    background_tasks.add_task(
-        _collect_and_analyze_background, topic_id, payload.seed_keyword, project["domain"],
-        project["language_code"], project["location_name"], payload.sample_prompts, team_id,
-    )
-
-    return {"status": "collecting", "topic_id": topic_id}
-
-# ── NEU (23.09.2026): Buying Center ─────────────────────────────────────────
-
-@app.post("/projects/{project_id}/buying-center/suggest")
-def suggest_buying_center_endpoint(
-    project_id: str, payload: BuyingCenterSuggestRequest, member_id: str = Depends(require_member),
-):
-    """
-    Buying-Center-Vorschlag für ein Topic, das gerade im Anlege-Dialog steht
-    (deshalb project_id statt topic_id). Speichert nichts, der Nutzer
-    bestätigt/ändert und schickt die Rollen mit POST /topics mit.
-    Synchroner Claude-Call, dauert ca. 10-20 Sekunden.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        project = get_project(project_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Projekt nicht gefunden")
-    if project["team_id"] != team_id:
-        raise HTTPException(status_code=404, detail="Projekt nicht gefunden")
-
-    try:
-        return suggest_buying_center(
-            project, payload.topic_name, payload.seed_keyword, payload.target_group, payload.offer_url,
-        )
-    except Exception as e:
-        logger.exception("Buying-Center-Vorschlag fehlgeschlagen für Projekt %s", project_id)
-        raise HTTPException(status_code=502, detail=f"Vorschlag konnte nicht erstellt werden: {e}")
-
-
-def _topic_role_names(topic_id: str) -> dict[str, str]:
-    """role_id -> Rollenname für alle Rollen des Topics."""
-    return {r["role_id"]: r["rolle"] for r in get_topic_buying_center(topic_id)}
-
-
-def _load_topic_for_member(topic_id: str, member_id: str) -> dict:
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics").select("id, team_id, project_id").eq("id", topic_id).single().execute()
-        ).data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-    return topic
-
-
-def _buying_center_response(topic: dict) -> dict:
-    roles = get_topic_buying_center(topic["id"])
-    active = (
-        supabase.table("prompts").select("id, role_id, source").eq("topic_id", topic["id"])
-        .eq("prompt_type", "stable_core").eq("is_active", True).execute()
-    ).data
-    counts: dict[str, int] = {}
-    for p in active:
-        if p.get("role_id"):
-            counts[p["role_id"]] = counts.get(p["role_id"], 0) + 1
-    for r in roles:
-        r["prompt_count"] = counts.get(r["role_id"], 0)
-    library = (
-        supabase.table("buying_center_roles").select("name").eq("project_id", topic["project_id"]).order("name").execute()
-    ).data
-    return {
-        "topic_id": topic["id"],
-        "rollen": roles,
-        "bibliothek": [row["name"] for row in library],
-        "budget": get_prompt_budget(topic["id"], active),
-        "prompts_ohne_rolle": sum(1 for p in active if not p.get("role_id")),
+    try {
+      var cachedDetail = state.topicDetailCache[topicId];
+      var liveTopic = getTopicById(topicId);
+      var cacheIsStale = !cachedDetail
+        || (cachedDetail.topic && isPendingStatus(cachedDetail.topic.status))
+        || (cachedDetail.topic && liveTopic && liveTopic.status !== cachedDetail.topic.status);
+      if (cacheIsStale) {
+        state.topicDetailCache[topicId] = await loadTopicDetail(topicId);
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Topic-Detail konnte nicht geladen werden:', e);
+      state.topicDetailCache[topicId] = null;
     }
 
+    state.isLoadingDetail = false;
+    render();
 
-def _fill_roles_safely(topic_id: str) -> dict:
-    try:
-        return fill_underrepresented_roles(topic_id)
-    except Exception as e:
-        logger.exception("Rollen-Prompts für Topic %s konnten nicht ergänzt werden", topic_id)
-        return {"erstellt": {}, "fehlende_plaetze": {}, "grund": "fehler", "fehler": str(e)}
-
-
-@app.get("/topics/{topic_id}/buying-center")
-def get_buying_center_endpoint(topic_id: str, member_id: str = Depends(require_member)):
-    topic = _load_topic_for_member(topic_id, member_id)
-    return _buying_center_response(topic)
-
-
-@app.put("/topics/{topic_id}/buying-center")
-def save_buying_center_endpoint(
-    topic_id: str, payload: SaveBuyingCenterRequest, member_id: str = Depends(require_member),
-):
-    """
-    Buying Center eines bestehenden Topics ersetzen. Arbeitet mit derselben
-    Logik wie das manuelle Deaktivieren/Hinzufügen von Prompts und gilt ab
-    dem nächsten regulären Lauf:
-    - Prompts einer ENTFERNTEN Rolle werden deaktiviert (Historie bleibt).
-    - Für Rollen mit weniger als 2 Prompts werden neue Prompts erzeugt,
-      soweit freie System-Plätze vorhanden sind (siehe get_prompt_budget).
-    - Motivation/Einwand ändern lässt bestehende Prompts unangetastet.
-    Synchron, damit der Nutzer direkt sieht, was passiert ist.
-    """
-    topic = _load_topic_for_member(topic_id, member_id)
-    old_role_ids = set(_topic_role_names(topic_id).keys())
-    if len(payload.rollen) > 3:
-        raise HTTPException(status_code=400, detail="Höchstens 3 Rollen je Thema.")
-
-    try:
-        save_topic_buying_center(topic_id, topic["project_id"], [r.model_dump() for r in payload.rollen])
-    except Exception as e:
-        logger.exception("Buying Center für Topic %s konnte nicht gespeichert werden", topic_id)
-        raise HTTPException(status_code=500, detail=f"Speichern fehlgeschlagen: {e}")
-
-    removed = list(old_role_ids - set(_topic_role_names(topic_id).keys()))
-    deactivated = 0
-    if removed:
-        try:
-            rows = (
-                supabase.table("prompts").update({"is_active": False})
-                .eq("topic_id", topic_id).eq("is_active", True).in_("role_id", removed).execute()
-            ).data
-            deactivated = len(rows or [])
-        except Exception:
-            logger.exception("Prompts entfernter Rollen für Topic %s nicht deaktivierbar", topic_id)
-
-    # NEU (23.09.2026): Wurde eine Einstiegsphase nach hinten verschoben,
-    # werden die Prompts dieser Rolle in Phasen davor deaktiviert. Sonst stünden
-    # Messwerte in Zellen, die "steigt später ein" anzeigen.
-    phase_order = ["exploration", "evaluation", "comparison", "decision"]
-    for role in get_topic_buying_center(topic_id):
-        entry = role.get("einstiegsphase") or "exploration"
-        earlier = phase_order[:phase_order.index(entry)] if entry in phase_order else []
-        if not earlier:
-            continue
-        try:
-            rows = (
-                supabase.table("prompts").update({"is_active": False})
-                .eq("topic_id", topic_id).eq("is_active", True).eq("role_id", role["role_id"])
-                .in_("messymiddle_phase", earlier).execute()
-            ).data
-            deactivated += len(rows or [])
-        except Exception:
-            logger.exception("Prompts vor der Einstiegsphase für Topic %s nicht deaktivierbar", topic_id)
-
-    fill = _fill_roles_safely(topic_id)
-    return {**_buying_center_response(topic), "deaktiviert": deactivated, "ergaenzung": fill}
-
-
-@app.post("/topics/{topic_id}/buying-center/fill")
-def fill_buying_center_endpoint(topic_id: str, member_id: str = Depends(require_member)):
-    """Fehlende Rollen-Prompts erneut ergänzen, z. B. nachdem der Nutzer
-    Prompts deaktiviert hat, um Plätze frei zu machen."""
-    topic = _load_topic_for_member(topic_id, member_id)
-    fill = _fill_roles_safely(topic_id)
-    return {**_buying_center_response(topic), "deaktiviert": 0, "ergaenzung": fill}
-
-
-@app.patch("/topics/{topic_id}/prompts/{prompt_id}/role")
-def set_prompt_role_endpoint(
-    topic_id: str, prompt_id: str, payload: SetPromptRoleRequest, member_id: str = Depends(require_member),
-):
-    """
-    Einem bestehenden Prompt eine Rolle zuordnen. Ändert den Prompt-Text
-    nicht, der Verlauf bleibt erhalten. Wichtigster Weg, um Themen, die vor
-    dem Buying Center angelegt wurden, nachträglich Rollen zu geben.
-    """
-    _load_topic_for_member(topic_id, member_id)
-    role_name = None
-    if payload.role_id:
-        role_name = _topic_role_names(topic_id).get(payload.role_id)
-        if not role_name:
-            raise HTTPException(status_code=400, detail="Diese Rolle gehört nicht zu diesem Thema")
-    try:
-        prompt_row = supabase.table("prompts").select("id, topic_id").eq("id", prompt_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Prompt nicht gefunden")
-    if not prompt_row or prompt_row.get("topic_id") != topic_id:
-        raise HTTPException(status_code=404, detail="Prompt gehört nicht zu diesem Topic")
-
-    supabase.table("prompts").update({"role_id": payload.role_id, "persona": role_name}).eq("id", prompt_id).execute()
-    return {"status": "ok", "prompt_id": prompt_id, "role_id": payload.role_id, "persona": role_name}
-
-
-@app.post("/topics/{topic_id}/archive")
-def archive_topic_endpoint(topic_id: str, member_id: str = Depends(require_member)):
-    """
-    GEÄNDERT (14.09.2026): Deaktivieren archiviert nicht mehr sofort,
-    sondern markiert das Thema nur zur Deaktivierung vor
-    (archive_effective_at = Ende des laufenden Monatszyklus). status
-    bleibt bewusst 'active', damit der Cron (get_due_topics) bis dahin
-    ganz normal weiterläuft — das Thema soll ja "den Monatszyklus zu
-    Ende" laufen. Die tatsächliche Archivierung übernimmt
-    enforce_scheduled_archivals() (siehe run_topic.py), aufgerufen aus
-    _retry_failed_background unten, alle 15-30 Minuten.
-
-    Begründung fürs Timing: eine sofortige Archivierung + sofortiges
-    Anlegen eines neuen Themas hätte sonst einen laufenden Monatszyklus
-    verworfen (Geld für DataForSEO/ChatGPT/Gemini-Calls schon
-    ausgegeben) UND dem neuen Thema sofort einen weiteren vollen Lauf
-    beschert (siehe create_topic_endpoint/enforce_scheduled_archivals
-    für die zweite Hälfte der Lösung).
-
-    status='queued' ist ein Sonderfall: ein wartendes Thema hat noch NIE
-    einen Zyklus gestartet (kein Slot, kein Cron-Lauf, keine Kosten
-    angefallen), "zu Ende laufen lassen" ergibt hier keinen Sinn -> wird
-    sofort archiviert, wie im alten Verhalten.
-
-    GEÄNDERT (14.09.2026): status='collecting' blockiert nur noch, wenn
-    es INNERHALB der erwarteten Dauer liegt (siehe
-    _stuck_collecting_minutes) — läuft ein Thema länger als
-    STUCK_COLLECTING_THRESHOLD_MINUTES, gilt es als hängengeblieben (z.B.
-    Server-Neustart mitten im Erstlauf, siehe Chat-Verlauf 14.09.2026) und
-    lässt sich wie ein 'queued'-Thema sofort deaktivieren, statt auf einen
-    Task zu warten, der gar nicht mehr läuft.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("team_id, status, last_monthly_collection_at, created_at, collecting_started_at")
-            .eq("id", topic_id)
-            .single()
-            .execute()
-        ).data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    if topic["status"] == "archived":
-        return {"status": "archived", "topic_id": topic_id}  # idempotent
-
-    if topic["status"] == "collecting":
-        stuck_minutes = _stuck_collecting_minutes(topic)
-        if stuck_minutes < STUCK_COLLECTING_THRESHOLD_MINUTES:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Thema läuft gerade noch (erster Datenlauf, seit {int(stuck_minutes)} Minute(n)), "
-                    "bitte warten bis das abgeschlossen ist."
-                ),
-            )
-        logger.warning(
-            "Topic %s hing %d Minute(n) in 'collecting', wird über /archive sofort deaktiviert",
-            topic_id, int(stuck_minutes),
-        )
-        try:
-            supabase.table("ai_visibility_topics").update({"status": "archived"}).eq("id", topic_id).execute()
-        except Exception as e:
-            logger.exception("Fehler beim Deaktivieren des hängengebliebenen Topics %s", topic_id)
-            raise HTTPException(status_code=500, detail=f"Thema konnte nicht deaktiviert werden: {e}")
-        return {"status": "archived", "topic_id": topic_id}
-
-    if topic["status"] == "queued":
-        try:
-            supabase.table("ai_visibility_topics").update({"status": "archived"}).eq("id", topic_id).execute()
-        except Exception as e:
-            logger.exception("Fehler beim Archivieren von wartendem Topic %s", topic_id)
-            raise HTTPException(status_code=500, detail=f"Thema konnte nicht deaktiviert werden: {e}")
-        return {"status": "archived", "topic_id": topic_id}
-
-    # status == 'active': Deaktivierung vormerken statt sofort ausführen.
-    anchor = topic.get("last_monthly_collection_at") or topic["created_at"]
-    try:
-        anchor_dt = datetime.fromisoformat(anchor.replace("Z", "+00:00"))
-    except Exception:
-        anchor_dt = datetime.now(timezone.utc)
-    effective_at = anchor_dt + timedelta(days=30)
-
-    try:
-        supabase.table("ai_visibility_topics").update({
-            "archive_effective_at": effective_at.isoformat(),
-        }).eq("id", topic_id).execute()
-    except Exception as e:
-        logger.exception("Fehler beim Vormerken der Deaktivierung für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Thema konnte nicht zur Deaktivierung vorgemerkt werden: {e}")
-
-    return {"status": "active", "topic_id": topic_id, "archive_effective_at": effective_at.isoformat()}
-
-
-@app.delete("/topics/{topic_id}")
-def delete_topic_endpoint(topic_id: str, member_id: str = Depends(require_member)):
-    """
-    NEU (14.09.2026): endgültiges Löschen, NUR für Themen ohne einen
-    einzigen ausgewerteten Lauf (siehe Chat-Verlauf 14.09.2026: "aus der
-    Warteschlange deaktiviert, bevor der erste Durchlauf stattfand").
-
-    Bewusst über die tatsächliche ai_runs-Anzahl geprüft, nicht nur über
-    status == 'queued' — deckt damit auch ältere, schon archivierte
-    Themen mit ab, die nie einen Lauf hatten (z.B. vor dieser Änderung
-    archiviert), ohne sich auf einen historisch korrekten Status
-    verlassen zu müssen. Sobald auch nur ein Lauf existiert, gilt ein
-    Thema als historisch wertvoll — dafür bleibt es bei archivieren/
-    reaktivieren (siehe archive_topic_endpoint), ein Hard-Delete würde
-    diese Historie unwiderruflich verlieren.
-
-    Kaskadiert über die bestehenden ON DELETE CASCADE-Fremdschlüssel auf
-    prompts/search_queries/opportunities/content_ideas/topic_changelog/
-    content_gaps/competitor_insights — kein manuelles Aufräumen dieser
-    Tabellen nötig.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("team_id, status")
-            .eq("id", topic_id)
-            .single()
-            .execute()
-        ).data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    if topic["status"] == "collecting":
-        raise HTTPException(
-            status_code=409,
-            detail="Thema läuft gerade noch (erster Datenlauf), bitte warten oder danach löschen.",
-        )
-
-    try:
-        run_count = (
-            supabase.table("ai_runs")
-            .select("id", count="exact")
-            .eq("topic_id", topic_id)
-            .execute()
-        ).count or 0
-    except Exception:
-        logger.exception("Fehler beim Prüfen vorhandener Läufe für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail="Konnte nicht prüfen, ob das Thema bereits Läufe hat")
-
-    if run_count > 0:
-        raise HTTPException(
-            status_code=409,
-            detail="Thema hat bereits ausgewertete Läufe und kann nicht gelöscht werden, nur archiviert.",
-        )
-
-    try:
-        supabase.table("ai_visibility_topics").delete().eq("id", topic_id).execute()
-    except Exception as e:
-        logger.exception("Fehler beim Löschen von Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Thema konnte nicht gelöscht werden: {e}")
-
-    return {"status": "deleted", "topic_id": topic_id}
-
-
-@app.post("/topics/{topic_id}/cancel-archive")
-def cancel_archive_endpoint(topic_id: str, member_id: str = Depends(require_member)):
-    """
-    NEU (14.09.2026): Gegenstück zur Vormerkung oben — "Deaktivierung
-    abbrechen", solange das Thema noch 'active' ist und archive_effective_at
-    noch nicht erreicht wurde (enforce_scheduled_archivals hätte es sonst
-    schon archiviert). Setzt archive_effective_at zurück auf NULL, der
-    Cron läuft für dieses Thema unverändert normal weiter, als wäre nie
-    deaktiviert worden.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("team_id, status, archive_effective_at")
-            .eq("id", topic_id)
-            .single()
-            .execute()
-        ).data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    if topic["status"] != "active" or not topic.get("archive_effective_at"):
-        raise HTTPException(
-            status_code=409,
-            detail="Für dieses Thema steht aktuell keine Deaktivierung aus.",
-        )
-
-    try:
-        supabase.table("ai_visibility_topics").update({"archive_effective_at": None}).eq("id", topic_id).execute()
-    except Exception as e:
-        logger.exception("Fehler beim Abbrechen der Deaktivierung für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Deaktivierung konnte nicht abgebrochen werden: {e}")
-
-    return {"status": "active", "topic_id": topic_id}
-
-@app.post("/topics/{topic_id}/reactivate")
-def reactivate_topic_endpoint(topic_id: str, member_id: str = Depends(require_member)):
-    """
-    NEU (14.09.2026): Gegenstück zu archive_topic_endpoint. Reaktiviert nur,
-    wenn noch ein freier Topic-Slot verfügbar ist — dieselbe Prüfung wie
-    beim Neuanlegen (siehe check_topic_limit in create_topic_endpoint),
-    damit sich das Limit auf keinem der beiden Wege umgehen lässt.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id, status").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    if topic["status"] != "archived":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Reaktivieren nur für archivierte Topics möglich (aktuell: '{topic['status']}').",
-        )
-
-    try:
-        check_topic_limit(team_id)
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-    except Exception as e:
-        logger.exception("Fehler beim Limit-Check für Team %s (Reaktivieren)", team_id)
-        raise HTTPException(status_code=500, detail=f"Limit-Check fehlgeschlagen: {e}")
-
-    try:
-        supabase.table("ai_visibility_topics").update({"status": "active"}).eq("id", topic_id).execute()
-    except Exception as e:
-        logger.exception("Fehler beim Reaktivieren von Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Thema konnte nicht aktiviert werden: {e}")
-
-    return {"status": "active", "topic_id": topic_id}
-
-
-@app.post("/run-topic")
-def run_topic_endpoint(payload: RunTopicRequest, member_id: str = Depends(require_member)):
-    team_id = _resolve_team_id(member_id)
-
-    try:
-        topic_id = run(
-            team_id=team_id,
-            topic_name=payload.topic_name,
-            seed_keyword=payload.seed_keyword,
-            own_domain=payload.own_domain,
-            sample_prompts=payload.sample_prompts,
-        )
-    except Exception as e:
-        logger.exception("Fehler beim Datenlauf für Topic '%s'", payload.topic_name)
-        raise HTTPException(status_code=500, detail=f"Datenlauf fehlgeschlagen: {e}")
-
-    opportunities_created = 0
-    try:
-        opportunities_created = generate_opportunities(topic_id)
-    except Exception:
-        # Datenlauf war erfolgreich, nur die Opportunity-Analyse ist
-        # fehlgeschlagen. Nicht den ganzen Request als Fehler zurückgeben,
-        # aber klar loggen und im Response sichtbar machen.
-        logger.exception("Opportunity-Analyse fehlgeschlagen für Topic %s", topic_id)
-
-    try:
-        generate_summary(topic_id)
-    except Exception:
-        logger.exception("Claude-Zusammenfassung fehlgeschlagen für Topic %s", topic_id)
-
-    try:
-        generate_gap_analysis(topic_id)
-    except Exception:
-        logger.exception("Lücken-Analyse fehlgeschlagen für Topic %s", topic_id)
-
-    return {
-        "status": "ok",
-        "topic_id": topic_id,
-        "opportunities_created": opportunities_created,
+    var loadedDetail = state.topicDetailCache[topicId];
+    if (!loadedDetail || !loadedDetail.topic || isPendingStatus(loadedDetail.topic.status)) {
+      return; // Report noch nicht bereit: nichts nachladen
     }
 
+    var hasRunningStep = (loadedDetail.step_status || []).some(function (s) { return s.state === 'running'; });
+    if (hasRunningStep) startStepPolling(topicId);
 
-@app.post("/generate-opportunities/{topic_id}")
-def generate_opportunities_endpoint(topic_id: str, member_id: str = Depends(require_member)):
-    team_id = _resolve_team_id(member_id)
+    loadTabData(topicId);
+  }
 
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception as e:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
+  function backToOverview() {
+    state.activeView = 'overview';
+    state.activeTopicId = null;
+    state.activeSubTab = 'themen';
+    updateUrlParams({ cvz_topic: null, cvz_tab: 'themen' });
+    render();
+    loadDomainDashboard(state.activeProjectId);
+  }
 
-    try:
-        created = generate_opportunities(topic_id)
-    except Exception as e:
-        logger.exception("Fehler bei Opportunity-Analyse für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Opportunity-Analyse fehlgeschlagen: {e}")
+  function selectFromPicker(rawValue) {
+    var separatorIndex = rawValue.indexOf(':');
+    var kind = rawValue.slice(0, separatorIndex);
+    var id = rawValue.slice(separatorIndex + 1);
 
-    try:
-        generate_summary(topic_id)
-    except Exception:
-        logger.exception("Claude-Zusammenfassung fehlgeschlagen für Topic %s", topic_id)
-
-    try:
-        generate_gap_analysis(topic_id)
-    except Exception:
-        logger.exception("Lücken-Analyse fehlgeschlagen für Topic %s", topic_id)
-
-    return {"status": "ok", "topic_id": topic_id, "opportunities_created": created}
-
-
-@app.post("/topics/{topic_id}/generate-action-plan")
-def generate_action_plan_endpoint(
-    topic_id: str,
-    background_tasks: BackgroundTasks,
-    member_id: str = Depends(require_member),
-):
-    """Aktionsplan für ein Topic manuell (neu) generieren.
-
-    Nützlich wenn der erste automatische Lauf ohne Ergebnis blieb (z.B. weil
-    die Prompts noch keine Phasenzuordnung hatten). Prüft Team-Zugehörigkeit
-    und startet die Generierung im Hintergrund (gibt sofort 202 zurück).
-    Das Frontend pollt /topics/{id} bis action_plan.generated_at gesetzt ist.
-
-    NEU (17.09.2026): Async via BackgroundTasks (war synchron → 60s Timeout).
-    """
-    team_id = _resolve_team_id(member_id)
-
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("team_id, status")
-            .eq("id", topic_id)
-            .single()
-            .execute()
-            .data
-        )
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    if topic.get("status") in ("collecting", "analyzing"):
-        raise HTTPException(
-            status_code=409,
-            detail="Das Thema wird gerade analysiert. Bitte warten, bis der Lauf abgeschlossen ist.",
-        )
-
-    # GEÄNDERT (20.09.2026): läuft über den Step-Tracker, damit Status und
-    # Fehlerprotokoll wie bei jedem anderen Schritt geführt werden.
-    mark_step_running(topic_id, "action_plan")
-    background_tasks.add_task(retry_step, topic_id, "action_plan")
-    from fastapi.responses import JSONResponse
-    return JSONResponse(
-        status_code=202,
-        content={"status": "pending", "topic_id": topic_id},
-    )
-
-
-# ── Action-Plan: Erledigt-Toggle ───────────────────────────────────────────────
-
-class ToggleActionPlanItemRequest(BaseModel):
-    """NEU (17.09.2026): Markiert ein Aktionsplan-Item als erledigt oder offen.
-
-    item_index: 0-basierter Index des Items im items[]-Array des Plans.
-    item_title: Titel des Items (fuer den Changelog-Eintrag / Chart-Marker).
-    item_phase: Phase des Items ("exploration" | "evaluation" | "comparison" | "decision").
-    complete: True = erledigt markieren, False = Erledigung rueckgaengig machen.
-    """
-    item_index: int
-    item_title: str
-    item_phase: str
-    complete: bool
-
-
-@app.post("/topics/{topic_id}/action-plan/toggle-item")
-def toggle_action_plan_item_endpoint(
-    topic_id: str,
-    payload: ToggleActionPlanItemRequest,
-    member_id: str = Depends(require_member),
-):
-    """NEU (17.09.2026): Markiert ein Aktionsplan-Item als erledigt/offen.
-
-    GEAENDERT (18.09.2026): Frueher wurden bei complete=True ZWEI Eintraege
-    angelegt (content_changes UND topic_changelog). Da die "Aenderungs-
-    Chronik" im Frontend beide Quellen zu einer gemeinsamen Timeline
-    zusammenfuehrt (siehe renderMessyMiddleTab, "combined"-Array), erschien
-    die Erledigung dort faktisch doppelt, zusaetzlich zum eigenen Eintrag in
-    "Content-Aenderungen & Events". Jetzt wird NUR NOCH content_changes
-    befuellt, mit dem eigenen change_type='aktionsplan' (statt 'sonstiges'),
-    damit das Frontend diese Eintraege gezielt aus der kombinierten
-    Aenderungs-Chronik herausfiltern kann (sie bleiben dort exklusiv in
-    "Content-Aenderungen & Events" sichtbar) und im Trend-Chart trotzdem als
-    Marker erscheinen — dafuer werden content_changes-Eintraege weiterhin
-    genutzt.
-
-    GEAENDERT (18.09.2026), zweite Aenderung: Bei complete=False (Erledigung
-    rueckgaengig) wird der zugehoerige content_changes-Eintrag jetzt WIEDER
-    ENTFERNT. Die Zuordnung Action-Item -> content_change-Zeile liegt dafuer
-    in der neuen Spalte action_plans.completed_item_content_change_ids
-    (JSONB-Objekt {"<item_index>": "<content_change.id>"}), siehe
-    ALTER-TABLE-Statement:
-
-        ALTER TABLE action_plans
-          ADD COLUMN IF NOT EXISTS completed_item_content_change_ids JSONB NOT NULL DEFAULT '{}'::jsonb;
-
-    Fuer Items, die VOR dieser Migration erledigt wurden (also keinen
-    Eintrag in dieser Spalte haben), faellt der Code auf den alten Text-
-    Match (Topic + exakte Beschreibung) zurueck — kein Backfill noetig.
-    Zur Sicherheit werden dabei auch evtl. noch vorhandene topic_changelog-
-    Eintraege aus der Zeit vor der ersten Aenderung (Soft-Delete, wie im
-    regulaeren delete_changelog_entry_endpoint) mit aufgeraeumt; dafuer gab
-    es nie eine id-Spalte, hier bleibt der Text-Match dauerhaft bestehen.
-    """
-    team_id = _resolve_team_id(member_id)
-
-    # Sicherheitscheck: Topic gehoert zu diesem Team
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("team_id, name")
-            .eq("id", topic_id)
-            .single()
-            .execute()
-            .data
-        )
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    # Action-Plan-Zeile fuer dieses Topic holen (neuester Plan)
-    try:
-        plan_rows = (
-            supabase.table("action_plans")
-            .select("id, items, completed_item_indices, completed_item_content_change_ids")
-            .eq("topic_id", topic_id)
-            .order("generated_at", desc=True)
-            .limit(1)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Fehler beim Laden des Action-Plans fuer Toggle (topic_id=%s)", topic_id)
-        raise HTTPException(status_code=500, detail="Konnte Aktionsplan nicht laden")
-
-    if not plan_rows:
-        raise HTTPException(status_code=404, detail="Kein Aktionsplan fuer dieses Topic gefunden")
-
-    plan_row = plan_rows[0]
-    plan_id = plan_row["id"]
-    current_completed: list[int] = plan_row.get("completed_item_indices") or []
-    # JSONB-Objekt {"<item_index>": "<content_change.id>"} — Keys sind immer
-    # Strings (JSON kennt keine numerischen Objektschluessel), item_index
-    # deshalb bei jedem Zugriff ueber idx_key in einen String umgewandelt.
-    content_change_map: dict[str, str] = plan_row.get("completed_item_content_change_ids") or {}
-
-    # Toggle: hinzufuegen oder entfernen
-    idx = payload.item_index
-    idx_key = str(idx)
-    if payload.complete:
-        if idx not in current_completed:
-            current_completed = sorted(set(current_completed) | {idx})
-    else:
-        current_completed = [i for i in current_completed if i != idx]
-
-    # completed_item_indices in Supabase aktualisieren — das ist der
-    # kritische Teil (Erledigt-Status selbst), Fehler hier brechen die
-    # Anfrage ab. Die Aktualisierung von completed_item_content_change_ids
-    # erfolgt bewusst spaeter separat und nicht-fatal (siehe unten).
-    try:
-        supabase.table("action_plans").update({
-            "completed_item_indices": current_completed,
-        }).eq("id", plan_id).execute()
-    except Exception:
-        logger.exception("Fehler beim Aktualisieren von completed_item_indices (plan_id=%s)", plan_id)
-        raise HTTPException(status_code=500, detail="Konnte Erledigt-Status nicht speichern")
-
-    content_change = None
-    removed_content_change_ids: list[str] = []
-    removed_changelog_ids: list[str] = []
-
-    # Deterministischer Text nur noch als Fallback fuer Items ohne Eintrag
-    # in content_change_map (vor dieser Migration erledigt) sowie fuer den
-    # topic_changelog-Altlasten-Cleanup, siehe Docstring oben.
-    description_cc = f"✓ Aktionsplan erledigt [{payload.item_phase}]: {payload.item_title}"[:500]
-    description_cl = f"✓ Aktionsplan-Item als erledigt markiert [{payload.item_phase.capitalize()}]: {payload.item_title}"[:1000]
-
-    if payload.complete:
-        if idx_key in content_change_map:
-            # Schon verknuepft (z.B. Doppel-Klick) — nichts erneut anlegen.
-            logger.info(
-                "content_change fuer Action-Item bereits verknuepft, ueberspringe Neuanlage (topic_id=%s, item_index=%d)",
-                topic_id, idx,
-            )
-        else:
-            # content_changes — erscheint als Marker im Verlaufs-Chart UND in
-            # der Liste "Content-Aenderungen & Events". change_type=
-            # 'aktionsplan' (nicht mehr 'sonstiges'), damit Frontend/Label
-            # diese Eintraege gezielt unterscheiden koennen.
-            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            # NEU (20.09.2026): die Empfehlung des Items wird als "details"
-            # mitgespeichert. Der Aktionsplan wird monatlich neu erzeugt (das
-            # alte Item verschwindet), im Änderungsprotokoll stünde sonst nur
-            # der Titel. Mit den Details weiß Claude beim nächsten Plan genau,
-            # WAS umgesetzt wurde, und empfiehlt es nicht erneut (siehe
-            # change_history.py).
-            item_details = None
-            try:
-                raw_items = plan_row.get("items")
-                plan_items = json.loads(raw_items) if isinstance(raw_items, str) else (raw_items or [])
-                if 0 <= idx < len(plan_items):
-                    item_details = (plan_items[idx].get("recommendation") or "").strip()[:800] or None
-            except Exception:
-                logger.warning("Empfehlung des Action-Items %d konnte nicht gelesen werden (topic_id=%s)", idx, topic_id)
-            try:
-                cc_result = (
-                    supabase.table("content_changes")
-                    .insert({
-                        "topic_id": topic_id,
-                        "changed_at": today_str,
-                        "change_type": "aktionsplan",
-                        "description": description_cc,
-                        "details": item_details,
-                        "url": None,
-                    })
-                    .execute()
-                ).data
-                content_change = cc_result[0] if cc_result else None
-                if content_change:
-                    content_change_map[idx_key] = content_change["id"]
-                logger.info(
-                    "content_change angelegt fuer erledigtes Action-Item (topic_id=%s, item_index=%d)",
-                    topic_id, idx,
-                )
-            except Exception:
-                logger.exception(
-                    "Fehler beim Anlegen der content_change fuer Action-Item (topic_id=%s, item_index=%d)",
-                    topic_id, idx,
-                )
-                # Nicht fatal — completed_item_indices wurde schon gesetzt
-    else:
-        # Erledigt-Markierung wurde entfernt: zugehoerigen content_changes-
-        # Eintrag wieder loeschen. Bevorzugt ueber die in content_change_map
-        # gespeicherte id (robust, funktioniert auch wenn item_title sich
-        # zwischenzeitlich geaendert hat); nur wenn die Zuordnung fehlt
-        # (Item wurde vor der Migration erledigt), Fallback auf Text-Match.
-        cc_id = content_change_map.pop(idx_key, None)
-        if cc_id:
-            try:
-                del_result = (
-                    supabase.table("content_changes")
-                    .delete()
-                    .eq("id", cc_id)
-                    .execute()
-                ).data
-                removed_content_change_ids = [row["id"] for row in (del_result or [])]
-            except Exception:
-                logger.exception(
-                    "Fehler beim Entfernen der content_change (id=%s) fuer zurueckgesetztes Action-Item (topic_id=%s, item_index=%d)",
-                    cc_id, topic_id, idx,
-                )
-                # Nicht fatal — completed_item_indices wurde schon aktualisiert
-        else:
-            try:
-                del_result = (
-                    supabase.table("content_changes")
-                    .delete()
-                    .eq("topic_id", topic_id)
-                    .eq("description", description_cc)
-                    .execute()
-                ).data
-                removed_content_change_ids = [row["id"] for row in (del_result or [])]
-            except Exception:
-                logger.exception(
-                    "Fehler beim Entfernen der content_change (Text-Match) fuer zurueckgesetztes Action-Item (topic_id=%s, item_index=%d)",
-                    topic_id, idx,
-                )
-                # Nicht fatal — completed_item_indices wurde schon aktualisiert
-
-        if removed_content_change_ids:
-            logger.info(
-                "content_change(s) entfernt fuer zurueckgesetztes Action-Item (topic_id=%s, item_index=%d, ids=%s)",
-                topic_id, idx, removed_content_change_ids,
-            )
-
-        # Ebenso etwaige topic_changelog-Eintraege aus der Zeit vor dieser
-        # Aenderung aufraeumen (Soft-Delete, wie delete_changelog_entry_endpoint).
-        try:
-            deleter = _resolve_member_user(member_id)
-            cl_del_result = (
-                supabase.table("topic_changelog")
-                .update({
-                    "deleted_at": datetime.now(timezone.utc).isoformat(),
-                    "deleted_by_name": deleter.get("firstname"),
-                    "deleted_by_member_id": deleter.get("id"),
-                })
-                .eq("topic_id", topic_id)
-                .eq("entry_text", description_cl)
-                .is_("deleted_at", "null")
-                .execute()
-            ).data
-            removed_changelog_ids = [row["id"] for row in (cl_del_result or [])]
-            if removed_changelog_ids:
-                logger.info(
-                    "topic_changelog-Eintrag(e) entfernt fuer zurueckgesetztes Action-Item (topic_id=%s, item_index=%d, ids=%s)",
-                    topic_id, idx, removed_changelog_ids,
-                )
-        except Exception:
-            logger.exception(
-                "Fehler beim Entfernen des changelog-Eintrags fuer zurueckgesetztes Action-Item (topic_id=%s, item_index=%d)",
-                topic_id, idx,
-            )
-            # Nicht fatal
-
-    # completed_item_content_change_ids separat und nicht-fatal speichern:
-    # der wichtige Erledigt-Status (completed_item_indices) ist zu diesem
-    # Zeitpunkt bereits persistiert; schlaegt dieser Schreibvorgang fehl,
-    # faellt der naechste Toggle-Versuch fuer dieses Item einfach wieder auf
-    # den Text-Match-Fallback zurueck (siehe oben).
-    try:
-        supabase.table("action_plans").update({
-            "completed_item_content_change_ids": content_change_map,
-        }).eq("id", plan_id).execute()
-    except Exception:
-        logger.exception(
-            "Fehler beim Aktualisieren von completed_item_content_change_ids (plan_id=%s)", plan_id,
-        )
-
-    return {
-        "status": "ok",
-        "completed_item_indices": current_completed,
-        "content_change": content_change,
-        "removed_content_change_ids": removed_content_change_ids,
-        "removed_changelog_ids": removed_changelog_ids,
+    if (kind === 'project') {
+      state.activeProjectId = id;
+      state.activeView = 'overview';
+      state.activeTopicId = null;
+      state.activeSubTab = 'themen';
+      updateUrlParams({ cvz_project: id, cvz_topic: null, cvz_tab: 'themen' });
+      render();
+      loadDomainDashboard(id);
+    } else if (kind === 'topic') {
+      openTopicDetail(id);
     }
+  }
+
+  var STATUS_LABELS = {
+    active:     { label: 'Aktiv',         className: 'cvz-status-active' },
+    collecting: { label: 'Sammelt Daten', className: 'cvz-status-collecting' },
+    // GEAENDERT (21.09.2026): hiess "Analysiert" und las sich wie "fertig".
+    analyzing:  { label: 'Wird analysiert', className: 'cvz-status-analyzing' },
+    error:      { label: 'Fehler',        className: 'cvz-status-error' },
+    archived:   { label: 'Archiviert',    className: 'cvz-status-archived' },
+    queued:     { label: 'Wartet',        className: 'cvz-status-queued' },
+  };
+
+  var OPPORTUNITY_TYPE_LABELS = {
+    high_demand_low_visibility:      'Hohe Nachfrage, wenig Sichtbarkeit',
+    competitor_citation:             'Wettbewerber wird zitiert',
+    google_visible_ai_invisible:     'Google sichtbar, KI unsichtbar',
+    ai_visible_competitor_dominates: 'KI-sichtbar, Wettbewerber dominiert',
+    new_question:                    'Neue Frage entdeckt',
+    near_miss_ranking:               'Knapp an Seite 1 vorbei',
+  };
+
+  // Farb- und Label-Konfiguration fuer Opportunity-Typen.
+  // Wird in renderSituationTab (Wichtigste Handlungsfelder) verwendet.
+  var OPP_TYPE_CONFIG = {
+    near_miss_ranking:               { color: '#c98e2a', bg: 'rgba(201,142,42,.09)', border: 'rgba(201,142,42,.3)' },
+    high_demand_low_visibility:      { color: '#5aacd2', bg: 'rgba(90,172,210,.09)', border: 'rgba(90,172,210,.3)' },
+    google_visible_ai_invisible:     { color: '#8878ca', bg: 'rgba(136,120,202,.09)', border: 'rgba(136,120,202,.3)' },
+    competitor_citation:             { color: '#de5b50', bg: 'rgba(222,91,80,.09)', border: 'rgba(222,91,80,.3)' },
+    ai_visible_competitor_dominates: { color: '#c87a38', bg: 'rgba(200,122,56,.09)', border: 'rgba(200,122,56,.3)' },
+    new_question:                    { color: '#4ec68a', bg: 'rgba(78,198,138,.09)', border: 'rgba(78,198,138,.3)' },
+  };
+
+  // Farb- und Hinweis-Konfiguration fuer Beste-Content-Chancen-Typen.
+  var CONTENT_CHANCE_CONFIG = {
+    erste_ki_zitierung: {
+      label: 'Erste KI-Zitierung, ausbaufähig',
+      color: '#4fd1c5',
+      bg: 'rgba(79,209,197,.08)',
+      border: 'rgba(79,209,197,.3)',
+      tip: 'Jetzt ausbauen: Thema tiefer abdecken, um Zitierrate dauerhaft zu steigern.',
+    },
+    seo_naeher_top10: {
+      label: 'Nah an Google Top 10',
+      color: '#c98e2a',
+      bg: 'rgba(201,142,42,.08)',
+      border: 'rgba(201,142,42,.3)',
+      tip: 'SEO-Potenzial: Inhalt und interne Verlinkung ausbauen für Top-10-Einstieg.',
+    },
+  };
+
+  var PHASE_LABELS = {
+    exploration: 'Exploration',
+    evaluation:  'Evaluation',
+    comparison:  'Vergleich',
+    decision:    'Entscheidung',
+  };
+  var PHASE_ORDER = ['exploration', 'evaluation', 'comparison', 'decision'];
+
+  // NEU (16.09.2026): Journey-Map-Tab: Phasenfarben und Kanal-Reihenfolge
+  // für renderMessyMiddleTab / renderPhaseScoreGrid.
+  var PHASE_COLORS = {
+    exploration: '#8878ca',
+    evaluation:  '#5aacd2',
+    comparison:  '#4ec68a',
+    decision:    '#c98e2a',
+  };
+
+  // GEÄNDERT (20.09.2026): 'google_organic' entfernt, dashboard.py:
+  // _compute_phase_scores() liefert pro Phase nur chat_gpt/gemini/
+  // google_ai (siehe AI_CHANNELS + "google_ai" dort). Ein "google_organic"-
+  // Kanal existierte nur in den Mock-Daten (CONFIG.useMockData) dieser
+  // Datei, nie in der echten API-Antwort. Die Journey-Map-Karten zeigten
+  // dadurch pro Phase eine vierte Zeile "Google Organic: 0 %", die wie eine
+  // echte Messung aussah, aber nie etwas anderes als 0 anzeigen konnte.
+  var CHANNEL_ORDER = ['chat_gpt', 'gemini', 'google_ai'];
+  var CHANNEL_LABELS = {
+    chat_gpt:       'ChatGPT',
+    gemini:         'Gemini',
+    google_ai:      'Google AI Overview',
+  };
+
+  var CONTENT_CHANGE_TYPE_LABELS = {
+    neue_seite:   'Neue Seite',
+    ueberarbeitung: 'Überarbeitung',
+    kampagne:     'Kampagne',
+    sonstiges:    'Sonstiges',
+    // NEU (18.09.2026): automatisch vom Backend gesetzt, wenn ein
+    // Aktionsplan-Item als erledigt markiert wird (main.py,
+    // toggle_action_plan_item_endpoint). Bewusst NICHT in
+    // CONTENT_CHANGE_TYPE_ORDER, damit es nicht im manuellen
+    // "Content-Änderung eintragen"-Formular als Option auftaucht.
+    aktionsplan:  'Aktions-Plan',
+  };
+  var CONTENT_CHANGE_TYPE_ORDER = ['neue_seite', 'ueberarbeitung', 'kampagne', 'sonstiges'];
+
+  var VISIBILITY_LABELS = {
+    green:  'Zitiert',
+    yellow: 'Erwähnt, nicht zitiert',
+    // GEÄNDERT (15.09.2026): war "Nicht vorhanden": unklar, WAS nicht
+    // vorhanden ist (siehe Chat-Verlauf 15.09.2026). Gemeint ist: die
+    // eigene Domain taucht in den ausgewerteten ChatGPT/Gemini-Antworten
+    // zu diesem Prompt nicht auf, weder erwähnt noch zitiert.
+    red:    'In KI-Antworten nicht sichtbar',
+  };
+
+  var CHANGELOG_LOCATION_LABELS = {
+    landingpage: 'Landingpage',
+    blogartikel: 'Blogartikel',
+    preisseite:  'Preisseite',
+    meta:        'Meta-Daten',
+    sonstiges:   'Sonstiges',
+  };
+  var CHANGELOG_LOCATION_ORDER = ['landingpage', 'blogartikel', 'preisseite', 'meta', 'sonstiges'];
+
+  var CHANGELOG_EFFECT_LABELS = {
+    mehr_zitierungen: 'Mehr KI-Zitierungen',
+    bessere_position: 'Bessere Google-Position',
+    beides:           'Beides',
+    unklar:           'Unklar',
+    sonstiges:        'Sonstiges',
+  };
+  var CHANGELOG_EFFECT_ORDER = ['mehr_zitierungen', 'bessere_position', 'beides', 'unklar', 'sonstiges'];
+
+  var CONTENT_TYPE_LABELS = {
+    review_plattform:  'Review-Plattform',
+    vergleichsartikel: 'Vergleichsartikel',
+    produktseite:      'Produktseite',
+    // NEU (18.09.2026): siehe source_analysis.py _ALLOWED_CONTENT_TYPES:
+    // deckt Behörden-/Verbands-/Institutionsseiten und reine "So
+    // funktioniert's"-Seiten ohne Verkaufsabsicht ab, die vorher
+    // zwangsläufig auf 'fachartikel' oder 'produktseite' fielen.
+    erklaerseite:      'Erklärseite',
+    // NEU (21.09.2026): Hersteller-Dokumentation und Hilfe-Portale (siehe source_analysis.py).
+    dokumentation:     'Dokumentation',
+    fachartikel:       'Fachartikel',
+    video:             'Video',
+    forum:             'Forum',
+    sonstiges:         'Sonstiges',
+    // NEU (18.09.2026): zwei deterministisch (ohne Claude-Call) erkannte
+    // Sonderfälle, siehe source_analysis.py _looks_like_asset/_analyze_url,
+    // ersetzen das bisherige leere "-", wenn eine zitierte URL entweder ein
+    // reiner Datei-Download ist oder automatisiert gar nicht auslesbar war
+    // (z.B. Bot-Schutz). Ebenfalls bewusst NICHT in CONTENT_CHANGE_TYPE_ORDER/
+    // manuell wählbar, da nie von Claude, sondern nur code-seitig gesetzt.
+    dokument_download: 'Datei-Download (PDF/Bild/etc.)',
+    nicht_abrufbar:    'Nicht automatisiert auslesbar',
+    // NEU (18.09.2026): LinkedIn/X/Facebook/Instagram/TikTok/Pinterest/
+    // Medium/GitHub: bewusst eine eigene, plattform- statt seitentyp-
+    // bezogene Kategorie (siehe source_analysis.py _KNOWN_PLATFORM_DOMAINS),
+    // weil der konkrete Seitentyp je Pfad zu unterschiedlich wäre, die
+    // Kernaussage "hier lohnt sich Präsenz" aber unabhängig davon gilt.
+    social_media:      'Social-Media-Plattform',
+  };
+
+  var GAP_PRIORITY_LABELS = {
+    hoch:    'Hohe Priorität',
+    mittel:  'Mittlere Priorität',
+    niedrig: 'Niedrige Priorität',
+  };
+
+  var KEYWORD_SOURCE_LABELS = {
+    seed_keyword:         'Primäres Keyword',
+    related_keywords:     'Keyword-Idee',
+    keyword_ideas:        'Keyword-Idee',
+    keyword_suggestions:  'Keyword-Idee',
+    paa:                  'Häufig gefragt (von Google)',
+    gsc_near_miss:        'Google Search Console',
+    // NEU (23.09.2026): von Claude formulierte Fragen für Phasen ohne echte Keywords
+    problem_question:     'Problemfrage (KI-Vorschlag)',
+    manual:               'Eigenes Keyword',
+  };
+
+  // NEU (20.09.2026): Farben für die Keyword-Einschätzung, die main.py
+  // jetzt pro Zeile mitliefert (keyword_status/keyword_status_label, siehe
+  // keyword_status.py). Reihenfolge/Bedeutung siehe dort.
+  var KEYWORD_STATUS_COLORS = {
+    rankt_bereits:          '#35a86b',
+    knapp_seite_1:          '#c98e2a',
+    nachfrage_unsichtbar:   '#5aacd2',
+    reine_idee:             '#8b98a5',
+  };
+
+  var MODEL_LABELS = {
+    chat_gpt: 'ChatGPT',
+    gemini:   'Gemini',
+  };
+
+  // NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026): Top-
+  // SERP-Ergebnisse + SERP-Feature-Typen bei Keywords/GSC-Keywords, siehe
+  // run_topic.py: check_serp_for_top_keywords/_extract_serp_summary.
+  var SERP_FEATURE_LABELS = {
+    organic: 'Organisch',
+    people_also_ask: '\u00c4hnliche Fragen',
+    featured_snippet: 'Featured Snippet',
+    answer_box: 'Antwortbox',
+    ai_overview: 'AI Overview',
+    knowledge_graph: 'Knowledge Panel',
+    video: 'Video',
+    images: 'Bilder',
+    local_pack: 'Local Pack',
+    top_stories: 'Top Stories',
+    shopping: 'Shopping',
+  };
+  // Feature-Typen, die typischerweise bedeuten "Google beantwortet die
+  // Frage schon direkt, ohne Klick", nur zur Einordnung, keine
+  // abschließende Liste aller möglichen DataForSEO-Typen.
+  var SERP_ZERO_CLICK_FEATURE_TYPES = ['featured_snippet', 'answer_box', 'ai_overview', 'knowledge_graph'];
+
+  // Gemeinsam genutzt von renderKeywordExpansion (Keywords-Tab) und
+  // renderGscRowExpansion (GSC-Performance-Tab), dieselbe Datenquelle
+  // (search_queries.top_serp_results/serp_features), zwei Anzeigeorte.
+  function renderSerpSummaryBlock(row) {
+    if (!row.top_serp_results || row.top_serp_results.length === 0) return '';
+
+    var hasZeroClickFeature = (row.serp_features || []).some(function (f) {
+      return SERP_ZERO_CLICK_FEATURE_TYPES.indexOf(f) !== -1;
+    });
+
+    var resultsHtml = row.top_serp_results.map(function (r) {
+      return '<li>' +
+        '<img class="cvz-inline-favicon" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(r.domain || '') + '" alt="">' +
+        '<a href="' + escapeHtml(r.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(r.domain || r.url || '') + '</a>' +
+        (r.rank ? ' <span class="cvz-serp-rank">Position ' + escapeHtml(r.rank) + '</span>' : '') +
+      '</li>';
+    }).join('');
+
+    var featuresHtml = (row.serp_features || []).map(function (f) {
+      var isZeroClick = SERP_ZERO_CLICK_FEATURE_TYPES.indexOf(f) !== -1;
+      return '<span class="cvz-persona-chip' + (isZeroClick ? ' cvz-serp-feature-risk' : '') + '">' +
+        escapeHtml(SERP_FEATURE_LABELS[f] || f) + '</span>';
+    }).join('');
 
-
-@app.get("/topics")
-def list_topics(member_id: str = Depends(require_member)):
-    team_id = _resolve_team_id(member_id)
-    try:
-        topics = (
-            supabase.table("ai_visibility_topics")
-            .select("id, project_id, name, seed_keyword, own_domain, status, created_at, archive_effective_at, last_monthly_collection_at, collecting_started_at")
-            .eq("team_id", team_id)
-            .order("created_at", desc=True)
-            .execute()
-        ).data
-    except Exception as e:
-        logger.exception("Fehler beim Laden der Topic-Liste")
-        raise HTTPException(status_code=500, detail=f"Konnte Topics nicht laden: {e}")
-
-    # Opportunity-Anzahl: eine einzige Batch-Abfrage statt N+1 per-topic-Queries.
-    # Vorher: für jedes Topic SELECT count(*) WHERE topic_id = X  -> N Requests
-    # Jetzt:  SELECT topic_id WHERE topic_id IN (...) -> 1 Request + Zaehlen in Python
-    topic_ids = [t["id"] for t in topics]
-    opp_counts: dict = {t["id"]: 0 for t in topics}
-    if topic_ids:
-        try:
-            opp_rows = (
-                supabase.table("opportunities")
-                .select("topic_id")
-                .in_("topic_id", topic_ids)
-                .execute()
-            ).data
-            for row in (opp_rows or []):
-                tid = row.get("topic_id")
-                if tid in opp_counts:
-                    opp_counts[tid] += 1
-        except Exception:
-            logger.exception("Fehler beim Batch-Zaehlen der Opportunities")
-            opp_counts = {t["id"]: None for t in topics}
-    for topic in topics:
-        topic["opportunities_count"] = opp_counts.get(topic["id"], 0)
-
-    return {"topics": topics}
-
-
-@app.get("/topics/{topic_id}")
-def get_topic_detail(topic_id: str, member_id: str = Depends(require_member)):
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics").select("*").eq("id", topic_id).single().execute()
-        ).data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        opportunities = (
-            supabase.table("opportunities")
-            .select("*")
-            .eq("topic_id", topic_id)
-            .order("created_at", desc=True)
-            .execute()
-        ).data
-        # ANMERKUNG (14.09.2026): Opportunities bewusst NICHT mit Phase
-        # getaggt, anders als content_ideas unten. Die opportunities-
-        # Tabelle hat weder eine prompt_id- noch eine search_query_id-
-        # Spalte (nur topic_id/opportunity_type/title/description/
-        # supporting_data/status), und ob/wie supporting_data einen
-        # Prompt- oder Keyword-Bezug trägt, entscheidet opportunities.py
-        # (liegt hier nicht vor). Ohne das zu raten, bräuchte eine
-        # Phasen-Zuordnung entweder eine Schema-Erweiterung (z.B.
-        # prompt_id/search_query_id-Spalte auf opportunities) oder eine
-        # bestätigte supporting_data-Struktur, aus der main.py den Bezug
-        # ableiten könnte.
-
-        # GEÄNDERT (13.09.2026): organic_rank/gsc_impressions/gsc_position/
-        # first_seen_at neu dabei, fürs aufklappbare Keyword-Detail im
-        # Frontend (siehe renderKeywordExpansion in script.js). Vorher
-        # wurden diese Spalten geladen (opportunities.py nutzt sie längst),
-        # aber nie ans Frontend durchgereicht.
-        # GEÄNDERT (14.09.2026): gsc_clicks dazu — fehlte hier, obwohl
-        # save_gsc_near_miss (run_topic.py) es längst mit speichert.
-        # Notwendig, damit die GSC-Tabelle im Frontend eine Klick-Spalte
-        # zeigen kann (siehe Chat-Verlauf 14.09.2026: gsc_rows kam bis
-        # hierhin nie an, war clientseitig fest auf [] gesetzt).
-        # GEÄNDERT (15.09.2026): top_serp_results/serp_features/
-        # serp_checked_at dazu (siehe run_topic.py: save_keyword_serp_
-        # analysis) — Kundenwunsch: schnelle Einschätzung, ob ein
-        # Wettbewerber oder eine neutrale Quelle (z.B. Wikipedia) die SERP
-        # dominiert, plus SERP-Feature-Typen fürs Commodity-Risiko.
-        search_queries = (
-            supabase.table("search_queries")
-            .select(
-                "id, keyword, search_volume, source, organic_rank, gsc_impressions, gsc_clicks, gsc_position, "
-                "page_url, is_near_miss, "
-                "first_seen_at, top_serp_results, serp_features, serp_checked_at, "
-                "messymiddle_phase, phase_manually_set"
-            )
-            .eq("topic_id", topic_id)
-            # NEU (16.09.2026): deaktivierte Keywords (siehe deactivate_keyword_
-            # endpoint) aus der Ansicht ausblenden, analog zum bestehenden
-            # is_active-Filter bei prompts weiter unten. Braucht dieselbe
-            # Migration (search_queries.is_active), siehe create_manual_
-            # keyword_endpoint.
-            .eq("is_active", True)
-            .order("search_volume", desc=True)
-            .execute()
-        ).data
-
-        # NEU (20.09.2026): einheitliche Keyword-Einschätzung (siehe
-        # keyword_status.py) direkt an jede Zeile angehängt, damit das
-        # Frontend nicht selbst nochmal eigene Schwellen für "rankt schon /
-        # knapp an Seite 1 / nur Nachfrage / reine Idee" nachbauen muss.
-        for q in search_queries:
-            status = classify_keyword(q)
-            q["keyword_status"] = status["status"]
-            q["keyword_status_label"] = status["label"]
-
-        prompts = (
-            supabase.table("prompts")
-            # NEU (14.09.2026): persona dazu (siehe Migration unten im
-            # Modul-Docstring-Bereich sowie prompt_discovery.py) — fürs
-            # Rollen-Filter im Prompts-Tab (renderPromptsByPhase).
-            # NEU (15.09.2026): ai_search_volume dazu (siehe
-            # ai_search_questions.py) — sonst kommt beim Frontend nie an,
-            # dass ein Prompt aus einer echten AI-Overview-Frage stammt.
-            # NEU (23.09.2026): role_id dazu (Sichtbarkeit je Rolle im Frontend).
-            .select("id, prompt_text, prompt_type, messymiddle_phase, persona, role_id, relevance_reason, is_active, intent_cluster_id, source, ai_search_volume, intent_clusters(name, phase)")
-            .eq("topic_id", topic_id)
-            # GEFIXT (23.09.2026): deactivate_prompt_endpoint verspricht, dass
-            # deaktivierte Prompts aus der Ansicht verschwinden, dieser Filter
-            # fehlte aber. Deaktivierte Prompts wurden weiter angezeigt.
-            .eq("is_active", True)
-            .order("prompt_type")
-            .execute()
-        ).data
-    except Exception as e:
-        logger.exception("Fehler beim Laden des Topic-Details für %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Topic-Detail nicht laden: {e}")
-
-    # Bonus-Fix (13.09.2026): visibility_status pro Prompt war bisher immer
-    # null (siehe script.js loadTopicDetail, hartcodiert). Jetzt berechnet,
-    # siehe _compute_visibility_status_by_prompt. Mutiert die Dicts in
-    # `prompts` direkt, das ist dieselbe Liste, die unten zurückgegeben wird.
-    status_by_prompt = _compute_visibility_status_by_prompt(topic_id, [p["id"] for p in prompts])
-    # NEU (18.09.2026): separater Marker fuer "als Quelle genannt, aber ohne
-    # echten Link" — siehe _compute_unlinked_citation_by_prompt.
-    unlinked_by_prompt = _compute_unlinked_citation_by_prompt(topic_id, [p["id"] for p in prompts])
-    citation_counts_by_prompt = _compute_citation_counts_by_prompt(topic_id, [p["id"] for p in prompts])
-    # NEU (23.09.2026): Prompt-Budget fürs Frontend (freie Plätze für eigene Prompts)
-    try:
-        prompt_budget = get_prompt_budget(topic_id, [p for p in prompts if p.get("prompt_type") == "stable_core"])
-    except Exception:
-        logger.exception("Prompt-Budget für Topic %s nicht berechenbar", topic_id)
-        prompt_budget = None
-    for p in prompts:
-        p["visibility_status"] = status_by_prompt.get(p["id"])
-        p["cited_without_link"] = unlinked_by_prompt.get(p["id"], False)
-        counts = citation_counts_by_prompt.get(p["id"])
-        p["cited_count"] = counts["cited_count"] if counts else None
-        p["total_runs"] = counts["total_runs"] if counts else None
-
-    try:
-        content_ideas = get_content_ideas_for_topic(topic_id)
-    except Exception:
-        # Zusatzauswertung, kein Kernvorgang: ein Fehler hier soll die
-        # restliche Detail-Ansicht nicht blockieren, nur leer bleiben.
-        logger.exception("Fehler beim Laden der Content-Ideen für Topic %s, Rest der Antwort bleibt unberührt", topic_id)
-        content_ideas = []
-
-    # NEU (14.09.2026): Content-Ideen mit der Phase ihres zugehörigen
-    # Prompts taggen (content_ideas.prompt_id -> prompts.messymiddle_phase),
-    # damit Content-Ideen wie Prompts nach Journey-Phase priorisierbar
-    # sind (siehe Chat-Verlauf 14.09.2026). Kein neuer Endpunkt, keine
-    # Schema-Änderung nötig, content_ideas.prompt_id ist bereits eine
-    # NOT-NULL-Fremdschlüssel-Spalte. Läuft über die bereits geladenen
-    # `prompts` statt eines zusätzlichen Datenbank-Roundtrips.
-    phase_by_prompt_id = {p["id"]: p.get("messymiddle_phase") for p in prompts}
-    for idea in content_ideas:
-        idea["phase"] = phase_by_prompt_id.get(idea.get("prompt_id"))
-
-    positioning_insight = _compute_positioning_insight(topic, search_queries)
-
-    try:
-        source_profiles = get_source_profiles_for_topic(topic_id)
-    except Exception:
-        logger.exception("Fehler beim Laden der Quellen-Analysen für Topic %s, Rest der Antwort bleibt unberührt", topic_id)
-        source_profiles = []
-
-    # NEU (16.09.2026): Kundenwunsch (siehe Chat-Verlauf 16.09.2026) —
-    # Plattform-Übersicht über ALLE zitierten Quellen (nicht nur
-    # bestätigte Wettbewerber), gruppiert nach Content-Typ (Forum, Video,
-    # Review-Plattform, ...), siehe _get_cited_platforms_overview.
-    try:
-        cited_platforms = _get_cited_platforms_overview(topic_id)
-    except Exception:
-        logger.exception("Fehler beim Laden der Plattform-Übersicht für Topic %s, Rest der Antwort bleibt unberührt", topic_id)
-        cited_platforms = []
-
-    # NEU (14.09.2026): pro Prompt die meistzitierte Quelle + deren
-    # Content-Typ anreichern (siehe _compute_top_cited_domain_by_prompt),
-    # fürs "was für Inhalte helfen"-Badge in der Prompt-Zeile
-    # (renderPromptsByPhase). profile_by_url nutzt dieselben
-    # source_profiles, die auch der Wettbewerber-Tab schon zeigt — keine
-    # doppelte Datenhaltung, nur eine zusätzliche Zuordnung pro Prompt.
-    # GEÄNDERT (18.09.2026): Zuordnung läuft jetzt über analyzed_url
-    # (domain_data["top_url"]) statt über die Domain, weil eine Domain
-    # mehrere Content-Typen haben kann (siehe source_analysis.py) — das
-    # Badge soll den Typ der tatsächlich meistzitierten Seite zeigen, nicht
-    # irgendeinen zufällig zuerst analysierten Typ derselben Domain.
-    cited_domain_data_by_prompt = _compute_top_cited_domain_by_prompt(topic_id, [p["id"] for p in prompts])
-    profile_by_url = {sp["analyzed_url"]: sp for sp in source_profiles if sp.get("analyzed_url")}
-    for p in prompts:
-        domain_data = cited_domain_data_by_prompt.get(p["id"])
-        top_domain = domain_data["top"] if domain_data else None
-        all_domains = domain_data["all"] if domain_data else []
-        top_url = domain_data.get("top_url") if domain_data else None
-        profile = profile_by_url.get(top_url) if top_url else None
-        p["top_cited_domain"] = top_domain
-        p["cited_domains"] = all_domains  # Alle zitierten Domains sortiert nach Häufigkeit
-        p["top_cited_content_type"] = profile.get("content_type") if profile else None
-
-    # NEU (13.09.2026): fürs Frontend, um die Wettbewerber-Auswertung auf
-    # echte Wettbewerber zu filtern statt auf alle zitierten Domains (siehe
-    # renderCompetitorInsightSection in script.js).
-    # GEÄNDERT (15.09.2026): steht jetzt direkt auf dem Topic (select("*")
-    # oben hat die Spalte schon mitgeladen), kein zusätzlicher Query mehr
-    # nötig — Wettbewerber sind jetzt ein Topic-Attribut, kein Projekt-
-    # Attribut mehr, siehe _get_topic_competitor_domains.
-    competitor_domains = topic.get("competitor_domains") or []
-
-    # get_content_gaps_for_topic/get_competitor_insights_for_topic fangen
-    # ihre Fehler bereits selbst ab und geben im Fehlerfall [] zurück
-    # (siehe gap_analysis.py), daher hier kein zusätzliches try/except nötig.
-    content_gaps = get_content_gaps_for_topic(topic_id)
-    competitor_insights = get_competitor_insights_for_topic(topic_id)
-
-    # NEU (16.09.2026): Claude-generierter Aktionsplan laden.
-    # get_action_plan_for_topic gibt {"items": [], "generated_at": null}
-    # zurück wenn noch kein Plan existiert (erster Lauf noch nicht fertig).
-    try:
-        action_plan = get_action_plan_for_topic(topic_id)
-    except Exception:
-        logger.exception("Fehler beim Laden des Aktionsplans für Topic %s, Rest der Antwort bleibt unberührt", topic_id)
-        action_plan = {"items": [], "generated_at": None}
-
-    try:
-        changelog = _get_changelog_for_topic(topic_id)
-    except Exception:
-        # Wie content_ideas/source_profiles: Zusatzinfo, kein Kernvorgang.
-        logger.exception("Fehler beim Laden des Changelogs für Topic %s, Rest der Antwort bleibt unberührt", topic_id)
-        changelog = []
-
-    # NEU (15.09.2026): Auf/Ab-Signal pro verknüpftem Keyword, siehe
-    # _compute_changelog_keyword_deltas. Fehler hier sollen die restliche
-    # Detail-Ansicht nicht blockieren, nur ohne Deltas bleiben.
-    try:
-        keyword_deltas = _compute_changelog_keyword_deltas(topic_id, changelog, search_queries)
-    except Exception:
-        logger.exception("Änderungs-Deltas konnten nicht berechnet werden für Topic %s, Rest der Antwort bleibt unberührt", topic_id)
-        keyword_deltas = {}
-    for entry in changelog:
-        entry["keyword_deltas"] = keyword_deltas.get(entry["id"], {})
-
-    # NEU (15.09.2026): "beste Content-Chancen", siehe Chat-Verlauf
-    # 15.09.2026 und _compute_best_content_chances weiter unten. Rein
-    # deterministisch aus bereits geladenen search_queries/prompts
-    # berechnet, kein neuer Query, kein Claude-Call.
-    best_content_chances = _compute_best_content_chances(search_queries, prompts)
-
-    # NEU (20.09.2026): Ergänzungen, alle nach dem Muster "Fehler hier
-    # blockieren nie die restliche Detail-Ansicht".
-    # - ai_knowledge: neuester KI-Wissens-Check (siehe ai_knowledge.py).
-    # - change_assessment: Umsetzungsstand und gemessene Wirkung der
-    #   Nutzer-Änderungen (siehe change_history.py).
-    # - step_status: Schritte, die fehlgeschlagen sind, fehlen oder gerade
-    #   laufen, fürs Frontend: pro Eintrag ein "Erneut erstellen"-Button
-    #   (siehe step_tracker.py, POST /topics/{id}/retry-step).
-    try:
-        ai_knowledge = get_ai_knowledge_for_topic(topic_id)
-    except Exception:
-        logger.exception("KI-Wissens-Check konnte nicht geladen werden (Topic %s), Rest der Antwort bleibt unberührt", topic_id)
-        ai_knowledge = None
-    try:
-        change_assessment = build_change_assessment_for_ui(get_change_assessment(topic_id))
-    except Exception:
-        logger.exception("Änderungs-Bewertung konnte nicht berechnet werden (Topic %s), Rest der Antwort bleibt unberührt", topic_id)
-        change_assessment = {"summary": {"anzahl": 0}, "items": []}
-    step_status = get_step_states(topic_id, topic)
-    # NEU (20.09.2026): Ziele fuer Bewertungen und Digital PR (zitierte Quellen
-    # und Rankings), siehe outreach_targets.py.
-    try:
-        outreach_targets = targets_for_ui(get_outreach_targets(topic_id))
-    except Exception:
-        logger.exception("Zielliste konnte nicht geladen werden (Topic %s), Rest der Antwort bleibt unberührt", topic_id)
-        outreach_targets = None
-
-    # NEU (20.09.2026): interne Feldnamen aus Nutzertexten entfernen, auch für
-    # bereits gespeicherte Altdaten (siehe text_style.sanitize_user_payload).
-    # Berührt nur Fließtext-Felder, keine IDs, Enums oder URLs.
-    topic["last_run_error"] = sanitize_user_text(topic.get("last_run_error"))
-    return sanitize_user_payload({
-        "topic": topic, "opportunities": opportunities, "search_queries": search_queries,
-        "prompts": prompts, "prompt_budget": prompt_budget, "content_ideas": content_ideas, "positioning_insight": positioning_insight,
-        "source_profiles": source_profiles, "competitor_domains": competitor_domains,
-        "content_gaps": content_gaps, "competitor_insights": competitor_insights,
-        "changelog": changelog, "best_content_chances": best_content_chances,
-        "cited_platforms": cited_platforms,
-        # NEU (16.09.2026): Claude-generierter Aktionsplan.
-        "action_plan": action_plan,
-        "ai_knowledge": ai_knowledge,
-        "change_assessment": change_assessment,
-        "step_status": step_status,
-        "outreach_targets": outreach_targets,
-    })
-
-
-def _compute_best_content_chances(search_queries: list, prompts: list) -> list:
-    """
-    NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026) — eine
-    hervorgehobene, sortierte Auswahl der aussichtsreichsten Content-
-    Chancen, rein deterministisch aus bereits geladenen Rohdaten berechnet
-    (kein neuer Query, kein Claude-Call, gleiches Prinzip wie
-    opportunities.py). Zwei vom Kunden konkret genannte Kriterien:
-
-    1. "seo_naeher_top10": Keywords, die organisch bereits in den Top 10
-       ranken (organic_rank <= STRONG_RANK_MAX) UND ein tatsächlich
-       gemessenes Suchvolumen haben, sortiert nach Suchvolumen absteigend.
-       Verwandt mit Opportunity 3 in opportunities.py
-       (google_visible_ai_invisible), hier aber als eigene, nach Volumen
-       sortierte Rangliste statt einer einzelnen Karte — der SEO-Erfolg
-       ist schon da, nur die KI-Sichtbarkeit fehlt noch.
-    2. "erste_ki_zitierung": Prompts, bei denen die eigene Domain BEREITS
-       mindestens einmal zitiert wurde (cited_count > 0), aber noch nicht
-       durchgehend (cited_count < total_runs) — ein erster Fuß in der
-       Tür, den gezielter Content ausbauen kann, statt komplett bei null
-       anzufangen.
-
-    Absichtlich nicht in opportunities.py selbst (keine eigene
-    persistente Tabellen-Zeile, kein Duplikat-Schutz nötig) — das ist
-    eine sortierte HERVORHEBUNG bereits vorhandener Signale fürs
-    Frontend, kein neu ENTDECKTER Befund wie eine echte Opportunity.
-
-    GEÄNDERT (20.09.2026): nutzte bisher eine eigene, lokale Schwelle
-    NEAR_TOP10_RANK_THRESHOLD = 15, während opportunities.py für dieselbe
-    Frage ("Google sichtbar?") ORGANIC_VISIBLE_RANK = 10 nutzte — zwei
-    unterschiedliche Antworten auf dieselbe Frage im selben Tool. Jetzt
-    beide auf STRONG_RANK_MAX (siehe keyword_status.py) vereinheitlicht.
-    Das engt "seo_naeher_top10" von Position 15 auf Position 10 ein.
-
-    GEÄNDERT (23.09.2026): dasselbe Keyword kann mehrfach in search_queries
-    stehen (save_search_queries dedupliziert nur pro Keyword+Source, siehe
-    run_topic.py) — z. B. einmal aus 'gsc_near_miss', einmal aus
-    'related_keywords'/'keyword_suggestions', teils mit abweichender
-    Groß-/Kleinschreibung. Ohne Dedup erschien dieselbe Content-Chance
-    mehrfach als eigene Karte. Jetzt Dedup auf normalisierten Keyword-Text
-    (strip + lower), bevor sortiert und auf Top 5 gekürzt wird.
-    """
-
-    seen_keywords = set()
-    seo_chances = []
-    for q in search_queries:
-        if (
-            q.get("organic_rank") is None
-            or q["organic_rank"] > STRONG_RANK_MAX
-            or q.get("search_volume") is None
-        ):
-            continue
-        key = q["keyword"].strip().lower()
-        if key in seen_keywords:
-            continue
-        seen_keywords.add(key)
-        seo_chances.append(q)
-    seo_chances.sort(key=lambda q: q["search_volume"], reverse=True)
-
-    citation_chances = [
-        p for p in prompts
-        if p.get("cited_count") is not None and p.get("total_runs")
-        and 0 < p["cited_count"] < p["total_runs"]
-    ]
-    citation_chances.sort(key=lambda p: p["cited_count"], reverse=True)
-
-    chances = []
-    for q in seo_chances[:5]:
-        chances.append({
-            "kind": "seo_naeher_top10",
-            "label": q["keyword"],
-            "detail": f"Google-Position {q['organic_rank']}, {q['search_volume']} Suchen/Monat",
-        })
-    for p in citation_chances[:5]:
-        chances.append({
-            "kind": "erste_ki_zitierung",
-            "label": p["prompt_text"],
-            "detail": f"{p['cited_count']} von {p['total_runs']} ausgewerteten L\u00e4ufen zitiert",
-        })
-    return chances
-
-
-def _get_domain_visibility_trend(topic_ids: list[str], weeks: int = 26) -> list[dict]:
-    """
-    Wie _get_own_visibility_trend, aber über mehrere Themen einer Domain
-    aggregiert: EIN Roundtrip mit in_("topic_id", topic_ids) statt N
-    Einzelabfragen (siehe getDomainDashboardData-Kommentar in script.js
-    zur Kosten-Begründung). Zählt Läufe wochenweise über alle übergebenen
-    Themen hinweg auf.
-    """
-    if not topic_ids:
-        return []
-    cutoff = (datetime.now(timezone.utc) - timedelta(weeks=weeks)).isoformat()
-    try:
-        runs = (
-            supabase.table("ai_runs")
-            .select("collected_at, source, own_domain_mentioned, own_domain_cited, own_domain_recommended")
-            .in_("topic_id", topic_ids)
-            .in_("source", ["chat_gpt", "gemini"])
-            .gte("collected_at", cutoff)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden des Domain-Sichtbarkeits-Verlaufs für Themen %s", topic_ids)
-        raise
-
-    buckets: dict[str, dict] = {}
-    for r in runs:
-        if not r.get("collected_at"):
-            continue
-        week = _week_start_label(r["collected_at"])
-        bucket = buckets.setdefault(week, {"mentioned": 0, "cited": 0, "recommended": 0, "total": 0})
-        bucket["total"] += 1
-        if r.get("own_domain_mentioned"):
-            bucket["mentioned"] += 1
-        if r.get("own_domain_cited"):
-            bucket["cited"] += 1
-        if r.get("own_domain_recommended") is True:
-            bucket["recommended"] += 1
-
-    return [{"week": week, **counts} for week, counts in sorted(buckets.items())]
-
-
-@app.get("/projects/{project_id}/dashboard")
-def get_project_dashboard_endpoint(project_id: str, member_id: str = Depends(require_member)):
-    """
-    Aggregations-Endpunkt für die Domain-Übersicht (Ebene 1+2), bisher
-    ausschließlich über MOCK_TOPIC_DETAIL im Frontend simuliert (siehe
-    getDomainDashboardData in script.js). Liefert Trend, Opportunities und
-    Content-Ideen über ALLE AKTIVEN Themen einer Domain, in EINEM Request
-    statt N Einzelaufrufen von GET /topics/{id} (bei vielen Themen sonst
-    langsam/teuer, siehe Kommentar im Frontend).
-
-    Bewusst NUR diese drei: Wettbewerber-/Keyword-/Prompt-Aggregation auf
-    Domain-Ebene ist derselbe Bug (getDomainDashboardData hängt auch dort
-    an MOCK_TOPIC_DETAIL), braucht aber Einblick in gap_analysis.py/
-    source_analysis.py/prompt_discovery.py, um bestehende Einzel-Themen-
-    Funktionen korrekt zu bündeln statt deren Rückgabeform zu raten (Stand
-    14.09.2026: diese Dateien lagen bei der Implementierung nicht vor).
-    Folgt als zweiter Schritt.
-
-    GEÄNDERT (14.09.2026): content_ideas tragen jetzt zusätzlich `phase`
-    (aus prompts.messymiddle_phase über content_ideas.prompt_id), analog
-    zu get_topic_detail. opportunities bewusst NICHT phasengetaggt, siehe
-    Kommentar dort, warum das ohne opportunities.py nicht sicher geht.
-
-    Archivierte Themen fließen NICHT ein (siehe Frontend-Kommentar vom
-    14.09.2026: aggregierte Ansichten sollen den aktuell relevanten Hebel
-    zeigen, nicht von pausierten Themen verwässert werden).
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        project = get_project(project_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="Domain nicht gefunden")
-    if not project or project.get("team_id") != team_id:
-        raise HTTPException(status_code=404, detail="Domain nicht gefunden")
-
-    try:
-        active_topics = (
-            supabase.table("ai_visibility_topics")
-            .select("id, name")
-            .eq("project_id", project_id)
-            .eq("team_id", team_id)
-            .neq("status", "archived")
-            .execute()
-        ).data
-    except Exception as e:
-        logger.exception("Fehler beim Laden der aktiven Themen für Domain %s", project_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Themen nicht laden: {e}")
-
-    topic_ids = [t["id"] for t in active_topics]
-    topic_name_by_id = {t["id"]: t["name"] for t in active_topics}
-
-    if not topic_ids:
-        return {"project_id": project_id, "trend": [], "opportunities": [], "content_ideas": []}
-
-    try:
-        trend = _get_domain_visibility_trend(topic_ids)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Konnte Sichtbarkeits-Verlauf nicht laden: {e}")
-
-    try:
-        # Kein Status-Filter, analog zu get_topic_detail (liefert dort auch
-        # alle Status, keine Einschränkung auf 'new'), damit sich Single-
-        # Topic- und Domain-Ansicht identisch verhalten.
-        opportunities = (
-            supabase.table("opportunities")
-            .select("*")
-            .in_("topic_id", topic_ids)
-            .order("created_at", desc=True)
-            .execute()
-        ).data
-    except Exception as e:
-        logger.exception("Fehler beim Laden der Opportunities für Domain %s", project_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Opportunities nicht laden: {e}")
-    for opp in opportunities:
-        opp["topic_name"] = topic_name_by_id.get(opp["topic_id"], "")
-
-    try:
-        # ANNAHME (nicht verifiziert, content_ideas.py lag bei der
-        # Implementierung nicht vor): hier nur die Rohtabelle mit
-        # offer_detected=true. Falls get_content_ideas_for_topic
-        # zusätzliche Anreicherung/Filterung macht, hier angleichen.
-        content_ideas = (
-            supabase.table("content_ideas")
-            .select("*")
-            .in_("topic_id", topic_ids)
-            .eq("offer_detected", True)
-            .order("detected_at", desc=True)
-            .execute()
-        ).data
-    except Exception as e:
-        logger.exception("Fehler beim Laden der Content-Ideen für Domain %s", project_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Content-Ideen nicht laden: {e}")
-    for idea in content_ideas:
-        idea["topic_name"] = topic_name_by_id.get(idea["topic_id"], "")
-
-    # NEU (14.09.2026): dieselbe Phasen-Anreicherung wie in get_topic_detail
-    # (content_ideas.prompt_id -> prompts.messymiddle_phase), damit die
-    # Domain-Übersicht Content-Ideen genauso nach Journey-Phase zeigen kann
-    # wie die Topic-Detailansicht.
-    idea_prompt_ids = list({idea["prompt_id"] for idea in content_ideas if idea.get("prompt_id")})
-    if idea_prompt_ids:
-        try:
-            idea_prompts = (
-                supabase.table("prompts")
-                .select("id, messymiddle_phase")
-                .in_("id", idea_prompt_ids)
-                .execute()
-            ).data
-        except Exception:
-            logger.exception("Fehler beim Laden der Prompt-Phasen für Content-Ideen, Domain %s", project_id)
-            idea_prompts = []
-        phase_by_prompt_id = {p["id"]: p.get("messymiddle_phase") for p in idea_prompts}
-        for idea in content_ideas:
-            idea["phase"] = phase_by_prompt_id.get(idea.get("prompt_id"))
-
-    return {
-        "project_id": project_id,
-        "trend": trend,
-        "opportunities": opportunities,
-        "content_ideas": content_ideas,
-    }
-
-
-@app.get("/topics/{topic_id}/prompts/{prompt_id}/citations")
-def get_prompt_citations_endpoint(topic_id: str, prompt_id: str, member_id: str = Depends(require_member)):
-    """
-    NEU (13.09.2026): Liefert die letzten PROMPT_CITATION_RUN_LIMIT Läufe je
-    Engine (ChatGPT/Gemini) für EINEN Prompt, inkl. voller Antwort
-    (raw_response[0].markdown) und zitierter Quellen. Google AI Overview
-    bewusst ausgeschlossen: hängt an search_query_id statt prompt_id (siehe
-    Datenmodell in ai_runs), lässt sich also nicht sauber einem einzelnen
-    Prompt zuordnen.
-
-    Lazy geladen, NICHT Teil von GET /topics/{id}: raw_response ist pro Lauf
-    groß (volles Antwort-Markdown + komplette Quellenliste), das soll nur
-    beim tatsächlichen Aufklappen eines Prompts im Frontend abgerufen
-    werden (analog zu /competitor-citations, siehe maybeLoadCitationTrend /
-    togglePromptExpansion in script.js), nicht bei jedem Topic-Detail-Load.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id, own_domain").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        prompt = (
-            supabase.table("prompts").select("id, prompt_text")
-            .eq("id", prompt_id).eq("topic_id", topic_id).single().execute()
-        ).data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Prompt nicht gefunden")
-
-    own_domain_normalized = _normalize_search_domain(topic.get("own_domain"))
-
-    try:
-        chat_gpt_runs = _get_recent_runs_for_prompt(topic_id, prompt_id, "chat_gpt")
-        gemini_runs = _get_recent_runs_for_prompt(topic_id, prompt_id, "gemini")
-    except Exception:
-        logger.exception("Fehler beim Laden der Läufe für Prompt %s", prompt_id)
-        raise HTTPException(status_code=500, detail="Konnte Läufe nicht laden")
-
-    return {
-        "prompt_id": prompt_id,
-        "prompt_text": prompt["prompt_text"],
-        "chat_gpt": [e for e in (_extract_run_answer(r, own_domain_normalized) for r in chat_gpt_runs) if e],
-        "gemini": [e for e in (_extract_run_answer(r, own_domain_normalized) for r in gemini_runs) if e],
-    }
-
-
-@app.get("/topics/{topic_id}/competitor-citations")
-def get_competitor_citation_trend_endpoint(
-    topic_id: str,
-    weeks: Literal[4, 12, 26] = 12,
-    member_id: str = Depends(require_member),
-):
-    """
-    Wöchentlicher Verlauf, wer wie oft zitiert wurde (siehe
-    _get_competitor_citation_trend). Bewusst ein EIGENER Endpunkt statt Teil
-    von GET /topics/{id}, weil diese Auswertung mehr Datenbank-Last erzeugt
-    (Historie über mehrere Wochen statt nur des aktuellen Stands) und vom
-    Frontend nur bei Bedarf geladen werden soll (z.B. wenn der
-    entsprechende Tab geöffnet wird), nicht bei jedem Seitenaufruf.
-
-    GEÄNDERT (25.09.2026, Kundenwunsch): weeks jetzt als Query-Parameter
-    statt fest auf den Default von _get_competitor_citation_trend()
-    verdrahtet -- Frontend kann damit zwischen Presets (4/12/26 Wochen)
-    wählen, für einen GA4-ähnlichen Zeitraum-Picker in der
-    Wettbewerbsvergleich-Grafik. Bewusst Literal[4, 12, 26] statt einem
-    freien int: ein beliebig hoher Wert (z.B. ?weeks=9999) würde einen
-    unbeschränkt großen ai_runs-Scan auslösen -- _get_competitor_citation_trend
-    filtert erst NACH dem Laden aller Zeilen im Cutoff-Zeitraum, es gibt
-    kein LIMIT in der zugrundeliegenden Query. FastAPI validiert
-    Literal-Werte automatisch (422 bei ungültigem Wert), kein manueller
-    Check nötig, und die erlaubten Werte erscheinen automatisch in der
-    OpenAPI-Doku (/openapi.json, /docs).
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        weekly_data = _get_competitor_citation_trend(topic_id, weeks=weeks)
-    except Exception as e:
-        logger.exception("Fehler beim Laden des Zitations-Verlaufs für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Zitations-Verlauf nicht laden: {e}")
-
-    return {"topic_id": topic_id, "weeks": weekly_data}
-
-
-@app.get("/topics/{topic_id}/monthly-overview-trend")
-def get_monthly_overview_trend_endpoint(topic_id: str, member_id: str = Depends(require_member)):
-    """
-    NEU (15.09.2026): kombinierte Monats-Grafik für die Übersicht (siehe
-    Chat-Verlauf 15.09.2026) — Prompt-Zitierungen, GSC-Klicks/Impressionen
-    und neue Keywords, alle nach Kalendermonat gebündelt. Eigener
-    Endpunkt, gleicher Grund wie /visibility-trend: mehr Datenbank-Last
-    als der normale Topic-Detail-Load, nur bei Bedarf geladen.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        months = _get_monthly_overview_trend(topic_id)
-    except Exception as e:
-        logger.exception("Fehler beim Laden der Monatsübersicht für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Monatsübersicht nicht laden: {e}")
-
-    return {"topic_id": topic_id, "months": months}
-
-
-def _get_monthly_overview_trend(topic_id: str) -> list[dict]:
-    """
-    NEU (15.09.2026): kombiniert drei bisher getrennte Datenquellen zu
-    einer gemeinsamen Monats-Zeitachse:
-    - own_domain_cited/total_runs aus ai_runs (Prompt-Zitierungen)
-    - gsc_clicks/gsc_impressions aus search_rank_snapshots (siehe
-      run_topic.py: save_rank_snapshot, gsc_clicks dort am 15.09.2026
-      ergänzt, vorher fehlte das für diese Grafik)
-    - new_keywords aus search_queries.first_seen_at
-
-    BEWUSST Kalendermonate (YYYY-MM aus dem Zeitstempel), nicht dieselben
-    rollierenden 30-Tage-Fenster wie claude_summary.py: für eine Grafik
-    mit mehreren Monaten Verlauf sind feste Kalendermonate einfacher lesbar
-    und vergleichbar, auch wenn der eigentliche Monatslauf nicht exakt
-    kalenderausgerichtet läuft (der Unterschied ist für eine grobe
-    Trend-Grafik unerheblich).
-    """
-    try:
-        ai_runs = (
-            supabase.table("ai_runs")
-            .select("collected_at, own_domain_cited")
-            .eq("topic_id", topic_id)
-            .in_("source", ["chat_gpt", "gemini"])
-            .execute()
-        ).data
-
-        rank_snapshots = (
-            supabase.table("search_rank_snapshots")
-            .select("gsc_clicks, gsc_impressions, snapshot_at")
-            .eq("topic_id", topic_id)
-            .execute()
-        ).data
-
-        keywords = (
-            supabase.table("search_queries")
-            .select("first_seen_at")
-            .eq("topic_id", topic_id)
-            .in_("source", ["related_keywords", "keyword_ideas", "keyword_suggestions", "paa"])
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden der Monatsübersicht für Topic %s", topic_id)
-        raise
-
-    def _month_key(dt_str: str) -> str:
-        return dt_str[:7]  # "YYYY-MM"
-
-    months: set[str] = set()
-    cited_by_month: dict[str, int] = {}
-    total_by_month: dict[str, int] = {}
-    for r in ai_runs:
-        if not r.get("collected_at"):
-            continue
-        m = _month_key(r["collected_at"])
-        months.add(m)
-        total_by_month[m] = total_by_month.get(m, 0) + 1
-        if r.get("own_domain_cited"):
-            cited_by_month[m] = cited_by_month.get(m, 0) + 1
-
-    clicks_by_month: dict[str, int] = {}
-    impressions_by_month: dict[str, int] = {}
-    for s in rank_snapshots:
-        if not s.get("snapshot_at"):
-            continue
-        m = _month_key(s["snapshot_at"])
-        months.add(m)
-        clicks_by_month[m] = clicks_by_month.get(m, 0) + (s.get("gsc_clicks") or 0)
-        impressions_by_month[m] = impressions_by_month.get(m, 0) + (s.get("gsc_impressions") or 0)
-
-    new_keywords_by_month: dict[str, int] = {}
-    for k in keywords:
-        if not k.get("first_seen_at"):
-            continue
-        m = _month_key(k["first_seen_at"])
-        months.add(m)
-        new_keywords_by_month[m] = new_keywords_by_month.get(m, 0) + 1
-
-    return [
-        {
-            "month": m,
-            "own_domain_cited": cited_by_month.get(m, 0),
-            "total_runs": total_by_month.get(m, 0),
-            "gsc_clicks": clicks_by_month.get(m, 0),
-            "gsc_impressions": impressions_by_month.get(m, 0),
-            "new_keywords": new_keywords_by_month.get(m, 0),
-        }
-        for m in sorted(months)
-    ]
-
-
-def _get_own_visibility_trend(topic_id: str, weeks: int = 26) -> list[dict]:
-    """
-    NEU (13.09.2026): wöchentlicher Verlauf der EIGENEN Sichtbarkeit
-    (own_domain_mentioned/own_domain_cited/own_domain_recommended), analog
-    zu _get_competitor_citation_trend, aber für die eigene Domain und ohne
-    den Umweg über ai_sources (own_domain_* stehen direkt auf ai_runs).
-    Grundlage für die Zeitleiste in der Übersicht (siehe Chat vom
-    13.09.2026: "wie sich Zitierungen, Nennungen ... im Laufe der Zeit
-    geändert haben").
-    """
-    cutoff = (datetime.now(timezone.utc) - timedelta(weeks=weeks)).isoformat()
-    try:
-        runs = (
-            supabase.table("ai_runs")
-            .select("collected_at, source, own_domain_mentioned, own_domain_cited, own_domain_recommended")
-            .eq("topic_id", topic_id)
-            .in_("source", ["chat_gpt", "gemini"])
-            .gte("collected_at", cutoff)
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden des Sichtbarkeits-Verlaufs für Topic %s", topic_id)
-        raise
-
-    # week -> {mentioned, cited, recommended, total}
-    buckets: dict[str, dict] = {}
-    for r in runs:
-        if not r.get("collected_at"):
-            continue
-        week = _week_start_label(r["collected_at"])
-        bucket = buckets.setdefault(week, {"mentioned": 0, "cited": 0, "recommended": 0, "total": 0})
-        bucket["total"] += 1
-        if r.get("own_domain_mentioned"):
-            bucket["mentioned"] += 1
-        if r.get("own_domain_cited"):
-            bucket["cited"] += 1
-        if r.get("own_domain_recommended") is True:
-            bucket["recommended"] += 1
-
-    return [
-        {"week": week, **counts}
-        for week, counts in sorted(buckets.items())
-    ]
-
-
-@app.get("/topics/{topic_id}/visibility-trend")
-def get_visibility_trend_endpoint(
-    topic_id: str,
-    weeks: Literal[4, 12, 26] = 26,
-    member_id: str = Depends(require_member),
-):
-    """
-    Eigener Endpunkt aus demselben Grund wie /competitor-citations: mehr
-    Datenbank-Last als der normale Topic-Detail-Load, deshalb nur bei
-    Bedarf geladen (Übersicht-Tab), nicht Teil von GET /topics/{id}.
-
-    GEÄNDERT (25.09.2026, Kundenwunsch): weeks jetzt als Query-Parameter,
-    analog zu /competitor-citations -- selbes Preset-Set (4/12/26 Wochen)
-    für einen konsistenten Zeitraum-Picker über beide Grafiken hinweg.
-    Default bewusst weiterhin 26 (nicht 12 wie bei /competitor-citations),
-    identisch zum bisherigen Default von _get_own_visibility_trend, damit
-    sich am aktuellen Verhalten ohne den neuen Parameter nichts ändert.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        weekly_data = _get_own_visibility_trend(topic_id, weeks=weeks)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Konnte Sichtbarkeits-Verlauf nicht laden: {e}")
-
-    return {"topic_id": topic_id, "weeks": weekly_data}
-
-
-def _get_week_detail(topic_id: str, week: str) -> dict:
-    """
-    NEU (13.09.2026): Detailauflösung für EINE Woche, angestoßen durch
-    Klick auf einen Punkt/Marker im Übersicht-Chart (siehe script.js:
-    showWeekDetail). Anders als /visibility-trend (nur Wochen-Summen)
-    liefert das hier pro Prompt und pro Keyword den Stand DIESER Woche
-    UND den jeweils letzten Stand DAVOR, damit das Frontend direkt
-    "verbessert/verschlechtert seit letzter Woche" anzeigen kann, ohne
-    selbst die komplette Historie laden zu müssen.
-
-    week: Montag-der-Woche als ISO-Datum (z.B. "2026-08-10"), exakt das
-    Format, das _week_start_label/_get_own_visibility_trend produzieren.
-
-    Bewusst je zwei Abfragen (Läufe/Snapshots DIESER Woche, dann EINE
-    weitere Abfrage für "davor" über alle betroffenen prompt_ids/Keywords
-    zusammen, nicht pro Prompt/Keyword einzeln), um kein N+1 zu bauen.
-    """
-    try:
-        week_start = datetime.fromisoformat(week).replace(tzinfo=timezone.utc)
-    except ValueError:
-        raise ValueError(f"Ungültiges Wochenformat: {week}")
-    week_end = week_start + timedelta(days=7)
-
-    try:
-        runs = (
-            supabase.table("ai_runs")
-            .select("id, prompt_id, source, collected_at, own_domain_cited, own_domain_mentioned, "
-                    "own_domain_recommended, prompts(prompt_text, messymiddle_phase)")
-            .eq("topic_id", topic_id)
-            .in_("source", ["chat_gpt", "gemini"])
-            .gte("collected_at", week_start.isoformat())
-            .lt("collected_at", week_end.isoformat())
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Fehler beim Laden der Läufe für Wochendetail (topic_id=%s, week=%s)", topic_id, week)
-        raise
-
-    prompt_ids = list({r["prompt_id"] for r in runs if r.get("prompt_id")})
-    # GEÄNDERT (13.09.2026): speichert jetzt die ganze Vorlauf-Zeile (nicht
-    # nur own_domain_cited), damit das Frontend auch own_domain_mentioned
-    # und vor allem collected_at anzeigen kann. Ohne das Datum war "davor
-    # zitiert" mehrdeutig, wenn der letzte Lauf für einen Prompt schon
-    # Wochen zurücklag (z.B. nach einer Pause), siehe Chat vom 13.09.2026.
-    previous_by_key: dict[tuple, dict] = {}
-    if prompt_ids:
-        try:
-            previous_runs = (
-                supabase.table("ai_runs")
-                .select("prompt_id, source, own_domain_cited, own_domain_mentioned, collected_at")
-                .eq("topic_id", topic_id)
-                .in_("prompt_id", prompt_ids)
-                .in_("source", ["chat_gpt", "gemini"])
-                .lt("collected_at", week_start.isoformat())
-                .order("collected_at", desc=True)
-                .execute()
-            ).data
-        except Exception:
-            logger.exception("Fehler beim Laden der Vorwochen-Läufe für Wochendetail (topic_id=%s)", topic_id)
-            previous_runs = []
-        for pr in previous_runs:
-            key = (pr["prompt_id"], pr["source"])
-            if key not in previous_by_key:  # Liste ist DESC, erster Treffer = neuester
-                previous_by_key[key] = pr
-
-    prompts_detail = []
-    for r in runs:
-        prompt = r.get("prompts") or {}
-        previous = previous_by_key.get((r.get("prompt_id"), r.get("source")))
-        prompts_detail.append({
-            "prompt_text": prompt.get("prompt_text"),
-            "phase": prompt.get("messymiddle_phase"),
-            "engine": r.get("source"),
-            "cited": r.get("own_domain_cited"),
-            "mentioned": r.get("own_domain_mentioned"),
-            "recommended": r.get("own_domain_recommended"),
-            "previous_cited": (previous or {}).get("own_domain_cited"),
-            "previous_mentioned": (previous or {}).get("own_domain_mentioned"),
-            "previous_collected_at": (previous or {}).get("collected_at"),
-        })
-
-    try:
-        keyword_snapshots = (
-            supabase.table("search_rank_snapshots")
-            .select("keyword, organic_rank, gsc_position, gsc_impressions, snapshot_at")
-            .eq("topic_id", topic_id)
-            .gte("snapshot_at", week_start.isoformat())
-            .lt("snapshot_at", week_end.isoformat())
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Fehler beim Laden der Keyword-Snapshots für Wochendetail (topic_id=%s)", topic_id)
-        raise
-
-    keyword_names = list({s["keyword"] for s in keyword_snapshots})
-    previous_by_keyword: dict[str, dict] = {}
-    if keyword_names:
-        try:
-            previous_snapshots = (
-                supabase.table("search_rank_snapshots")
-                .select("keyword, organic_rank, gsc_position, snapshot_at")
-                .eq("topic_id", topic_id)
-                .in_("keyword", keyword_names)
-                .lt("snapshot_at", week_start.isoformat())
-                .order("snapshot_at", desc=True)
-                .execute()
-            ).data
-        except Exception:
-            logger.exception("Fehler beim Laden der Vorwochen-Snapshots für Wochendetail (topic_id=%s)", topic_id)
-            previous_snapshots = []
-        for ps in previous_snapshots:
-            if ps["keyword"] not in previous_by_keyword:  # Liste ist DESC, erster Treffer = neuester
-                previous_by_keyword[ps["keyword"]] = ps
-
-    keywords_detail = []
-    for s in keyword_snapshots:
-        previous = previous_by_keyword.get(s["keyword"])
-        keywords_detail.append({
-            "keyword": s["keyword"],
-            "organic_rank": s.get("organic_rank"),
-            "gsc_position": s.get("gsc_position"),
-            "gsc_impressions": s.get("gsc_impressions"),
-            "previous_organic_rank": (previous or {}).get("organic_rank"),
-            "previous_gsc_position": (previous or {}).get("gsc_position"),
-            "previous_snapshot_at": (previous or {}).get("snapshot_at"),
-        })
-
-    try:
-        changelog = (
-            supabase.table("topic_changelog")
-            .select("entry_text, author_name, created_at")
-            .eq("topic_id", topic_id)
-            .gte("created_at", week_start.isoformat())
-            .lt("created_at", week_end.isoformat())
-            .execute()
-        ).data
-    except Exception:
-        logger.exception("Fehler beim Laden der Changelog-Einträge für Wochendetail (topic_id=%s)", topic_id)
-        raise
-
-    return {"week": week, "prompts": prompts_detail, "keywords": keywords_detail, "changelog": changelog}
-
-
-@app.get("/topics/{topic_id}/week-detail")
-def get_week_detail_endpoint(topic_id: str, week: str, member_id: str = Depends(require_member)):
-    """
-    Eigener Endpunkt, nur bei Klick auf einen Chart-Punkt/-Marker
-    abgerufen (siehe script.js: showWeekDetail), nicht Teil der übrigen
-    Lazy-Load-Endpunkte.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        detail = _get_week_detail(topic_id, week)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Konnte Wochendetail nicht laden: {e}")
-
-    return detail
-
-
-def _get_rank_history(topic_id: str, keyword: str | None = None, weeks: int = 26) -> list[dict]:
-    """
-    NEU (13.09.2026): liest search_rank_snapshots (siehe run_topic.py:
-    save_rank_snapshot). Ohne keyword: alle historisierten Keywords
-    gruppiert nach Woche (fürs Übersicht-Chart, i.d.R. dominiert vom
-    Seed-Keyword, da das aktuell einzige mit organic_rank ist). Mit
-    keyword: nur dessen Verlauf (fürs Aufklappen eines einzelnen
-    Keywords im Keywords-Tab).
-    """
-    cutoff = (datetime.now(timezone.utc) - timedelta(weeks=weeks)).isoformat()
-    try:
-        query = (
-            supabase.table("search_rank_snapshots")
-            # GEÄNDERT (15.09.2026): gsc_clicks ergänzt — fehlte hier, obwohl
-            # save_rank_snapshot (run_topic.py) es längst mit speichert und
-            # das Frontend (renderGscRowExpansion) es für die
-            # GSC-Verlaufsgrafik längst erwartet. War bisher immer
-            # undefined/leer angekommen.
-            .select("keyword, organic_rank, gsc_impressions, gsc_clicks, gsc_position, snapshot_at")
-            .eq("topic_id", topic_id)
-            .gte("snapshot_at", cutoff)
-            .order("snapshot_at")
-        )
-        if keyword:
-            query = query.eq("keyword", keyword)
-        return query.execute().data or []
-    except Exception:
-        logger.exception("Supabase-Fehler beim Laden der Rank-Historie für Topic %s", topic_id)
-        raise
-
-
-def _compute_changelog_keyword_deltas(topic_id: str, changelog: list[dict], search_queries: list[dict]) -> dict:
-    """
-    NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026) — pro
-    Änderungsprotokoll-Eintrag UND pro damit verknüpftem Keyword ein
-    einfaches Auf/Ab-Signal: hat sich die Position dieses Keywords seit
-    dem Eintrag verbessert oder verschlechtert? Bewusst KEINE Einschränkung
-    auf ein Keyword pro Eintrag (siehe Chat-Verlauf 15.09.2026) — ein
-    Eintrag kann mehrere verknüpfte Keywords haben, jedes bekommt sein
-    eigenes Signal.
-
-    Vergleicht den Rank-Snapshot kurz VOR/AM Eintrag (Baseline) mit dem
-    aktuellsten verfügbaren Snapshot (aktueller Stand). Niedrigere Position
-    ist besser (sowohl organic_rank als auch gsc_position), organic_rank
-    hat Vorrang, falls beide vorliegen. Gibt {entry_id: {keyword_id:
-    "up"|"down"|"neutral"}} zurück — ein Keyword ohne ausreichende
-    Snapshot-Historie (weniger als 2 Punkte insgesamt, oder Baseline ==
-    aktueller Stand) taucht in der inneren Map einfach nicht auf, kein
-    erratener Wert.
-    """
-    keyword_text_by_id = {q["id"]: q["keyword"] for q in search_queries}
-    has_any_link = any(entry.get("linked_search_query_ids") for entry in changelog)
-    if not has_any_link:
-        return {}
-
-    try:
-        snapshots = _get_rank_history(topic_id)
-    except Exception:
-        logger.exception("Rank-Historie für Änderungs-Deltas konnte nicht geladen werden (topic_id=%s)", topic_id)
-        return {}
-
-    snapshots_by_keyword: dict[str, list[dict]] = {}
-    for s in snapshots:
-        snapshots_by_keyword.setdefault(s["keyword"], []).append(s)
-    for rows in snapshots_by_keyword.values():
-        rows.sort(key=lambda r: r["snapshot_at"])
-
-    def _rank_value(row: dict):
-        # GEÄNDERT (20.09.2026): gsc_position kommt von Supabase als String
-        # ("25.00", numeric(5,2)-Spalte), organic_rank als int. Unkonvertiert
-        # führte das je nach Snapshot-Mix entweder zu TypeError (int vs.
-        # str) oder zu falschen "up"/"down"-Signalen (String-Vergleich:
-        # "9.00" > "25.00" ist lexikografisch True, numerisch aber falsch).
-        # to_number() (keyword_status.py) macht beide Seiten vergleichbar.
-        organic = to_number(row.get("organic_rank"))
-        return organic if organic is not None else to_number(row.get("gsc_position"))
-
-    def _parse(dt_str: str) -> datetime:
-        return datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-
-    result: dict[str, dict[str, str]] = {}
-    for entry in changelog:
-        linked_ids = entry.get("linked_search_query_ids") or []
-        entry_created_at = entry.get("created_at")
-        if not linked_ids or not entry_created_at:
-            continue
-        entry_dt = _parse(entry_created_at)
-        entry_map: dict[str, str] = {}
-        for kw_id in linked_ids:
-            keyword_text = keyword_text_by_id.get(kw_id)
-            if not keyword_text:
-                continue
-            rows = snapshots_by_keyword.get(keyword_text) or []
-            if len(rows) < 2:
-                continue
-            baseline_rows = [r for r in rows if _parse(r["snapshot_at"]) <= entry_dt]
-            baseline = baseline_rows[-1] if baseline_rows else rows[0]
-            current = rows[-1]
-            if baseline is current:
-                continue
-            baseline_value = _rank_value(baseline)
-            current_value = _rank_value(current)
-            if baseline_value is None or current_value is None:
-                continue
-            if current_value < baseline_value:
-                entry_map[kw_id] = "up"
-            elif current_value > baseline_value:
-                entry_map[kw_id] = "down"
-            else:
-                entry_map[kw_id] = "neutral"
-        if entry_map:
-            result[entry["id"]] = entry_map
-    return result
-
-
-@app.get("/topics/{topic_id}/rank-history")
-def get_rank_history_endpoint(topic_id: str, keyword: str | None = None, member_id: str = Depends(require_member)):
-    """
-    Eigener Endpunkt, gleicher Grund wie /visibility-trend/-competitor-
-    citations: nur bei Bedarf geladen. Optionaler ?keyword=-Parameter für
-    den Einzel-Keyword-Verlauf im aufgeklappten Keywords-Tab.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        snapshots = _get_rank_history(topic_id, keyword)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Konnte Rank-Historie nicht laden: {e}")
-
-    return {"topic_id": topic_id, "snapshots": snapshots}
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# ACHTUNG (gefunden beim Zusammenbauen 14.09.2026, nicht Teil des von mir
-# angefragten Themas): Diese Funktion hatte in eurer eingefügten Version
-# KEINEN @app.-Decorator über sich (direkt nach dem return von
-# get_rank_history_endpoint, ohne Leerzeile/Dekorator). Das ist gültiges
-# Python, aber FastAPI registriert die Route dann NICHT – der Endpoint war
-# schlicht nie erreichbar. Ich habe hier einen Decorator ergänzt, ABER die
-# Route (POST /topics/{topic_id}/generate-prompts) ist geraten, angelehnt
-# an eure Namenskonvention (z.B. /topics/{topic_id}/retry). Bitte prüfen,
-# ob euer Frontend an genau dieser URL etwas aufruft – falls nicht, den
-# Pfad unten entsprechend anpassen.
-# ══════════════════════════════════════════════════════════════════════════
-@app.post("/topics/{topic_id}/generate-prompts")
-def generate_prompts_endpoint(topic_id: str, member_id: str = Depends(require_member)):
-    """
-    Manueller Trigger für Stable-Core/Discovery-Prompt-Generierung. Läuft
-    normalerweise automatisch bei der Topic-Erstellung; dieser Endpunkt ist
-    für den Fall gedacht, dass ihr neue Discovery-Prompt-Kandidaten sehen
-    wollt, ohne ein neues Topic anzulegen. Bewusst NICHT Teil des
-    monatlichen Crons, damit der Stable Core nicht unkontrolliert wächst
-    (siehe Kappung in prompt_discovery.py).
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        result = generate_prompts_for_topic(topic_id)
-    except Exception as e:
-        logger.exception("Fehler bei Prompt-Generierung für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Prompt-Generierung fehlgeschlagen: {e}")
-    return {"status": "ok", "topic_id": topic_id, **result}
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Changelog: der Kunde dokumentiert selbst, wann er was am eigenen Content
-# geändert hat (z.B. "Landingpage-Text am 01.09. überarbeitet"). NEU
-# (13.09.2026). Rein informativ, keine automatische Verknüpfung zu
-# Sichtbarkeits-Änderungen, das müsste der Kunde selbst im Sichtbarkeits-
-# Verlauf danebenlegen (siehe /visibility-trend, gleiche Zeitachse: Woche).
-#
-# GEÄNDERT (13.09.2026): Löschen ist SOFT-DELETE (deleted_at/deleted_by_name
-# gesetzt, Zeile bleibt in der DB), damit nachvollziehbar bleibt, wer wann
-# was gelöscht hat, und damit ein Eintrag innerhalb der Aufbewahrungsfrist
-# (CHANGELOG_DELETED_RETENTION_DAYS) wiederhergestellt werden kann. Nach
-# Ablauf der Frist wird nichts automatisch hart gelöscht, die Zeile bleibt
-# bestehen, verschwindet nur aus der "Gelöschte Einträge"-Ansicht. Wollt
-# ihr echtes Hart-Löschen nach Ablauf der Frist, bräuchte es einen
-# zusätzlichen Cron-Job, der ist hier bewusst nicht gebaut.
-# ══════════════════════════════════════════════════════════════════════════
-
-CHANGELOG_DELETED_RETENTION_DAYS = 90
-
-
-def _resolve_member_user(member_id: str) -> dict:
-    """
-    GEÄNDERT (13.09.2026): liefert jetzt id UND firstname (vorher nur
-    firstname), damit Aufrufer sowohl den lesbaren Namen (author_name/
-    deleted_by_name, Text) als auch den echten Fremdschlüssel
-    (author_member_id/deleted_by_member_id, siehe topic_changelog_schema.sql)
-    setzen können. Gibt bei Fehlschlag {} zurück (nicht None), damit
-    Aufrufer immer .get() nutzen können, ohne extra None-Check.
-    """
-    try:
-        user = (
-            supabase.table("users")
-            .select("id, firstname")
-            .eq("memberstack_id", member_id)
-            .is_("deleted_at", "null")
-            .single()
-            .execute()
-        ).data
-        return user or {}
-    except Exception:
-        logger.warning("Konnte User-Datensatz für member_id=%s nicht auflösen", member_id, exc_info=True)
-        return {}
-
-
-@app.post("/topics/{topic_id}/changelog")
-def create_changelog_entry_endpoint(
-    topic_id: str, payload: CreateChangelogEntryRequest, member_id: str = Depends(require_member),
-):
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    entry_text = payload.entry_text.strip()
-    if not entry_text:
-        raise HTTPException(status_code=400, detail="Eintrag darf nicht leer sein")
-
-    # NEU (14.09.2026): eingehende Keyword-/Prompt-IDs LIVE gegen dieses
-    # Topic validieren, statt sie blind zu übernehmen — sonst könnte ein
-    # Client (versehentlich oder absichtlich) eine ID aus einem fremden
-    # Topic verlinken. Ungültige IDs werden still verworfen (kein Fehler),
-    # analog zum Umgang mit einer ungültigen `priority` bei content_gaps.
-    linked_search_query_ids = []
-    if payload.linked_search_query_ids:
-        try:
-            valid_queries = (
-                supabase.table("search_queries")
-                .select("id")
-                .eq("topic_id", topic_id)
-                .in_("id", payload.linked_search_query_ids)
-                .execute()
-            ).data
-            linked_search_query_ids = [q["id"] for q in valid_queries]
-        except Exception:
-            logger.exception("Fehler beim Validieren der verknüpften Keywords für Topic %s", topic_id)
-
-    linked_prompt_ids = []
-    if payload.linked_prompt_ids:
-        try:
-            valid_prompts = (
-                supabase.table("prompts")
-                .select("id")
-                .eq("topic_id", topic_id)
-                .in_("id", payload.linked_prompt_ids)
-                .execute()
-            ).data
-            linked_prompt_ids = [p["id"] for p in valid_prompts]
-        except Exception:
-            logger.exception("Fehler beim Validieren der verknüpften Prompts für Topic %s", topic_id)
-
-    # GEÄNDERT (13.09.2026): speichert jetzt zusätzlich author_member_id
-    # (echter Fremdschlüssel, siehe topic_changelog_schema.sql), damit ein
-    # Konto-Löschen (einzelnes Mitglied, Team bleibt bestehen) diesen
-    # Eintrag automatisch per ON DELETE CASCADE mitentfernt. author_name
-    # bleibt als lesbare Beschriftung parallel bestehen.
-    author = _resolve_member_user(member_id)
-
-    try:
-        inserted = (
-            supabase.table("topic_changelog")
-            .insert({
-                "topic_id": topic_id,
-                "entry_text": entry_text,
-                "author_name": author.get("firstname"),
-                "author_member_id": author.get("id"),
-                "linked_search_query_ids": linked_search_query_ids,
-                "linked_prompt_ids": linked_prompt_ids,
-            })
-            .execute()
-        )
-    except Exception as e:
-        logger.exception("Fehler beim Speichern des Changelog-Eintrags für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Eintrag konnte nicht gespeichert werden: {e}")
-
-    return {"status": "ok", "entry": inserted.data[0]}
-
-
-def _get_changelog_entry_for_topic(topic_id: str, entry_id: str) -> dict:
-    try:
-        entry = (
-            supabase.table("topic_changelog")
-            .select("id, topic_id")
-            .eq("id", entry_id)
-            .eq("topic_id", topic_id)
-            .single()
-            .execute()
-        ).data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
-    if not entry:
-        raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
-    return entry
-
-
-@app.delete("/topics/{topic_id}/changelog/{entry_id}")
-def delete_changelog_entry_endpoint(topic_id: str, entry_id: str, member_id: str = Depends(require_member)):
-    """
-    Soft-Delete: setzt deleted_at/deleted_by_name, entfernt die Zeile NICHT
-    physisch. Wer gelöscht hat, bleibt damit nachvollziehbar (siehe
-    Modul-Kommentar oben).
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-    _get_changelog_entry_for_topic(topic_id, entry_id)
-
-    # GEÄNDERT (13.09.2026): speichert zusätzlich deleted_by_member_id
-    # (ON DELETE SET NULL, siehe topic_changelog_schema.sql und die
-    # Begründung dort, warum das anders behandelt wird als author_member_id).
-    deleter = _resolve_member_user(member_id)
-
-    try:
-        supabase.table("topic_changelog").update({
-            "deleted_at": datetime.now(timezone.utc).isoformat(),
-            "deleted_by_name": deleter.get("firstname"),
-            "deleted_by_member_id": deleter.get("id"),
-        }).eq("id", entry_id).eq("topic_id", topic_id).execute()
-    except Exception as e:
-        logger.exception("Fehler beim Löschen des Changelog-Eintrags %s (Topic %s)", entry_id, topic_id)
-        raise HTTPException(status_code=500, detail=f"Eintrag konnte nicht gelöscht werden: {e}")
-
-    return {"status": "ok", "entry_id": entry_id}
-
-
-@app.post("/topics/{topic_id}/changelog/{entry_id}/restore")
-def restore_changelog_entry_endpoint(topic_id: str, entry_id: str, member_id: str = Depends(require_member)):
-    """Macht einen Soft-Delete rückgängig (innerhalb der Aufbewahrungsfrist), siehe Modul-Kommentar oben."""
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-    _get_changelog_entry_for_topic(topic_id, entry_id)
-
-    try:
-        supabase.table("topic_changelog").update({
-            "deleted_at": None,
-            "deleted_by_name": None,
-            "deleted_by_member_id": None,
-        }).eq("id", entry_id).eq("topic_id", topic_id).execute()
-    except Exception as e:
-        logger.exception("Fehler beim Wiederherstellen des Changelog-Eintrags %s (Topic %s)", entry_id, topic_id)
-        raise HTTPException(status_code=500, detail=f"Eintrag konnte nicht wiederhergestellt werden: {e}")
-
-    return {"status": "ok", "entry_id": entry_id}
-
-
-@app.get("/topics/{topic_id}/changelog/deleted")
-def get_deleted_changelog_endpoint(topic_id: str, member_id: str = Depends(require_member)):
-    """
-    "Archiv"-Ansicht: gelöschte Einträge der letzten
-    CHANGELOG_DELETED_RETENTION_DAYS Tage, mit Autor UND Löscher. Eigener
-    Endpunkt, nur bei Bedarf geladen (z.B. Klick auf "Gelöschte Einträge"),
-    nicht Teil der normalen Changelog-Liste.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=CHANGELOG_DELETED_RETENTION_DAYS)).isoformat()
-    try:
-        entries = (
-            supabase.table("topic_changelog")
-            .select("id, entry_text, author_name, deleted_by_name, deleted_at, created_at, linked_search_query_ids, linked_prompt_ids")
-            .eq("topic_id", topic_id)
-            .not_.is_("deleted_at", "null")
-            .gte("deleted_at", cutoff)
-            .order("deleted_at", desc=True)
-            .execute()
-        ).data
-    except Exception as e:
-        logger.exception("Fehler beim Laden der gelöschten Changelog-Einträge für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Konnte gelöschte Einträge nicht laden: {e}")
-
-    return {"topic_id": topic_id, "entries": entries, "retention_days": CHANGELOG_DELETED_RETENTION_DAYS}
-
-
-def _get_changelog_for_topic(topic_id: str) -> list[dict]:
-    """
-    GEÄNDERT (13.09.2026): aus get_changelog_endpoint herausgezogen, damit
-    get_topic_detail dieselbe Query nutzen kann. Changelog-Einträge sind
-    ein paar Textzeilen pro Topic, keine große Historie wie ai_runs/
-    ai_sources, daher NICHT mehr per Lazy-Load in main.py behandeln,
-    sondern direkt Teil von GET /topics/{id} (siehe dort). Der
-    eigenständige GET-Endpunkt unten bleibt trotzdem bestehen, für
-    spätere Anwendungsfälle wie eine eigene Changelog-Ansicht.
-
-    GEÄNDERT (13.09.2026), zweite Änderung: filtert jetzt weiche gelöschte
-    Einträge raus (deleted_at gesetzt), siehe delete_changelog_entry_endpoint.
-    Die gelöschten selbst stehen in get_deleted_changelog_endpoint.
-    """
     return (
-        supabase.table("topic_changelog")
-        .select("id, entry_text, author_name, created_at, linked_search_query_ids, linked_prompt_ids")
-        .eq("topic_id", topic_id)
-        .is_("deleted_at", "null")
-        .order("created_at", desc=True)
-        .execute()
-    ).data
-
-
-@app.get("/topics/{topic_id}/changelog")
-def get_changelog_endpoint(topic_id: str, member_id: str = Depends(require_member)):
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        entries = _get_changelog_for_topic(topic_id)
-    except Exception as e:
-        logger.exception("Fehler beim Laden des Changelogs für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Changelog nicht laden: {e}")
-
-    return {"topic_id": topic_id, "entries": entries}
-
-
-# ── Content Changes (Dashboard-Marker) ────────────────────────────────────────
-
-def _clean_uuid_list(values: list[str]) -> list[str]:
-    """Behält nur gültige UUIDs, ohne Duplikate. Verhindert einen 500er durch eine kaputte ID im Array."""
-    import uuid
-    cleaned: list[str] = []
-    for value in values or []:
-        try:
-            normalized = str(uuid.UUID(str(value)))
-        except ValueError:
-            continue
-        if normalized not in cleaned:
-            cleaned.append(normalized)
-    return cleaned
-
-
-@app.post("/topics/{topic_id}/content-changes")
-def create_content_change_endpoint(
-    topic_id: str,
-    payload: CreateContentChangeRequest,
-    member_id: str = Depends(require_member),
-):
-    """
-    NEU (16.09.2026): Nutzer trägt eine Content-Änderung ein (neue Seite,
-    Überarbeitung, Kampagne, Sonstiges). Diese erscheint später als vertikaler
-    Marker in den Trend-Charts des Dashboards, damit man Korrelationen zwischen
-    Inhaltsänderungen und Visibility-Verläufen erkennen kann.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("team_id")
-            .eq("id", topic_id)
-            .single()
-            .execute()
-            .data
-        )
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    valid_types = {"neue_seite", "ueberarbeitung", "kampagne", "sonstiges"}
-    if payload.change_type not in valid_types:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Ungültiger change_type. Erlaubt: {', '.join(sorted(valid_types))}",
-        )
-    description = payload.description.strip()
-    if not description:
-        raise HTTPException(status_code=400, detail="description darf nicht leer sein")
-
-    try:
-        inserted = (
-            supabase.table("content_changes")
-            .insert({
-                "topic_id": topic_id,
-                "changed_at": payload.changed_at,
-                "change_type": payload.change_type,
-                "description": description,
-                "url": payload.url or None,
-                "linked_search_query_ids": _clean_uuid_list(payload.linked_search_query_ids),
-                "linked_prompt_ids": _clean_uuid_list(payload.linked_prompt_ids),
-            })
-            .execute()
-        ).data
-    except Exception as e:
-        logger.exception("Fehler beim Speichern der Content-Änderung für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Content-Änderung nicht speichern: {e}")
-
-    return {"ok": True, "change": inserted[0] if inserted else None}
-
-
-@app.get("/topics/{topic_id}/content-changes")
-def get_content_changes_endpoint(
-    topic_id: str,
-    member_id: str = Depends(require_member),
-):
-    """
-    NEU (16.09.2026): Gibt alle eingetragenen Content-Änderungen für dieses
-    Topic zurück, chronologisch sortiert. Wird vom Dashboard-Frontend genutzt,
-    um Marker in Trend-Charts zu rendern.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("team_id")
-            .eq("id", topic_id)
-            .single()
-            .execute()
-            .data
-        )
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        changes = (
-            supabase.table("content_changes")
-            .select("id, changed_at, change_type, description, url, created_at, linked_search_query_ids, linked_prompt_ids")
-            .eq("topic_id", topic_id)
-            .order("changed_at", desc=False)
-            .execute()
-        ).data
-    except Exception as e:
-        logger.exception("Fehler beim Laden der Content-Änderungen für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Content-Änderungen nicht laden: {e}")
-
-    return {"topic_id": topic_id, "changes": changes}
-
-
-@app.get("/topics/{topic_id}/dashboard-data")
-def get_topic_dashboard_data_endpoint(
-    topic_id: str,
-    weeks: int = 12,
-    member_id: str = Depends(require_member),
-):
-    """
-    NEU (16.09.2026): Aggregierter Dashboard-Endpoint — liefert alle Kennzahlen
-    für das Messy-Middle-Dashboard in einem einzigen API-Call:
-      - Phase Visibility Scores (0–100) pro Phase und Channel
-      - Wöchentliche Zeitreihen (Sparklines, Trend-Charts)
-      - Share of Voice pro Phase (Wettbewerber)
-      - Google Organic Score
-      - Content Gaps und Opportunities
-      - Content Changes (für Marker in Charts)
-
-    `weeks` steuert den Betrachtungszeitraum (Standard: 12 Wochen).
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("team_id")
-            .eq("id", topic_id)
-            .single()
-            .execute()
-            .data
-        )
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        data = get_dashboard_data(topic_id, weeks=max(4, min(52, weeks)))
-    except Exception as e:
-        logger.exception("Fehler beim Aggregieren der Dashboard-Daten für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Dashboard-Daten nicht aggregieren: {e}")
-
-    # NEU (20.09.2026): siehe get_topic_detail, Bereinigung interner Feldnamen.
-    return sanitize_user_payload(data)
-
-
-@app.post("/topics/{topic_id}/retry")
-def retry_topic_endpoint(topic_id: str, background_tasks: BackgroundTasks, member_id: str = Depends(require_member)):
-    """
-    NEU: Für Topics mit status='error' (der komplette Erstlauf ist
-    fehlgeschlagen, z.B. weil prompt_discovery.py von Claude kein valides
-    JSON zurückbekam, siehe Chat-Verlauf vom 12.09.). Stößt collect_topic_data
-    noch einmal komplett neu an, nicht nur die Prompt-Generierung.
-
-    Sicher, weil die Datensammlung darin bereits idempotent ist (Keywords/
-    PAA werden per find-or-create/upsert behandelt, siehe Logs "20 neue,
-    0 aktualisierte"), schon gespeichertes Material wird also nicht
-    doppelt eingekauft oder dupliziert, nur das, was beim letzten Versuch
-    fehlte, wird ergänzt.
-
-    GEÄNDERT (14.09.2026): erlaubt jetzt ZUSÄTZLICH status='collecting',
-    wenn collecting_started_at länger als STUCK_COLLECTING_THRESHOLD_MINUTES
-    zurückliegt — deckt den Fall ab, dass der Hintergrund-Task mitten im
-    Lauf abgewürgt wurde (z.B. Server-Neustart/Absturz während des
-    Erstlaufs, siehe Chat-Verlauf 14.09.2026: ein Thema blieb dadurch
-    dauerhaft in 'collecting' hängen, ohne dass je status='error' gesetzt
-    wurde — das passiert nur bei einem sauber abgefangenen Fehler, nicht
-    bei einem hart getöteten Prozess). Ein GERADE ERST gestartetes
-    'collecting' (innerhalb der Schwelle) bleibt weiterhin blockiert, da
-    läuft mit hoher Wahrscheinlichkeit noch ein echter Hintergrund-Task.
-
-    NICHT für status='active' gedacht (dafür gibt's die regulären
-    Cron-Läufe).
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("team_id, status, seed_keyword, own_domain, language_code, location_name, collecting_started_at, created_at")
-            .eq("id", topic_id).single().execute()
-        ).data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    if topic["status"] in ("collecting", "analyzing"):
-        stuck_minutes = _stuck_collecting_minutes(topic)
-        if stuck_minutes < STUCK_COLLECTING_THRESHOLD_MINUTES:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Läuft seit {int(stuck_minutes)} Minute(n), noch innerhalb der erwarteten Dauer. "
-                    f"Erst ab {STUCK_COLLECTING_THRESHOLD_MINUTES} Minuten als hängengeblieben behandelbar."
-                ),
-            )
-        logger.warning(
-            "Topic %s hing %d Minute(n) in 'collecting', wird über /retry manuell neu gestartet",
-            topic_id, int(stuck_minutes),
-        )
-    elif topic["status"] != "error":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Retry nur für Topics mit Status 'error' oder hängengebliebenem 'collecting' möglich (aktuell: '{topic['status']}').",
-        )
-
-    # GEÄNDERT (14.09.2026): kein Auflösen mehr auf den Team-Owner, siehe
-    # create_topic_endpoint oben für die Begründung. team_id ist hier über
-    # _resolve_team_id ohnehin schon bekannt.
-    supabase.table("ai_visibility_topics").update({
-        "status": "collecting",
-        "collecting_started_at": datetime.now(timezone.utc).isoformat(),
-    }).eq("id", topic_id).execute()
-
-    background_tasks.add_task(
-        _collect_and_analyze_background, topic_id, topic["seed_keyword"], topic["own_domain"],
-        topic["language_code"], topic["location_name"], [], team_id,
-    )
-
-    return {"status": "collecting", "topic_id": topic_id}
-
-
-class RetryStepRequest(BaseModel):
-    step: str
-
-
-@app.post("/topics/{topic_id}/retry-step")
-def retry_step_endpoint(
-    topic_id: str,
-    payload: RetryStepRequest,
-    background_tasks: BackgroundTasks,
-    member_id: str = Depends(require_member),
-):
-    """
-    NEU (20.09.2026): Kundenwunsch (siehe Chat-Verlauf 20.09.2026). Startet
-    GENAU EINEN Analyse-Schritt neu (z.B. "summary", "action_plan",
-    "gap_analysis"), nicht den gesamten Lauf. Gedacht für Felder, die beim
-    regulären Lauf nicht geliefert wurden. Der Status pro Schritt kommt als
-    step_status aus GET /topics/{id}, das Frontend zeigt den Button nur für
-    Einträge mit state "failed" oder "missing" und blendet ihn aus, sobald der
-    Schritt erfolgreich lief.
-
-    Schutzregeln (der Endpunkt löst kostenpflichtige Claude-/DataForSEO-Aufrufe
-    aus):
-    - nur für Schritte, die im Registry als user_retryable markiert sind,
-    - nur wenn der Schritt tatsächlich fehlgeschlagen ist oder sein Ergebnis
-      fehlt, ein Klick auf ein intaktes Feld startet nichts,
-    - nur für aktive Topics und nur, wenn nicht schon ein Schritt läuft.
-    Läuft als Hintergrund-Task und antwortet sofort mit 202, das Frontend fragt
-    GET /topics/{id} ab, bis der Schritt nicht mehr "running" ist.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("id, team_id, status, latest_summary")
-            .eq("id", topic_id).single().execute()
-        ).data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    definition = STEPS.get(payload.step)
-    if not definition or not definition.user_retryable:
-        raise HTTPException(status_code=400, detail="Dieser Schritt kann nicht einzeln gestartet werden.")
-    if topic["status"] != "active":
-        raise HTTPException(
-            status_code=409,
-            detail="Nur für aktive Themen möglich. Läuft gerade eine Analyse, bitte kurz warten.",
-        )
-    if is_step_running(topic_id):
-        raise HTTPException(status_code=409, detail="Es läuft bereits ein Vorgang für dieses Thema.")
-
-    current = {entry["step"]: entry for entry in get_step_states(topic_id, topic)}
-    if payload.step not in current or current[payload.step]["state"] not in ("failed", "missing"):
-        raise HTTPException(status_code=409, detail="Für dieses Feld ist kein erneuter Start nötig.")
-
-    mark_step_running(topic_id, payload.step)
-    background_tasks.add_task(retry_step, topic_id, payload.step)
-    return JSONResponse(status_code=202, content={"status": "running", "topic_id": topic_id, "step": payload.step})
-
-
-@app.post("/topics/{topic_id}/refresh-gsc")
-def refresh_gsc_endpoint(topic_id: str, background_tasks: BackgroundTasks, member_id: str = Depends(require_member)):
-    """
-    NEU (14.09.2026): manueller Nachzieh-Trigger für GSC-Near-Miss-Daten,
-    unabhängig vom turnusmäßigen Monatslauf. Gedacht für den Fall, dass
-    die GSC-Verbindung ERST NACH dem Anlegen eines Themas hergestellt
-    wurde (siehe Chat-Verlauf 14.09.2026) — ohne diesen Endpunkt hätte man
-    bis zu 30 Tage auf den nächsten fälligen collect_monthly_data-Lauf
-    warten müssen. Läuft NUR den GSC-Teil (refresh_gsc_data in
-    run_topic.py), nicht den teuren Rest von collect_monthly_data
-    (Keywords/AI-Overview/SERP-Check werden dabei NICHT neu abgefragt).
-
-    Läuft als Hintergrund-Task, weil der GSC-API-Call ein paar Sekunden
-    dauern kann — die Antwort kommt sofort, das Ergebnis erscheint beim
-    nächsten Laden der Themen-Detailansicht (search_queries mit
-    source='gsc_near_miss').
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("team_id, status, own_domain, seed_keyword")
-            .eq("id", topic_id)
-            .single()
-            .execute()
-        ).data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    if topic["status"] not in ("active", "error"):
-        raise HTTPException(
-            status_code=409,
-            detail=f"GSC-Nachziehen nur für aktive oder fehlgeschlagene Themen möglich (aktuell: '{topic['status']}').",
-        )
-
-    # GEÄNDERT (15.09.2026): seed_keyword mitgegeben, siehe run_topic.py:
-    # refresh_gsc_data — sonst würde der manuelle Trigger auf die
-    # Themenrelevanz-Filterung verzichten und ALLE GSC-Anfragen
-    # übernehmen, während der automatische Monatslauf gefiltert speichert.
-    background_tasks.add_task(refresh_gsc_data, topic_id, topic["own_domain"], team_id, topic.get("seed_keyword"))
-    return {"status": "refreshing", "topic_id": topic_id}
-
-@app.get("/topics/{topic_id}/competitor-suggestions")
-def get_competitor_suggestions_endpoint(topic_id: str, member_id: str = Depends(require_member)):
-    """
-    NEU (14.09.2026): siehe competitor_suggestions.py. Liefert nur die noch
-    offenen ('pending') Vorschläge, kein erneuter Claude-Call, die
-    Generierung läuft bereits automatisch im Hintergrund nach dem ersten
-    Sammel-Lauf (siehe _collect_and_analyze_background).
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        suggestions = get_competitor_suggestions_for_topic(topic_id)
-    except Exception as e:
-        logger.exception("Fehler beim Laden der Wettbewerber-Vorschläge für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Vorschläge nicht laden: {e}")
-
-    return {"topic_id": topic_id, "suggestions": suggestions}
-
-
-class ConfirmCompetitorsRequest(BaseModel):
-    competitor_domains: list[str]
-
-
-@app.post("/topics/{topic_id}/confirm-competitors")
-def confirm_competitors_endpoint(
-    topic_id: str, payload: ConfirmCompetitorsRequest, background_tasks: BackgroundTasks,
-    member_id: str = Depends(require_member),
-):
-    """
-    NEU (14.09.2026): Übernimmt die vom User zusammengestellte Wettbewerber-
-    Liste (siehe GET .../competitor-suggestions für die Vorschläge, dazu).
-
-    GEÄNDERT (15.09.2026): schreibt jetzt auf ai_visibility_topics.
-    competitor_domains DIESES Topics, nicht mehr auf projects.
-    competitor_domains (siehe _get_topic_competitor_domains für die
-    ausführliche Begründung: ein Projekt kann fachlich unabhängige Themen
-    mit unterschiedlichen Wettbewerbern haben). Die vorherige projects.
-    excluded_competitor_domains-Zwischenlösung entfällt damit ersatzlos —
-    das Problem, das sie lösen sollte, kann strukturell nicht mehr
-    auftreten, wenn jedes Topic seine eigene Liste hat.
-
-    payload.competitor_domains ist die VOLLSTÄNDIGE gewünschte Liste und
-    ERSETZT ai_visibility_topics.competitor_domains (dedupliziert,
-    case-insensitiv/ohne 'www.' normalisiert) — kein Additiv-Merge, damit
-    sich eine Domain auch wieder entfernen lässt ("echtes Austauschen",
-    siehe Chat-Verlauf 15.09.2026).
-
-    Markiert danach die zugehörigen Vorschlagszeilen als entschieden
-    (mark_suggestions_reviewed, siehe competitor_suggestions.py: bestätigte
-    Domains -> 'confirmed', der Rest der bisher offenen Vorschläge für
-    dieses Topic -> 'dismissed') und stößt Quellen-Analyse, Opportunities
-    und Lücken-Analyse für DIESES Topic erneut an, damit die Bestätigung
-    sich sofort auswirkt, statt erst beim nächsten Cron-Lauf.
-    """
-    team_id = _resolve_team_id(member_id)
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("team_id")
-            .eq("id", topic_id).single().execute()
-        ).data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    # Dedupliziert die vom Frontend geschickte Endliste (normalisiert,
-    # keine Duplikate).
-    seen_normed: set[str] = set()
-    final_domains: list[str] = []
-    for d in payload.competitor_domains:
-        if not d:
-            continue
-        normed = _normalize_search_domain(d)
-        if normed not in seen_normed:
-            final_domains.append(d)
-            seen_normed.add(normed)
-
-    try:
-        supabase.table("ai_visibility_topics").update({"competitor_domains": final_domains}).eq("id", topic_id).execute()
-    except Exception:
-        logger.exception("Fehler beim Speichern der bestätigten Wettbewerber für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail="Wettbewerber konnten nicht gespeichert werden")
-
-    try:
-        mark_suggestions_reviewed(topic_id, final_domains)
-    except Exception:
-        logger.exception("Konnte Wettbewerber-Vorschläge für Topic %s nicht als entschieden markieren", topic_id)
-
-    for step_key in ("source_analysis", "opportunities", "gap_analysis", "action_plan"):
-        mark_step_running(topic_id, step_key)
-
-    background_tasks.add_task(_reanalyze_after_competitor_confirmation, topic_id)
-
-    return {"status": "ok", "competitor_domains": final_domains}
-
-
-class PromptStatusUpdate(BaseModel):
-    prompt_type: str  # "stable_core" oder "discovery"
-
-
-@app.post("/topics/{topic_id}/prompts")
-def create_manual_prompt_endpoint(
-    topic_id: str, payload: CreateManualPromptRequest, member_id: str = Depends(require_member),
-):
-    """
-    NEU (15.09.2026): manuelles Anlegen eines Stable-Core-Prompts mit frei
-    gewählter Phase (siehe Chat-Verlauf 15.09.2026). Eigenes Kontingent von
-    MAX_MANUAL_PROMPTS, zusätzlich zu den automatisch generierten (siehe
-    Konstanten-Kommentar oben) — macht zusammen bis zu 20 Stable-Core-
-    Prompts pro Topic.
-
-    prompt_type ist fest 'stable_core' (nicht 'discovery'): eine frei
-    gewählte Phase ergibt für 'discovery' keinen Sinn, dessen Phase ist
-    laut prompt_discovery.py implizit immer 'discovery' selbst.
-
-    find_or_create_prompt ist idempotent (siehe run_topic.py) — legt ein
-    Nutzer denselben Text an, der schon (mit welchem source auch immer)
-    existiert, wird kein Duplikat erzeugt und kein zusätzlicher manueller
-    Slot verbraucht.
-    """
-    team_id = _resolve_team_id(member_id)
-
-    prompt_text = (payload.prompt_text or "").strip()
-    if not prompt_text:
-        raise HTTPException(status_code=400, detail="prompt_text darf nicht leer sein")
-    if payload.messymiddle_phase not in MESSYMIDDLE_PHASES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"messymiddle_phase muss eines von {', '.join(MESSYMIDDLE_PHASES)} sein",
-        )
-    if not payload.force and _looks_like_bare_keyword(prompt_text):
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"'{prompt_text}' sieht eher nach einem Keyword als nach einer echten "
-                "Frage/Aufforderung aus. Bitte so formulieren, wie ein Nutzer es an ChatGPT "
-                "stellen würde (z.B. 'Welche KI-Beratung passt zu meinem Unternehmen?' statt "
-                "'ki beratung mittelstand'). Falls das wirklich so gewollt ist: mit "
-                "force=true erneut senden."
-            ),
-        )
-
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    # GEÄNDERT (23.09.2026): gemeinsamer Topf von 20 statt fester 4 eigener
-    # Plätze. Wer System-Prompts deaktiviert, kann entsprechend mehr eigene anlegen.
-    try:
-        budget = get_prompt_budget(topic_id)
-    except Exception as e:
-        logger.exception("Fehler beim Berechnen des Prompt-Budgets für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Zählung fehlgeschlagen: {e}")
-
-    if budget["frei_eigene"] <= 0:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Alle {budget['max_gesamt']} Prompt-Plätze sind belegt. "
-                    "Erst einen bestehenden Prompt deaktivieren.",
-        )
-
-    role_name = None
-    if payload.role_id:
-        role_name = _topic_role_names(topic_id).get(payload.role_id)
-        if not role_name:
-            raise HTTPException(status_code=400, detail="Diese Rolle gehört nicht zu diesem Thema")
-
-    try:
-        prompt_id = find_or_create_prompt(
-            topic_id, prompt_text, prompt_type="stable_core",
-            messymiddle_phase=payload.messymiddle_phase, source="manual",
-            persona=role_name, role_id=payload.role_id,
-        )
-    except Exception as e:
-        logger.exception("Fehler beim manuellen Anlegen eines Prompts für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Prompt konnte nicht angelegt werden: {e}")
-
-    return {"status": "ok", "prompt_id": prompt_id, "messymiddle_phase": payload.messymiddle_phase}
-
-
-@app.patch("/topics/{topic_id}/keywords/{keyword_id}/phase")
-def update_keyword_phase_endpoint(
-    topic_id: str, keyword_id: str, payload: UpdateKeywordPhaseRequest, member_id: str = Depends(require_member),
-):
-    """
-    NEU (15.09.2026): manuelle Korrektur der Messy-Middle-Phase eines
-    Keywords/einer PAA-Frage (siehe Chat-Verlauf 15.09.2026, UpdateKeyword
-    PhaseRequest oben für die Begründung). Setzt phase_manually_set=true,
-    damit run_topic.py: save_search_queries diese Korrektur bei
-    künftigen Sammel-Läufen respektiert und nicht überschreibt.
-    """
-    team_id = _resolve_team_id(member_id)
-
-    if payload.messymiddle_phase not in MESSYMIDDLE_PHASES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"messymiddle_phase muss eines von {', '.join(MESSYMIDDLE_PHASES)} sein",
-        )
-
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        keyword_row = (
-            supabase.table("search_queries")
-            .select("id, topic_id")
-            .eq("id", keyword_id)
-            .single()
-            .execute()
-            .data
-        )
-    except Exception:
-        raise HTTPException(status_code=404, detail="Keyword nicht gefunden")
-    if not keyword_row or keyword_row.get("topic_id") != topic_id:
-        raise HTTPException(status_code=404, detail="Keyword geh\u00f6rt nicht zu diesem Topic")
-
-    try:
-        supabase.table("search_queries").update({
-            "messymiddle_phase": payload.messymiddle_phase,
-            "phase_manually_set": True,
-        }).eq("id", keyword_id).execute()
-    except Exception as e:
-        logger.exception("Fehler beim Speichern der manuellen Phasen-Korrektur (keyword_id=%s)", keyword_id)
-        raise HTTPException(status_code=500, detail=f"Phase konnte nicht gespeichert werden: {e}")
-
-    return {"status": "ok", "keyword_id": keyword_id, "messymiddle_phase": payload.messymiddle_phase}
-
-
-@app.post("/topics/{topic_id}/keywords")
-def create_manual_keyword_endpoint(
-    topic_id: str, payload: CreateManualKeywordRequest, member_id: str = Depends(require_member),
-):
-    """
-    NEU (16.09.2026): manuelles Anlegen eines Keywords, analog zu
-    create_manual_prompt_endpoint oben, siehe Chat-Verlauf 16.09.2026.
-    source='manual' unterscheidet diese Zeilen von automatisch
-    gesammelten (related_keywords/keyword_ideas/keyword_suggestions/paa/
-    gsc_near_miss), damit z.B. save_search_queries bei künftigen Läufen
-    nicht versehentlich mit ihnen kollidiert.
-
-    ──────────────────────────────────────────────────────────────────
-    NOCH NICHT AUSGEFÜHRTE MIGRATION, bitte gegen euer Schema prüfen:
-
-        alter table search_queries add column is_active boolean not null default true;
-
-    Ohne diese Spalte schlägt sowohl dieser Endpunkt als auch
-    deactivate_keyword_endpoint (siehe unten) sowie der is_active-Filter
-    in get_topic_detail fehl — exakt dasselbe Muster wie der
-    content_recommendation-Fund vom 16.09.2026 (opportunities.py), bitte
-    diesmal VOR dem Deploy ausführen, nicht erst nach dem nächsten
-    "warum ist X leer"-Vorfall.
-    ──────────────────────────────────────────────────────────────────
-    """
-    team_id = _resolve_team_id(member_id)
-
-    keyword = (payload.keyword or "").strip()
-    if not keyword:
-        raise HTTPException(status_code=400, detail="keyword darf nicht leer sein")
-    if payload.messymiddle_phase is not None and payload.messymiddle_phase not in MESSYMIDDLE_PHASES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"messymiddle_phase muss eines von {', '.join(MESSYMIDDLE_PHASES)} sein",
-        )
-
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        manual_count = (
-            supabase.table("search_queries")
-            .select("id", count="exact")
-            .eq("topic_id", topic_id)
-            .eq("source", "manual")
-            .eq("is_active", True)
-            .execute()
-        ).count or 0
-    except Exception as e:
-        logger.exception("Fehler beim Zählen der manuellen Keywords für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Zählung fehlgeschlagen: {e}")
-
-    if manual_count >= MAX_MANUAL_KEYWORDS:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Bereits {manual_count}/{MAX_MANUAL_KEYWORDS} manuell hinzugefügte Keywords. "
-                    "Erst ein bestehendes manuelles Keyword deaktivieren.",
-        )
-
-    try:
-        existing = (
-            supabase.table("search_queries")
-            .select("id")
-            .eq("topic_id", topic_id)
-            .eq("keyword", keyword)
-            .limit(1)
-            .execute()
-        ).data
-        if existing:
-            keyword_id = existing[0]["id"]
-        else:
-            inserted = (
-                supabase.table("search_queries")
-                .insert({
-                    "topic_id": topic_id,
-                    "keyword": keyword,
-                    "source": "manual",
-                    "messymiddle_phase": payload.messymiddle_phase,
-                    "phase_manually_set": payload.messymiddle_phase is not None,
-                    "is_active": True,
-                })
-                .execute()
-            )
-            keyword_id = inserted.data[0]["id"]
-    except Exception as e:
-        logger.exception("Fehler beim manuellen Anlegen eines Keywords für Topic %s", topic_id)
-        raise HTTPException(status_code=500, detail=f"Keyword konnte nicht angelegt werden: {e}")
-
-    return {"status": "ok", "keyword_id": keyword_id, "messymiddle_phase": payload.messymiddle_phase}
-
-
-@app.patch("/topics/{topic_id}/keywords/{keyword_id}/deactivate")
-def deactivate_keyword_endpoint(topic_id: str, keyword_id: str, member_id: str = Depends(require_member)):
-    """
-    NEU (16.09.2026): Keyword/GSC-Performance-Keyword für dieses Topic
-    entfernen, siehe Chat-Verlauf 16.09.2026. Soft-Delete über
-    is_active=false statt eines echten DELETE — dieselbe Begründung wie
-    bei Prompts (deactivate_prompt_endpoint unten): search_queries.id
-    kann von intent_clusters/changelog referenziert sein, ein harter
-    DELETE würde dort Fremdschlüssel-Verweise brechen oder eine
-    ON-DELETE-Kaskade auslösen, die mehr mitreißt als gewollt.
-
-    Braucht dieselbe Migration wie create_manual_keyword_endpoint oben
-    (search_queries.is_active).
-    """
-    team_id = _resolve_team_id(member_id)
-
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        keyword_row = (
-            supabase.table("search_queries").select("id, topic_id").eq("id", keyword_id).single().execute().data
-        )
-    except Exception:
-        raise HTTPException(status_code=404, detail="Keyword nicht gefunden")
-    if not keyword_row or keyword_row.get("topic_id") != topic_id:
-        raise HTTPException(status_code=404, detail="Keyword gehört nicht zu diesem Topic")
-
-    try:
-        supabase.table("search_queries").update({"is_active": False}).eq("id", keyword_id).execute()
-    except Exception as e:
-        logger.exception("Fehler beim Deaktivieren des Keywords (keyword_id=%s)", keyword_id)
-        raise HTTPException(status_code=500, detail=f"Keyword konnte nicht entfernt werden: {e}")
-
-    return {"status": "ok", "keyword_id": keyword_id}
-
-
-@app.patch("/topics/{topic_id}/prompts/{prompt_id}/deactivate")
-def deactivate_prompt_endpoint(topic_id: str, prompt_id: str, member_id: str = Depends(require_member)):
-    """
-    NEU (16.09.2026): Prompt für dieses Topic entfernen, siehe Chat-
-    Verlauf 16.09.2026 ("bei Prompts, Keywords und GSC-Performance-
-    Keywords sollten User die Möglichkeit haben, diese zu entfernen").
-    Soft-Delete über is_active=false (Spalte existiert bereits, siehe
-    schema_full.sql: prompts.is_active) statt eines echten DELETE: ein
-    Prompt kann bereits ai_runs/content_ideas/opportunities-Verweise
-    haben (prompt_id-Fremdschlüssel), die für die historische Auswertung
-    (Zitationsverlauf, Content-Ideen) erhalten bleiben sollen, auch wenn
-    der Prompt selbst nicht mehr aktiv getrackt wird. get_topic_detail
-    filtert bereits serverseitig auf is_active=true, ein deaktivierter
-    Prompt verschwindet also direkt aus der Prompts-Ansicht.
-    """
-    team_id = _resolve_team_id(member_id)
-
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    try:
-        prompt_row = (
-            supabase.table("prompts").select("id, topic_id").eq("id", prompt_id).single().execute().data
-        )
-    except Exception:
-        raise HTTPException(status_code=404, detail="Prompt nicht gefunden")
-    if not prompt_row or prompt_row.get("topic_id") != topic_id:
-        raise HTTPException(status_code=404, detail="Prompt gehört nicht zu diesem Topic")
-
-    try:
-        supabase.table("prompts").update({"is_active": False}).eq("id", prompt_id).execute()
-    except Exception as e:
-        logger.exception("Fehler beim Deaktivieren des Prompts (prompt_id=%s)", prompt_id)
-        raise HTTPException(status_code=500, detail=f"Prompt konnte nicht entfernt werden: {e}")
-
-    return {"status": "ok", "prompt_id": prompt_id}
-
-
-@app.post("/topics/{topic_id}/prompts/{prompt_id}/set-type")
-def set_prompt_type_endpoint(
-    topic_id: str, prompt_id: str, payload: PromptStatusUpdate,
-    member_id: str = Depends(require_member),
-):
-    """
-    Promote (discovery -> stable_core) oder Demote (stable_core -> discovery).
-    Bei Promote wird das 16er-Limit hart durchgesetzt, kein automatisches
-    Verdrängen eines anderen Prompts, das müsst ihr bewusst separat tun
-    (erst demoten, dann promoten).
-    """
-    team_id = _resolve_team_id(member_id)
-
-    if payload.prompt_type not in ("stable_core", "discovery"):
-        raise HTTPException(status_code=400, detail="prompt_type muss 'stable_core' oder 'discovery' sein")
-
-    try:
-        topic = supabase.table("ai_visibility_topics").select("team_id").eq("id", topic_id).single().execute().data
-    except Exception:
-        raise HTTPException(status_code=404, detail="Topic nicht gefunden")
-    _check_topic_belongs_to_team(topic, team_id)
-
-    if payload.prompt_type == "stable_core":
-        # GEÄNDERT (23.09.2026): gemeinsames Budget, hochgestufte Discovery-
-        # Prompts zählen als System-Prompts (max. 16, insgesamt max. 20).
-        try:
-            budget = get_prompt_budget(topic_id)
-        except Exception as e:
-            logger.exception("Fehler beim Zählen der Stable-Core-Prompts für Topic %s", topic_id)
-            raise HTTPException(status_code=500, detail=f"Zählung fehlgeschlagen: {e}")
-        if budget["frei_system"] <= 0:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Keine freien Plätze: {budget['aktiv_system']}/{budget['max_system']} System-Prompts, "
-                        f"{budget['aktiv_gesamt']}/{budget['max_gesamt']} insgesamt. Erst einen anderen demoten.",
-            )
-
-    try:
-        supabase.table("prompts").update({"prompt_type": payload.prompt_type}).eq("id", prompt_id).eq("topic_id", topic_id).execute()
-    except Exception as e:
-        logger.exception("Fehler beim Ändern des Prompt-Typs (prompt_id=%s)", prompt_id)
-        raise HTTPException(status_code=500, detail=f"Konnte Prompt-Typ nicht ändern: {e}")
-
-    return {"status": "ok", "prompt_id": prompt_id, "prompt_type": payload.prompt_type}
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Downgrade-Entscheidung (§ Kunde wählt, welche Themen bei Downgrade wegfallen)
-# ══════════════════════════════════════════════════════════════════════════
-
-@app.get("/account/downgrade-status")
-def downgrade_status_endpoint(member_id: str = Depends(require_member)):
-    """
-    Liefert, ob gerade eine Downgrade-Entscheidung offen ist (der Webhook
-    hat die Menge reduziert, aber es gibt mehr aktive Themen als die neue
-    Menge erlaubt), und falls ja, aus welchen Themen der Owner wählen kann.
-    Nur der Team-Owner darf das abfragen, siehe get_owner_user_row_for_billing.
-    """
-    try:
-        user = get_owner_user_row_for_billing(member_id)
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-
-    if not user.get("topics_over_limit"):
-        return {"over_limit": False}
-
-    try:
-        topics = (
-            supabase.table("ai_visibility_topics")
-            .select("id, name, seed_keyword, own_domain, created_at")
-            .eq("team_id", user["team_id"])
-            .eq("status", "active")
-            .order("created_at")
-            .execute()
-        ).data
-    except Exception as e:
-        logger.exception("Fehler beim Laden der Downgrade-Themen für Team %s", user["team_id"])
-        raise HTTPException(status_code=500, detail=f"Konnte Themen nicht laden: {e}")
-
-    return {
-        "over_limit": True,
-        "pending_limit": user.get("pending_topics_limit"),
-        "effective_at": user.get("downgrade_effective_at"),
-        "topics": topics,
+      '<p class="cvz-changelog-guided-label">Top-SERP-Ergebnisse' +
+        (hasZeroClickFeature ? ' (Zero-Click-Risiko, siehe Features unten)' : '') +
+      '</p>' +
+      '<ul class="cvz-serp-results-list">' + resultsHtml + '</ul>' +
+      (featuresHtml ? '<div class="cvz-persona-filter" style="margin-top:6px;">' + featuresHtml + '</div>' : '') +
+      (row.serp_checked_at ? '<p class="cvz-opportunity-topic">SERP gepr\u00fcft: ' + formatRelativeTime(row.serp_checked_at) + '</p>' : '')
+    );
+  }
+
+  // GEÄNDERT (16.09.2026): 7 Tabs → 5 fokussierte Views (Kundenwunsch:
+  // Marketer-freundliches Frontend mit klarer Struktur; "Daten"-Tab
+  // bewahrt den Zugang zu Keywords, Prompts und GSC).
+  var TOPIC_TABS = [
+    { id: 'situation', label: 'Situation' },
+    { id: 'journey', label: 'Journey Map & Wettbewerb' },
+    { id: 'aktionsplan', label: 'Aktionsplan' },
+    { id: 'verlauf', label: 'Verlauf & Änderungen' },
+    { id: 'daten', label: 'Daten' },
+  ];
+
+  var DOMAIN_TABS = [
+    { id: 'themen', label: 'Themen' },
+    { id: 'uebersicht', label: 'Übersicht' },
+  ];
+
+  function render() {
+    var container = document.getElementById('cvz-visibility-app');
+    if (!container) {
+      console.error('[CVZ Visibility] Container #cvz-visibility-app nicht gefunden.');
+      return;
     }
 
+    var focusedId = null, selectionStart = null, selectionEnd = null;
+    var activeEl = document.activeElement;
+    if (activeEl && activeEl.id && container.contains(activeEl)) {
+      focusedId = activeEl.id;
+      if (typeof activeEl.selectionStart === 'number') {
+        selectionStart = activeEl.selectionStart;
+        selectionEnd = activeEl.selectionEnd;
+      }
+    }
 
-class ResolveDowngradeRequest(BaseModel):
-    keep_topic_ids: list[str]  # welche der aktuell aktiven Themen behalten werden sollen
+    container.innerHTML = '';
+    if (state.activeView === 'topic-detail') {
+      // GEAENDERT (18.09.2026): JS-basiertes sticky Tab-Nav (17.09.2026,
+      // IntersectionObserver-Loesung) wieder entfernt, siehe Chat-Verlauf
+      // 18.09.2026: sah in der Praxis nicht gut aus (Nav blieb beim
+      // Fixieren ueber Content stehen/ueberlappte). Tab-Nav ist jetzt
+      // wieder normaler Teil des Flows, ohne Sticky-Verhalten.
+      container.appendChild(renderTopicDetailView());
+    } else {
+      container.appendChild(renderOverview());
+    }
 
+    container.onclick = handleContainerClick;
 
-@app.post("/account/resolve-downgrade")
-def resolve_downgrade_endpoint(payload: ResolveDowngradeRequest, member_id: str = Depends(require_member)):
-    """
-    Vorzeitige Auflösung EINES offenen Downgrades (der Kunde muss die Frist
-    downgrade_effective_at nicht abwarten, trifft er rechtzeitig eine Wahl,
-    wird sofort archiviert statt erst zum Stichtag). Archiviert (NICHT hart
-    löschen, Daten bleiben für einen eventuellen späteren Neukauf erhalten)
-    alle nicht ausgewählten aktiven Themen, senkt danach erst das
-    tatsächliche Limit. Reihenfolge bewusst so: Limit wird erst gesenkt,
-    wenn die Auswahl schon vollzogen ist, sonst könnte ein zwischenzeit-
-    licher Fehler das Team ohne aktive Themen, aber mit korrektem Limit
-    zurücklassen. Trifft der Kunde KEINE Wahl bis zur Frist, übernimmt
-    stattdessen automatisch enforce_expired_downgrades() (siehe
-    /cron/enforce-downgrades).
-    """
-    try:
-        user = get_owner_user_row_for_billing(member_id)
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+    if (focusedId) {
+      var toRefocus = document.getElementById(focusedId);
+      if (toRefocus) {
+        toRefocus.focus();
+        if (selectionStart !== null && typeof toRefocus.setSelectionRange === 'function') {
+          try { toRefocus.setSelectionRange(selectionStart, selectionEnd); } catch (e) { }
+        }
+      }
+    }
+  }
 
-    if not user.get("topics_over_limit"):
-        raise HTTPException(status_code=400, detail="Keine offene Downgrade-Entscheidung vorhanden")
+  function handleContainerClick(event) {
+    var createToggle = event.target.closest('[data-cvz-create-toggle]');
+    if (createToggle) {
+      state.showCreateForm = !state.showCreateForm;
+      state.createError = null;
+      state.limitReached = false;
+      resetCreateFlow();
+      render();
+      return;
+    }
+    // GEÄNDERT (23.09.2026): "Weiter" holt jetzt zuerst den Buying-Center-
+    // Vorschlag, statt das Thema direkt anzulegen.
+    var createSubmit = event.target.closest('[data-cvz-create-submit]');
+    if (createSubmit) {
+      submitCreateStep1(true);
+      return;
+    }
+    var createSkipBc = event.target.closest('[data-cvz-create-skip-bc]');
+    if (createSkipBc) {
+      if (state.createStep === 2) {
+        submitCreateFinal(false);
+      } else {
+        submitCreateStep1(false);
+      }
+      return;
+    }
+    var createConfirm = event.target.closest('[data-cvz-create-confirm]');
+    if (createConfirm) {
+      submitCreateFinal(true);
+      return;
+    }
+    var createBack = event.target.closest('[data-cvz-create-back]');
+    if (createBack) {
+      state.createStep = 1;
+      state.createError = null;
+      render();
+      return;
+    }
+    // GEÄNDERT (23.09.2026): Rollen-Karten gibt es jetzt im Anlege-Dialog
+    // (ctx "create") und im Bearbeiten von bestehenden Themen (ctx "edit").
+    var bcRemove = event.target.closest('[data-cvz-bc-remove]');
+    if (bcRemove) {
+      var removeRoles = getRoleArray(bcRemove.getAttribute('data-cvz-bc-ctx'));
+      removeRoles.splice(parseInt(bcRemove.getAttribute('data-cvz-bc-remove'), 10), 1);
+      ensureOneChampion(removeRoles);
+      render();
+      return;
+    }
+    var bcChampion = event.target.closest('[data-cvz-bc-champion]');
+    if (bcChampion) {
+      var championIndex = parseInt(bcChampion.getAttribute('data-cvz-bc-champion'), 10);
+      getRoleArray(bcChampion.getAttribute('data-cvz-bc-ctx')).forEach(function (r, i) { r.ist_champion = (i === championIndex); });
+      render();
+      return;
+    }
+    var bcAdd = event.target.closest('[data-cvz-bc-add]');
+    if (bcAdd) {
+      var addRoles = getRoleArray(bcAdd.getAttribute('data-cvz-bc-ctx'));
+      if (addRoles.length < MAX_BC_ROLES) {
+        addRoles.push({
+          rolle: bcAdd.getAttribute('data-cvz-bc-add') || '',
+          ist_champion: false, motivation: '', einwand: '', einstiegsphase: 'exploration',
+        });
+        ensureOneChampion(addRoles);
+      }
+      render();
+      return;
+    }
+    var bcEditToggle = event.target.closest('[data-cvz-bc-edit-toggle]');
+    if (bcEditToggle) {
+      toggleRoleEditor(bcEditToggle.getAttribute('data-cvz-bc-edit-toggle'));
+      return;
+    }
+    var bcEditSave = event.target.closest('[data-cvz-bc-edit-save]');
+    if (bcEditSave) {
+      saveRoleEditor(bcEditSave.getAttribute('data-cvz-bc-edit-save'));
+      return;
+    }
+    var bcEditSuggest = event.target.closest('[data-cvz-bc-edit-suggest]');
+    if (bcEditSuggest) {
+      suggestRolesForExistingTopic(bcEditSuggest.getAttribute('data-cvz-bc-edit-suggest'));
+      return;
+    }
+    var bcFill = event.target.closest('[data-cvz-bc-fill]');
+    if (bcFill) {
+      fillMissingRolePrompts(bcFill.getAttribute('data-cvz-bc-fill'));
+      return;
+    }
+    var roleCellAdd = event.target.closest('[data-cvz-role-cell-add]');
+    if (roleCellAdd) {
+      state.manualPromptDraftRoleId = roleCellAdd.getAttribute('data-cvz-role-cell-add');
+      state.manualPromptDraftPhase = roleCellAdd.getAttribute('data-cvz-role-cell-phase');
+      state.activeSubTab = 'daten';
+      updateUrlParams({ cvz_tab: 'daten' });
+      loadTabData(state.activeTopicId);
+      render();
+      var manualInput = document.getElementById('cvz-manual-prompt-input');
+      if (manualInput) {
+        if (manualInput.scrollIntoView) manualInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        manualInput.focus();
+      }
+      return;
+    }
+    var promptRoleSet = event.target.closest('[data-cvz-prompt-role-set]');
+    if (promptRoleSet) {
+      setPromptRole(
+        state.activeTopicId,
+        promptRoleSet.getAttribute('data-cvz-prompt-role-pid'),
+        promptRoleSet.getAttribute('data-cvz-prompt-role-set') || null,
+      );
+      return;
+    }
+    var buySlot = event.target.closest('[data-cvz-buy-slot]');
+    if (buySlot) {
+      submitBuyTopicSlot();
+      return;
+    }
+    var runSelect = event.target.closest('[data-cvz-run-select]');
+    if (runSelect) {
+      var runOwner = runSelect.getAttribute('data-cvz-run-owner');
+      state.expandedPromptRunIndex[runOwner] = parseInt(runSelect.getAttribute('data-cvz-run-select'), 10);
+      render();
+      return;
+    }
+    var engineTab = event.target.closest('[data-cvz-prompt-engine]');
+    if (engineTab) {
+      var engineOwner = engineTab.getAttribute('data-cvz-prompt-engine-owner');
+      state.expandedPromptEngine[engineOwner] = engineTab.getAttribute('data-cvz-prompt-engine');
+      state.expandedPromptRunIndex[engineOwner] = 0;
+      render();
+      return;
+    }
+    var promptDelete = event.target.closest('[data-cvz-prompt-delete]');
+    if (promptDelete) {
+      deactivatePrompt(state.activeTopicId, promptDelete.getAttribute('data-cvz-prompt-delete'));
+      return;
+    }
+    var promptToggle = event.target.closest('[data-cvz-prompt-toggle]');
+    if (promptToggle) {
+      togglePromptExpansion(promptToggle.getAttribute('data-cvz-prompt-toggle'));
+      return;
+    }
+    var personaFilter = event.target.closest('[data-cvz-persona-filter]');
+    if (personaFilter) {
+      var personaValue = personaFilter.getAttribute('data-cvz-persona-filter');
+      state.activePersonaFilter = personaValue || null;
+      render();
+      return;
+    }
+    // NEU (17.09.2026): Phase-Filter fuer Content-Luecken
+    var gapPhaseFilter = event.target.closest('[data-cvz-gap-phase-filter]');
+    if (gapPhaseFilter) {
+      state.gapPhaseFilter = gapPhaseFilter.getAttribute('data-cvz-gap-phase-filter') || null;
+      render();
+      return;
+    }
+    // NEU (17.09.2026): Phase-Filter fuer Quellen-Analyse
+    var sourcePhaseFilter = event.target.closest('[data-cvz-source-phase-filter]');
+    if (sourcePhaseFilter) {
+      state.sourcePhaseFilter = sourcePhaseFilter.getAttribute('data-cvz-source-phase-filter') || null;
+      render();
+      return;
+    }
+    var kwDeactivate = event.target.closest('[data-cvz-keyword-deactivate]');
+    if (kwDeactivate) {
+      deactivateKeyword(state.activeTopicId, kwDeactivate.getAttribute('data-cvz-keyword-deactivate'));
+      return;
+    }
+    var manualKeywordSubmit = event.target.closest('[data-cvz-manual-keyword-submit]');
+    if (manualKeywordSubmit) {
+      submitManualKeyword(manualKeywordSubmit.getAttribute('data-cvz-manual-keyword-submit'));
+      return;
+    }
+    var keywordToggle = event.target.closest('[data-cvz-keyword-toggle]');
+    if (keywordToggle) {
+      toggleKeywordExpansion(
+        state.activeTopicId,
+        keywordToggle.getAttribute('data-cvz-keyword-toggle'),
+        keywordToggle.getAttribute('data-cvz-keyword-text'),
+      );
+      return;
+    }
+    // NEU (15.09.2026): manuelle Phasen-Korrektur bei Keywords/PAA-Fragen.
+    var keywordPhaseSet = event.target.closest('[data-cvz-keyword-phase-set]');
+    if (keywordPhaseSet) {
+      updateKeywordPhase(
+        state.activeTopicId,
+        keywordPhaseSet.getAttribute('data-cvz-keyword-phase-id'),
+        keywordPhaseSet.getAttribute('data-cvz-keyword-phase-set'),
+      );
+      return;
+    }
+    var changelogSubmit = event.target.closest('[data-cvz-changelog-submit]');
+    if (changelogSubmit) {
+      submitChangelogEntry(state.activeTopicId);
+      return;
+    }
+    var changelogLocation = event.target.closest('[data-cvz-changelog-location]');
+    if (changelogLocation) {
+      var locationValue = changelogLocation.getAttribute('data-cvz-changelog-location');
+      state.changelogLocationDraft = (state.changelogLocationDraft === locationValue) ? null : locationValue;
+      render();
+      return;
+    }
+    var changelogEffect = event.target.closest('[data-cvz-changelog-effect]');
+    if (changelogEffect) {
+      var effectValue = changelogEffect.getAttribute('data-cvz-changelog-effect');
+      state.changelogEffectDraft = (state.changelogEffectDraft === effectValue) ? null : effectValue;
+      render();
+      return;
+    }
+    var changelogLinkToggle = event.target.closest('[data-cvz-changelog-link-toggle]');
+    if (changelogLinkToggle) {
+      var linkKind = changelogLinkToggle.getAttribute('data-cvz-changelog-link-toggle');
+      state.changelogLinkSectionOpen[linkKind] = !state.changelogLinkSectionOpen[linkKind];
+      render();
+      return;
+    }
+    var changelogLinkChip = event.target.closest('[data-cvz-changelog-link-chip]');
+    if (changelogLinkChip) {
+      var chipKind = changelogLinkChip.getAttribute('data-cvz-changelog-link-kind');
+      var chipId = changelogLinkChip.getAttribute('data-cvz-changelog-link-chip');
+      var currentIds = state.changelogDraftLinkedIds[chipKind];
+      var idIndex = currentIds.indexOf(chipId);
+      if (idIndex === -1) {
+        currentIds.push(chipId);
+      } else {
+        currentIds.splice(idIndex, 1);
+      }
+      render();
+      return;
+    }
+    var changelogMore = event.target.closest('[data-cvz-changelog-more]');
+    if (changelogMore) {
+      var moreTopicId = changelogMore.getAttribute('data-cvz-changelog-more');
+      state.changelogVisibleCount[moreTopicId] = (state.changelogVisibleCount[moreTopicId] || 10) + 10;
+      render();
+      return;
+    }
+    var changelogDelete = event.target.closest('[data-cvz-changelog-delete]');
+    if (changelogDelete) {
+      deleteChangelogEntry(state.activeTopicId, changelogDelete.getAttribute('data-cvz-changelog-delete'));
+      return;
+    }
+    var changelogRestore = event.target.closest('[data-cvz-changelog-restore]');
+    if (changelogRestore) {
+      restoreChangelogEntry(state.activeTopicId, changelogRestore.getAttribute('data-cvz-changelog-restore'));
+      return;
+    }
+    var changelogToggleDeleted = event.target.closest('[data-cvz-changelog-toggle-deleted]');
+    if (changelogToggleDeleted) {
+      toggleDeletedChangelog(state.activeTopicId);
+      return;
+    }
+    // NEU (20.09.2026): Klick-Handler für den "Jetzt erstellen"/"Erneut
+    // erstellen"-Button aus renderStepNotice, fehlte bisher komplett,
+    // der Button (data-cvz-retry-step) tat also nichts.
+    var retryStepBtn = event.target.closest('[data-cvz-retry-step]');
+    if (retryStepBtn) {
+      retryStep(state.activeTopicId, retryStepBtn.getAttribute('data-cvz-retry-step'));
+      return;
+    }
+    var weekDetailPoint = event.target.closest('[data-cvz-week-detail]');
+    if (weekDetailPoint) {
+      showWeekDetail(state.activeTopicId, weekDetailPoint.getAttribute('data-cvz-week-detail'));
+      return;
+    }
+    var weekDetailClose = event.target.closest('[data-cvz-week-detail-close]');
+    if (weekDetailClose) {
+      state.selectedWeekDetailKey = null;
+      render();
+      return;
+    }
+    var tabBtn = event.target.closest('[data-cvz-tab]');
+    if (tabBtn) {
+      var newTab = tabBtn.getAttribute('data-cvz-tab');
+      state.activeSubTab = newTab;
+      updateUrlParams({ cvz_tab: newTab });
+      if ((newTab === 'situation' || newTab === 'daten') && state.activeView === 'topic-detail') {
+        maybeLoadBuyingCenter(state.activeTopicId);
+      }
+      if (newTab === 'situation' && state.activeView === 'topic-detail') {
+        maybeLoadVisibilityTrend(state.activeTopicId);
+        maybeLoadTopicRankHistory(state.activeTopicId);
+        maybeLoadMonthlyOverviewTrend(state.activeTopicId);
+        maybeLoadDashboardData(state.activeTopicId);
+        maybeLoadContentChanges(state.activeTopicId);
+      }
+      if ((newTab === 'journey' || newTab === 'verlauf') && state.activeView === 'topic-detail') {
+        maybeLoadDashboardData(state.activeTopicId);
+        maybeLoadContentChanges(state.activeTopicId);
+      }
+      if (newTab === 'verlauf' && state.activeView === 'topic-detail') {
+        maybeLoadVisibilityTrend(state.activeTopicId);
+      }
+      // NEU (17.09.2026): Aktionsplan-Tab: Cache-Busting.
+      // Re-fetch NUR wenn action_plan komplett fehlt ODER wenn noch keine Items vorhanden
+      // UND generated_at ebenfalls fehlt (= Plan wurde noch nie generiert).
+      // NICHT re-fetchen wenn Items vorhanden sind (auch wenn generated_at null ist).
+      // Das wuerde bei einem NULL-generated_at in der DB eine Endlos-Schleife erzeugen.
+      if (newTab === 'aktionsplan' && state.activeView === 'topic-detail') {
+        var _apCached = state.topicDetailCache[state.activeTopicId];
+        var _apObj = _apCached && _apCached.action_plan;
+        var _apHasItems = _apObj && Array.isArray(_apObj.items) && _apObj.items.length > 0;
+        var _apMissing = !_apCached || !_apObj || (!_apHasItems && !_apObj.generated_at);
+        if (_apMissing) {
+          delete state.topicDetailCache[state.activeTopicId];
+          openTopicDetail(state.activeTopicId, false); // async, neu laden + rendern
+          return;
+        }
+      }
+      render();
+      return;
+    }
 
-    pending_limit = user.get("pending_topics_limit") or 0
-    if len(payload.keep_topic_ids) > pending_limit:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Euer neues Limit erlaubt maximal {pending_limit} Themen, ausgewählt: {len(payload.keep_topic_ids)}",
-        )
+    // Journey-Map Retry-Button
+    var journeyRetryBtn = event.target.closest('[data-cvz-journey-retry]');
+    if (journeyRetryBtn) {
+      var retryTopicId = journeyRetryBtn.getAttribute('data-cvz-journey-retry');
+      delete state.dashboardDataCache[retryTopicId];
+      maybeLoadDashboardData(retryTopicId);
+      maybeLoadContentChanges(retryTopicId);
+      return;
+    }
 
-    try:
-        active_topics = (
-            supabase.table("ai_visibility_topics")
-            .select("id")
-            .eq("team_id", user["team_id"])
-            .eq("status", "active")
-            .execute()
-        ).data
-    except Exception as e:
-        logger.exception("Fehler beim Laden der aktiven Themen für Team %s", user["team_id"])
-        raise HTTPException(status_code=500, detail=f"Konnte Themen nicht laden: {e}")
+    // NEU (25.09.2026, Kundenwunsch): Zeitraum-Presets (4/12/26 Wochen) für
+    // "Sichtbarkeits-Verlauf pro Phase".
+    var weeksPresetBtn = event.target.closest('[data-cvz-phase-trend-weeks]');
+    if (weeksPresetBtn) {
+      var weeksTopicId = weeksPresetBtn.getAttribute('data-cvz-phase-trend-topic');
+      var weeksValue = parseInt(weeksPresetBtn.getAttribute('data-cvz-phase-trend-weeks'), 10);
+      state.phaseTrendWeeksByTopic[weeksTopicId] = weeksValue;
+      if (weeksValue === 12) {
+        // 12 Wochen ist der Default -- dashboardDataCache hat das i.d.R.
+        // schon (kein neuer Request nötig), nur neu rendern.
+        render();
+      } else {
+        maybeLoadPhaseTrend(weeksTopicId, weeksValue);
+      }
+      return;
+    }
 
-    active_ids = {t["id"] for t in active_topics}
-    keep_ids = set(payload.keep_topic_ids)
-    invalid_ids = keep_ids - active_ids
-    if invalid_ids:
-        raise HTTPException(status_code=400, detail=f"Unbekannte oder nicht betroffene Topic-IDs: {sorted(invalid_ids)}")
+    // NEU (25.09.2026, Kundenwunsch): Domain in Trend-Grafik ein-/ausblenden
+    // (Klick auf Legenden-Eintrag).
+    var chartDomainToggleBtn = event.target.closest('[data-cvz-chart-domain-toggle]');
+    if (chartDomainToggleBtn) {
+      var toggleDomain = chartDomainToggleBtn.getAttribute('data-cvz-chart-domain-toggle');
+      var toggleTopicId = chartDomainToggleBtn.getAttribute('data-cvz-chart-domain-topic');
+      toggleChartDomain(toggleTopicId, toggleDomain);
+      render();
+      return;
+    }
 
-    archive_ids = list(active_ids - keep_ids)
+    // NEU (16.09.2026): Journey-Map-Tab: Phasenwechsel
+    var journeyPhaseBtn = event.target.closest('[data-cvz-journey-phase]');
+    if (journeyPhaseBtn) {
+      var newPhase = journeyPhaseBtn.getAttribute('data-cvz-journey-phase');
+      state.journeyActivePhase = (state.journeyActivePhase === newPhase) ? null : newPhase;
+      render();
+      return;
+    }
 
-    try:
-        if archive_ids:
-            supabase.table("ai_visibility_topics").update({"status": "archived"}).in_("id", archive_ids).execute()
+    // NEU (16.09.2026): Journey-Map-Tab: Content-Änderung einreichen
+    var contentChangeSubmit = event.target.closest('[data-cvz-content-change-submit]');
+    if (contentChangeSubmit) {
+      submitContentChange(state.activeTopicId);
+      return;
+    }
+    var backBtn = event.target.closest('[data-cvz-back]');
+    if (backBtn) {
+      backToOverview();
+      return;
+    }
+    var retryBtn = event.target.closest('[data-cvz-retry-topic]');
+    if (retryBtn) {
+      retryTopic(retryBtn.getAttribute('data-cvz-retry-topic'));
+      return;
+    }
+    var archiveBtn = event.target.closest('[data-cvz-archive-topic]');
+    if (archiveBtn) {
+      setTopicArchiveStatus(archiveBtn.getAttribute('data-cvz-archive-topic'), true);
+      return;
+    }
+    var reactivateBtn = event.target.closest('[data-cvz-reactivate-topic]');
+    if (reactivateBtn) {
+      setTopicArchiveStatus(reactivateBtn.getAttribute('data-cvz-reactivate-topic'), false);
+      return;
+    }
+    var cancelArchiveBtn = event.target.closest('[data-cvz-cancel-archive-topic]');
+    if (cancelArchiveBtn) {
+      cancelArchiveTopic(cancelArchiveBtn.getAttribute('data-cvz-cancel-archive-topic'));
+      return;
+    }
+    var deleteTopicBtn = event.target.closest('[data-cvz-delete-topic]');
+    if (deleteTopicBtn) {
+      deleteTopicPermanently(deleteTopicBtn.getAttribute('data-cvz-delete-topic'));
+      return;
+    }
+    var refreshGscBtn = event.target.closest('[data-cvz-refresh-gsc]');
+    if (refreshGscBtn) {
+      refreshGscData(refreshGscBtn.getAttribute('data-cvz-refresh-gsc'));
+      return;
+    }
+    var competitorManageToggle = event.target.closest('[data-cvz-competitor-manage-toggle]');
+    if (competitorManageToggle) {
+      var manageTopicId = competitorManageToggle.getAttribute('data-cvz-competitor-manage-toggle');
+      var cachedForManage = state.topicDetailCache[manageTopicId];
+      toggleCompetitorManage(manageTopicId, (cachedForManage && cachedForManage.competitor_domains) || []);
+      return;
+    }
+    var competitorChip = event.target.closest('[data-cvz-competitor-chip]');
+    if (competitorChip) {
+      var chipTopicId = competitorChip.getAttribute('data-cvz-competitor-topic');
+      var chipDomain = competitorChip.getAttribute('data-cvz-competitor-chip');
+      var draftDomains = state.competitorDraftDomains[chipTopicId] || [];
+      var chipIndex = draftDomains.indexOf(chipDomain);
+      if (chipIndex === -1) {
+        draftDomains.push(chipDomain);
+      } else {
+        draftDomains.splice(chipIndex, 1);
+      }
+      state.competitorDraftDomains[chipTopicId] = draftDomains;
+      render();
+      return;
+    }
+    var competitorManualAdd = event.target.closest('[data-cvz-competitor-manual-add]');
+    if (competitorManualAdd) {
+      var manualAddTopicId = competitorManualAdd.getAttribute('data-cvz-competitor-manual-add');
+      var manualInput = document.getElementById('cvz-competitor-manual-input');
+      var manualDomain = ((manualInput && manualInput.value) || '').trim();
+      if (manualDomain) {
+        var currentDraft = state.competitorDraftDomains[manualAddTopicId] || [];
+        if (currentDraft.indexOf(manualDomain) === -1) {
+          currentDraft.push(manualDomain);
+        }
+        state.competitorDraftDomains[manualAddTopicId] = currentDraft;
+        if (manualInput) manualInput.value = '';
+        render();
+      }
+      return;
+    }
+    var competitorSubmit = event.target.closest('[data-cvz-competitor-submit]');
+    if (competitorSubmit) {
+      submitCompetitorSelection(competitorSubmit.getAttribute('data-cvz-competitor-submit'));
+      return;
+    }
+    var manualPromptSubmit = event.target.closest('[data-cvz-manual-prompt-submit]');
+    if (manualPromptSubmit) {
+      submitManualPrompt(manualPromptSubmit.getAttribute('data-cvz-manual-prompt-submit'));
+      return;
+    }
+    // NEU (15.09.2026): GSC-Zeilen im selben Auf-/Zuklapp-Stil wie Keywords,
+    // siehe renderGscBlock/toggleGscRowExpansion.
+    var gscToggle = event.target.closest('[data-cvz-gsc-toggle]');
+    if (gscToggle) {
+      toggleGscRowExpansion(
+        state.activeTopicId,
+        gscToggle.getAttribute('data-cvz-gsc-toggle'),
+        gscToggle.getAttribute('data-cvz-gsc-text'),
+      );
+      return;
+    }
+    var oppToggle = event.target.closest('[data-cvz-opp-toggle]');
+    if (oppToggle) {
+      toggleOppExpansion(oppToggle.getAttribute('data-cvz-opp-toggle'));
+      return;
+    }
+    var topicCard = event.target.closest('[data-cvz-topic-id]');
+    if (topicCard) {
+      openTopicDetail(topicCard.getAttribute('data-cvz-topic-id'));
+      return;
+    }
+  }
 
-        supabase.table("users").update({
-            "ai_visibility_topics_limit": pending_limit,
-            "topics_over_limit": False,
-            "pending_topics_limit": None,
-            "downgrade_effective_at": None,
-        }).eq("id", user["id"]).execute()
-    except Exception as e:
-        logger.exception("Fehler beim Auflösen des Downgrades für User %s", user["id"])
-        raise HTTPException(status_code=500, detail=f"Downgrade konnte nicht aufgelöst werden: {e}")
+  // NEU (25.09.2026, Kundenwunsch): Domain-Ein-/Ausblenden in Trend-Grafiken.
+  function isChartDomainHidden(topicId, domain) {
+    var byTopic = state.hiddenChartDomains[topicId];
+    return !!(byTopic && byTopic[domain]);
+  }
 
-    return {"status": "ok", "kept": sorted(keep_ids), "archived": sorted(archive_ids), "new_limit": pending_limit}
+  function toggleChartDomain(topicId, domain) {
+    if (!state.hiddenChartDomains[topicId]) state.hiddenChartDomains[topicId] = {};
+    var byTopic = state.hiddenChartDomains[topicId];
+    if (byTopic[domain]) delete byTopic[domain];
+    else byTopic[domain] = true;
+  }
 
+  function renderTabNav(tabs, activeTabId) {
+    var nav = document.createElement('div');
+    nav.className = 'cvz-tab-nav';
+    tabs.forEach(function (tab) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cvz-tab-btn' + (tab.id === activeTabId ? ' cvz-tab-btn-active' : '');
+      btn.setAttribute('data-cvz-tab', tab.id);
+      btn.textContent = tab.label;
+      nav.appendChild(btn);
+    });
+    return nav;
+  }
 
-@app.post("/cron/enforce-downgrades")
-def cron_enforce_downgrades_endpoint(x_cron_secret: str = Header(...)):
-    """
-    Fallback-Kadenz (empfohlen: täglich) für Kunden, die bis zur Frist
-    keine eigene Wahl getroffen haben. Siehe enforce_expired_downgrades().
-    """
-    _check_cron_secret(x_cron_secret)
-    try:
-        results = enforce_expired_downgrades()
-    except Exception as e:
-        logger.exception("Fehler beim automatischen Durchsetzen überfälliger Downgrades")
-        raise HTTPException(status_code=500, detail=f"Downgrade-Enforcement fehlgeschlagen: {e}")
-    return {"status": "ok", "processed": len(results), "details": results}
+  // NEU (25.09.2026, Kundenwunsch): Zeitraum-Preset-Auswahl ("wie bei GA4",
+  // aber als feste Presets statt freiem Datumsbereich) für Trend-Charts.
+  // Aktuell nur an der "Sichtbarkeits-Verlauf pro Phase"-Grafik verdrahtet
+  // (renderVerlaufTab); die Funktion selbst ist aber generisch gehalten
+  // (topicId + aktueller Wert rein, data-Attribute raus), falls sie später
+  // auch an anderen Trend-Charts (z.B. Wettbewerbsvergleich) wiederverwendet
+  // werden soll -- dieselben Presets (4/12/26) sind serverseitig für
+  // /competitor-citations und /visibility-trend bereits vorbereitet.
+  function renderWeeksPresetPicker(topicId, selectedWeeks) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-weeks-preset-picker';
+    [4, 12, 26].forEach(function (w) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cvz-weeks-preset-btn' + (w === selectedWeeks ? ' cvz-weeks-preset-btn-active' : '');
+      btn.textContent = w + ' Wochen';
+      btn.setAttribute('data-cvz-phase-trend-weeks', String(w));
+      btn.setAttribute('data-cvz-phase-trend-topic', topicId);
+      wrap.appendChild(btn);
+    });
+    return wrap;
+  }
 
+  function renderDomainAndTopicPicker() {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-picker-row';
 
-# ══════════════════════════════════════════════════════════════════════════
-# Cron-Endpunkte: werden von Supabase pg_cron über eine Edge Function
-# angestoßen, nicht direkt von Nutzern. Verarbeiten alle fälligen Topics
-# über alle Teams hinweg, daher kein Memberstack-Auth nötig, stattdessen
-# ein eigenes CRON_SECRET.
-# ══════════════════════════════════════════════════════════════════════════
+    var activeProject = getProjectById(state.activeProjectId);
 
-def _weekly_background(topic_id: str, own_domain: str) -> None:
-    # GEÄNDERT (16.09.2026): siehe _record_topic_run_error/
-    # _clear_topic_run_error weiter oben — dieselbe Fehler-Persistenz wie
-    # beim Erstlauf, damit ein fehlgeschlagener wöchentlicher Lauf auch
-    # ohne Log-Zugriff diagnostizierbar ist.
-    # GEÄNDERT (20.09.2026): die Analyse läuft über den Step-Tracker.
-    try:
-        prompts = get_topic_prompts(topic_id)
-        if not prompts:
-            logger.warning("Topic %s hat keine Stable-Core-Prompts, weekly-Lauf übersprungen", topic_id)
-            return
-        collect_weekly_data(topic_id, own_domain, prompts, "de", "Germany")
-    except Exception as e:
-        logger.exception("Weekly Cron-Lauf fehlgeschlagen für Topic %s", topic_id)
-        _record_topic_run_error(topic_id, "weekly_background", e)
-        return
+    var domainSelect = document.createElement('select');
+    domainSelect.className = 'cvz-picker-select';
+    domainSelect.setAttribute('aria-label', 'Domain w\u00e4hlen');
+    if (state.projects.length === 0) {
+      var noDomainOption = document.createElement('option');
+      noDomainOption.value = '';
+      noDomainOption.textContent = 'Keine Domains vorhanden';
+      domainSelect.appendChild(noDomainOption);
+      domainSelect.disabled = true;
+    } else {
+      state.projects.forEach(function (project) {
+        var option = document.createElement('option');
+        option.value = project.id;
+        option.textContent = project.domain;
+        if (project.id === state.activeProjectId) option.selected = true;
+        domainSelect.appendChild(option);
+      });
+    }
+    domainSelect.addEventListener('change', function () {
+      if (domainSelect.value) selectFromPicker('project:' + domainSelect.value);
+    });
 
-    # GEÄNDERT (15.09.2026): generate_summary lief hier bisher auch mit,
-    # lief also faktisch WÖCHENTLICH statt monatlich — obwohl die
-    # Zusammenfassung explizit auf einen Monatsvergleich ausgelegt ist
-    # (siehe claude_summary.py). Auf Kundenwunsch vom 15.09.2026 jetzt
-    # NUR NOCH im monatlichen Lauf, siehe _monthly_background unten.
-    if run_step(topic_id, "opportunities", triggered_by="weekly").ok:
-        _clear_topic_run_error(topic_id)
+    var topicsForActiveDomain = state.allTopics.filter(function (t) { return t.project_id === state.activeProjectId; });
 
+    var topicSelect = document.createElement('select');
+    topicSelect.className = 'cvz-picker-select';
+    topicSelect.setAttribute('aria-label', 'Thema w\u00e4hlen');
 
-def _monthly_background(topic_id: str, seed_keyword: str, own_domain: str, team_id: str) -> None:
-    """
-    GEÄNDERT (20.09.2026), siehe Chat-Verlauf 20.09.2026:
-    - Jeder Analyse-Schritt läuft einzeln über den Step-Tracker. Vorher lag
-      alles in EINEM try-Block: scheiterte die Lücken-Analyse, wurden
-      Aktionsplan und Empfehlungen gar nicht mehr gestartet.
-    - Die Zusammenfassung läuft wieder monatlich (am 16.09.2026 war sie hier
-      auskommentiert). Sie enthält jetzt zusätzlich den Umsetzungsstand der
-      Nutzer-Änderungen und den Stand des KI-Wissens-Checks.
-    - Neu: monatlicher KI-Wissens-Check, VOR Aktionsplan und Zusammenfassung,
-      weil beide sein Ergebnis nutzen.
-    Reihenfolge: Datenerhebung, Handlungsfelder, Lücken-Analyse (nutzt die
-    frisch aktualisierten Quellen-Profile), Empfehlungen zu den Handlungs-
-    feldern, KI-Wissens-Check, Aktionsplan (nutzt alles davor), Zusammenfassung.
-    """
-    # GEÄNDERT (14.09.2026): kein Auflösen mehr auf den Team-Owner, siehe
-    # create_topic_endpoint für die Begründung. team_id kommt hier ohnehin
-    # schon als Parameter rein.
-    collected = run_tracked(
-        topic_id, "collect",
-        lambda: collect_monthly_data(topic_id, seed_keyword, own_domain, "de", "Germany", team_id, triggered_by="monthly"),
-        triggered_by="monthly",
-    )
-    if not collected.ok:
-        logger.error("Monthly Cron-Lauf: Datenerhebung fehlgeschlagen für Topic %s, Analysen werden übersprungen", topic_id)
-        _record_topic_run_error(topic_id, "monthly_background", collected.error)
-        return
+    var placeholderOption = document.createElement('option');
+    placeholderOption.value = '';
+    placeholderOption.textContent = topicsForActiveDomain.length
+      ? (state.activeTopicId ? '\u2192 Zur Domain-\u00dcbersicht' : 'Thema w\u00e4hlen \u2026')
+      : (activeProject ? 'Noch keine Themen f\u00fcr ' + activeProject.domain : 'Erst Domain w\u00e4hlen');
+    placeholderOption.selected = !state.activeTopicId;
+    topicSelect.appendChild(placeholderOption);
 
-    all_ok = True
-    # NEU (13.09.2026): Lücken-Analyse bewusst NUR im monatlichen, NICHT im
-    # wöchentlichen Cron: source_profiles, ihre Haupt-Eingabe, werden nur
-    # monatlich aktualisiert. Aktionsplan (NEU 17.09.2026) nutzt deren Output
-    # mit, Content-Empfehlungen (NEU 15.09.2026) brauchen die frisch
-    # generierte Opportunity-Liste.
-    for step in ("opportunities", "gap_analysis", "content_recommendations", "ai_knowledge", "action_plan", "summary"):
-        if not run_step(topic_id, step, triggered_by="monthly").ok:
-            all_ok = False
+    topicsForActiveDomain.forEach(function (topic) {
+      var option = document.createElement('option');
+      option.value = topic.id;
+      option.textContent = topic.name;
+      if (topic.id === state.activeTopicId) option.selected = true;
+      topicSelect.appendChild(option);
+    });
+    topicSelect.disabled = topicsForActiveDomain.length === 0;
 
-    if all_ok:
-        _clear_topic_run_error(topic_id)
+    topicSelect.addEventListener('change', function () {
+      if (topicSelect.value) {
+        selectFromPicker('topic:' + topicSelect.value);
+      } else if (state.activeTopicId) {
+        backToOverview();
+      }
+    });
 
+    wrap.appendChild(domainSelect);
+    wrap.appendChild(topicSelect);
+    return wrap;
+  }
 
-@app.post("/cron/weekly")
-def cron_weekly(background_tasks: BackgroundTasks, x_cron_secret: str = Header(...)):
-    _check_cron_secret(x_cron_secret)
-    try:
-        due_topics = get_due_topics("weekly")
-    except Exception as e:
-        logger.exception("Fehler beim Ermitteln fälliger Weekly-Topics")
-        raise HTTPException(status_code=500, detail=f"Konnte fällige Topics nicht laden: {e}")
+  // =========================================================================
+  // NEU (23.09.2026): Anlegen in zwei Schritten mit Buying Center
+  // =========================================================================
+  // Schritt 1 legt nur (falls nötig) die Domain an und holt einen Vorschlag
+  // für Zielgruppe und Buying Center. Das Thema selbst wird erst in Schritt 2
+  // angelegt, weil die Prompts sofort danach im Hintergrund entstehen und
+  // die Rollen dann schon feststehen müssen.
 
-    for topic in due_topics:
-        background_tasks.add_task(_weekly_background, topic["id"], topic["own_domain"])
+  // GEÄNDERT (23.09.2026): höchstens die 3 wichtigsten Rollen. Dafür bekommt
+  // jede ab ihrer Einstiegsphase in jeder Phase Prompts (siehe prompt_discovery.py).
+  var MAX_BC_ROLES = 3;
 
-    logger.info("Weekly Cron gestartet für %d Topic(s)", len(due_topics))
-    return {"status": "ok", "queued": len(due_topics)}
+  function entryIndex(phase) {
+    var i = PHASE_ORDER.indexOf(phase);
+    return i === -1 ? 0 : i;
+  }
+  var BC_TEXT_MAX_CHARS = 200;
 
+  function resetCreateFlow() {
+    state.createStep = 1;
+    state.createDraft = { projectId: null, topicText: '', offerUrl: '', domainValue: null, newDomainText: '' };
+    state.bcSuggestFailed = false;
+    state.bcSuggestion = null;
+    state.bcDraftRoles = [];
+    state.bcTargetGroup = '';
+    state.isSuggestingBc = false;
+  }
 
-@app.post("/cron/monthly")
-def cron_monthly(background_tasks: BackgroundTasks, x_cron_secret: str = Header(...)):
-    _check_cron_secret(x_cron_secret)
-    try:
-        due_topics = get_due_topics("monthly")
-    except Exception as e:
-        logger.exception("Fehler beim Ermitteln fälliger Monthly-Topics")
-        raise HTTPException(status_code=500, detail=f"Konnte fällige Topics nicht laden: {e}")
+  function getRoleArray(ctx) {
+    if (ctx === 'edit') {
+      var topicId = state.activeTopicId;
+      if (!state.bcEditDraft[topicId]) state.bcEditDraft[topicId] = [];
+      return state.bcEditDraft[topicId];
+    }
+    return state.bcDraftRoles;
+  }
 
-    for topic in due_topics:
-        background_tasks.add_task(_monthly_background, topic["id"], topic["seed_keyword"], topic["own_domain"], topic["team_id"])
+  function ensureOneChampion(rolesArg) {
+    var roles = rolesArg || state.bcDraftRoles;
+    if (roles.length === 0) return;
+    var found = false;
+    roles.forEach(function (r) {
+      if (r.ist_champion && !found) { found = true; } else { r.ist_champion = false; }
+    });
+    if (!found) roles[0].ist_champion = true;
+  }
 
-    logger.info("Monthly Cron gestartet für %d Topic(s)", len(due_topics))
-    return {"status": "ok", "queued": len(due_topics)}
+  // Liest Domain-Auswahl aus Schritt 1 und legt eine neue Domain bei Bedarf an.
+  // Gibt das Projekt zurück oder null (dann steht der Fehler in state.createError).
+  async function resolveCreateProject() {
+    var domainSelect = document.getElementById('cvz-create-domain-select');
+    var newDomainInput = document.getElementById('cvz-create-domain-new');
+    var selectedValue = domainSelect ? domainSelect.value : state.createDraft.domainValue;
 
+    if (selectedValue !== '__new__') {
+      var existing = getProjectById(selectedValue);
+      if (!existing) state.createError = 'Ausgewählte Domain nicht gefunden, bitte Seite neu laden.';
+      return existing;
+    }
 
-def _start_first_run_for_promoted_topic(topic_id: str) -> None:
-    """
-    NEU (20.09.2026): startet den Erstlauf für ein Thema, das gerade aus der
-    Warteschlange befördert wurde (status 'collecting', siehe
-    enforce_scheduled_archivals). Gleiche Parameter wie beim regulären Anlegen
-    (create_topic_endpoint), Projekt-Sprache und -Standort kommen aus dem Topic.
-    """
-    import threading
+    var newDomainText = ((newDomainInput && newDomainInput.value) || '').trim();
+    if (!newDomainText) {
+      state.createError = 'Bitte neue Domain und Thema ausfüllen.';
+      return null;
+    }
+    // Schon einmal angelegt (z. B. nach "Zurück")? Dann wiederverwenden.
+    var already = state.projects.filter(function (p) { return p.domain === newDomainText; })[0];
+    if (already) return already;
 
-    try:
-        topic = (
-            supabase.table("ai_visibility_topics")
-            .select("id, team_id, seed_keyword, own_domain, language_code, location_name")
-            .eq("id", topic_id).single().execute()
-        ).data
-    except Exception:
-        logger.exception("Beförderten Topic %s konnte nicht geladen werden, Erstlauf nicht gestartet", topic_id)
-        try:
-            supabase.table("ai_visibility_topics").update({"status": "error"}).eq("id", topic_id).execute()
-        except Exception:
-            logger.exception("Konnte Fehler-Status für Topic %s nicht setzen", topic_id)
-        return
+    var project;
+    if (CONFIG.useMockData) {
+      project = { id: 'proj-' + Date.now(), name: newDomainText, domain: newDomainText };
+    } else {
+      var projectData = await apiFetch('/projects', {
+        method: 'POST',
+        body: { name: newDomainText, domain: newDomainText, language_code: 'de', location_name: 'Germany' },
+      });
+      project = { id: projectData.project_id, name: newDomainText, domain: newDomainText };
+    }
+    state.projects.push(project);
+    return project;
+  }
 
-    threading.Thread(
-        target=_collect_and_analyze_background,
-        args=(
-            topic_id, topic["seed_keyword"], topic["own_domain"],
-            topic["language_code"], topic["location_name"], [], topic["team_id"],
-        ),
-        daemon=True,
-        name=f"first-run-{topic_id}",
-    ).start()
-    logger.info("Erstlauf für beförderten Topic %s gestartet", topic_id)
+  async function submitCreateStep1(withBuyingCenter) {
+    var topicInput = document.getElementById('cvz-create-topic');
+    var urlInput = document.getElementById('cvz-create-offer-url');
+    var topicText = ((topicInput && topicInput.value) || '').trim();
+    state.createDraft.topicText = topicText;
+    state.createDraft.offerUrl = ((urlInput && urlInput.value) || '').trim();
 
+    if (!topicText) {
+      state.createError = 'Bitte Thema ausfüllen.';
+      render();
+      return;
+    }
 
-def _retry_failed_background() -> None:
-    """
-    NEU (14.09.2026): Läuft als BackgroundTask, aus demselben Grund wie
-    _weekly_background/_monthly_background: retry_failed_tasks() kann je
-    nach Anzahl offener Einträge mehrere Sekunden bis Minuten dauern.
+    state.createError = null;
+    state.bcSuggestFailed = false;
+    state.isSuggestingBc = withBuyingCenter;
+    state.isCreating = !withBuyingCenter;
+    render();
 
-    Stürzt retry_failed_tasks() komplett ab (z.B. weil Supabase nicht
-    erreichbar ist, nicht nur ein einzelner Task fehlschlägt), geht dafür
-    zusätzlich zum Log eine Alarm-Mail raus. Das ist der Fall, den einzelne
-    gave_up-Alarme (siehe _send_gave_up_alert in run_topic.py) NICHT
-    abdecken: dort läuft die Funktion ja noch, hier bricht sie komplett ab,
-    bevor überhaupt Tasks abgearbeitet werden.
+    try {
+      var project = await resolveCreateProject();
+      if (!project) {
+        state.isSuggestingBc = false;
+        state.isCreating = false;
+        render();
+        return;
+      }
+      state.createDraft.projectId = project.id;
+      state.activeProjectId = project.id;
 
-    GEÄNDERT (14.09.2026): ruft danach zusätzlich enforce_scheduled_
-    archivals() auf (siehe run_topic.py) — huckepack auf demselben Cron
-    statt eines eigenen pg_cron-Eintrags, aus genau dem Grund, aus dem
-    auch retry-failed selbst diese Kadenz nutzt (alle 15-30 Minuten,
-    häufig genug, dass eine vorgemerkte Deaktivierung nicht tagelang
-    hängen bleibt). Eigener try/except, damit ein Fehler hier NICHT den
-    Retry-Teil oben nachträglich als fehlgeschlagen erscheinen lässt.
-    """
-    try:
-        result = retry_failed_tasks()
-        logger.info("Retry-Cron abgeschlossen: %s", result)
-    except Exception as e:
-        logger.exception("Retry-Cron-Lauf komplett fehlgeschlagen")
-        send_failure_alert_email(
-            subject="🔥 Visibility Tracker: Retry-Cron komplett abgestürzt",
-            html_body=(
-                f"<p>retry_failed_tasks() ist mit einem Fehler abgebrochen, "
-                f"BEVOR Tasks abgearbeitet werden konnten:</p><p><code>{e}</code></p>"
-                f"<p>Bitte Railway-Logs prüfen.</p>"
-            ),
-        )
+      if (!withBuyingCenter) {
+        await createTopicWithBuyingCenter(project, topicText, null, []);
+        return;
+      }
 
-    try:
-        archival_result = enforce_scheduled_archivals()
-        if archival_result:
-            logger.info("Vorgemerkte Deaktivierungen/Warteschlange verarbeitet: %s", archival_result)
-        # GEÄNDERT (20.09.2026): beförderte Themen bekommen jetzt ihren Erstlauf.
-        # Vorher wurden sie nur auf 'active' gesetzt und nie gestartet, siehe
-        # run_topic.py: enforce_scheduled_archivals. Jeder Erstlauf läuft in
-        # einem eigenen Thread, damit der Retry-Cron nicht minutenlang blockiert.
-        for entry in archival_result:
-            if entry.get("promoted_topic_id"):
-                _start_first_run_for_promoted_topic(entry["promoted_topic_id"])
-    except Exception:
-        logger.exception("Durchsetzen vorgemerkter Deaktivierungen fehlgeschlagen")
+      var suggestion;
+      if (CONFIG.useMockData) {
+        suggestion = {
+          ist_solo_zielgruppe: false,
+          zielgruppe_vorschlag: 'Mittelständische Unternehmen mit eigener IT-Abteilung, die ihre Infrastruktur auslagern wollen.',
+          rollen: [
+            { rolle: 'IT-Leitung', ist_champion: true, einstiegsphase: 'exploration', motivation: 'Ausfallsicherheit ohne eigenes zweites Rechenzentrum', einwand: 'Latenz und Anbindung zum eigenen Standort ungeklärt' },
+            { rolle: 'Geschäftsführung', ist_champion: false, einstiegsphase: 'comparison', motivation: 'Planbare Kosten statt Investitionen', einwand: 'Lange Vertragsbindung' },
+          ],
+          annahmen: ['Angenommen: Unternehmen mit 200 bis 1.000 Mitarbeitenden'],
+          grundlage_duenn: !state.createDraft.offerUrl,
+          seite_gelesen: !!state.createDraft.offerUrl,
+          seite_fehler: null,
+          bibliothek: ['Einkauf', 'IT-Leitung'],
+        };
+      } else {
+        suggestion = await apiFetch('/projects/' + project.id + '/buying-center/suggest', {
+          method: 'POST',
+          body: {
+            topic_name: topicText,
+            seed_keyword: topicText,
+            offer_url: state.createDraft.offerUrl || null,
+          },
+        });
+      }
 
+      state.bcSuggestion = suggestion;
+      state.bcTargetGroup = suggestion.zielgruppe_vorschlag || '';
+      state.bcDraftRoles = (suggestion.rollen || []).map(function (r) {
+        return { rolle: r.rolle || '', ist_champion: !!r.ist_champion, motivation: r.motivation || '', einwand: r.einwand || '', einstiegsphase: r.einstiegsphase || 'exploration' };
+      });
+      ensureOneChampion();
+      state.createStep = 2;
+    } catch (e) {
+      console.error('[CVZ Visibility] Buying-Center-Vorschlag fehlgeschlagen:', e);
+      state.createError = 'Der Vorschlag für die Rollen konnte nicht erstellt werden. ' +
+        'Versucht es erneut oder legt das Thema an und legt die Rollen später im Thema fest.';
+      state.bcSuggestFailed = true;
+    }
+    state.isSuggestingBc = false;
+    state.isCreating = false;
+    render();
+  }
 
-@app.post("/cron/retry-failed")
-def cron_retry_failed(background_tasks: BackgroundTasks, x_cron_secret: str = Header(...)):
-    """
-    NEU (14.09.2026): Arbeitet die Retry-Queue (Tabelle failed_tasks) ab:
-    fehlgeschlagene related_keywords/google_ai_overview/chat_gpt/gemini-
-    Requests aus collect_monthly_data/collect_weekly_data werden hier
-    erneut versucht (siehe log_failed_task/retry_failed_tasks in
-    run_topic.py).
+  async function submitCreateFinal(withBuyingCenter) {
+    var project = getProjectById(state.createDraft.projectId);
+    if (!project) {
+      state.createError = 'Domain nicht gefunden, bitte Seite neu laden.';
+      render();
+      return;
+    }
 
-    Sollte HÄUFIGER laufen als /cron/weekly bzw. /cron/monthly (empfohlen:
-    alle 15-30 Minuten), sonst bleibt ein fehlgeschlagener Request bis zum
-    nächsten regulären Lauf (7 bzw. 30 Tage) einfach liegen.
-    """
-    _check_cron_secret(x_cron_secret)
-    background_tasks.add_task(_retry_failed_background)
-    logger.info("Retry-Cron gestartet")
-    return {"status": "ok"}
+    var roles = [];
+    if (withBuyingCenter) {
+      roles = state.bcDraftRoles
+        .map(function (r) {
+          return {
+            rolle: (r.rolle || '').trim(),
+            ist_champion: !!r.ist_champion,
+            motivation: (r.motivation || '').trim() || null,
+            einwand: (r.einwand || '').trim() || null,
+            einstiegsphase: r.einstiegsphase || 'exploration',
+          };
+        })
+        .filter(function (r) { return r.rolle; });
+
+      var isSolo = state.bcSuggestion && state.bcSuggestion.ist_solo_zielgruppe;
+      if (roles.length === 0 && !isSolo) {
+        state.createError = 'Bitte mindestens eine Rolle behalten oder "Rollen später festlegen" wählen.';
+        render();
+        return;
+      }
+      var names = roles.map(function (r) { return r.rolle.toLowerCase(); });
+      var hasDuplicate = names.some(function (n, i) { return names.indexOf(n) !== i; });
+      if (hasDuplicate) {
+        state.createError = 'Jede Rolle darf nur einmal vorkommen.';
+        render();
+        return;
+      }
+    }
+
+    state.isCreating = true;
+    state.createError = null;
+    render();
+    var targetGroup = withBuyingCenter ? (state.bcTargetGroup || '').trim() || null : null;
+    await createTopicWithBuyingCenter(project, state.createDraft.topicText, targetGroup, roles);
+  }
+
+  async function createTopicWithBuyingCenter(project, topicText, targetGroup, roles) {
+    try {
+      var newTopic;
+      if (CONFIG.useMockData) {
+        newTopic = { id: 'topic-' + Date.now(), project_id: project.id, name: topicText, seed_keyword: topicText, status: 'collecting', opportunities_count: 0 };
+      } else {
+        var topicData = await apiFetch('/topics', {
+          method: 'POST',
+          body: {
+            project_id: project.id,
+            topic_name: topicText,
+            seed_keyword: topicText,
+            sample_prompts: [],
+            target_group: targetGroup,
+            buying_center: roles,
+          },
+        });
+        newTopic = { id: topicData.topic_id, project_id: project.id, name: topicText, seed_keyword: topicText, status: topicData.status || 'collecting', opportunities_count: 0 };
+      }
+      state.allTopics.push(newTopic);
+      state.activeProjectId = project.id;
+
+      if (state.topicUsage && newTopic.status !== 'queued') {
+        state.topicUsage.current_count += 1;
+        state.topicUsage.can_create = state.topicUsage.current_count < state.topicUsage.limit;
+      }
+
+      state.isCreating = false;
+      state.showCreateForm = false;
+      resetCreateFlow();
+      if (newTopic.status !== 'queued') {
+        maybeStartPolling();
+      }
+      openTopicDetail(newTopic.id);
+    } catch (e) {
+      console.error('[CVZ Visibility] Anlegen fehlgeschlagen:', e);
+      state.isCreating = false;
+      if (e.status === 403) {
+        state.createError = e.message;
+        state.limitReached = true;
+      } else {
+        state.createError = 'Anlegen fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler');
+        state.limitReached = false;
+      }
+      render();
+    }
+  }
+
+  async function retryTopic(topicId) {
+    if (CONFIG.useMockData) {
+      var mockTopic = getTopicById(topicId);
+      if (mockTopic) mockTopic.status = 'active';
+      if (state.topicDetailCache[topicId]) state.topicDetailCache[topicId].topic.status = 'active';
+      render();
+      return;
+    }
+
+    state.retryingTopicId = topicId;
+    render();
+
+    try {
+      await apiFetch('/topics/' + topicId + '/retry', { method: 'POST' });
+      await loadTopics();
+      maybeStartPolling();
+    } catch (e) {
+      console.error('[CVZ Visibility] Retry fehlgeschlagen f\u00fcr Topic ' + topicId + ':', e);
+      await showCvzAlert('Erneut versuchen fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.retryingTopicId = null;
+    render();
+  }
+
+  async function setTopicArchiveStatus(topicId, archive) {
+    var confirmTitle = archive ? 'Thema deaktivieren?' : 'Thema wieder aktivieren?';
+    var confirmBody = archive
+      ? 'Es werden dann keine neuen Datenläufe mehr gestartet, alle bisherigen Daten bleiben aber sichtbar. Du kannst das Thema jederzeit wieder aktivieren.'
+      : 'Ab dem nächsten wöchentlichen Lauf werden wieder neue Daten gesammelt.';
+    var confirmed = await showCvzConfirm(confirmBody, {
+      title: confirmTitle,
+      confirmLabel: archive ? 'Deaktivieren' : 'Aktivieren',
+    });
+    if (!confirmed) return;
+
+    state.archivingTopicId = topicId;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        var mockTopic = getTopicById(topicId);
+        if (mockTopic) mockTopic.status = archive ? 'archived' : 'active';
+        if (state.topicDetailCache[topicId]) {
+          state.topicDetailCache[topicId].topic.status = archive ? 'archived' : 'active';
+        }
+      } else {
+        await apiFetch('/topics/' + topicId + '/' + (archive ? 'archive' : 'reactivate'), { method: 'POST' });
+        await loadTopics();
+        await loadTopicUsage();
+      }
+
+      var affectedTopic = getTopicById(topicId);
+      if (affectedTopic) {
+        delete state.domainDashboardCache[affectedTopic.project_id];
+        if (state.activeView === 'overview' && state.activeProjectId === affectedTopic.project_id) {
+          loadDomainDashboard(affectedTopic.project_id, true);
+        }
+      }
+
+      if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
+        delete state.topicDetailCache[topicId];
+        await openTopicDetail(topicId, false);
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Status konnte nicht geändert werden:', e);
+      await showCvzAlert('Status konnte nicht geändert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.archivingTopicId = null;
+    render();
+  }
+
+  async function deleteTopicPermanently(topicId) {
+    var confirmed = await showCvzConfirm(
+      'Dieses Thema wurde nie gestartet und kann folgenlos entfernt werden. Das ist NICHT r\u00fcckg\u00e4ngig zu machen.',
+      { title: 'Thema endg\u00fcltig l\u00f6schen?', confirmLabel: 'Endg\u00fcltig l\u00f6schen' }
+    );
+    if (!confirmed) return;
+
+    var affectedTopic = getTopicById(topicId);
+    state.archivingTopicId = topicId;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        state.allTopics = state.allTopics.filter(function (t) { return t.id !== topicId; });
+      } else {
+        await apiFetch('/topics/' + topicId, { method: 'DELETE' });
+        await loadTopics();
+        await loadTopicUsage();
+      }
+      delete state.topicDetailCache[topicId];
+      if (affectedTopic) delete state.domainDashboardCache[affectedTopic.project_id];
+      if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
+        backToOverview();
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Thema konnte nicht gel\u00f6scht werden:', e);
+      await showCvzAlert('Thema konnte nicht gel\u00f6scht werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.archivingTopicId = null;
+    render();
+  }
+
+  async function refreshGscData(topicId) {
+    if (state.isRefreshingGsc) return;
+    state.isRefreshingGsc = true;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        await showCvzAlert('Im Mock-Modus nicht verf\u00fcgbar.');
+      } else {
+        await apiFetch('/topics/' + topicId + '/refresh-gsc', { method: 'POST' });
+        await new Promise(function (resolve) { setTimeout(resolve, 6000); });
+        delete state.topicDetailCache[topicId];
+        if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
+          await openTopicDetail(topicId, false);
+        }
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] GSC-Daten konnten nicht nachgezogen werden:', e);
+      await showCvzAlert('GSC-Daten konnten nicht nachgezogen werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.isRefreshingGsc = false;
+    render();
+  }
+
+  async function loadCompetitorSuggestions(topicId) {
+    if (state.isLoadingCompetitorSuggestions) return;
+    state.isLoadingCompetitorSuggestions = true;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        state.competitorSuggestionsCache[topicId] = [];
+      } else {
+        var data = await apiFetch('/topics/' + topicId + '/competitor-suggestions');
+        state.competitorSuggestionsCache[topicId] = data.suggestions || [];
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Wettbewerber-Vorschl\u00e4ge konnten nicht geladen werden:', e);
+      state.competitorSuggestionsCache[topicId] = [];
+    }
+
+    state.isLoadingCompetitorSuggestions = false;
+    render();
+  }
+
+  function toggleCompetitorManage(topicId, currentActiveDomains) {
+    var isOpening = !state.competitorManageOpen[topicId];
+    state.competitorManageOpen[topicId] = isOpening;
+    if (isOpening) {
+      if (!state.competitorDraftDomains[topicId]) {
+        state.competitorDraftDomains[topicId] = currentActiveDomains.slice();
+      }
+      if (!state.competitorSuggestionsCache[topicId]) {
+        loadCompetitorSuggestions(topicId);
+      }
+    }
+    render();
+  }
+
+  async function submitCompetitorSelection(topicId) {
+    if (state.isSubmittingCompetitors) return;
+    var domains = state.competitorDraftDomains[topicId] || [];
+    state.isSubmittingCompetitors = true;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        await showCvzAlert('Im Mock-Modus nicht verf\u00fcgbar.');
+      } else {
+        await apiFetch('/topics/' + topicId + '/confirm-competitors', {
+          method: 'POST',
+          body: { competitor_domains: domains },
+        });
+        // GEAENDERT (21.09.2026): leert ALLE Zwischenspeicher des Themas, nicht nur das Detail.
+        purgeTopicCaches(topicId);
+        state.competitorManageOpen[topicId] = false;
+        delete state.competitorDraftDomains[topicId];
+        delete state.competitorSuggestionsCache[topicId];
+        await openTopicDetail(topicId, false);
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Wettbewerber konnten nicht gespeichert werden:', e);
+      await showCvzAlert('Wettbewerber konnten nicht gespeichert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.isSubmittingCompetitors = false;
+    render();
+  }
+
+  async function submitManualPrompt(topicId) {
+    if (state.isSubmittingManualPrompt) return;
+    var promptText = (state.manualPromptDraftText || '').trim();
+    if (!promptText) return;
+    var phase = state.manualPromptDraftPhase || 'exploration';
+
+    state.isSubmittingManualPrompt = true;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        await showCvzAlert('Im Mock-Modus nicht verf\u00fcgbar.');
+      } else {
+        await apiFetch('/topics/' + topicId + '/prompts', {
+          method: 'POST',
+          body: { prompt_text: promptText, messymiddle_phase: phase, role_id: state.manualPromptDraftRoleId || null },
+        });
+        state.manualPromptDraftText = '';
+        delete state.topicDetailCache[topicId];
+        delete state.buyingCenterCache[topicId];
+        await openTopicDetail(topicId, false);
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Prompt konnte nicht angelegt werden:', e);
+      await showCvzAlert('Prompt konnte nicht angelegt werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.isSubmittingManualPrompt = false;
+    render();
+  }
+
+  async function deactivatePrompt(topicId, promptId) {
+    var confirmed = await showCvzConfirm(
+      'Diesen Prompt wirklich deaktivieren?',
+      { title: 'Prompt deaktivieren?', confirmLabel: 'Deaktivieren' }
+    );
+    if (!confirmed) return;
+
+    if (CONFIG.useMockData) {
+      await showCvzAlert('Im Mock-Modus nicht verfügbar.');
+      return;
+    }
+
+    try {
+      await apiFetch('/topics/' + topicId + '/prompts/' + promptId + '/deactivate', { method: 'PATCH' });
+      state.manualPromptDraftText = '';
+      delete state.topicDetailCache[topicId];
+      delete state.buyingCenterCache[topicId];
+      await openTopicDetail(topicId, false);
+    } catch (e) {
+      console.error('[CVZ Visibility] Prompt konnte nicht deaktiviert werden:', e);
+      await showCvzAlert('Prompt konnte nicht deaktiviert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+  }
+
+  async function deactivateKeyword(topicId, keywordId) {
+    var confirmed = await showCvzConfirm(
+      'Dieses Keyword wirklich deaktivieren?',
+      { title: 'Keyword deaktivieren?', confirmLabel: 'Deaktivieren' }
+    );
+    if (!confirmed) return;
+
+    if (CONFIG.useMockData) {
+      await showCvzAlert('Im Mock-Modus nicht verfügbar.');
+      return;
+    }
+
+    try {
+      await apiFetch('/topics/' + topicId + '/keywords/' + keywordId + '/deactivate', { method: 'PATCH' });
+      state.manualKeywordDraftText = '';
+      delete state.topicDetailCache[topicId];
+      await openTopicDetail(topicId, false);
+    } catch (e) {
+      console.error('[CVZ Visibility] Keyword konnte nicht deaktiviert werden:', e);
+      await showCvzAlert('Keyword konnte nicht deaktiviert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+  }
+
+  async function submitManualKeyword(topicId) {
+    if (state.isSubmittingManualKeyword) return;
+    var kw = (state.manualKeywordDraftText || '').trim();
+    if (!kw) return;
+
+    state.isSubmittingManualKeyword = true;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        await showCvzAlert('Im Mock-Modus nicht verfügbar.');
+      } else {
+        await apiFetch('/topics/' + topicId + '/keywords', {
+          method: 'POST',
+          body: { keyword: kw },
+        });
+        state.manualKeywordDraftText = '';
+        delete state.topicDetailCache[topicId];
+        await openTopicDetail(topicId, false);
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Keyword konnte nicht angelegt werden:', e);
+      await showCvzAlert('Keyword konnte nicht angelegt werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.isSubmittingManualKeyword = false;
+    render();
+  }
+
+  async function cancelArchiveTopic(topicId) {
+    state.archivingTopicId = topicId;
+    render();
+
+    try {
+      if (CONFIG.useMockData) {
+        var mockTopic = getTopicById(topicId);
+        if (mockTopic) mockTopic.archive_effective_at = null;
+        if (state.topicDetailCache[topicId]) {
+          state.topicDetailCache[topicId].topic.archive_effective_at = null;
+        }
+      } else {
+        await apiFetch('/topics/' + topicId + '/cancel-archive', { method: 'POST' });
+        await loadTopics();
+      }
+
+      if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
+        delete state.topicDetailCache[topicId];
+        await openTopicDetail(topicId, false);
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Deaktivierung konnte nicht abgebrochen werden:', e);
+      await showCvzAlert('Deaktivierung konnte nicht abgebrochen werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+
+    state.archivingTopicId = null;
+    render();
+  }
+
+  async function submitBuyTopicSlot() {
+    state.isBuyingSlot = true;
+    render();
+
+    try {
+      var response = await fetch(CONFIG.stripeCheckoutUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memberstack_token: state.memberToken, quantity: 1 }),
+      });
+      var data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || data.detail || ('Checkout fehlgeschlagen (' + response.status + ')'));
+      }
+
+      if (data.mode === 'checkout_created' && data.checkout_url) {
+        window.location.href = data.checkout_url;
+        return;
+      }
+      if (data.mode === 'quantity_updated') {
+        state.limitReached = false;
+        state.createError = 'Slot gekauft (jetzt ' + data.new_quantity + ' insgesamt).';
+        try {
+          await loadTopicUsage();
+        } catch (e) {
+          console.error('[CVZ Visibility] Nutzungsstand konnte nach Kauf nicht neu geladen werden:', e);
+        }
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Slot-Kauf fehlgeschlagen:', e);
+      state.createError = 'Slot-Kauf fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler');
+    }
+
+    state.isBuyingSlot = false;
+    render();
+  }
+
+  function renderCreateTopicForm() {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-create-form';
+
+    var toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'cvz-create-toggle-btn';
+    toggleBtn.setAttribute('data-cvz-create-toggle', '');
+    toggleBtn.textContent = state.showCreateForm ? '\u2212 Formular schlie\u00dfen' : '+ Neues Thema anlegen';
+    wrap.appendChild(toggleBtn);
+
+    if (!state.showCreateForm) return wrap;
+
+    var form = document.createElement('div');
+    form.className = 'cvz-create-form-fields';
+
+    var limitReachedUpfront = state.topicUsage && !state.topicUsage.can_create && !state.topicUsage.can_queue && !state.limitReached;
+    if (limitReachedUpfront) {
+      var upfrontMsg = document.createElement('p');
+      upfrontMsg.className = 'cvz-create-error';
+      upfrontMsg.textContent =
+        'Euer Plan-Limit ist erreicht (' + state.topicUsage.current_count + '/' + state.topicUsage.limit + '). ' +
+        'Weiteres Topic-Slot nötig, um ein neues Thema anzulegen.';
+      form.appendChild(upfrontMsg);
+
+      var upfrontBuyBtn = document.createElement('button');
+      upfrontBuyBtn.type = 'button';
+      upfrontBuyBtn.className = 'cvz-create-buy-btn';
+      upfrontBuyBtn.setAttribute('data-cvz-buy-slot', '');
+      upfrontBuyBtn.disabled = state.isBuyingSlot;
+      upfrontBuyBtn.textContent = state.isBuyingSlot ? 'Wird bearbeitet …' : '+ 1 Topic-Slot kaufen';
+      form.appendChild(upfrontBuyBtn);
+
+      wrap.appendChild(form);
+      return wrap;
+    }
+
+    var queueNotice = state.topicUsage && !state.topicUsage.can_create && state.topicUsage.can_queue;
+    if (queueNotice) {
+      var queueMsg = document.createElement('p');
+      queueMsg.className = 'cvz-create-info';
+      var queueDate = formatShortDate(state.topicUsage.next_slot_at);
+      queueMsg.textContent =
+        'Euer Plan-Limit ist aktuell ausgeschöpft (' + state.topicUsage.current_count + '/' + state.topicUsage.limit + '). ' +
+        'Das Thema wird angelegt und startet automatisch, sobald ein Slot frei wird' +
+        (queueDate ? ' (voraussichtlich ab ' + queueDate + ')' : '') +
+        ', das kann nach dem Freiwerden eines Slots noch bis zu 30 Minuten dauern.';
+      form.appendChild(queueMsg);
+    }
+
+    // NEU (23.09.2026): Schritt 2 (Buying Center bestätigen)
+    if (state.createStep === 2) {
+      wrap.appendChild(renderBuyingCenterStep());
+      return wrap;
+    }
+
+    var domainSelect = document.createElement('select');
+    domainSelect.id = 'cvz-create-domain-select';
+    domainSelect.className = 'cvz-create-input';
+
+    // GEFIXT (23.09.2026): Alle Felder schreiben ihren Inhalt sofort in
+    // state.createDraft. Vorher wurde er erst beim Absenden gelesen, und
+    // jedes Neuzeichnen der Seite (z. B. Polling alle 5 s, solange ein Thema
+    // Daten sammelt) hat die Eingaben gelöscht.
+    var selectedDomain = state.createDraft.domainValue ||
+      (state.projects.length === 0 ? '__new__' : state.activeProjectId);
+
+    state.projects.forEach(function (project) {
+      var option = document.createElement('option');
+      option.value = project.id;
+      option.textContent = project.domain;
+      if (project.id === selectedDomain) option.selected = true;
+      domainSelect.appendChild(option);
+    });
+
+    var newOption = document.createElement('option');
+    newOption.value = '__new__';
+    newOption.textContent = '+ Neue Domain';
+    if (selectedDomain === '__new__') newOption.selected = true;
+    domainSelect.appendChild(newOption);
+
+    var newDomainInput = document.createElement('input');
+    newDomainInput.type = 'text';
+    newDomainInput.id = 'cvz-create-domain-new';
+    newDomainInput.className = 'cvz-create-input';
+    newDomainInput.placeholder = 'Neue Domain (z.B. kunde-c.de)';
+    newDomainInput.value = state.createDraft.newDomainText || '';
+    newDomainInput.style.display = (domainSelect.value === '__new__') ? '' : 'none';
+    newDomainInput.addEventListener('input', function () {
+      state.createDraft.newDomainText = newDomainInput.value;
+    });
+
+    domainSelect.addEventListener('change', function () {
+      state.createDraft.domainValue = domainSelect.value;
+      newDomainInput.style.display = (domainSelect.value === '__new__') ? '' : 'none';
+      if (domainSelect.value === '__new__') newDomainInput.focus();
+    });
+
+    var TOPIC_MAX_CHARS = 80;
+    var topicInput = document.createElement('input');
+    topicInput.type = 'text';
+    topicInput.id = 'cvz-create-topic';
+    topicInput.className = 'cvz-create-input';
+    // GEÄNDERT (23.09.2026): Zeichenlimit steht jetzt im Platzhalter statt
+    // als eigene Zeile darunter.
+    topicInput.placeholder = 'Thema / Seed-Keyword (z. B. landingpage optimierung, max. ' + TOPIC_MAX_CHARS + ' Zeichen)';
+    topicInput.maxLength = TOPIC_MAX_CHARS;
+    topicInput.value = state.createDraft.topicText || '';
+    topicInput.addEventListener('input', function () {
+      state.createDraft.topicText = topicInput.value;
+    });
+
+    // GEFIXT (21.09.2026): topicInput/topicHint hingen bisher als zwei
+    // eigenstaendige Flex-Items direkt in .cvz-create-form-fields (einer
+    // Flex-Row), dadurch stand der Hinweis oben neben statt unter dem
+    // Eingabefeld. Gemeinsamer Wrapper haelt beide zusammen als EIN
+    // Flex-Item der Row, Eingabefeld und Hinweis stehen darin normal
+    // untereinander.
+    var topicFieldWrap = document.createElement('div');
+    topicFieldWrap.style.cssText = 'flex:1;min-width:180px;';
+    topicInput.style.width = '100%';
+    topicFieldWrap.appendChild(topicInput);
+
+    // NEU (23.09.2026): optionale Angebotsseite. Ersetzt die Abfrage von
+    // Branche/Zielgruppe: Claude liest die Seite und leitet daraus ab.
+    var urlFieldWrap = document.createElement('div');
+    urlFieldWrap.style.cssText = 'flex:1 1 100%;';
+    var urlInput = document.createElement('input');
+    urlInput.type = 'url';
+    urlInput.id = 'cvz-create-offer-url';
+    urlInput.className = 'cvz-create-input';
+    urlInput.style.width = '100%';
+    urlInput.placeholder = 'URL eurer Angebotsseite zu diesem Thema (optional)';
+    urlInput.value = state.createDraft.offerUrl || '';
+    urlInput.addEventListener('input', function () {
+      state.createDraft.offerUrl = urlInput.value;
+    });
+    var urlHint = document.createElement('p');
+    urlHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    urlHint.textContent = 'Muss auf eurer Domain liegen. Daraus leiten wir Zielgruppe und Buying Center ab.';
+    urlFieldWrap.appendChild(urlInput);
+    urlFieldWrap.appendChild(urlHint);
+
+    var busy = state.isCreating || state.isSuggestingBc;
+    var submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.className = 'cvz-create-submit-btn';
+    submitBtn.setAttribute('data-cvz-create-submit', '');
+    submitBtn.disabled = busy;
+    submitBtn.innerHTML = state.isSuggestingBc
+      ? '<span class="cvz-spinner"></span>Rollen werden vorgeschlagen \u2026'
+      : 'Weiter';
+
+    form.appendChild(domainSelect);
+    form.appendChild(newDomainInput);
+    form.appendChild(topicFieldWrap);
+    form.appendChild(urlFieldWrap);
+    form.appendChild(submitBtn);
+
+    // GEÄNDERT (23.09.2026): Der Ausweg ohne Rollen erscheint nur noch, wenn
+    // der Rollen-Vorschlag fehlgeschlagen ist. Vorher stand er immer da, und
+    // es war nicht klar, warum man ihn wählen sollte.
+    if (state.bcSuggestFailed) {
+      var skipBtn = document.createElement('button');
+      skipBtn.type = 'button';
+      skipBtn.className = 'cvz-delete-topic-btn';
+      skipBtn.setAttribute('data-cvz-create-skip-bc', '');
+      skipBtn.disabled = busy;
+      skipBtn.textContent = state.isCreating ? 'Wird angelegt \u2026' : 'Thema trotzdem anlegen, Rollen später festlegen';
+      form.appendChild(skipBtn);
+    }
+
+    if (state.createError) {
+      var err = document.createElement('p');
+      err.className = 'cvz-create-error';
+      err.textContent = state.createError;
+      form.appendChild(err);
+
+      if (state.limitReached) {
+        var buyBtn = document.createElement('button');
+        buyBtn.type = 'button';
+        buyBtn.className = 'cvz-create-buy-btn';
+        buyBtn.setAttribute('data-cvz-buy-slot', '');
+        buyBtn.disabled = state.isBuyingSlot;
+        buyBtn.textContent = state.isBuyingSlot ? 'Wird bearbeitet \u2026' : '+ 1 Topic-Slot kaufen';
+        form.appendChild(buyBtn);
+      }
+    }
+
+    wrap.appendChild(form);
+    return wrap;
+  }
+
+  // NEU (23.09.2026): Schritt 2 des Anlegens. Vorschlag prüfen, Rollen
+  // umbenennen, entfernen, austauschen (aus anderen Themen der Domain) oder
+  // ergänzen. Bewusst auf MAX_BC_ROLES begrenzt, weil sich die 16 Prompts
+  // sonst zu dünn auf die Rollen verteilen.
+  function renderBuyingCenterStep() {
+    var sug = state.bcSuggestion || {};
+    var box = document.createElement('div');
+    box.className = 'cvz-card';
+    box.style.cssText = 'margin-top:10px;display:flex;flex-direction:column;gap:14px;';
+
+    var headRow = document.createElement('div');
+    headRow.style.cssText = 'display:flex;align-items:center;';
+    var head = document.createElement('p');
+    head.className = 'cvz-section-label';
+    head.style.margin = '0';
+    head.textContent = 'Wer entscheidet beim Kauf von \u201e' + state.createDraft.topicText + '\u201c mit?';
+    headRow.appendChild(head);
+    headRow.appendChild(makeTip(
+      'Für jede Rolle formulieren wir die Prompts so, wie diese Person ChatGPT oder Gemini fragen würde. ' +
+      'Die Motivation prägt Fragen am Anfang der Journey, der Einwand die Fragen kurz vor der Entscheidung. ' +
+      'Später geänderte Rollen gelten nur für neue Prompts, damit euer Verlauf vergleichbar bleibt.'
+    ));
+    box.appendChild(headRow);
+
+    function note(text, color) {
+      var p = document.createElement('p');
+      p.style.cssText = 'margin:0;font-size:12px;line-height:1.5;color:' + (color || 'var(--cvz-text-muted,#8b98a5)') + ';';
+      p.textContent = text;
+      return p;
+    }
+    if (sug.grundlage_duenn) {
+      box.appendChild(note(
+        'Diese Rollen sind allgemein gehalten, weil wir weder eine Zielgruppe noch eure Angebotsseite kennen. ' +
+        'Ergänzt unten eine Zeile zur Zielgruppe oder geht zurück und tragt die URL der Angebotsseite ein.',
+        'var(--cvz-amber,#c98e2a)'
+      ));
+    }
+    if (sug.seite_fehler) box.appendChild(note('Angebotsseite nicht gelesen: ' + sug.seite_fehler, 'var(--cvz-amber,#c98e2a)'));
+    if (sug.seite_gelesen) box.appendChild(note('Eure Angebotsseite wurde für den Vorschlag gelesen.'));
+
+    // Zielgruppe
+    var tgLabel = document.createElement('p');
+    tgLabel.className = 'cvz-changelog-guided-label';
+    tgLabel.style.margin = '0';
+    tgLabel.textContent = 'Zielgruppe';
+    box.appendChild(tgLabel);
+    var tgInput = document.createElement('textarea');
+    tgInput.id = 'cvz-bc-target';
+    tgInput.className = 'cvz-changelog-input';
+    tgInput.rows = 2;
+    tgInput.maxLength = 300;
+    tgInput.value = state.bcTargetGroup || '';
+    tgInput.placeholder = 'An wen richtet sich das Angebot? (Branche, Größe, Situation)';
+    tgInput.addEventListener('input', function () { state.bcTargetGroup = tgInput.value; });
+    box.appendChild(tgInput);
+
+    if (sug.ist_solo_zielgruppe) {
+      box.appendChild(note('Das Angebot richtet sich an Selbstständige. Dort entscheidet eine Person allein, deshalb gibt es kein Buying Center.'));
+    }
+
+    box.appendChild(renderRoleCards('create', state.bcDraftRoles, sug.bibliothek || []));
+
+    // Annahmen
+    if (sug.annahmen && sug.annahmen.length) {
+      var aLabel = document.createElement('p');
+      aLabel.className = 'cvz-changelog-guided-label';
+      aLabel.style.margin = '0';
+      aLabel.textContent = 'Getroffene Annahmen, bitte kurz prüfen';
+      box.appendChild(aLabel);
+      var list = document.createElement('ul');
+      list.style.cssText = 'margin:0;padding-left:18px;font-size:12px;color:var(--cvz-text-muted,#8b98a5);line-height:1.5;';
+      sug.annahmen.forEach(function (a) {
+        var li = document.createElement('li');
+        li.textContent = a;
+        list.appendChild(li);
+      });
+      box.appendChild(list);
+    }
+
+    // Aktionen
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;';
+    var confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'cvz-create-submit-btn';
+    confirmBtn.setAttribute('data-cvz-create-confirm', '');
+    confirmBtn.disabled = state.isCreating;
+    confirmBtn.textContent = state.isCreating ? 'Wird angelegt \u2026' : 'Thema anlegen';
+    actions.appendChild(confirmBtn);
+    var backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'cvz-archive-btn';
+    backBtn.setAttribute('data-cvz-create-back', '');
+    backBtn.disabled = state.isCreating;
+    backBtn.textContent = 'Zurück';
+    actions.appendChild(backBtn);
+    var skip = document.createElement('button');
+    skip.type = 'button';
+    skip.className = 'cvz-delete-topic-btn';
+    skip.setAttribute('data-cvz-create-skip-bc', '');
+    skip.disabled = state.isCreating;
+    skip.textContent = 'Rollen später festlegen';
+    skip.title = 'Das Thema startet ohne Rollen. Ihr könnt sie jederzeit im Thema unter "Sichtbarkeit je Rolle" festlegen und bestehende Prompts zuordnen.';
+    actions.appendChild(skip);
+    box.appendChild(actions);
+
+    if (state.createError) {
+      var err = document.createElement('p');
+      err.className = 'cvz-create-error';
+      err.style.margin = '0';
+      err.textContent = state.createError;
+      box.appendChild(err);
+      if (state.limitReached) {
+        var buyBtn = document.createElement('button');
+        buyBtn.type = 'button';
+        buyBtn.className = 'cvz-create-buy-btn';
+        buyBtn.setAttribute('data-cvz-buy-slot', '');
+        buyBtn.disabled = state.isBuyingSlot;
+        buyBtn.textContent = state.isBuyingSlot ? 'Wird bearbeitet \u2026' : '+ 1 Topic-Slot kaufen';
+        box.appendChild(buyBtn);
+      }
+    }
+    return box;
+  }
+
+  // =========================================================================
+  // NEU (23.09.2026): Rollen-Karten (gemeinsam für Anlegen und Bearbeiten)
+  // =========================================================================
+  // ctx "create": Anlege-Dialog, ctx "edit": bestehendes Thema. Beim
+  // Bearbeiten sind Namen bestehender Rollen gesperrt: Ein neuer Name wäre
+  // für das Backend eine neue Rolle, die Prompts der alten würden
+  // deaktiviert. Wer umbenennen will, entfernt die Rolle und legt sie neu an.
+  function renderRoleCards(ctx, roles, library) {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-direction:column;gap:10px;';
+
+    var label = document.createElement('p');
+    label.className = 'cvz-changelog-guided-label';
+    label.style.margin = '0';
+    label.textContent = 'Die ' + MAX_BC_ROLES + ' wichtigsten Rollen (' + roles.length + ' von max. ' + MAX_BC_ROLES + ')';
+    wrap.appendChild(label);
+
+    // NEU (23.09.2026): erklärt, warum auf 3 Rollen begrenzt ist
+    var whyThree = document.createElement('p');
+    whyThree.style.cssText = 'margin:0;font-size:12px;line-height:1.5;color:var(--cvz-text-muted,#8b98a5);';
+    whyThree.textContent =
+      'Wir messen bewusst nur die ' + MAX_BC_ROLES + ' wichtigsten Rollen: die Rolle, die den Kauf vorantreibt, ' +
+      'und die Rollen, die selbst recherchieren oder den Kauf mit einem Einwand kippen können. ' +
+      'Dafür bekommt jede dieser Rollen ab ihrer Einstiegsphase in jeder Phase eigene Prompts. ' +
+      'Mit mehr Rollen würden sich die Prompts so dünn verteilen, dass pro Rolle und Phase keine belastbare Aussage mehr möglich wäre.';
+    wrap.appendChild(whyThree);
+
+    roles.forEach(function (role, i) {
+      var locked = ctx === 'edit' && !!role.role_id;
+      var card = document.createElement('div');
+      card.style.cssText = 'border:1px solid var(--cvz-border,#232b36);padding:12px;display:flex;flex-direction:column;gap:8px;' +
+        (role.ist_champion ? 'border-left:3px solid var(--cvz-teal,#4fd1c5);' : '');
+
+      var nameLabel = document.createElement('span');
+      nameLabel.style.cssText = 'font-size:12px;color:var(--cvz-text-muted,#8b98a5);margin-bottom:-4px;';
+      nameLabel.innerHTML = '<strong style="color:var(--cvz-text,#e6edf3);font-weight:600;">Rolle</strong>';
+      card.appendChild(nameLabel);
+
+      var top = document.createElement('div');
+      top.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
+      var nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.id = 'cvz-bc-' + ctx + '-name-' + i;
+      nameInput.className = 'cvz-create-input';
+      nameInput.maxLength = 40;
+      nameInput.placeholder = 'Rolle (z. B. IT-Leitung)';
+      nameInput.value = role.rolle;
+      nameInput.readOnly = locked;
+      if (locked) {
+        nameInput.style.opacity = '0.75';
+        nameInput.title = 'Zum Umbenennen die Rolle entfernen und neu hinzufügen.';
+      }
+      nameInput.addEventListener('input', function () { roles[i].rolle = nameInput.value; });
+      top.appendChild(nameInput);
+
+      if (ctx === 'edit' && role.role_id) {
+        var count = document.createElement('span');
+        count.style.cssText = 'font-size:11px;color:var(--cvz-text-muted,#8b98a5);white-space:nowrap;';
+        count.textContent = (role.prompt_count || 0) + ' Prompts';
+        top.appendChild(count);
+      }
+
+      var champBtn = document.createElement('button');
+      champBtn.type = 'button';
+      champBtn.className = 'cvz-persona-chip' + (role.ist_champion ? ' cvz-persona-chip-active' : '');
+      champBtn.setAttribute('data-cvz-bc-champion', String(i));
+      champBtn.setAttribute('data-cvz-bc-ctx', ctx);
+      champBtn.title = 'Der Champion treibt den Kauf voran und bekommt mehr Prompts.';
+      champBtn.textContent = role.ist_champion ? '\u2713 Treibt den Kauf' : 'Treibt den Kauf';
+      top.appendChild(champBtn);
+
+      card.appendChild(top);
+
+      // NEU (23.09.2026): Einstiegsphase der Rolle
+      var entryRow = document.createElement('div');
+      entryRow.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+      var entryLabel = document.createElement('span');
+      entryLabel.style.cssText = 'font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+      entryLabel.innerHTML = '<strong style="color:var(--cvz-text,#e6edf3);font-weight:600;">Steigt ein in:</strong>';
+      entryRow.appendChild(entryLabel);
+      var entrySelect = document.createElement('select');
+      entrySelect.id = 'cvz-bc-' + ctx + '-entry-' + i;
+      entrySelect.className = 'cvz-changelog-custom-input';
+      entrySelect.style.cssText = 'max-width:200px;margin:0;';
+      PHASE_ORDER.forEach(function (ph) {
+        var opt = document.createElement('option');
+        opt.value = ph;
+        opt.textContent = PHASE_LABELS[ph] || ph;
+        if ((role.einstiegsphase || 'exploration') === ph) opt.selected = true;
+        entrySelect.appendChild(opt);
+      });
+      entrySelect.addEventListener('change', function () { roles[i].einstiegsphase = entrySelect.value; });
+      entryRow.appendChild(entrySelect);
+      entryRow.appendChild(makeTip(
+        'Ab dieser Phase recherchiert oder entscheidet die Rolle mit. Für jede Phase ab hier erstellen wir mindestens einen Prompt. ' +
+        'Davor wird für die Rolle nichts gemessen, in der Tabelle steht dort "steigt später ein".'
+      ));
+      card.appendChild(entryRow);
+
+      // GEÄNDERT (23.09.2026): Beschriftung über den beiden Textfeldern.
+      // Vorher standen dort nur die Sätze, ohne erkennbar, was sie bedeuten.
+      [['motivation', 'Motivation', 'Was will diese Rolle mit dem Kauf erreichen?',
+        'Daraus entstehen die Fragen am Anfang der Journey (Exploration, Evaluation).', '-mot-'],
+       ['einwand', 'Einwand', 'Woran kann der Kauf bei dieser Rolle scheitern?',
+        'Daraus entstehen die Fragen kurz vor der Entscheidung (Vergleich, Entscheidung).', '-obj-']].forEach(function (cfg) {
+        var fieldLabel = document.createElement('div');
+        fieldLabel.style.cssText = 'display:flex;align-items:center;margin:4px 0 -4px;';
+        var fieldLabelText = document.createElement('span');
+        fieldLabelText.style.cssText = 'font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+        fieldLabelText.innerHTML = '<strong style="color:var(--cvz-text,#e6edf3);font-weight:600;">' + escapeHtml(cfg[1]) + ':</strong> ' + escapeHtml(cfg[2]);
+        fieldLabel.appendChild(fieldLabelText);
+        fieldLabel.appendChild(makeTip(cfg[3]));
+        card.appendChild(fieldLabel);
+
+        var ta = document.createElement('textarea');
+        ta.id = 'cvz-bc-' + ctx + cfg[4] + i;
+        ta.className = 'cvz-changelog-input';
+        ta.rows = 2;
+        ta.maxLength = BC_TEXT_MAX_CHARS;
+        ta.placeholder = cfg[2];
+        ta.value = role[cfg[0]] || '';
+        ta.addEventListener('input', function () { roles[i][cfg[0]] = ta.value; });
+        card.appendChild(ta);
+      });
+
+      // GEÄNDERT (23.09.2026): beschrifteter Button statt kleinem x
+      var removeRow = document.createElement('div');
+      removeRow.style.cssText = 'display:flex;justify-content:flex-end;';
+      var removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'cvz-archive-btn';
+      removeBtn.setAttribute('data-cvz-bc-remove', String(i));
+      removeBtn.setAttribute('data-cvz-bc-ctx', ctx);
+      removeBtn.textContent = 'Rolle entfernen';
+      removeRow.appendChild(removeBtn);
+      card.appendChild(removeRow);
+
+      wrap.appendChild(card);
+    });
+
+    if (roles.length < MAX_BC_ROLES) {
+      var addRow = document.createElement('div');
+      addRow.className = 'cvz-persona-filter';
+      addRow.style.margin = '0';
+      var used = roles.map(function (r) { return (r.rolle || '').trim().toLowerCase(); });
+      (library || []).forEach(function (name) {
+        if (used.indexOf(String(name).toLowerCase()) !== -1) return;
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'cvz-persona-chip';
+        chip.setAttribute('data-cvz-bc-add', name);
+        chip.setAttribute('data-cvz-bc-ctx', ctx);
+        chip.title = 'Aus anderen Themen dieser Domain übernehmen';
+        chip.textContent = '+ ' + name;
+        addRow.appendChild(chip);
+      });
+      var addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'cvz-persona-chip';
+      addBtn.setAttribute('data-cvz-bc-add', '');
+      addBtn.setAttribute('data-cvz-bc-ctx', ctx);
+      addBtn.textContent = '+ Eigene Rolle';
+      addRow.appendChild(addBtn);
+      wrap.appendChild(addRow);
+    } else {
+      var maxNote = document.createElement('p');
+      maxNote.style.cssText = 'margin:0;font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+      maxNote.textContent = 'Alle ' + MAX_BC_ROLES + ' Plätze sind belegt. Um eine Rolle auszutauschen, entfernt zuerst eine bestehende.';
+      wrap.appendChild(maxNote);
+    }
+    return wrap;
+  }
+
+  // =========================================================================
+  // NEU (23.09.2026): Buying Center bestehender Themen
+  // =========================================================================
+  async function maybeLoadBuyingCenter(topicId, force) {
+    if (!topicId || CONFIG.useMockData) return;
+    if (!force && (state.buyingCenterCache[topicId] || state.loadingBuyingCenter[topicId])) return;
+    state.loadingBuyingCenter[topicId] = true;
+    try {
+      state.buyingCenterCache[topicId] = await apiFetch('/topics/' + topicId + '/buying-center');
+    } catch (e) {
+      console.error('[CVZ Visibility] Buying Center konnte nicht geladen werden:', e);
+      state.buyingCenterCache[topicId] = { rollen: [], bibliothek: [], _error: true };
+    }
+    state.loadingBuyingCenter[topicId] = false;
+    render();
+  }
+
+  function toggleRoleEditor(topicId) {
+    var opening = !state.bcEditOpen[topicId];
+    state.bcEditOpen[topicId] = opening;
+    delete state.bcEditResult[topicId];
+    if (opening) {
+      var bc = state.buyingCenterCache[topicId] || { rollen: [] };
+      state.bcEditDraft[topicId] = (bc.rollen || []).map(function (r) {
+        return {
+          role_id: r.role_id, rolle: r.rolle, ist_champion: !!r.ist_champion,
+          motivation: r.motivation || '', einwand: r.einwand || '', prompt_count: r.prompt_count || 0,
+          einstiegsphase: r.einstiegsphase || 'exploration', einstiegsphase_vorher: r.einstiegsphase || 'exploration',
+        };
+      });
+    }
+    render();
+  }
+
+  async function suggestRolesForExistingTopic(topicId) {
+    var topic = getTopicById(topicId);
+    if (!topic || state.isSuggestingBcEdit) return;
+    state.isSuggestingBcEdit = true;
+    render();
+    try {
+      var sug = await apiFetch('/projects/' + topic.project_id + '/buying-center/suggest', {
+        method: 'POST',
+        body: { topic_name: topic.name, seed_keyword: topic.seed_keyword || topic.name },
+      });
+      state.bcEditDraft[topicId] = (sug.rollen || []).map(function (r) {
+        return { rolle: r.rolle, ist_champion: !!r.ist_champion, motivation: r.motivation || '', einwand: r.einwand || '', einstiegsphase: r.einstiegsphase || 'exploration' };
+      });
+      ensureOneChampion(state.bcEditDraft[topicId]);
+    } catch (e) {
+      console.error('[CVZ Visibility] Rollen-Vorschlag fehlgeschlagen:', e);
+      await showCvzAlert('Der Vorschlag konnte nicht erstellt werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    state.isSuggestingBcEdit = false;
+    render();
+  }
+
+  function applyBuyingCenterResult(topicId, result) {
+    state.buyingCenterCache[topicId] = result;
+    state.bcEditResult[topicId] = { deaktiviert: result.deaktiviert || 0, ergaenzung: result.ergaenzung || {} };
+    // Prompt-Liste hat sich geändert: Detail beim nächsten Rendern neu laden.
+    delete state.topicDetailCache[topicId];
+    delete state.dashboardDataCache[topicId];
+  }
+
+  async function saveRoleEditor(topicId) {
+    if (state.isSavingBc) return;
+    var draft = (state.bcEditDraft[topicId] || []).map(function (r) {
+      return {
+        rolle: (r.rolle || '').trim(), ist_champion: !!r.ist_champion,
+        motivation: (r.motivation || '').trim() || null, einwand: (r.einwand || '').trim() || null,
+        einstiegsphase: r.einstiegsphase || 'exploration',
+      };
+    }).filter(function (r) { return r.rolle; });
+
+    var names = draft.map(function (r) { return r.rolle.toLowerCase(); });
+    if (names.some(function (n, i) { return names.indexOf(n) !== i; })) {
+      await showCvzAlert('Jede Rolle darf nur einmal vorkommen.');
+      return;
+    }
+
+    // Vorab ehrlich anzeigen, welche Prompts wegfallen.
+    var before = (state.buyingCenterCache[topicId] || {}).rollen || [];
+    var removed = before.filter(function (r) { return names.indexOf(r.rolle.toLowerCase()) === -1; });
+    var removedPrompts = removed.reduce(function (sum, r) { return sum + (r.prompt_count || 0); }, 0);
+
+    // NEU (23.09.2026): nach hinten verschobene Einstiegsphasen. Prompts der
+    // Rolle in Phasen davor werden im Backend deaktiviert.
+    var detailPrompts = ((state.topicDetailCache[topicId] || {}).prompts) || [];
+    var laterParts = [];
+    var laterPrompts = 0;
+    (state.bcEditDraft[topicId] || []).forEach(function (r) {
+      if (!r.role_id) return;
+      var n = detailPrompts.filter(function (p) {
+        return p.role_id === r.role_id && entryIndex(p.messymiddle_phase || p.phase) < entryIndex(r.einstiegsphase);
+      }).length;
+      if (n > 0) {
+        laterPrompts += n;
+        laterParts.push(r.rolle + ' (' + n + ' vor ' + (PHASE_LABELS[r.einstiegsphase] || r.einstiegsphase) + ')');
+      }
+    });
+
+    if (removedPrompts > 0 || laterPrompts > 0) {
+      var parts = [];
+      if (removedPrompts > 0) {
+        parts.push(removedPrompts + ' Prompts der Rolle(n) ' + removed.map(function (r) { return r.rolle; }).join(', ') + ' werden deaktiviert.');
+      }
+      if (laterPrompts > 0) {
+        parts.push('Wegen späterer Einstiegsphasen werden ' + laterPrompts + ' Prompts deaktiviert: ' + laterParts.join(', ') + '.');
+      }
+      var ok = await showCvzConfirm(
+        parts.join(' ') + ' Ihr bisheriger Verlauf bleibt einsehbar, sie werden aber nicht mehr abgefragt. ' +
+        'Fehlende Prompts für neue Rollen oder vorgezogene Phasen erstellen wir, sie bekommen ab dem nächsten Lauf Daten.',
+        { title: 'Rollen ändern?', confirmLabel: 'Speichern' }
+      );
+      if (!ok) return;
+    }
+
+    state.isSavingBc = true;
+    render();
+    try {
+      var result = await apiFetch('/topics/' + topicId + '/buying-center', { method: 'PUT', body: { rollen: draft } });
+      applyBuyingCenterResult(topicId, result);
+      state.bcEditOpen[topicId] = false;
+      await openTopicDetail(topicId, false);
+    } catch (e) {
+      console.error('[CVZ Visibility] Rollen konnten nicht gespeichert werden:', e);
+      await showCvzAlert('Rollen konnten nicht gespeichert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    state.isSavingBc = false;
+    render();
+  }
+
+  async function fillMissingRolePrompts(topicId) {
+    if (state.isSavingBc) return;
+    state.isSavingBc = true;
+    render();
+    try {
+      var result = await apiFetch('/topics/' + topicId + '/buying-center/fill', { method: 'POST' });
+      applyBuyingCenterResult(topicId, result);
+      await openTopicDetail(topicId, false);
+    } catch (e) {
+      console.error('[CVZ Visibility] Rollen-Prompts konnten nicht ergänzt werden:', e);
+      await showCvzAlert('Prompts konnten nicht ergänzt werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    state.isSavingBc = false;
+    render();
+  }
+
+  async function setPromptRole(topicId, promptId, roleId) {
+    try {
+      var resp = await apiFetch('/topics/' + topicId + '/prompts/' + promptId + '/role', {
+        method: 'PATCH', body: { role_id: roleId },
+      });
+      var detail = state.topicDetailCache[topicId];
+      var prompt = detail && (detail.prompts || []).filter(function (p) { return p.id === promptId; })[0];
+      if (prompt) {
+        prompt.role_id = resp.role_id;
+        prompt.persona = resp.persona;
+      }
+      maybeLoadBuyingCenter(topicId, true);
+    } catch (e) {
+      console.error('[CVZ Visibility] Rolle konnte nicht zugeordnet werden:', e);
+      await showCvzAlert('Rolle konnte nicht zugeordnet werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    render();
+  }
+
+  // Rollen-Chips zum Zuordnen, oben in der aufgeklappten Prompt-Zeile.
+  function renderPromptRoleChipsHtml(prompt) {
+    var bc = state.buyingCenterCache[state.activeTopicId];
+    var roles = (bc && bc.rollen) || [];
+    if (roles.length === 0) return '';
+    var chips = roles.map(function (r) {
+      var active = prompt.role_id === r.role_id;
+      return '<button type="button" class="cvz-persona-chip' + (active ? ' cvz-persona-chip-active' : '') + '" ' +
+        'data-cvz-prompt-role-set="' + escapeHtml(r.role_id) + '" data-cvz-prompt-role-pid="' + escapeHtml(prompt.id) + '">' +
+        escapeHtml(r.rolle) + '</button>';
+    }).join('') +
+      '<button type="button" class="cvz-persona-chip' + (!prompt.role_id ? ' cvz-persona-chip-active' : '') + '" ' +
+        'data-cvz-prompt-role-set="" data-cvz-prompt-role-pid="' + escapeHtml(prompt.id) + '">Keine Rolle</button>';
+    return '<p class="cvz-changelog-guided-label">Rolle (ändert den Prompt nicht, der Verlauf bleibt)</p>' +
+      '<div class="cvz-persona-filter">' + chips + '</div>';
+  }
+
+  // Ergebnis des letzten Speicherns / Ergänzens in Klartext.
+  function renderBcResultNote(topicId) {
+    var res = state.bcEditResult[topicId];
+    if (!res) return null;
+    var parts = [];
+    if (res.deaktiviert) parts.push(res.deaktiviert + ' Prompts deaktiviert (entfernte Rollen oder spätere Einstiegsphasen).');
+    var created = res.ergaenzung.erstellt || {};
+    var createdText = Object.keys(created).filter(function (k) { return created[k] > 0; })
+      .map(function (k) { return k + ': ' + created[k]; }).join(', ');
+    if (createdText) parts.push('Neue Prompts erstellt (' + createdText + '). Sie bekommen ab dem nächsten Lauf Daten.');
+    if (res.ergaenzung.grund === 'fehler') parts.push('Neue Prompts konnten nicht erstellt werden. Bitte später erneut versuchen.');
+    var missing = res.ergaenzung.fehlende_plaetze || {};
+    var missingText = Object.keys(missing).map(function (k) { return k + ' (' + missing[k] + ')'; }).join(', ');
+    var box = document.createElement('div');
+    box.className = 'cvz-card';
+    box.style.cssText = 'padding:10px 14px;border-left:3px solid ' + (missingText ? 'var(--cvz-amber,#c98e2a)' : 'var(--cvz-teal,#4fd1c5)') + ';';
+    var p = document.createElement('p');
+    p.style.cssText = 'margin:0;font-size:12px;line-height:1.5;color:var(--cvz-text-muted,#8b98a5);';
+    p.textContent = (parts.join(' ') || 'Gespeichert.') + (missingText
+      ? ' Für ' + missingText + ' fehlen freie Plätze (das System erstellt max. 20 Prompts, insgesamt sind 24 möglich). ' +
+        'Deaktiviert im Daten-Tab Prompts, die ihr nicht braucht, und klickt dann auf "Fehlende Prompts ergänzen". ' +
+        'Alternativ könnt ihr für die Rolle eigene Prompts anlegen.'
+      : '');
+    box.appendChild(p);
+    return box;
+  }
+
+  function renderRoleEditor(topicId) {
+    var bc = state.buyingCenterCache[topicId] || {};
+    var draft = getRoleArray('edit');
+    var box = document.createElement('div');
+    box.className = 'cvz-card';
+    box.style.cssText = 'margin:12px 0;display:flex;flex-direction:column;gap:12px;';
+
+    var intro = document.createElement('p');
+    intro.style.cssText = 'margin:0;font-size:12px;line-height:1.5;color:var(--cvz-text-muted,#8b98a5);';
+    intro.textContent = 'Änderungen gelten ab dem nächsten Lauf. Entfernte Rollen: ihre Prompts werden deaktiviert. ' +
+      'Neue Rollen und vorgezogene Einstiegsphasen: Wir erstellen für jede fehlende Phase einen Prompt. Spätere Einstiegsphase: Prompts davor werden deaktiviert. Motivation und Einwand ändern: bestehende Prompts bleiben unverändert.';
+    box.appendChild(intro);
+
+    if (draft.length === 0) {
+      var sugBtn = document.createElement('button');
+      sugBtn.type = 'button';
+      sugBtn.className = 'cvz-create-toggle-btn';
+      sugBtn.setAttribute('data-cvz-bc-edit-suggest', topicId);
+      sugBtn.disabled = state.isSuggestingBcEdit;
+      sugBtn.innerHTML = state.isSuggestingBcEdit
+        ? '<span class="cvz-spinner"></span>Rollen werden vorgeschlagen \u2026'
+        : 'Rollen vorschlagen lassen';
+      box.appendChild(sugBtn);
+    }
+
+    box.appendChild(renderRoleCards('edit', draft, bc.bibliothek || []));
+
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;';
+    var save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'cvz-create-submit-btn';
+    save.setAttribute('data-cvz-bc-edit-save', topicId);
+    save.disabled = state.isSavingBc;
+    save.innerHTML = state.isSavingBc ? '<span class="cvz-spinner"></span>Wird gespeichert \u2026' : 'Speichern';
+    actions.appendChild(save);
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'cvz-archive-btn';
+    cancel.setAttribute('data-cvz-bc-edit-toggle', topicId);
+    cancel.disabled = state.isSavingBc;
+    cancel.textContent = 'Abbrechen';
+    actions.appendChild(cancel);
+    box.appendChild(actions);
+    return box;
+  }
+
+  // =========================================================================
+  // NEU (23.09.2026): Sichtbarkeit je Rolle (Rolle × Journey-Phase)
+  // =========================================================================
+  // Basis: dieselben Zahlen wie in der Prompt-Liste (cited_count/total_runs
+  // pro Prompt), summiert je Rolle und Phase. Bewusst als Tabelle mit
+  // Klartext-Zahlen statt nur Farben: Eine Zelle beruht oft auf 1-2 Prompts.
+  function renderRoleVisibilitySection(topicId, detail) {
+    var bc = state.buyingCenterCache[topicId];
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    section.style.marginTop = '24px';
+
+    var headRow = document.createElement('div');
+    headRow.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Sichtbarkeit je Rolle';
+    headRow.appendChild(heading);
+    headRow.appendChild(makeTip(
+      'Jede Zelle zeigt, bei wie vielen Fragen dieser Rolle in dieser Phase eure Domain in mindestens einer KI-Antwort zitiert wurde. ' +
+      'Grundlage sind oft nur 1 bis 3 Fragen je Zelle. Die Tabelle zeigt, wo Content für eine Rolle fehlt. Für eine exakte Messung ist die Datenbasis zu klein. ' +
+      'Rollen, die später in den Kaufprozess einsteigen, werden erst ab ihrer Einstiegsphase gemessen.'
+    ));
+    if (bc && !bc._error) {
+      var editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'cvz-create-toggle-btn';
+      editBtn.style.marginLeft = 'auto';
+      editBtn.setAttribute('data-cvz-bc-edit-toggle', topicId);
+      editBtn.textContent = state.bcEditOpen[topicId] ? '\u2212 Rollen bearbeiten' : ((bc.rollen || []).length ? 'Rollen bearbeiten' : 'Rollen festlegen');
+      headRow.appendChild(editBtn);
+    }
+    section.appendChild(headRow);
+
+    if (!bc) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.innerHTML = '<span class="cvz-spinner"></span>Rollen werden geladen \u2026';
+      section.appendChild(loading);
+      return section;
+    }
+
+    var resultNote = renderBcResultNote(topicId);
+    if (resultNote) section.appendChild(resultNote);
+    var missing = (state.bcEditResult[topicId] && state.bcEditResult[topicId].ergaenzung.fehlende_plaetze) || {};
+    if (Object.keys(missing).length) {
+      var fillBtn = document.createElement('button');
+      fillBtn.type = 'button';
+      fillBtn.className = 'cvz-retry-btn';
+      fillBtn.setAttribute('data-cvz-bc-fill', topicId);
+      fillBtn.disabled = state.isSavingBc;
+      fillBtn.textContent = state.isSavingBc ? 'Wird ergänzt \u2026' : 'Fehlende Prompts ergänzen';
+      section.appendChild(fillBtn);
+    }
+
+    if (state.bcEditOpen[topicId]) section.appendChild(renderRoleEditor(topicId));
+
+    var roles = bc.rollen || [];
+    if (roles.length === 0) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = 'Für dieses Thema sind noch keine Rollen festgelegt. Legt 2 bis 3 Rollen fest, um zu sehen, ' +
+        'ob z. B. die IT-Leitung euch in KI-Antworten findet, die Geschäftsführung aber nicht.';
+      section.appendChild(none);
+      return section;
+    }
+
+    var prompts = (detail.prompts || []).filter(function (p) { return p.is_active !== false; });
+    var rows = roles.map(function (r) { return { key: r.role_id, label: r.rolle, champion: r.ist_champion, entry: r.einstiegsphase || 'exploration' }; });
+    var unassigned = prompts.filter(function (p) { return !p.role_id; });
+    if (unassigned.length) rows.push({ key: null, label: 'Ohne Rolle', champion: false });
+
+    // GEÄNDERT (23.09.2026): zählt Fragen statt KI-Antworten, wie die
+    // Zusammenfassung. Eine Frage gilt als zitiert, wenn eure Domain in
+    // mindestens einer Antwort als Quelle genannt wurde.
+    function cellStats(roleKey, phase) {
+      var n = 0, measured = 0, cited = 0;
+      prompts.forEach(function (p) {
+        if ((p.role_id || null) !== roleKey) return;
+        if (phase && (p.messymiddle_phase || p.phase) !== phase) return;
+        n++;
+        if ((p.total_runs || 0) > 0) {
+          measured++;
+          if ((p.cited_count || 0) > 0) cited++;
+        }
+      });
+      return { n: n, measured: measured, cited: cited };
+    }
+
+    function cellHtml(st, isTotal, roleKey, phase) {
+      if (st.n === 0) {
+        // NEU (23.09.2026): leere Zelle mit direktem Weg zu einem eigenen Prompt
+        var addBtn = (roleKey && phase)
+          ? '<button type="button" class="cvz-persona-chip" style="margin-top:4px;font-size:11px;padding:2px 8px;" ' +
+              'data-cvz-role-cell-add="' + escapeHtml(roleKey) + '" data-cvz-role-cell-phase="' + escapeHtml(phase) + '">+ Prompt</button>'
+          : '';
+        return '<div style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);opacity:.7;">nicht gemessen</div>' + addBtn;
+      }
+      if (st.measured === 0) {
+        return '<span style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);">neu, Daten ab<br>nächstem Lauf</span>';
+      }
+      var pct = Math.round((st.cited / st.measured) * 100);
+      return '<div style="font-size:' + (isTotal ? '16px' : '14px') + ';font-weight:700;color:' +
+          (pct === 0 ? 'var(--cvz-red,#de5b50)' : 'var(--cvz-text,#e6edf3)') + ';">' + pct + '%</div>' +
+        '<div style="font-size:10px;color:var(--cvz-text-muted,#8b98a5);">' + st.cited + ' von ' + st.measured +
+          (st.measured === 1 ? ' Frage' : ' Fragen') + '</div>';
+    }
+
+    function cellBg(st) {
+      if (st.n === 0 || st.measured === 0) return 'transparent';
+      var pct = st.cited / st.measured;
+      return pct === 0 ? 'rgba(222,91,80,.10)' : 'rgba(79,209,197,' + (0.08 + pct * 0.42).toFixed(2) + ')';
+    }
+
+    var th = 'text-align:center;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
+      'color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#232b36);white-space:nowrap;';
+    var html = '<table style="width:100%;min-width:560px;border-collapse:collapse;font-size:13px;"><thead><tr>' +
+      '<th style="' + th + 'text-align:left;">Rolle</th>' +
+      PHASE_ORDER.map(function (ph) {
+        return '<th style="' + th + '"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;background:' +
+          PHASE_COLORS[ph] + ';"></span>' + escapeHtml(PHASE_LABELS[ph]) + '</th>';
+      }).join('') +
+      '<th style="' + th + '">Gesamt</th></tr></thead><tbody>';
+
+    rows.forEach(function (row) {
+      html += '<tr><td style="padding:10px;border-bottom:1px solid var(--cvz-border,#232b36);font-weight:600;white-space:nowrap;">' +
+        escapeHtml(row.label) +
+        (row.champion ? ' <span title="Treibt den Kauf" style="color:var(--cvz-teal,#4fd1c5);">\u2605</span>' : '') + '</td>';
+      PHASE_ORDER.forEach(function (ph) {
+        // NEU (23.09.2026): vor der Einstiegsphase wird für die Rolle nichts gemessen
+        if (row.entry && entryIndex(ph) < entryIndex(row.entry)) {
+          html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);">' +
+            '<div style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);opacity:.7;">steigt später ein</div></td>';
+          return;
+        }
+        var st = cellStats(row.key, ph);
+        html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);background:' + cellBg(st) + ';">' + cellHtml(st, false, row.key, ph) + '</td>';
+      });
+      var tot = cellStats(row.key, null);
+      html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);border-left:1px solid var(--cvz-border,#232b36);background:' +
+        cellBg(tot) + ';">' + cellHtml(tot, true) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+
+    var card = document.createElement('div');
+    card.className = 'cvz-card';
+    card.style.cssText = 'padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    card.innerHTML = html;
+    section.appendChild(card);
+
+    var caption = document.createElement('p');
+    caption.className = 'cvz-chart-caption';
+    caption.textContent = 'Anteil der Fragen, bei denen eure Domain in mindestens einer ChatGPT- oder Gemini-Antwort zitiert wurde, je Rolle und Journey-Phase. ' +
+      'Rot: bisher bei keiner Frage zitiert. „Steigt später ein“: Die Rolle recherchiert erst ab ihrer Einstiegsphase mit, änderbar unter „Rollen bearbeiten“. ' +
+      '„Nicht gemessen“: Der Prompt für diese Zelle fehlt noch (z. B. keine freien Plätze), über „+ Prompt“ legt ihr ihn selbst an.';
+    section.appendChild(caption);
+
+    if (unassigned.length) {
+      var hint = document.createElement('p');
+      hint.className = 'cvz-thin-data-note';
+      hint.textContent = unassigned.length + ' Prompts haben noch keine Rolle. Im Daten-Tab einen Prompt aufklappen und oben eine Rolle wählen, ' +
+        'der Verlauf des Prompts bleibt dabei erhalten.';
+      section.appendChild(hint);
+    }
+    return section;
+  }
+
+  function renderOverview() {
+    var wrap = document.createElement('div');
+    wrap.appendChild(renderDomainAndTopicPicker());
+    var usageBadge = renderTopicUsageBadge();
+    if (usageBadge) wrap.appendChild(usageBadge);
+    wrap.appendChild(renderCreateTopicForm());
+    wrap.appendChild(renderDomainDashboard(getProjectById(state.activeProjectId)));
+    return wrap;
+  }
+
+  function renderTopicUsageBadge() {
+    if (!state.topicUsage) return null;
+    var available = Math.max(0, state.topicUsage.limit - state.topicUsage.current_count);
+    var badge = document.createElement('p');
+    badge.className = 'cvz-topic-usage-badge';
+    badge.textContent =
+      'Team-weit: ' + state.topicUsage.current_count + ' von ' + state.topicUsage.limit +
+      ' Themen genutzt \u00b7 ' + available + ' verf\u00fcgbar';
+    return badge;
+  }
+
+  function getDomainDashboardData(projectId) {
+    var topics = state.allTopics.filter(function (t) { return t.project_id === projectId; });
+    var activeTopics = topics.filter(function (t) { return t.status !== 'archived'; });
+
+    var live = CONFIG.useMockData ? null : state.domainDashboardCache[projectId];
+
+    var opportunities = live ? live.opportunities.slice() : [];
+    var contentIdeas = live ? live.contentIdeas.slice() : [];
+
+    var trend = live ? live.trend : null;
+
+    return {
+      topics: topics, opportunities: opportunities, contentIdeas: contentIdeas, trend: trend,
+    };
+  }
+
+  function renderDomainDashboard(project) {
+    var wrap = document.createElement('div');
+
+    if (!project) {
+      var emptyMsg = document.createElement('p');
+      emptyMsg.className = 'cvz-card-placeholder-text';
+      emptyMsg.textContent = 'Keine Domain ausgewählt.';
+      wrap.appendChild(emptyMsg);
+      return wrap;
+    }
+
+    var data = getDomainDashboardData(project.id);
+
+    var header = document.createElement('div');
+    header.className = 'cvz-domain-header';
+    // GEFIXT (21.09.2026): project.name ist bei den meisten Domains
+    // identisch zu project.domain (kein eigener Anzeigename vergeben),
+    // dadurch stand hier zweimal derselbe Domain-Name untereinander.
+    // Die zweite Zeile nur zeigen, wenn sie wirklich einen zusätzlichen
+    // Namen trägt.
+    header.innerHTML =
+      '<h3 class="cvz-section-title">' + escapeHtml(project.name) + '</h3>' +
+      (project.name !== project.domain
+        ? '<p class="cvz-card-eyebrow">' + escapeHtml(project.domain) + '</p>'
+        : '');
+    wrap.appendChild(header);
+
+    wrap.appendChild(renderTabNav(DOMAIN_TABS, state.activeSubTab));
+
+    var tabContent = document.createElement('div');
+    tabContent.className = 'cvz-tab-content';
+
+    switch (state.activeSubTab) {
+      case 'themen':
+        tabContent.appendChild(renderTopicStatusTable(data.topics));
+        break;
+      case 'uebersicht':
+      default:
+        if (CONFIG.useMockData) {
+          tabContent.appendChild(renderTrendChart(MOCK_DOMAIN_TREND[project.id]));
+        } else {
+          tabContent.appendChild(renderDomainTrendChart(data.trend, state.isLoadingDomainDashboard));
+        }
+        tabContent.appendChild(renderDomainOpportunitySection(data.opportunities));
+        tabContent.appendChild(renderContentIdeasSection(data.contentIdeas));
+        break;
+    }
+
+    wrap.appendChild(tabContent);
+    return wrap;
+  }
+
+  function renderDomainOpportunitySection(opportunities) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Opportunities über alle Themen dieser Domain';
+    section.appendChild(heading);
+
+    if (opportunities.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Aktuell keine offenen Opportunities für diese Domain.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-opportunity-grid';
+    opportunities.forEach(function (opp) {
+      var card = document.createElement('div');
+      card.className = 'cvz-card cvz-opportunity-card';
+      card.innerHTML =
+        '<p class="cvz-opportunity-type">' + escapeHtml(OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type) + '</p>' +
+        '<p class="cvz-opportunity-description">' + escapeHtml(opp.description || '') + '</p>' +
+        '<p class="cvz-opportunity-topic">' + escapeHtml(opp.topic_name) + '</p>';
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+    return section;
+  }
+
+  function renderTopicStatusTable(topics) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Themen in dieser Domain';
+    section.appendChild(heading);
+
+    if (topics.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Für diese Domain gibt es noch keine Themen.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    var table = document.createElement('table');
+    table.className = 'cvz-table cvz-table-clickable';
+    table.innerHTML = '<thead><tr><th>Thema</th><th>Status</th><th>Gestartet</th><th>Aktion</th></tr></thead>';
+    var tbody = document.createElement('tbody');
+    topics.forEach(function (topic) {
+      var status = STATUS_LABELS[topic.status] || { label: topic.status, className: '' };
+      var isBusy = state.archivingTopicId === topic.id;
+      var noSlotAvailable = !!(state.topicUsage && !state.topicUsage.can_create);
+      var reactivateDisabled = isBusy || noSlotAvailable;
+      var reactivateTitle = (!isBusy && noSlotAvailable)
+        ? ' title="Alle ' + state.topicUsage.limit + ' Topic-Slots sind aktuell belegt (' +
+          state.topicUsage.current_count + '/' + state.topicUsage.limit +
+          '). Erst ein anderes Thema deaktivieren oder ein weiteres Slot kaufen."'
+        : '';
+      var pendingArchival = topic.status === 'active' && !!topic.archive_effective_at;
+      var neverRan = topic.status === 'queued' || (topic.status === 'archived' && !topic.last_monthly_collection_at);
+      var actionCell;
+      if (topic.status === 'archived') {
+        actionCell =
+          '<button type="button" class="cvz-retry-btn" data-cvz-reactivate-topic="' + topic.id + '"' +
+            (reactivateDisabled ? ' disabled' : '') + reactivateTitle + '>' +
+            (isBusy ? 'Wird aktiviert …' : 'Aktivieren') +
+          '</button>';
+      } else if (pendingArchival) {
+        actionCell =
+          '<button type="button" class="cvz-archive-btn" data-cvz-cancel-archive-topic="' + topic.id + '"' +
+            (isBusy ? ' disabled' : '') + '>' +
+            (isBusy ? 'Wird bearbeitet …' : 'Deaktivierung abbrechen') +
+          '</button>';
+      } else {
+        actionCell =
+          '<button type="button" class="cvz-archive-btn" data-cvz-archive-topic="' + topic.id + '"' +
+            (isBusy ? ' disabled' : '') + '>' +
+            (isBusy
+              ? (topic.status === 'queued' ? 'Wird entfernt …' : 'Wird deaktiviert …')
+              : (topic.status === 'queued' ? 'Aus Warteschlange entfernen' : 'Deaktivieren')) +
+          '</button>';
+      }
+      if (neverRan) {
+        actionCell += '<button type="button" class="cvz-delete-topic-btn" data-cvz-delete-topic="' + topic.id + '"' +
+          (isBusy ? ' disabled' : '') + '>' +
+          (isBusy ? 'Wird gel\u00f6scht …' : 'Ganz l\u00f6schen') +
+        '</button>';
+      }
+      var extraStatusHint = '';
+      if (pendingArchival) {
+        var archiveDate = formatShortDate(topic.archive_effective_at);
+        extraStatusHint = '<span class="cvz-status-hint">Wird deaktiviert' +
+          (archiveDate ? ' am ' + archiveDate : '') + ', bisherige Daten bleiben erhalten.</span>';
+      } else if (topic.status === 'queued') {
+        extraStatusHint = '<span class="cvz-status-hint">Wartet auf einen freien Themen-Slot. Startet automatisch, kann nach Freiwerden eines Slots aber bis zu 30 Minuten dauern.</span>';
+      }
+      var STUCK_COLLECTING_THRESHOLD_MINUTES = 45;
+      var isStuckCollecting = false;
+      // GEAENDERT (21.09.2026): gilt jetzt auch fuer 'analyzing'.
+      if (topic.status === 'collecting' || topic.status === 'analyzing') {
+        var startedAtRaw = topic.collecting_started_at || topic.created_at;
+        var startedAtMs = startedAtRaw ? new Date(startedAtRaw).getTime() : NaN;
+        if (!isNaN(startedAtMs)) {
+          isStuckCollecting = (Date.now() - startedAtMs) / 60000 >= STUCK_COLLECTING_THRESHOLD_MINUTES;
+        }
+      }
+      var tr = document.createElement('tr');
+      tr.setAttribute('data-cvz-topic-id', topic.id);
+      tr.innerHTML =
+        '<td>' + escapeHtml(topic.name) + '</td>' +
+        '<td><span class="cvz-status-badge ' + status.className + '">' +
+          ((topic.status === 'collecting' || topic.status === 'analyzing') ? '<span class="cvz-spinner"></span>' : '') +
+          status.label + '</span>' +
+          (topic.status === 'collecting' && !isStuckCollecting ? '<span class="cvz-status-hint">Das wird mehrere Minuten dauern. Sobald der Lauf fertig ist, aktualisiert sich die Seite automatisch.</span>' : '') +
+          (topic.status === 'analyzing' && !isStuckCollecting ? '<span class="cvz-status-hint">Die Analyse l\u00e4uft noch. Sobald sie fertig ist, kannst du den Report \u00f6ffnen.</span>' : '') +
+          (isStuckCollecting ? '<span class="cvz-status-hint">L\u00e4uft ungew\u00f6hnlich lange, wirkt h\u00e4ngengeblieben (z. B. durch einen Server-Neustart mittendrin).</span>' : '') +
+          extraStatusHint +
+          (topic.status === 'error' || isStuckCollecting ? (
+            '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + topic.id + '"' +
+              (state.retryingTopicId === topic.id ? ' disabled' : '') + '>' +
+              (state.retryingTopicId === topic.id ? 'Wird erneut versucht …' : 'Erneut versuchen') +
+            '</button>'
+          ) : '') +
+        '</td>' +
+        '<td>' + formatRelativeTime(topic.created_at) + '</td>' +
+        '<td>' + actionCell + '</td>';
+        tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    var _scrollWrap = document.createElement('div');
+    _scrollWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    _scrollWrap.appendChild(table);
+    section.appendChild(_scrollWrap);
+    return section;
+  }
+
+  function renderTopicDetailView() {
+    var wrap = document.createElement('div');
+
+    wrap.appendChild(renderDomainAndTopicPicker());
+
+    var backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'cvz-back-btn';
+    backBtn.setAttribute('data-cvz-back', '');
+    backBtn.textContent = '← Zur Domain-Übersicht';
+
+    var currentTopicListEntry = getTopicById(state.activeTopicId);
+    var topActionRow = document.createElement('div');
+    topActionRow.className = 'cvz-top-action-row';
+    topActionRow.appendChild(backBtn);
+    if (currentTopicListEntry) {
+      var isArchivedNow = currentTopicListEntry.status === 'archived';
+      var isQueuedNow = currentTopicListEntry.status === 'queued';
+      var isBusyNow = state.archivingTopicId === currentTopicListEntry.id;
+      var noSlotAvailableNow = !!(state.topicUsage && !state.topicUsage.can_create);
+      var pendingArchivalNow = currentTopicListEntry.status === 'active' && !!currentTopicListEntry.archive_effective_at;
+      var archiveToggleBtn = document.createElement('button');
+      archiveToggleBtn.type = 'button';
+      if (isArchivedNow) {
+        archiveToggleBtn.className = 'cvz-retry-btn';
+        archiveToggleBtn.setAttribute('data-cvz-reactivate-topic', currentTopicListEntry.id);
+        archiveToggleBtn.disabled = isBusyNow || noSlotAvailableNow;
+        if (!isBusyNow && noSlotAvailableNow) {
+          archiveToggleBtn.title =
+            'Alle ' + state.topicUsage.limit + ' Topic-Slots sind aktuell belegt (' +
+            state.topicUsage.current_count + '/' + state.topicUsage.limit +
+            '). Erst ein anderes Thema deaktivieren oder ein weiteres Slot kaufen.';
+        }
+        archiveToggleBtn.textContent = isBusyNow ? 'Wird aktiviert …' : 'Thema aktivieren';
+      } else if (pendingArchivalNow) {
+        archiveToggleBtn.className = 'cvz-archive-btn';
+        archiveToggleBtn.setAttribute('data-cvz-cancel-archive-topic', currentTopicListEntry.id);
+        archiveToggleBtn.disabled = isBusyNow;
+        archiveToggleBtn.textContent = isBusyNow ? 'Wird bearbeitet …' : 'Deaktivierung abbrechen';
+      } else {
+        archiveToggleBtn.className = 'cvz-archive-btn';
+        archiveToggleBtn.setAttribute('data-cvz-archive-topic', currentTopicListEntry.id);
+        archiveToggleBtn.disabled = isBusyNow;
+        archiveToggleBtn.textContent = isBusyNow
+          ? (isQueuedNow ? 'Wird entfernt …' : 'Wird deaktiviert …')
+          : (isQueuedNow ? 'Aus Warteschlange entfernen' : 'Thema deaktivieren');
+      }
+      topActionRow.appendChild(archiveToggleBtn);
+    }
+    wrap.appendChild(topActionRow);
+
+    if (state.isLoadingDetail) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.textContent = 'Lädt...';
+      wrap.appendChild(loading);
+      return wrap;
+    }
+
+    var detail = state.topicDetailCache[state.activeTopicId];
+    if (!detail) {
+      var errorMsg = document.createElement('div');
+      errorMsg.className = 'cvz-card cvz-card-placeholder';
+      errorMsg.innerHTML = '<p class="cvz-card-placeholder-text">Für dieses Thema liegen noch keine Detaildaten vor (Status noch nicht "Aktiv", oder ein Ladefehler ist aufgetreten).</p>';
+      wrap.appendChild(errorMsg);
+      return wrap;
+    }
+
+    wrap.appendChild(renderSummaryCard(detail.topic));
+
+    // GEAENDERT (21.09.2026): ein gemeinsamer Banner fuer "wartet", "sammelt Daten" und
+    // "wird analysiert". Solange er erscheint, wird der Report (Tabs) NICHT gezeigt.
+    // Danach: Info-Balken, falls einzelne Analysen gerade neu laufen.
+    var runBanner = renderTopicRunBanner(detail.topic);
+    if (runBanner) {
+      wrap.appendChild(runBanner);
+      return wrap;
+    }
+    var runningStepsBanner = renderRunningStepsBanner(detail);
+    if (runningStepsBanner) wrap.appendChild(runningStepsBanner);
+
+    if (detail.topic.status === 'error') {
+      var errorBanner = document.createElement('div');
+      errorBanner.className = 'cvz-card cvz-collecting-banner cvz-error-banner';
+      errorBanner.innerHTML =
+        '<p class="cvz-collecting-banner-text">' +
+          '\u26a0\ufe0f Der Datenlauf f\u00fcr dieses Thema ist fehlgeschlagen. Bereits gesammelte Daten unten ' +
+          'k\u00f6nnen unvollst\u00e4ndig sein.' +
+          // NEU (16.09.2026): zeigt die tats\u00e4chlich gespeicherte
+          // Fehlermeldung (siehe main.py: _record_topic_run_error),
+          // statt nur "ist fehlgeschlagen" ohne jeden Grund.
+          (detail.topic.last_run_error
+            ? '<br><span class="cvz-run-error-detail">' + escapeHtml(sanitizeRunError(detail.topic.last_run_error)) + '</span>'
+            : '') +
+        '</p>' +
+        '<button type="button" class="cvz-retry-btn" data-cvz-retry-topic="' + detail.topic.id + '"' +
+          (state.retryingTopicId === detail.topic.id ? ' disabled' : '') + '>' +
+          (state.retryingTopicId === detail.topic.id ? 'Wird erneut versucht \u2026' : 'Erneut versuchen') +
+        '</button>';
+      wrap.appendChild(errorBanner);
+    } else if (detail.topic.last_run_error) {
+      // NEU (16.09.2026): Thema ist insgesamt weiter 'active' (es gibt
+      // brauchbare Bestandsdaten), aber der ZULETZT versuchte Lauf (oder
+      // ein einzelner Analyse-Schritt darin) ist fehlgeschlagen, dezenter
+      // Hinweis statt der vollen roten Fehler-Leiste, die für einen
+      // kompletten Erstlauf-Abbruch reserviert bleibt.
+      var softErrorBanner = document.createElement('div');
+      softErrorBanner.className = 'cvz-card cvz-collecting-banner cvz-soft-error-banner';
+      softErrorBanner.innerHTML =
+        '<p class="cvz-collecting-banner-text">' +
+          '\u26a0\ufe0f Der letzte Lauf hatte ein Problem' +
+          (detail.topic.last_run_error_at ? ' (' + formatRelativeTime(detail.topic.last_run_error_at) + ')' : '') +
+          ':<br><span class="cvz-run-error-detail">' + escapeHtml(sanitizeRunError(detail.topic.last_run_error)) + '</span>' +
+        '</p>';
+      wrap.appendChild(softErrorBanner);
+    }
+
+    wrap.appendChild(renderTabNav(TOPIC_TABS, state.activeSubTab));
+
+    var tabContent = document.createElement('div');
+    tabContent.className = 'cvz-tab-content';
+
+    // GEÄNDERT (16.09.2026): 5 fokussierte Views statt 7 Tabs
+    switch (state.activeSubTab) {
+      case 'journey':
+        tabContent.appendChild(renderJourneyMapTab(state.activeTopicId, detail));
+        break;
+      case 'aktionsplan':
+        tabContent.appendChild(renderAktionsplanTab(detail));
+        break;
+      case 'verlauf':
+        tabContent.appendChild(renderVerlaufTab(state.activeTopicId, detail));
+        break;
+      case 'daten': {
+        // NEU (20.09.2026): Retry-Hinweis, falls die GSC-Daten fehlen oder
+        // der letzte Nachzieh-Versuch fehlgeschlagen ist.
+        var datenStepNotice = renderStepNotice(detail, ['gsc']);
+        if (datenStepNotice) tabContent.appendChild(datenStepNotice);
+        // GEÄNDERT (25.09.2026): Kommentar korrigiert -- ursprünglich stand
+        // hier "gilt für Keywords, Prompts und GSC gemeinsam, da sie im
+        // selben Monatslauf erhoben werden". Das war zum Zeitpunkt des
+        // Cron-Debuggings (25.09.2026, siehe Chat-Verlauf) nicht mehr
+        // korrekt: Prompts laufen WÖCHENTLICH (_weekly_background), nur
+        // Keywords/GSC laufen monatlich (_monthly_background). Diese
+        // Freshness-Note bleibt trotzdem korrekt monatlich, weil sie sich
+        // nur auf Keywords/GSC bezieht -- die separate Prompt-Kadenz zeigt
+        // der zweite renderNextRunNote-Aufruf direkt darunter.
+        tabContent.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at));
+        tabContent.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Keywords, GSC)'));
+        tabContent.appendChild(renderNextRunNote(detail.topic, 7, 'Nächster Durchlauf (Prompts)'));
+        // Content-Änderungen (mit verlinkten Keywords/Prompts) als Marker aufbereiten
+        var _ccMarkers = (state.contentChangesCache[state.activeTopicId] || []).map(function (ch) {
+          return {
+            linked_search_query_ids: ch.linked_search_query_ids || [],
+            linked_prompt_ids: ch.linked_prompt_ids || [],
+            entry_text: ch.description,
+            created_at: ch.changed_at,
+            keyword_deltas: {},
+          };
+        });
+        var _allEntries = (detail.changelog || []).concat(_ccMarkers);
+        // Keywords (thematische, ohne GSC near-miss)
+        var thematicKws = (detail.search_queries || []).filter(function (q) { return q.source !== 'gsc_near_miss'; });
+        tabContent.appendChild(renderKeywordsTable(thematicKws, true, _allEntries));
+        var posInsight = renderPositioningInsight(detail.positioning_insight);
+        if (posInsight) tabContent.appendChild(posInsight);
+        // Prompts nach Phase
+        tabContent.appendChild(renderPromptsByPhase(detail.prompts, true, _allEntries));
+        // GSC-Performance (mit Relevanzfilter)
+        var _gscFiltered = filterGscByTopicRelevance(detail.gsc_rows, detail);
+        tabContent.appendChild(renderGscBlock(_gscFiltered, state.activeTopicId, _allEntries));
+        break;
+      }
+      case 'situation':
+      default:
+        tabContent.appendChild(renderSituationTab(state.activeTopicId, detail));
+        break;
+    }
+
+    wrap.appendChild(tabContent);
+    return wrap;
+  }
+
+  function renderTrendChart(trendData) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Sichtbarkeits-Entwicklung über die Wochen';
+    section.appendChild(heading);
+
+    if (!trendData || !trendData.weeks || trendData.weeks.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine wöchentliche Historie verfügbar.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    var card = document.createElement('div');
+    card.className = 'cvz-card';
+    card.innerHTML = buildTrendChartSvg(trendData);
+    section.appendChild(card);
+    return section;
+  }
+
+  function buildTrendChartSvg(trendData) {
+    var width = 640, height = 180, padding = 32;
+    var weeks = trendData.weeks;
+    var maxValue = Math.max(trendData.total_prompts, 1);
+    var stepX = weeks.length > 1 ? (width - padding * 2) / (weeks.length - 1) : 0;
+
+    function xFor(i) { return padding + i * stepX; }
+    function yFor(value) { return height - padding - (value / maxValue) * (height - padding * 2); }
+
+    var points = weeks.map(function (w, i) {
+      return xFor(i).toFixed(1) + ',' + yFor(w.visible_prompts).toFixed(1);
+    }).join(' ');
+
+    var dots = weeks.map(function (w, i) {
+      var x = xFor(i).toFixed(1);
+      var y = yFor(w.visible_prompts).toFixed(1);
+      return '<circle cx="' + x + '" cy="' + y + '" r="3" class="cvz-chart-dot">' +
+        '<title>' + escapeHtml(w.week) + ': ' + w.visible_prompts + ' von ' + trendData.total_prompts + ' Prompts sichtbar</title>' +
+        '</circle>';
+    }).join('');
+
+    var baselineY = height - padding;
+
+    return (
+      '<svg viewBox="0 0 ' + width + ' ' + height + '" class="cvz-chart-svg" preserveAspectRatio="xMidYMid meet">' +
+        '<line x1="' + padding + '" y1="' + baselineY + '" x2="' + (width - padding) + '" y2="' + baselineY + '" class="cvz-chart-axis"></line>' +
+        '<polyline points="' + points + '" class="cvz-chart-line"></polyline>' +
+        dots +
+      '</svg>' +
+      '<p class="cvz-chart-caption">Sichtbare Stable-Core-Prompts pro Woche, von ' + trendData.total_prompts + ' insgesamt.</p>'
+    );
+  }
+
+  function renderDomainTrendChart(weeks, isLoading) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Sichtbarkeits-Entwicklung über die Wochen';
+    section.appendChild(heading);
+
+    if (isLoading) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.textContent = 'Lädt...';
+      section.appendChild(loading);
+      return section;
+    }
+
+    if (!weeks || weeks.length < 2) {
+      var emptyCard = document.createElement('div');
+      emptyCard.className = 'cvz-card';
+      emptyCard.innerHTML =
+        buildEmptyChartSvg() +
+        '<p class="cvz-chart-caption">Es liegen noch nicht genügend Daten vor. Ab der zweiten Woche mit ausgewerteten Läufen siehst du hier den Sichtbarkeits-Verlauf.</p>';
+      section.appendChild(emptyCard);
+      return section;
+    }
+
+    var xLabels = weeks.map(function (w) { return formatShortDate(w.week); });
+    var mentionedRate = weeks.map(function (w) { return w.total ? Math.round((w.mentioned / w.total) * 100) : null; });
+    var citedRate = weeks.map(function (w) { return w.total ? Math.round((w.cited / w.total) * 100) : null; });
+    var recommendedRate = weeks.map(function (w) { return w.total ? Math.round((w.recommended / w.total) * 100) : null; });
+
+    var card = document.createElement('div');
+    card.className = 'cvz-card';
+    card.innerHTML =
+      buildLineChartSvg([
+        { label: 'Erwähnt', values: mentionedRate, color: 'var(--cvz-amber)' },
+        { label: 'Zitiert', values: citedRate, color: 'var(--cvz-teal)' },
+        { label: 'Empfohlen', values: recommendedRate, color: 'var(--cvz-red)' },
+      ], xLabels, { maxY: 100 }) +
+      '<div class="cvz-chart-legend">' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-amber)"></span>Erwähnt</span>' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Zitiert</span>' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-red)"></span>Empfohlen</span>' +
+      '</div>' +
+      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-L\u00e4ufe pro Woche (0 bis 100\u202f%), \u00fcber alle aktiven Themen dieser Domain aufsummiert, in dem die eigene Domain erw\u00e4hnt, zitiert bzw. aktiv empfohlen wurde.</p>';
+    section.appendChild(card);
+    return section;
+  }
+
+  var WEEKDAY_MONTHS_DE = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+
+  function formatShortDateISO(isoDate) {
+    var parts = isoDate.split(/[-T]/);
+    var monthIndex = parseInt(parts[1], 10) - 1;
+    return parseInt(parts[2], 10) + '. ' + (WEEKDAY_MONTHS_DE[monthIndex] || parts[1]);
+  }
+
+  function buildEmptyChartSvg() {
+    var width = 640, height = 180, padding = 32;
+    var baselineY = height - padding;
+    return (
+      '<svg viewBox="0 0 ' + width + ' ' + height + '" class="cvz-chart-svg" preserveAspectRatio="xMidYMid meet">' +
+        '<line x1="' + padding + '" y1="' + baselineY + '" x2="' + (width - padding) + '" y2="' + baselineY + '" class="cvz-chart-axis"></line>' +
+      '</svg>'
+    );
+  }
+
+  function buildLineChartSvg(seriesList, xLabels, opts) {
+    opts = opts || {};
+    var width = opts.width || 640, height = opts.height || 180, padding = 32;
+    var n = xLabels.length;
+    var stepX = n > 1 ? (width - padding * 2) / (n - 1) : 0;
+
+    var maxValue = opts.maxY;
+    if (maxValue == null) {
+      maxValue = 1;
+      seriesList.forEach(function (s) {
+        s.values.forEach(function (v) { if (v != null && v > maxValue) maxValue = v; });
+      });
+    }
+
+    // NEU (19.09.2026): Wenn mehrere Serien beim selben X-Wert denselben Score
+    // haben (z.B. alle Phasen bei 0%, siehe Chat-Verlauf 19.09.2026, erster
+    // Analyse-Lauf eines Topics, alle vier Phasen landen exakt übereinander),
+    // zeichnet SVG in Dokumentreihenfolge. Die zuletzt gezeichnete Serie
+    // verdeckt optisch alle darunterliegenden identischen Punkte vollständig.
+    // Fix: jede Serie bekommt einen kleinen, konstanten horizontalen Versatz
+    // je nach Position in seriesList, damit deckungsgleiche Punkte sichtbar
+    // nebeneinander liegen statt sich zu überdecken. Bei unterschiedlichen
+    // Werten ist der Versatz (wenige Pixel) nicht wahrnehmbar.
+    var DOT_SPACING = 3;
+    function offsetForSeries(si) {
+      return (si - (seriesList.length - 1) / 2) * DOT_SPACING;
+    }
+
+    function xFor(i, si) { return padding + i * stepX + (si != null ? offsetForSeries(si) : 0); }
+    function yFor(value) { return height - padding - (value / maxValue) * (height - padding * 2); }
+    var baselineY = height - padding;
+
+    var parts = [
+      '<svg viewBox="0 0 ' + width + ' ' + height + '" class="cvz-chart-svg" preserveAspectRatio="xMidYMid meet">',
+      '<line x1="' + padding + '" y1="' + baselineY + '" x2="' + (width - padding) + '" y2="' + baselineY + '" class="cvz-chart-axis"></line>',
+    ];
+
+    (opts.markers || []).forEach(function (m) {
+      var x = xFor(m.index).toFixed(1);
+      var weekKey = opts.xKeys ? opts.xKeys[m.index] : null;
+      parts.push(
+        '<line x1="' + x + '" y1="' + padding + '" x2="' + x + '" y2="' + baselineY + '" class="cvz-chart-marker-line"></line>' +
+        (weekKey
+          ? '<circle cx="' + x + '" cy="' + padding + '" r="9" fill="transparent" class="cvz-chart-hit" data-cvz-week-detail="' + escapeHtml(weekKey) + '"></circle>'
+          : '') +
+        '<circle cx="' + x + '" cy="' + padding + '" r="4" class="cvz-chart-marker-dot">' +
+          '<title>' + escapeHtml(m.date ? formatShortDate(m.date) + ': ' : '') + escapeHtml(m.label) + '</title>' +
+        '</circle>'
+      );
+    });
+
+    seriesList.forEach(function (s, si) {
+      var color = s.color || 'var(--cvz-teal)';
+      var segment = [];
+      var polylines = [];
+      s.values.forEach(function (v, i) {
+        if (v == null) {
+          if (segment.length > 1) polylines.push(segment.join(' '));
+          segment = [];
+          return;
+        }
+        segment.push(xFor(i, si).toFixed(1) + ',' + yFor(v).toFixed(1));
+      });
+      if (segment.length > 1) polylines.push(segment.join(' '));
+
+      polylines.forEach(function (points) {
+        var dashAttr = s.dashed ? ' stroke-dasharray="6 4"' : '';
+        parts.push('<polyline points="' + points + '"' + dashAttr + ' class="cvz-chart-line" style="stroke:' + color + ';opacity:' + (s.dashed ? '.7' : '1') + '"></polyline>');
+      });
+
+      s.values.forEach(function (v, i) {
+        if (v == null) return;
+        var cx = xFor(i, si).toFixed(1), cy = yFor(v).toFixed(1);
+        if (opts.xKeys && opts.xKeys[i] != null) {
+          parts.push('<circle cx="' + cx + '" cy="' + cy + '" r="9" fill="transparent" class="cvz-chart-hit" data-cvz-week-detail="' + escapeHtml(opts.xKeys[i]) + '"></circle>');
+        }
+        parts.push(
+          '<circle cx="' + cx + '" cy="' + cy + '" r="3" class="cvz-chart-dot" style="fill:' + color + '">' +
+          '<title>' + escapeHtml(s.label) + ' \u00b7 ' + escapeHtml(xLabels[i]) + ': ' + v + '</title></circle>'
+        );
+      });
+    });
+
+    parts.push('</svg>');
+    return parts.join('');
+  }
+
+  function weekStartLabel(isoDateStr) {
+    var d = new Date(isoDateStr);
+    var day = d.getUTCDay();
+    var diff = day === 0 ? 6 : day - 1;
+    var monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - diff));
+    return monday.toISOString().slice(0, 10);
+  }
+
+  function rankToVisibilityScore(rank) {
+    if (rank == null) return null;
+    return Math.max(0, Math.min(100, Math.round(100 - (rank - 1) * 4)));
+  }
+
+  function computeKeywordScoreByWeek(snapshots) {
+    var byWeek = {};
+    (snapshots || []).forEach(function (s) {
+      var rankValue = s.organic_rank != null ? s.organic_rank : s.gsc_position;
+      if (rankValue == null) return;
+      var week = weekStartLabel(s.snapshot_at);
+      var score = rankToVisibilityScore(rankValue);
+      var bucket = byWeek[week] || (byWeek[week] = { total: 0, count: 0 });
+      bucket.total += score;
+      bucket.count += 1;
+    });
+    var result = {};
+    Object.keys(byWeek).forEach(function (week) {
+      result[week] = Math.round(byWeek[week].total / byWeek[week].count);
+    });
+    return result;
+  }
+
+  function mapChangelogToMarkers(changelogEntries, xDates) {
+    return (changelogEntries || []).map(function (entry) {
+      var exactIndex = xDates.indexOf(weekStartLabel(entry.created_at));
+      if (exactIndex !== -1) {
+        return { index: exactIndex, label: entry.entry_text, date: entry.created_at };
+      }
+      var entryTime = new Date(entry.created_at).getTime();
+      var closestIndex = 0, closestDiff = Infinity;
+      xDates.forEach(function (d, i) {
+        var diff = Math.abs(new Date(d).getTime() - entryTime);
+        if (diff < closestDiff) { closestDiff = diff; closestIndex = i; }
+      });
+      return { index: closestIndex, label: entry.entry_text, date: entry.created_at };
+    });
+  }
+
+  function renderCombinedTrendSection(promptWeeks, rankSnapshots, changelogEntries, isLoading) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Gesamtentwicklung: Keywords & Prompts';
+    section.appendChild(heading);
+
+    if (isLoading) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.textContent = 'Lädt...';
+      section.appendChild(loading);
+      return section;
+    }
+
+    var promptRateByWeek = {};
+    (promptWeeks || []).forEach(function (w) {
+      promptRateByWeek[w.week] = w.total ? Math.round((w.cited / w.total) * 100) : null;
+    });
+    var keywordScoreByWeek = computeKeywordScoreByWeek(rankSnapshots);
+
+    var allWeeksSet = {};
+    Object.keys(promptRateByWeek).forEach(function (w) { allWeeksSet[w] = true; });
+    Object.keys(keywordScoreByWeek).forEach(function (w) { allWeeksSet[w] = true; });
+    var allWeeks = Object.keys(allWeeksSet).sort();
+
+    if (allWeeks.length < 2) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch nicht genug Verlaufsdaten für eine gemeinsame Ansicht.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    var xLabels = allWeeks.map(function (w) { return formatShortDate(w); });
+    var promptSeries = allWeeks.map(function (w) { return promptRateByWeek[w] != null ? promptRateByWeek[w] : null; });
+    var keywordSeries = allWeeks.map(function (w) { return keywordScoreByWeek[w] != null ? keywordScoreByWeek[w] : null; });
+    var markers = mapChangelogToMarkers(changelogEntries, allWeeks);
+
+    var card = document.createElement('div');
+    card.className = 'cvz-card';
+    card.innerHTML =
+      buildLineChartSvg([
+        { label: 'Prompts: Zitationsrate', values: promptSeries, color: 'var(--cvz-teal)' },
+        { label: 'Keywords: Sichtbarkeits-Index', values: keywordSeries, color: 'var(--cvz-amber)' },
+      ], xLabels, { maxY: 100, markers: markers, xKeys: allWeeks }) +
+      '<div class="cvz-chart-legend">' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Prompts: Zitationsrate</span>' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-amber)"></span>Keywords: Sichtbarkeits-Index</span>' +
+        (markers.length ? '<span class="cvz-chart-legend-item"><span class="cvz-legend-marker"></span>Eure Eintr\u00e4ge im \u00c4nderungsprotokoll</span>' : '') +
+      '</div>' +
+      '<p class="cvz-chart-caption">Zitationsrate: Anteil ausgewerteter ChatGPT/Gemini-L\u00e4ufe pro Woche, in dem eure Domain zitiert wurde. ' +
+      'Sichtbarkeits-Index: grobe, aus Google-Position/GSC-Position abgeleitete Kennzahl (0 bis 100, h\u00f6her ist besser), gemittelt \u00fcber alle ' +
+      'in dieser Woche erfassten Keywords, keine exakte Messgr\u00f6\u00dfe. Gestrichelte Linien markieren eure Eintr\u00e4ge im \u00c4nderungsprotokoll ' +
+      '(Datum wird auf die n\u00e4chstgelegene Woche gerundet). Zeigt Korrelation, keine Kausalit\u00e4t. ' +
+      'Klickt auf einen Punkt oder eine Markierung f\u00fcr die Details dieser Woche.</p>';
+    section.appendChild(card);
+
+    if (state.selectedWeekDetailKey && state.selectedWeekDetailKey.indexOf(state.activeTopicId + '|') === 0) {
+      section.appendChild(renderWeekDetailPanel(state.activeTopicId, state.selectedWeekDetailKey.split('|')[1]));
+    }
+
+    return section;
+  }
+
+  function renderWeekDetailPanel(topicId, week) {
+    var key = topicId + '|' + week;
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-card cvz-week-detail';
+
+    if (state.isLoadingWeekDetail) {
+      wrap.innerHTML = '<p class="cvz-card-placeholder-text">L\u00e4dt...</p>';
+      return wrap;
+    }
+
+    var detail = state.weekDetailCache[key];
+    var headerHtml =
+      '<div class="cvz-week-detail-header">' +
+        '<p class="cvz-opportunity-type">Woche vom ' + escapeHtml(formatShortDate(week)) + '</p>' +
+        '<button type="button" class="cvz-week-detail-close-btn" data-cvz-week-detail-close aria-label="Schlie\u00dfen">\u00d7</button>' +
+      '</div>';
+
+    if (!detail) {
+      wrap.innerHTML = headerHtml + '<p class="cvz-card-placeholder-text">Details konnten nicht geladen werden.</p>';
+      return wrap;
+    }
+
+    var html = headerHtml;
+
+    if (detail.prompts && detail.prompts.length) {
+      html += '<p class="cvz-section-label" style="margin-top:12px;">Prompts</p>';
+      detail.prompts.forEach(function (p) {
+        var statusLabel = p.cited ? 'zitiert' : (p.mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden');
+        var change;
+        if (p.previous_collected_at) {
+          var previousLabel = p.previous_cited ? 'zitiert' : (p.previous_mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden');
+          change = ', davor am ' + formatShortDate(p.previous_collected_at) + ': ' + previousLabel;
+        } else {
+          change = ', erster erfasster Lauf';
+        }
+        html +=
+          '<p class="cvz-week-detail-row"><strong>' + escapeHtml(MODEL_LABELS[p.engine] || p.engine) + ':</strong> ' +
+          escapeHtml(p.prompt_text) + ': ' + statusLabel + escapeHtml(change) + '</p>';
+      });
+    }
+
+    if (detail.keywords && detail.keywords.length) {
+      html += '<p class="cvz-section-label" style="margin-top:12px;">Keywords</p>';
+      detail.keywords.forEach(function (k) {
+        var current = k.organic_rank != null ? k.organic_rank : k.gsc_position;
+        var previous = k.previous_organic_rank != null ? k.previous_organic_rank : k.previous_gsc_position;
+        var changeText;
+        if (current != null && previous != null && k.previous_snapshot_at) {
+          var delta = previous - current;
+          var deltaLabel = delta > 0
+            ? 'verbessert um ' + delta
+            : (delta < 0 ? 'verschlechtert um ' + Math.abs(delta) : 'unver\u00e4ndert');
+          changeText = ', davor Position ' + previous + ' am ' + formatShortDate(k.previous_snapshot_at) + ' (' + deltaLabel + ')';
+        } else {
+          changeText = ', erste Messung';
+        }
+        html +=
+          '<p class="cvz-week-detail-row">' + escapeHtml(k.keyword) + ': Position ' +
+          (current != null ? escapeHtml(current) : '-') + escapeHtml(changeText) + '</p>';
+      });
+    }
+
+    if (detail.changelog && detail.changelog.length) {
+      html += '<p class="cvz-section-label" style="margin-top:12px;">Eure Eintr\u00e4ge</p>';
+      detail.changelog.forEach(function (entry) {
+        html += '<p class="cvz-week-detail-row">' + escapeHtml(entry.entry_text) + '</p>';
+      });
+    }
+
+    if (!(detail.prompts && detail.prompts.length) && !(detail.keywords && detail.keywords.length) && !(detail.changelog && detail.changelog.length)) {
+      html += '<p class="cvz-card-placeholder-text">Keine Daten f\u00fcr diese Woche.</p>';
+    }
+
+    wrap.innerHTML = html;
+    return wrap;
+  }
+
+  function renderSummaryCard(topic) {
+    var card = document.createElement('div');
+    card.className = 'cvz-card cvz-summary-card';
+    var archivedNotice = '';
+    if (topic.status === 'archived') {
+      archivedNotice = '<p class="cvz-archived-notice">Archiviert. Es werden aktuell keine neuen Datenläufe für dieses Thema gestartet. Alle bisher gesammelten Daten bleiben unten sichtbar.</p>';
+    } else if (topic.status === 'active' && topic.archive_effective_at) {
+      var archiveDate = formatShortDate(topic.archive_effective_at);
+      archivedNotice = '<p class="cvz-archived-notice">Deaktivierung vorgemerkt.' +
+        (archiveDate ? ' für ' + archiveDate : '') +
+        ' Bis dahin laufen die regulären Datenläufe für dieses Thema noch normal weiter.</p>';
+    } else if (topic.status === 'queued') {
+      archivedNotice = '<p class="cvz-archived-notice">Wartet auf einen freien Themen-Slot. Der erste Datenlauf startet automatisch, kann nach Freiwerden eines Slots aber bis zu 30 Minuten dauern.</p>';
+    }
+    card.innerHTML =
+      '<h3 class="cvz-section-title">' + escapeHtml(topic.name) + '</h3>' +
+      // GEÄNDERT (23.09.2026): Das Thema steht schon in der Überschrift. Hier
+      // nur noch die Domain, das Seed-Keyword nur, falls es vom Thema abweicht.
+      '<p class="cvz-card-eyebrow">' +
+        ((topic.seed_keyword && String(topic.seed_keyword).trim().toLowerCase() !== String(topic.name || '').trim().toLowerCase())
+          ? escapeHtml(topic.seed_keyword) + ' · '
+          : '') +
+        escapeHtml(topic.own_domain) +
+      '</p>' +
+      // NEU (25.09.2026, Kundenwunsch): zeigt, aus welchem Lauf diese
+      // Zusammenfassung (inkl. Meistzitierte Quellen, Stärkster Wettbewerber,
+      // Je Phase, Keyword-Chancen) stammt.
+      (topic.last_monthly_collection_at
+        ? '<p class="cvz-freshness-note">Datenstand: ' + escapeHtml(formatRelativeTime(topic.last_monthly_collection_at)) +
+          ' (' + escapeHtml(formatShortDate(topic.last_monthly_collection_at) || '') + ')</p>'
+        : '<p class="cvz-freshness-note">Datenstand: noch kein abgeschlossener Analyse-Lauf.</p>') +
+      archivedNotice +
+      '<p class="cvz-summary-text">' + escapeHtml(topic.latest_summary || 'Noch keine Zusammenfassung vorhanden.') + '</p>' +
+      renderSummaryDetailSections(topic.summary_detail);
+    card.appendChild(renderNextRunNote(topic, 30));
+    return card;
+  }
+
+  function renderSummaryDetailSections(detail) {
+    if (!detail) return '';
+    var html = '';
+    var maturity = detail.data_maturity || {};
+
+    var THIN_DATA_NOTE = '<p class="cvz-thin-data-note">Datenbasis hierf\u00fcr noch d\u00fcnn, die Einsch\u00e4tzung wird mit mehr gesammelten Daten pr\u00e4ziser.</p>';
+
+    // NEU (23.09.2026): alle zitierten Quellen mit Typ, unabhängig davon,
+    // ob Wettbewerber. Zahlen kommen direkt aus dem Backend, nicht von Claude.
+    var sources = detail.meistzitierte_quellen || [];
+    if (sources.length) {
+      var periodLabel = detail.meistzitierte_quellen_zeitraum === 'aktueller_monat' ? 'letzte 30 Tage' : 'seit Start des Themas';
+      html += '<div class="cvz-summary-subsection">' +
+        '<p class="cvz-section-label">Meistzitierte Quellen (' + periodLabel + ')</p>' +
+        '<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">' +
+        sources.map(function (q) {
+          var pct = q.von_fragen ? Math.round((q.anzahl_fragen / q.von_fragen) * 100) : 0;
+          var isComp = q.typ === 'wettbewerber';
+          return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;">' +
+            '<img class="cvz-inline-favicon" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(q.domain) + '" alt="">' +
+            '<strong style="min-width:150px;color:var(--cvz-text,#e6edf3);">' + escapeHtml(q.domain) + '</strong>' +
+            '<span class="cvz-persona-chip" style="cursor:default;' + (isComp ? 'color:var(--cvz-red,#de5b50);border-color:var(--cvz-red,#de5b50);' : '') + '">' +
+              escapeHtml(q.typ_label) + '</span>' +
+            '<span style="flex:1;min-width:120px;height:6px;background:var(--cvz-border,#232b36);border-radius:3px;overflow:hidden;">' +
+              '<span style="display:block;height:100%;width:' + pct + '%;background:' + (isComp ? 'var(--cvz-red,#de5b50)' : 'var(--cvz-text-muted,#8b98a5)') + ';"></span>' +
+            '</span>' +
+            '<span style="color:var(--cvz-text-muted,#8b98a5);white-space:nowrap;">bei ' + q.anzahl_fragen + ' von ' + q.von_fragen + ' Fragen</span>' +
+          '</div>';
+        }).join('') +
+        '</div>' +
+        '<p class="cvz-thin-data-note">KI-Antworten nennen meist mehrere Quellen. Ziel ist, neben diesen Quellen mitzitiert zu werden.</p>' +
+        '</div>';
+    }
+
+    // GEÄNDERT (23.09.2026): nur noch bestätigte Wettbewerber
+    var strength = detail.competitor_strength;
+    if (strength && strength.strongest_domain) {
+      html += '<div class="cvz-summary-subsection">' +
+        '<p class="cvz-section-label">St\u00e4rkster Wettbewerber</p>' +
+        '<p class="cvz-summary-text"><strong>' + escapeHtml(strength.strongest_domain) + '</strong>' +
+        (strength.reasoning ? ': ' + escapeHtml(strength.reasoning) : '') +
+        '</p>' +
+        (maturity.wettbewerber_duenn ? THIN_DATA_NOTE : '') +
+        '</div>';
+    } else if (maturity.keine_bestaetigten_wettbewerber) {
+      html += '<div class="cvz-summary-subsection">' +
+        '<p class="cvz-section-label">St\u00e4rkster Wettbewerber</p>' +
+        '<p class="cvz-summary-text">Noch keine Wettbewerber best\u00e4tigt. Legt sie im Tab \u201eJourney Map & Wettbewerb\u201c unter ' +
+        '\u201eBeobachtete Wettbewerber\u201c fest, dann bewerten wir sie hier gezielt.</p>' +
+        '</div>';
+    } else if (strength && strength.reasoning) {
+      html += '<div class="cvz-summary-subsection">' +
+        '<p class="cvz-section-label">St\u00e4rkster Wettbewerber</p>' +
+        '<p class="cvz-summary-text">' + escapeHtml(strength.reasoning) + '</p>' +
+        '</div>';
+    }
+
+    var phaseSummaries = detail.phase_summaries;
+    if (phaseSummaries) {
+      var phasenDuenn = maturity.phasen_duenn || {};
+      // GEÄNDERT (15.09.2026): echte Tabelle statt gestapelter Blöcke,
+      // Kundenwunsch: "eine Tabelle, die in die unterschiedlichen Phasen
+      // geht und dort eine Einschätzung gibt".
+      // GE\u00c4NDERT (20.09.2026): Spalte "Empfohlene Content-Typen" entfernt:
+      // sie kam aus einer eigenen, von claude_summary.py unabh\u00e4ngigen
+      // Claude-Generierung und konnte damit vom (separat generierten)
+      // Aktionsplan abweichen. Die Zusammenfassungs-Card ist reine
+      // Bestandsaufnahme ("wo stehen wir"), Handlungsempfehlungen mit
+      // Priorit\u00e4t und Beleg geh\u00f6ren ausschlie\u00dflich in den Aktionsplan-Tab.
+      var phaseRowsHtml = PHASE_ORDER.map(function (phase) {
+        var p = phaseSummaries[phase];
+        if (!p || !p.summary) return '';
+        return (
+          '<tr>' +
+            '<td style="color:var(--cvz-text-muted,#8b98a5);"><strong>' + escapeHtml(PHASE_LABELS[phase] || phase) + '</strong></td>' +
+            '<td style="color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(p.summary) + (phasenDuenn[phase] ? THIN_DATA_NOTE : '') + '</td>' +
+          '</tr>'
+        );
+      }).join('');
+      if (phaseRowsHtml) {
+        html += '<div class="cvz-summary-subsection">' +
+          '<p class="cvz-section-label">Je Phase</p>' +
+          '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">' +
+          '<table class="cvz-table" style="min-width:360px;"><thead><tr><th>Phase</th><th>Einsch\u00e4tzung</th></tr></thead>' +
+          '<tbody>' + phaseRowsHtml + '</tbody></table>' +
+          '</div>' +
+          (maturity.content_luecken_duenn ? THIN_DATA_NOTE : '') +
+          '</div>';
+      }
+    }
+
+    if (detail.keyword_opportunities) {
+      html += '<div class="cvz-summary-subsection">' +
+        '<p class="cvz-section-label">Keyword-Chancen &amp; -Schw\u00e4chen</p>' +
+        '<p class="cvz-summary-text">' + escapeHtml(detail.keyword_opportunities) + '</p>' +
+        (maturity.keyword_chancen_duenn ? THIN_DATA_NOTE : '') +
+        '</div>';
+    }
+
+    html += '<p class="cvz-ai-attribution">Zusammenfassung erstellt mit Claude (Anthropic)</p>';
+    return html;
+  }
+
+  // NEU (15.09.2026): siehe main.py: _compute_best_content_chances.
+  // VERBESSERT (16.09.2026): visuell aussagekraeftiger, Zitierrate als Balken.
+  // GEÄNDERT (25.09.2026, Kundenwunsch): nimmt jetzt "topic" statt nur
+  // "lastUpdated" entgegen -- renderNextRunNote braucht zusätzlich status/
+  // archive_effective_at/last_monthly_collection_at, die im reinen
+  // ISO-String nicht drinstecken. Aufrufstelle unten entsprechend angepasst.
+  function renderBestContentChancesSection(chances, topic) {
+    if (!chances || chances.length === 0) return null;
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Beste Content-Chancen';
+    section.appendChild(heading);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = 'Prompts und Keywords mit dem höchsten Hebel für mehr Sichtbarkeit.';
+    section.appendChild(sub);
+    section.appendChild(renderDataFreshnessNote(topic ? topic.last_monthly_collection_at : null));
+    section.appendChild(renderNextRunNote(topic, 30));
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-opportunity-grid';
+
+    chances.forEach(function (chance) {
+      var cfg = CONTENT_CHANCE_CONFIG[chance.kind] || {
+        label: chance.kind,
+        color: '#8b98a5',
+        bg: 'rgba(139,152,165,.08)',
+        border: 'rgba(139,152,165,.3)',
+        tip: '',
+      };
+
+      var card = document.createElement('div');
+      card.className = 'cvz-card cvz-idea-card';
+      card.style.cssText = 'border-left:3px solid ' + cfg.color + ';padding:0;overflow:hidden;';
+
+      var inner = document.createElement('div');
+      inner.style.cssText = 'padding:12px 14px;display:flex;flex-direction:column;gap:10px;';
+
+      // Kind-Chip
+      var chip = document.createElement('span');
+      chip.style.cssText =
+        'display:inline-flex;align-items:center;align-self:flex-start;' +
+        'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
+        'padding:2px 8px;border-radius:9999px;' +
+        'color:' + cfg.color + ';background:' + cfg.bg + ';border:1px solid ' + cfg.border + ';';
+      chip.textContent = cfg.label;
+      inner.appendChild(chip);
+
+      // Prompt / Keyword als Zitat
+      var lbl = document.createElement('p');
+      lbl.style.cssText = 'margin:0;font-size:13px;font-weight:600;color:var(--cvz-text-muted,#8b98a5);line-height:1.45;font-style:italic;';
+      lbl.textContent = '„' + chance.label + '“';
+      inner.appendChild(lbl);
+
+      // Zitierrate parsen ("N von M ausgewerteten Läufen zitiert")
+      var m = chance.detail ? chance.detail.match(/(\d+)\s+von\s+(\d+)/) : null;
+      if (m) {
+        var cited = parseInt(m[1], 10);
+        var total = parseInt(m[2], 10);
+        var pct   = total > 0 ? Math.round((cited / total) * 100) : 0;
+
+        var statRow = document.createElement('div');
+        statRow.style.cssText = 'display:flex;align-items:center;gap:12px;';
+
+        var statBox = document.createElement('div');
+        statBox.style.cssText = 'flex-shrink:0;text-align:center;min-width:44px;';
+        statBox.innerHTML =
+          '<div style="font-size:22px;font-weight:800;line-height:1;color:' + cfg.color + ';">' + cited + '/' + total + '</div>' +
+          '<div style="font-size:10px;margin-top:2px;color:var(--cvz-text-muted,#8b98a5);">Läufe</div>';
+        statRow.appendChild(statBox);
+
+        var barCol = document.createElement('div');
+        barCol.style.cssText = 'flex:1 1 0;';
+        var barTrack = document.createElement('div');
+        barTrack.style.cssText = 'height:6px;background:var(--cvz-border,#232b36);border-radius:3px;overflow:hidden;margin-bottom:3px;';
+        var barFill = document.createElement('div');
+        barFill.style.cssText = 'height:100%;width:' + pct + '%;background:' + cfg.color + ';border-radius:3px;';
+        barTrack.appendChild(barFill);
+        barCol.appendChild(barTrack);
+        var rateLbl = document.createElement('p');
+        rateLbl.style.cssText = 'margin:0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+        rateLbl.textContent = pct + '% Zitierrate';
+        barCol.appendChild(rateLbl);
+        statRow.appendChild(barCol);
+
+        inner.appendChild(statRow);
+      } else if (chance.detail) {
+        var detailTxt = document.createElement('p');
+        detailTxt.style.cssText = 'margin:0;font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+        detailTxt.textContent = chance.detail;
+        inner.appendChild(detailTxt);
+      }
+
+      // Tipp / naechster Schritt
+      if (cfg.tip) {
+        var tipEl = document.createElement('p');
+        tipEl.style.cssText =
+          'margin:0;font-size:11px;color:' + cfg.color + ';' +
+          'border-top:1px solid ' + cfg.border + ';padding-top:8px;';
+        tipEl.textContent = cfg.tip;
+        inner.appendChild(tipEl);
+      }
+
+      card.appendChild(inner);
+      grid.appendChild(card);
+    });
+
+    section.appendChild(grid);
+    return section;
+  }
+
+  // --- NEU (17.09.2026): Phase-Heuristik + localStorage-Overrides ---
+  function _detectGapPhase(description) {
+    if (!description) return null;
+    var d = description.toLowerCase();
+    if (/vergleich|versus|\bvs\b|alternativ|unterschied|gegenüber|brownfield.*greenfield|greenfield.*brownfield|verschiedene.*ansätz|ansätz.*vergleich|migrationsansätz/.test(d)) return 'comparison';
+    if (/anforderung|compliance|dsgvo|rechtlich|gesetz|regulier|prüfung|audit|zertifizier|bewertungs.*kriterien|beurteilung/.test(d)) return 'evaluation';
+    if (/implementierung|deployment|einführung|rollout|projektplan|zeitplan|meilenstein|performance.*nach|monitoring.*nach|nach.*implementierung|nach.*archivierung|betrieb/.test(d)) return 'decision';
+    if (/was ist|grundlagen|überblick|einführung.*thema|definition|konzept|grundsätzlich|wie funktioniert|warum.*archivierung/.test(d)) return 'exploration';
+    return null;
+  }
+
+  function _gapLsKey(topicId, desc) {
+    return 'cvz-gap-phase:' + (topicId || '') + ':' + (desc || '').substring(0, 60);
+  }
+  function _getGapPhase(topicId, desc) {
+    try { return localStorage.getItem(_gapLsKey(topicId, desc)) || null; } catch (e) { return null; }
+  }
+  function _setGapPhase(topicId, desc, phase) {
+    try {
+      if (phase) { localStorage.setItem(_gapLsKey(topicId, desc), phase); }
+      else { localStorage.removeItem(_gapLsKey(topicId, desc)); }
+    } catch (e) {}
+  }
+
+  // --- NEU (17.09.2026): Quellen-Analyse phase-gruppiert ---
+  function renderSourceProfilesSection(profiles, topicId, sovData) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Quellen-Analyse (Live-Web-Search, gecacht pro URL)';
+    section.appendChild(heading);
+
+    // Wenn share_of_voice-Daten vorhanden: phase-gruppierte Ansicht
+    var hasSov = sovData && PHASE_ORDER.some(function (p) { return sovData[p] && sovData[p].length; });
+    if (hasSov) {
+      _renderSourcesByPhase(section, sovData);
+      return section;
+    }
+
+    // Fallback: flache Liste
+    if (!profiles || profiles.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine Quellen-Analyse verfügbar.';
+      section.appendChild(empty);
+      return section;
+    }
+    var table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+    var thead = document.createElement('thead');
+    var hrow = document.createElement('tr');
+    ['Domain', 'Content-Typ', 'Zusammenfassung', 'Differenzierung'].forEach(function (label, i) {
+      var th = document.createElement('th');
+      th.textContent = label;
+      th.style.cssText = 'text-align:left;padding:7px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#30363d);white-space:nowrap;' + (i === 0 ? 'width:160px;' : '');
+      hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+    var tbody = document.createElement('tbody');
+    var _visibleProfiles = profiles.filter(function (p) { return p.summary || p.content_type; });
+    _visibleProfiles.forEach(function (profile, idx) {
+      var borderBottom = idx === _visibleProfiles.length - 1 ? 'none' : '1px solid var(--cvz-border,#30363d)';
+      var tr = document.createElement('tr');
+      var tdDomain = document.createElement('td');
+      tdDomain.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-weight:600;';
+      tdDomain.innerHTML = '<img style="width:14px;height:14px;border-radius:2px;vertical-align:middle;margin-right:5px;object-fit:contain;" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(profile.domain) + '" alt="">' + escapeHtml(profile.domain);
+      tr.appendChild(tdDomain);
+      var tdType = document.createElement('td');
+      tdType.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+      tdType.textContent = profile.content_type ? (CONTENT_TYPE_LABELS[profile.content_type] || profile.content_type) : '';
+      tr.appendChild(tdType);
+      var tdSum = document.createElement('td');
+      tdSum.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;';
+      tdSum.textContent = profile.summary || '';
+      tr.appendChild(tdSum);
+      var tdDiff = document.createElement('td');
+      tdDiff.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;color:var(--cvz-text-muted,#8b98a5);';
+      tdDiff.textContent = profile.differentiation_suggestion || '';
+      tr.appendChild(tdDiff);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    section.appendChild(table);
+    return section;
+  }
+
+  function _renderSourcesByPhase(section, sov) {
+    var activeFilter = state.sourcePhaseFilter;
+
+    // Phase-Filter-Chips
+    var filterRow = document.createElement('div');
+    filterRow.className = 'cvz-persona-filter';
+    filterRow.style.marginBottom = '12px';
+    var allChip = document.createElement('button');
+    allChip.type = 'button';
+    allChip.className = 'cvz-persona-chip' + (activeFilter === null ? ' cvz-persona-chip-active' : '');
+    allChip.setAttribute('data-cvz-source-phase-filter', '');
+    allChip.textContent = 'Alle';
+    filterRow.appendChild(allChip);
+    PHASE_ORDER.forEach(function (phase) {
+      var count = (sov[phase] || []).length;
+      if (!count) return;
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cvz-persona-chip' + (activeFilter === phase ? ' cvz-persona-chip-active' : '');
+      chip.style.borderLeftColor = PHASE_COLORS[phase] || '';
+      chip.setAttribute('data-cvz-source-phase-filter', phase);
+      chip.textContent = (PHASE_LABELS[phase] || phase) + ' (' + count + ')';
+      filterRow.appendChild(chip);
+    });
+    section.appendChild(filterRow);
+
+    // Tabelle
+    var table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+    var thead = document.createElement('thead');
+    var hrow = document.createElement('tr');
+    var COLS = ['Domain', 'Phase', 'Zitierrate', 'Content-Typ', 'Zusammenfassung', 'Differenzierung'];
+    var COL_WIDTHS = ['150px', '130px', '80px', '110px', '', ''];
+    COLS.forEach(function (label, i) {
+      var th = document.createElement('th');
+      th.textContent = label;
+      th.style.cssText = 'text-align:left;padding:7px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#30363d);white-space:nowrap;' + (COL_WIDTHS[i] ? 'width:' + COL_WIDTHS[i] + ';' : '');
+      hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+    var tbody = document.createElement('tbody');
+
+    var phasesToRender = activeFilter ? [activeFilter] : PHASE_ORDER;
+    phasesToRender.forEach(function (phase) {
+      var sources = sov[phase] || [];
+      if (!sources.length) return;
+      var phaseColor = PHASE_COLORS[phase] || '#4a5568';
+      var _visibleSources = sources.filter(function (s) { return s.summary || s.content_type; });
+      _visibleSources.forEach(function (src, idx) {
+        var isLast = !activeFilter
+          ? (idx === _visibleSources.length - 1 && phase === phasesToRender[phasesToRender.length - 1])
+          : idx === _visibleSources.length - 1;
+        var borderBottom = isLast ? 'none' : '1px solid var(--cvz-border,#30363d)';
+        var citePct = Math.round(src.citation_rate || 0);
+        var tr = document.createElement('tr');
+
+        // Domain
+        var tdDomain = document.createElement('td');
+        tdDomain.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';';
+        tdDomain.innerHTML = '<img style="width:14px;height:14px;border-radius:2px;vertical-align:middle;margin-right:5px;object-fit:contain;" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(src.domain) + '" alt=""><span style="font-weight:600;">' + escapeHtml(src.domain) + '</span>';
+        tr.appendChild(tdDomain);
+
+        // Phase
+        var tdPhase = document.createElement('td');
+        tdPhase.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:11px;white-space:nowrap;color:var(--cvz-text-muted,#8b98a5);';
+        tdPhase.innerHTML = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + phaseColor + ';margin-right:5px;vertical-align:middle;flex-shrink:0;"></span>' + escapeHtml(PHASE_LABELS[phase] || phase);
+        tr.appendChild(tdPhase);
+
+        // Zitierrate
+        var tdCite = document.createElement('td');
+        tdCite.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-weight:700;';
+        tdCite.textContent = citePct + '%';
+        tr.appendChild(tdCite);
+
+        // Content-Typ
+        var tdType = document.createElement('td');
+        tdType.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+        tdType.textContent = src.content_type ? (CONTENT_TYPE_LABELS[src.content_type] || src.content_type) : '';
+        tr.appendChild(tdType);
+
+        // Zusammenfassung
+        var tdSum = document.createElement('td');
+        tdSum.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;';
+        tdSum.textContent = src.summary || '';
+        tr.appendChild(tdSum);
+
+        // Differenzierung
+        var tdDiff = document.createElement('td');
+        tdDiff.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;line-height:1.4;color:var(--cvz-text-muted,#8b98a5);';
+        tdDiff.textContent = src.differentiation_suggestion || '';
+        tr.appendChild(tdDiff);
+
+        tbody.appendChild(tr);
+      });
+    });
+    table.appendChild(tbody);
+    var _scrollWrap = document.createElement('div');
+    _scrollWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    _scrollWrap.appendChild(table);
+    section.appendChild(_scrollWrap);
+  }
+
+  function renderCompetitorManageSection(detail, topicId) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var activeDomains = detail.competitor_domains || [];
+    var isOpen = !!state.competitorManageOpen[topicId];
+
+    var competitorToggleRow = document.createElement('div');
+    competitorToggleRow.style.cssText = 'display:flex;align-items:center;gap:6px;';
+    var toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'cvz-create-toggle-btn';
+    toggleBtn.setAttribute('data-cvz-competitor-manage-toggle', topicId);
+    toggleBtn.textContent = (isOpen ? '\u2212 ' : '+ ') + 'Wettbewerber bearbeiten (' + activeDomains.length + ' aktiv)';
+    competitorToggleRow.appendChild(toggleBtn);
+    competitorToggleRow.appendChild(makeTip(
+      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden f\u00fcr den hochpriorit\u00e4ren Alert \u201eWettbewerber \u00fcberholt euch\u201c genutzt und in der Journey Map als Share of Voice analysiert. Die Grafik \u201eSichtbarkeit im Wettbewerbsvergleich\u201c zeigt dagegen ALLE Domains, die KI-Systeme tats\u00e4chlich zitiert haben, auch bisher nicht best\u00e4tigte. Bereits zitierte Domains werden als Vorschl\u00e4ge angezeigt.'
+    ));
+    section.appendChild(competitorToggleRow);
+
+    if (!isOpen) return section;
+
+    if (state.isLoadingCompetitorSuggestions) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.textContent = 'L\u00e4dt Vorschl\u00e4ge \u2026';
+      section.appendChild(loading);
+    }
+
+    var draft = state.competitorDraftDomains[topicId] || activeDomains.slice();
+    var suggestions = state.competitorSuggestionsCache[topicId] || [];
+
+    var citationByDomain = {};
+    var domainSet = {};
+    activeDomains.forEach(function (d) { domainSet[d] = true; });
+    suggestions.forEach(function (s) {
+      if (s.domain) {
+        domainSet[s.domain] = true;
+        citationByDomain[s.domain] = s.citation_count;
+      }
+    });
+    var allDomains = Object.keys(domainSet).sort(function (a, b) {
+      return (citationByDomain[b] || 0) - (citationByDomain[a] || 0);
+    });
+
+    if (allDomains.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine Vorschl\u00e4ge und keine aktiven Wettbewerber. F\u00fcge unten eine eigene Domain hinzu.';
+      section.appendChild(empty);
+    } else {
+      var chipList = document.createElement('div');
+      chipList.className = 'cvz-persona-filter';
+      allDomains.forEach(function (domain) {
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'cvz-persona-chip' + (draft.indexOf(domain) !== -1 ? ' cvz-persona-chip-active' : '');
+        chip.setAttribute('data-cvz-competitor-chip', domain);
+        chip.setAttribute('data-cvz-competitor-topic', topicId);
+        var hint = citationByDomain[domain] ? ' (' + citationByDomain[domain] + '\u00d7 zitiert)' : '';
+        chip.textContent = domain + hint;
+        chipList.appendChild(chip);
+      });
+      section.appendChild(chipList);
+    }
+
+    var manualRow = document.createElement('div');
+    manualRow.className = 'cvz-changelog-form';
+    manualRow.innerHTML =
+      '<input type="text" id="cvz-competitor-manual-input" class="cvz-changelog-input" maxlength="100" placeholder="eigene-domain.de">' +
+      '<button type="button" class="cvz-create-toggle-btn" data-cvz-competitor-manual-add="' + topicId + '">Hinzuf\u00fcgen</button>';
+    section.appendChild(manualRow);
+    var compInputHint = document.createElement('p');
+    compInputHint.style.cssText = 'margin:2px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    compInputHint.textContent = 'max. 100 Zeichen';
+    section.appendChild(compInputHint);
+
+    // NEU (15.09.2026): Kundenwunsch (siehe Chat-Verlauf 15.09.2026):
+    // klarstellen, ab wann für einen Wettbewerber tatsächlich Daten
+    // vorliegen. Zitationsdaten existieren rückwirkend NUR, wenn die
+    // Domain in bisherigen Läufen bereits (unabhängig vom Wettbewerber-
+    // Status) zitiert wurde. Eine neu hinzugefügte, bisher nie zitierte
+    // Domain taucht im Wettbewerber-Tab erst ab dem nächsten Datenlauf
+    // auf, in dem sie tatsächlich vorkommt. Direkt über dem
+    // Speichern-Button, damit die Erwartung VOR dem Klick gesetzt wird.
+    var dataWindowNote = document.createElement('p');
+    dataWindowNote.className = 'cvz-card-placeholder-text';
+    dataWindowNote.style.marginTop = '8px';
+    dataWindowNote.textContent =
+      'Hinweis: Eine neu hinzugef\u00fcgte Domain zeigt hier nur Daten, wenn sie in bisherigen L\u00e4ufen bereits ' +
+      'zitiert wurde. Wurde sie bisher nie zitiert, erscheint sie erst ab dem n\u00e4chsten Datenlauf, in dem das ' +
+      'tats\u00e4chlich passiert, nicht sofort nach dem Speichern.';
+    section.appendChild(dataWindowNote);
+
+    var submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.className = 'cvz-changelog-submit-btn';
+    submitBtn.setAttribute('data-cvz-competitor-submit', topicId);
+    submitBtn.disabled = state.isSubmittingCompetitors;
+    submitBtn.textContent = state.isSubmittingCompetitors
+      ? 'Wird gespeichert \u2026'
+      : 'Speichern (' + draft.length + ' ausgew\u00e4hlt)';
+    section.appendChild(submitBtn);
+
+    return section;
+  }
+
+  // GEAENDERT (17.09.2026): Phase-Tabs + manuelle Phase-Overrides per localStorage
+  function renderContentGapsSection(gaps, topicId) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Content-Lücken (themenweite Analyse)';
+    section.appendChild(heading);
+
+    if (!gaps || gaps.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine Lücken-Analyse verfügbar.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    // Phase-Filter-Chips
+    var activeFilter = state.gapPhaseFilter;
+    var filterRow = document.createElement('div');
+    filterRow.className = 'cvz-persona-filter';
+    filterRow.style.marginBottom = '12px';
+    var allChip = document.createElement('button');
+    allChip.type = 'button';
+    allChip.className = 'cvz-persona-chip' + (activeFilter === null ? ' cvz-persona-chip-active' : '');
+    allChip.setAttribute('data-cvz-gap-phase-filter', '');
+    allChip.textContent = 'Alle';
+    filterRow.appendChild(allChip);
+    PHASE_ORDER.forEach(function (phase) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cvz-persona-chip' + (activeFilter === phase ? ' cvz-persona-chip-active' : '');
+      chip.style.borderLeftColor = PHASE_COLORS[phase] || '';
+      chip.setAttribute('data-cvz-gap-phase-filter', phase);
+      chip.textContent = PHASE_LABELS[phase] || phase;
+      filterRow.appendChild(chip);
+    });
+    section.appendChild(filterRow);
+
+    // Gaps in Phasen gruppieren (localStorage-Override > Heuristik)
+    var grouped = {};
+    PHASE_ORDER.forEach(function (p) { grouped[p] = []; });
+    grouped._unknown = [];
+    gaps.forEach(function (gap) {
+      var phase = _getGapPhase(topicId, gap.gap_description) || _detectGapPhase(gap.gap_description);
+      var bucket = (phase && grouped[phase]) ? phase : '_unknown';
+      grouped[bucket].push({ gap: gap, phase: phase });
+    });
+
+    // Tabelle aufbauen
+    var table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+
+    var thead = document.createElement('thead');
+    var hrow = document.createElement('tr');
+    var COLS = ['Priorität', 'Phase', 'Content-Lücke', 'Beleg', 'Empfehlung'];
+    var COL_WIDTHS = ['90px', '140px', '', '', '180px'];
+    COLS.forEach(function (label, i) {
+      var th = document.createElement('th');
+      th.textContent = label;
+      th.style.cssText = 'text-align:left;padding:7px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#30363d);white-space:nowrap;' + (COL_WIDTHS[i] ? 'width:' + COL_WIDTHS[i] + ';' : '');
+      hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    var PRIORITY_COLORS = { hoch: '#de5b50', mittel: '#c87a38', niedrig: '#5aacd2' };
+
+    function _buildGapRow(item, isLast) {
+      var gap = item.gap;
+      var currentPhase = item.phase || '';
+      var phaseColor = PHASE_COLORS[currentPhase] || 'var(--cvz-border,#30363d)';
+      var prioColor = PRIORITY_COLORS[gap.priority] || 'var(--cvz-text-muted,#8b98a5)';
+      var tr = document.createElement('tr');
+      var borderBottom = isLast ? 'none' : '1px solid var(--cvz-border,#30363d)';
+
+      // Prioritaet
+      var tdPrio = document.createElement('td');
+      tdPrio.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';';
+      tdPrio.innerHTML = gap.priority ? '<span style="font-size:11px;font-weight:700;color:' + prioColor + ';">' + escapeHtml(GAP_PRIORITY_LABELS[gap.priority] || gap.priority) + '</span>' : '<span style="color:var(--cvz-text-muted,#8b98a5);font-size:11px;">-</span>';
+      tr.appendChild(tdPrio);
+
+      // Phase (editable)
+      var tdPhase = document.createElement('td');
+      tdPhase.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';';
+      var sel = document.createElement('select');
+      sel.style.cssText = 'font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid ' + phaseColor + ';background:var(--cvz-card,#161b22);color:var(--cvz-text,#e6edf3);cursor:pointer;width:100%;';
+      var phaseOpts = [{ value: '', label: 'Keine Phase' }];
+      PHASE_ORDER.forEach(function (p) { phaseOpts.push({ value: p, label: PHASE_LABELS[p] || p }); });
+      phaseOpts.forEach(function (opt) {
+        var o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        if (currentPhase === opt.value) o.selected = true;
+        sel.appendChild(o);
+      });
+      (function (desc) {
+        sel.onchange = function () {
+          _setGapPhase(topicId, desc, sel.value || null);
+          render();
+        };
+      })(gap.gap_description);
+      tdPhase.appendChild(sel);
+      tr.appendChild(tdPhase);
+
+      // Content-Luecke
+      var tdDesc = document.createElement('td');
+      tdDesc.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';line-height:1.5;color:var(--cvz-text,#e6edf3);';
+      tdDesc.textContent = gap.gap_description || '';
+      tr.appendChild(tdDesc);
+
+      // Beleg
+      var tdEvid = document.createElement('td');
+      tdEvid.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;color:var(--cvz-text-muted,#8b98a5);line-height:1.4;';
+      tdEvid.textContent = gap.evidence || '';
+      tr.appendChild(tdEvid);
+
+      // Empfehlung
+      var tdRec = document.createElement('td');
+      tdRec.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';font-size:12px;color:var(--cvz-text-muted,#8b98a5);line-height:1.4;';
+      tdRec.textContent = gap.recommended_content_type || '';
+      tr.appendChild(tdRec);
+
+      return tr;
+    }
+
+    var allRows = [];
+    var phasesToRender = activeFilter ? [activeFilter] : PHASE_ORDER.concat(['_unknown']);
+    phasesToRender.forEach(function (phase) {
+      (grouped[phase] || []).forEach(function (item) { allRows.push(item); });
+    });
+
+    if (!allRows.length) {
+      var noMatch = document.createElement('p');
+      noMatch.className = 'cvz-card-placeholder-text';
+      noMatch.textContent = 'Keine Content-Lücken in dieser Phase.';
+      section.appendChild(noMatch);
+      return section;
+    }
+
+    allRows.forEach(function (item, idx) {
+      tbody.appendChild(_buildGapRow(item, idx === allRows.length - 1));
+    });
+    table.appendChild(tbody);
+    var _scrollWrap = document.createElement('div');
+    _scrollWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    _scrollWrap.appendChild(table);
+    section.appendChild(_scrollWrap);
+
+    return section;
+  }
+
+  function renderContentIdeasSection(ideas) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Content-Ideen (manuell beobachtet, keine automatisierte Erkennung)';
+    section.appendChild(heading);
+
+    if (!ideas || ideas.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Aktuell keine notierten Content-Ideen.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-opportunity-grid';
+    ideas.forEach(function (idea) {
+      var card = document.createElement('div');
+      card.className = 'cvz-card cvz-idea-card';
+      // GEÄNDERT (15.09.2026): zeigt jetzt, WELCHE KI das Angebot gemacht
+      // hat (idea.provider, siehe content_ideas.py; fehlte bisher im
+      // main.py-Select, "Welche KI?" ließ sich vorher gar nicht
+      // beantworten, siehe Chat-Verlauf 15.09.2026).
+      var providerLabel = idea.provider ? (MODEL_LABELS[idea.provider] || idea.provider) : null;
+      card.innerHTML =
+        (idea.phase ? '<p class="cvz-opportunity-type">' + escapeHtml(PHASE_LABELS[idea.phase] || idea.phase) + '</p>' : '') +
+        '<p class="cvz-opportunity-description">' +
+          (providerLabel ? '<strong>' + escapeHtml(providerLabel) + ':</strong> ' : '') +
+          escapeHtml(idea.description || '') +
+        '</p>' +
+        (idea.topic_name ? '<p class="cvz-opportunity-topic">' + escapeHtml(idea.topic_name) + '</p>' : '');
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+    return section;
+  }
+
+  function renderVisibilityTrendSection(weeks, isLoading, changelogEntries) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Sichtbarkeits-Verlauf im Detail';
+    section.appendChild(heading);
+
+    if (isLoading) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.textContent = 'Lädt...';
+      section.appendChild(loading);
+      return section;
+    }
+
+    if (!weeks || weeks.length < 2) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch kein Verlauf verfügbar, braucht mindestens zwei Wochen mit ausgewerteten Läufen.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    var xLabels = weeks.map(function (w) { return formatShortDate(w.week); });
+    var mentionedRate = weeks.map(function (w) { return w.total ? Math.round((w.mentioned / w.total) * 100) : null; });
+    var citedRate = weeks.map(function (w) { return w.total ? Math.round((w.cited / w.total) * 100) : null; });
+    var recommendedRate = weeks.map(function (w) { return w.total ? Math.round((w.recommended / w.total) * 100) : null; });
+    var weekLabelsOnly = weeks.map(function (w) { return w.week; });
+    var markers = mapChangelogToMarkers(changelogEntries, weekLabelsOnly);
+
+    var card = document.createElement('div');
+    card.className = 'cvz-card';
+    card.innerHTML =
+      buildLineChartSvg([
+        { label: 'Erwähnt', values: mentionedRate, color: 'var(--cvz-amber)' },
+        { label: 'Zitiert', values: citedRate, color: 'var(--cvz-teal)' },
+        { label: 'Empfohlen', values: recommendedRate, color: 'var(--cvz-red)' },
+      ], xLabels, { maxY: 100, markers: markers, xKeys: weekLabelsOnly }) +
+      '<div class="cvz-chart-legend">' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-amber)"></span>Erwähnt</span>' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Zitiert</span>' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-red)"></span>Empfohlen</span>' +
+      '</div>' +
+      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-L\u00e4ufe pro Woche (0 bis 100\u202f%), in dem die eigene Domain erw\u00e4hnt, zitiert bzw. aktiv empfohlen wurde. Klickt auf einen Punkt f\u00fcr die Details dieser Woche (Kachel erscheint oben bei der Gesamtentwicklung).</p>';
+    section.appendChild(card);
+    return section;
+  }
+
+  // GEÄNDERT (15.09.2026): gibt jetzt ZWEI getrennte Sections als Array
+  // zurück (vorher eine gemeinsame Section mit beiden Karten gestapelt),
+  // Kundenwunsch: alle Übersicht-Grafiken sollen auf Desktop nebeneinander
+  // und kleiner dargestellt werden (siehe cvz-charts-grid am Aufrufer).
+  // Damit jede Grafik ein gleich großes Grid-Element ist, statt einer
+  // doppelt so hohen Zelle mit zwei gestapelten Karten.
+  function renderMonthlyOverviewChart(months, isLoading) {
+    var citationSection = document.createElement('div');
+    citationSection.className = 'cvz-section';
+    var citationHeading = document.createElement('p');
+    citationHeading.className = 'cvz-section-label';
+    citationHeading.textContent = 'Prompt-Zitierungen im Zeitverlauf';
+    citationSection.appendChild(citationHeading);
+
+    var gscSection = document.createElement('div');
+    gscSection.className = 'cvz-section';
+    var gscHeading = document.createElement('p');
+    gscHeading.className = 'cvz-section-label';
+    gscHeading.textContent = 'GSC-Performance im Zeitverlauf';
+    gscSection.appendChild(gscHeading);
+
+    if (isLoading) {
+      var loading1 = document.createElement('p');
+      loading1.className = 'cvz-card-placeholder-text';
+      loading1.textContent = 'Lädt...';
+      citationSection.appendChild(loading1);
+      var loading2 = document.createElement('p');
+      loading2.className = 'cvz-card-placeholder-text';
+      loading2.textContent = 'Lädt...';
+      gscSection.appendChild(loading2);
+      return [citationSection, gscSection];
+    }
+
+    if (!months || months.length < 2) {
+      var emptyNoticeText = 'Noch kein Verlauf verf\u00fcgbar, braucht mindestens zwei Kalendermonate mit ausgewerteten L\u00e4ufen.';
+
+      var emptyCitationCard = document.createElement('div');
+      emptyCitationCard.className = 'cvz-card';
+      emptyCitationCard.innerHTML = buildEmptyChartSvg() + '<p class="cvz-chart-caption">' + emptyNoticeText + '</p>';
+      citationSection.appendChild(emptyCitationCard);
+
+      var emptyGscCard = document.createElement('div');
+      emptyGscCard.className = 'cvz-card';
+      emptyGscCard.innerHTML = buildEmptyChartSvg() + '<p class="cvz-chart-caption">' + emptyNoticeText + '</p>';
+      gscSection.appendChild(emptyGscCard);
+
+      return [citationSection, gscSection];
+    }
+
+    var xLabels = months.map(function (m) { return m.month; });
+
+    var citationCard = document.createElement('div');
+    citationCard.className = 'cvz-card';
+    citationCard.innerHTML =
+      buildLineChartSvg([
+        { label: 'Zitiert', values: months.map(function (m) { return m.own_domain_cited; }), color: 'var(--cvz-teal)' },
+        { label: 'Ausgewertete L\u00e4ufe', values: months.map(function (m) { return m.total_runs; }), color: 'var(--cvz-border)' },
+      ], xLabels, {}) +
+      '<p class="cvz-chart-caption">Wie viele ausgewertete ChatGPT/Gemini-L\u00e4ufe pro Kalendermonat die eigene Domain zitiert haben, gegen die Gesamtzahl ausgewerteter L\u00e4ufe.</p>';
+    citationSection.appendChild(citationCard);
+
+    var newKeywordsLine = document.createElement('p');
+    newKeywordsLine.className = 'cvz-chart-caption';
+    newKeywordsLine.textContent = 'Neue Keywords je Monat: ' +
+      months.map(function (m) { return m.month + ': ' + m.new_keywords; }).join(' \u00b7 ');
+    citationSection.appendChild(newKeywordsLine);
+
+    var gscCard = document.createElement('div');
+    gscCard.className = 'cvz-card';
+    gscCard.innerHTML =
+      buildLineChartSvg([
+        { label: 'Klicks', values: months.map(function (m) { return m.gsc_clicks; }), color: 'var(--cvz-teal)' },
+        { label: 'Impressionen', values: months.map(function (m) { return m.gsc_impressions; }), color: 'var(--cvz-amber)' },
+      ], xLabels, {}) +
+      '<p class="cvz-chart-caption">Google-Search-Console-Klicks/Impressionen pro Kalendermonat, summiert \u00fcber alle GSC-Near-Miss-Keywords dieses Themas.</p>';
+    gscSection.appendChild(gscCard);
+
+    return [citationSection, gscSection];
+
+    return section;
+  }
+
+  function renderChangelogLinkPicker(kind, items, getLabel) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-changelog-link-picker';
+
+    var isOpen = !!state.changelogLinkSectionOpen[kind];
+    var selectedIds = state.changelogDraftLinkedIds[kind];
+    var kindLabel = kind === 'keywords' ? 'Keywords' : 'Prompts';
+
+    var toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'cvz-create-toggle-btn';
+    toggleBtn.setAttribute('data-cvz-changelog-link-toggle', kind);
+    var countSuffix = selectedIds.length ? ' (' + selectedIds.length + ')' : '';
+    toggleBtn.textContent = (isOpen ? '\u2212 ' : '+ ') + 'Mit ' + kindLabel + ' verkn\u00fcpfen (optional)' + countSuffix;
+    wrap.appendChild(toggleBtn);
+
+    if (!isOpen) return wrap;
+
+    if (!items || items.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Keine ' + kindLabel + ' in diesem Thema vorhanden.';
+      wrap.appendChild(empty);
+      return wrap;
+    }
+
+    var chipList = document.createElement('div');
+    chipList.className = 'cvz-persona-filter cvz-changelog-link-chip-list';
+    items.forEach(function (item) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cvz-persona-chip' + (selectedIds.indexOf(item.id) !== -1 ? ' cvz-persona-chip-active' : '');
+      chip.setAttribute('data-cvz-changelog-link-chip', item.id);
+      chip.setAttribute('data-cvz-changelog-link-kind', kind);
+      chip.textContent = getLabel(item);
+      chipList.appendChild(chip);
+    });
+    wrap.appendChild(chipList);
+    return wrap;
+  }
+
+  function renderChangelogSection(entries, topicId, searchQueries, prompts) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = '\u00c4nderungsprotokoll';
+    section.appendChild(heading);
+
+    var CHANGELOG_MAX_CHARS = 1000;
+    var form = document.createElement('div');
+    form.className = 'cvz-changelog-form';
+    form.innerHTML =
+      '<textarea id="cvz-changelog-input" class="cvz-changelog-input" rows="2" ' +
+        'maxlength="' + CHANGELOG_MAX_CHARS + '" ' +
+        'placeholder="Was habt ihr ge\u00e4ndert? (z.B. Preistabelle als Vergleichstabelle umgebaut)">' +
+        escapeHtml(state.changelogDraft || '') +
+      '</textarea>' +
+      '<button type="button" class="cvz-changelog-submit-btn" data-cvz-changelog-submit ' +
+        (state.isSubmittingChangelog ? 'disabled' : '') + '>' +
+        (state.isSubmittingChangelog ? 'Wird gespeichert \u2026' : 'Eintragen') +
+      '</button>';
+    section.appendChild(form);
+    var changelogCharHint = document.createElement('p');
+    changelogCharHint.id = 'cvz-changelog-char-hint';
+    changelogCharHint.style.cssText = 'margin:4px 0 8px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    changelogCharHint.textContent = 'max. ' + CHANGELOG_MAX_CHARS + ' Zeichen';
+    section.appendChild(changelogCharHint);
+    var textareaEl = form.querySelector('#cvz-changelog-input');
+    textareaEl.addEventListener('input', function () {
+      state.changelogDraft = textareaEl.value;
+      var remaining = CHANGELOG_MAX_CHARS - textareaEl.value.length;
+      changelogCharHint.textContent = remaining < 100
+        ? remaining + ' Zeichen \u00fcbrig'
+        : 'max. ' + CHANGELOG_MAX_CHARS + ' Zeichen';
+      changelogCharHint.style.color = remaining < 30
+        ? 'var(--cvz-red,#de5b50)'
+        : 'var(--cvz-text-muted,#8b98a5)';
+    });
+
+    var locationLabel = document.createElement('p');
+    locationLabel.className = 'cvz-changelog-guided-label';
+    locationLabel.textContent = 'Wo? (optional)';
+    section.appendChild(locationLabel);
+
+    var locationChips = document.createElement('div');
+    locationChips.className = 'cvz-persona-filter';
+    CHANGELOG_LOCATION_ORDER.forEach(function (loc) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cvz-persona-chip' + (state.changelogLocationDraft === loc ? ' cvz-persona-chip-active' : '');
+      chip.setAttribute('data-cvz-changelog-location', loc);
+      chip.textContent = CHANGELOG_LOCATION_LABELS[loc];
+      locationChips.appendChild(chip);
+    });
+    section.appendChild(locationChips);
+
+    if (state.changelogLocationDraft === 'sonstiges') {
+      var locationCustomInput = document.createElement('input');
+      locationCustomInput.type = 'text';
+      locationCustomInput.id = 'cvz-changelog-location-custom';
+      locationCustomInput.className = 'cvz-changelog-custom-input';
+      locationCustomInput.placeholder = 'Wo genau? (z.B. FAQ-Seite)';
+      locationCustomInput.value = state.changelogLocationCustomText || '';
+      locationCustomInput.addEventListener('input', function () {
+        state.changelogLocationCustomText = locationCustomInput.value;
+      });
+      section.appendChild(locationCustomInput);
+    }
+
+    var effectLabel = document.createElement('p');
+    effectLabel.className = 'cvz-changelog-guided-label';
+    effectLabel.textContent = 'Erwarteter Effekt (optional)';
+    section.appendChild(effectLabel);
+
+    var effectChips = document.createElement('div');
+    effectChips.className = 'cvz-persona-filter';
+    CHANGELOG_EFFECT_ORDER.forEach(function (effect) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cvz-persona-chip' + (state.changelogEffectDraft === effect ? ' cvz-persona-chip-active' : '');
+      chip.setAttribute('data-cvz-changelog-effect', effect);
+      chip.textContent = CHANGELOG_EFFECT_LABELS[effect];
+      effectChips.appendChild(chip);
+    });
+    section.appendChild(effectChips);
+
+    if (state.changelogEffectDraft === 'sonstiges') {
+      var effectCustomInput = document.createElement('input');
+      effectCustomInput.type = 'text';
+      effectCustomInput.id = 'cvz-changelog-effect-custom';
+      effectCustomInput.className = 'cvz-changelog-custom-input';
+      effectCustomInput.placeholder = 'Welcher Effekt genau?';
+      effectCustomInput.value = state.changelogEffectCustomText || '';
+      effectCustomInput.addEventListener('input', function () {
+        state.changelogEffectCustomText = effectCustomInput.value;
+      });
+      section.appendChild(effectCustomInput);
+    }
+
+    section.appendChild(renderChangelogLinkPicker('keywords', searchQueries, function (q) { return q.keyword; }));
+    section.appendChild(renderChangelogLinkPicker('prompts', prompts, function (p) {
+      return p.prompt_text.length > 60 ? p.prompt_text.slice(0, 57) + '\u2026' : p.prompt_text;
+    }));
+
+    if (!entries || entries.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine Eintr\u00e4ge.';
+      section.appendChild(empty);
+    } else {
+      var visibleCount = state.changelogVisibleCount[topicId] || 10;
+      var visibleEntries = entries.slice(0, visibleCount);
+
+      var keywordTextById = {};
+      (searchQueries || []).forEach(function (q) { keywordTextById[q.id] = q.keyword; });
+      var promptTextById = {};
+      (prompts || []).forEach(function (p) { promptTextById[p.id] = p.prompt_text; });
+
+      var tableWrap = document.createElement('div');
+      tableWrap.className = 'cvz-changelog-table-wrap';
+      var rowsHtml = visibleEntries.map(function (entry) {
+        // GEÄNDERT (15.09.2026): verknüpfte Keywords bekommen jetzt einen
+        // Pfeil, wenn main.py ein Auf/Ab-Signal berechnet hat (siehe
+        // entry.keyword_deltas, main.py: _compute_changelog_keyword_deltas).
+        // Bewusst pro Keyword einzeln, ein Eintrag kann mehrere verknüpfte
+        // Keywords mit unterschiedlicher Richtung haben.
+        var keywordDeltas = entry.keyword_deltas || {};
+        var linkedKeywordItems = (entry.linked_search_query_ids || []).map(function (id) {
+          var text = keywordTextById[id];
+          if (!text) return null;
+          var direction = keywordDeltas[id];
+          var arrowHtml = '';
+          if (direction === 'up') {
+            arrowHtml = ' <span class="cvz-delta-up" title="Position seit dieser \u00c4nderung verbessert">\u25b2</span>';
+          } else if (direction === 'down') {
+            arrowHtml = ' <span class="cvz-delta-down" title="Position seit dieser \u00c4nderung verschlechtert">\u25bc</span>';
+          }
+          return escapeHtml(text) + arrowHtml;
+        }).filter(Boolean);
+        var linkedPromptItems = (entry.linked_prompt_ids || []).map(function (id) {
+          var text = promptTextById[id];
+          return text ? escapeHtml(text) : null;
+        }).filter(Boolean);
+        var linkedHtml = linkedKeywordItems.concat(linkedPromptItems).join(', ');
+        return (
+          '<tr>' +
+            '<td class="cvz-changelog-cell-text">' + escapeHtml(entry.entry_text) + '</td>' +
+            '<td class="cvz-changelog-cell-linked">' + (linkedHtml || '-') + '</td>' +
+            '<td class="cvz-changelog-cell-meta">' + formatRelativeTime(entry.created_at) + '</td>' +
+            '<td class="cvz-changelog-cell-meta">' + (entry.author_name ? escapeHtml(entry.author_name) : '-') + '</td>' +
+            '<td class="cvz-changelog-cell-action">' +
+              '<button type="button" class="cvz-changelog-delete-btn" data-cvz-changelog-delete="' + escapeHtml(entry.id) + '" aria-label="L\u00f6schen">\u00d7</button>' +
+            '</td>' +
+          '</tr>'
+        );
+      }).join('');
+      tableWrap.innerHTML =
+        '<table class="cvz-changelog-table">' +
+          '<thead><tr>' +
+            '<th>\u00c4nderung</th><th>Verkn\u00fcpft mit</th><th>Wann</th><th>Von</th><th></th>' +
+          '</tr></thead>' +
+          '<tbody>' + rowsHtml + '</tbody>' +
+        '</table>';
+      section.appendChild(tableWrap);
+
+      if (entries.length > visibleCount) {
+        var moreBtn = document.createElement('button');
+        moreBtn.type = 'button';
+        moreBtn.className = 'cvz-changelog-more-btn';
+        moreBtn.setAttribute('data-cvz-changelog-more', topicId);
+        moreBtn.textContent = 'Weitere anzeigen (noch ' + (entries.length - visibleCount) + ')';
+        section.appendChild(moreBtn);
+      }
+    }
+
+    var isDeletedOpen = !!state.showDeletedChangelog[topicId];
+    var toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'cvz-changelog-toggle-deleted-btn';
+    toggleBtn.setAttribute('data-cvz-changelog-toggle-deleted', '');
+    toggleBtn.textContent = isDeletedOpen ? 'Gel\u00f6schte Eintr\u00e4ge ausblenden' : 'Gel\u00f6schte Eintr\u00e4ge anzeigen';
+    section.appendChild(toggleBtn);
+
+    if (isDeletedOpen) {
+      if (state.isLoadingDeletedChangelog) {
+        var loadingDeleted = document.createElement('p');
+        loadingDeleted.className = 'cvz-card-placeholder-text';
+        loadingDeleted.textContent = 'L\u00e4dt...';
+        section.appendChild(loadingDeleted);
+      } else {
+        var deletedEntries = state.deletedChangelogCache[topicId] || [];
+        if (deletedEntries.length === 0) {
+          var noneDeleted = document.createElement('p');
+          noneDeleted.className = 'cvz-card-placeholder-text';
+          noneDeleted.textContent = 'Keine gel\u00f6schten Eintr\u00e4ge der letzten ' + CHANGELOG_DELETED_RETENTION_DAYS + ' Tage.';
+          section.appendChild(noneDeleted);
+        } else {
+          var deletedTableWrap = document.createElement('div');
+          deletedTableWrap.className = 'cvz-changelog-table-wrap';
+          var deletedRowsHtml = deletedEntries.map(function (entry) {
+            return (
+              '<tr class="cvz-changelog-row-deleted">' +
+                '<td class="cvz-changelog-cell-text">' + escapeHtml(entry.entry_text) + '</td>' +
+                '<td class="cvz-changelog-cell-meta">' +
+                  'Erstellt ' + formatRelativeTime(entry.created_at) +
+                  (entry.author_name ? ' von ' + escapeHtml(entry.author_name) : '') +
+                '</td>' +
+                '<td class="cvz-changelog-cell-meta">' +
+                  'Gel\u00f6scht ' + formatRelativeTime(entry.deleted_at) +
+                  (entry.deleted_by_name ? ' von ' + escapeHtml(entry.deleted_by_name) : '') +
+                '</td>' +
+                '<td class="cvz-changelog-cell-action">' +
+                  '<button type="button" class="cvz-changelog-restore-btn" data-cvz-changelog-restore="' + escapeHtml(entry.id) + '">Wiederherstellen</button>' +
+                '</td>' +
+              '</tr>'
+            );
+          }).join('');
+          deletedTableWrap.innerHTML =
+            '<table class="cvz-changelog-table">' +
+              '<thead><tr><th>\u00c4nderung</th><th>Erstellt</th><th>Gel\u00f6scht</th><th></th></tr></thead>' +
+              '<tbody>' + deletedRowsHtml + '</tbody>' +
+            '</table>';
+          section.appendChild(deletedTableWrap);
+        }
+      }
+    }
+
+    return section;
+  }
+
+  function renderPositioningInsight(insight) {
+    if (!insight) return null;
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Positionierungs-Hinweis';
+    section.appendChild(heading);
+
+    var card = document.createElement('div');
+    card.className = 'cvz-card cvz-idea-card';
+    card.innerHTML =
+      '<p class="cvz-opportunity-description">' +
+        'Das Thema zielt auf \u201E' + escapeHtml(insight.seed_keyword) + '\u201C (' + escapeHtml(insight.seed_volume) + ' Suchen/Monat), ' +
+        'aber \u201E' + escapeHtml(insight.suggested_keyword) + '\u201C wird mit ' + escapeHtml(insight.suggested_volume) +
+        ' Suchen/Monat rund ' + escapeHtml(insight.factor) + 'x h\u00e4ufiger gesucht. ' +
+        'M\u00f6glicherweise die treffendere Positionierung.' +
+      '</p>';
+    section.appendChild(card);
+    return section;
+  }
+
+  // NEU (23.09.2026): dasselbe Keyword kann aus mehreren Quellen kommen
+  // (z. B. Seed, keyword_suggestions und keyword_ideas) und stand dann
+  // mehrfach in der Liste. Pro Keyword bleibt ein Eintrag, bevorzugt aus der
+  // aussagekräftigsten Quelle. Hat der behaltene Eintrag keine Phase, wird
+  // die Phase eines Duplikats übernommen.
+  var KEYWORD_SOURCE_PRIORITY = ['seed_keyword', 'manual', 'gsc_near_miss', 'related_keywords',
+    'keyword_suggestions', 'keyword_ideas', 'paa', 'problem_question'];
+
+  function dedupeKeywords(keywords) {
+    var byKey = {};
+    var order = [];
+    (keywords || []).forEach(function (kw) {
+      var key = String(kw.keyword || '').trim().toLowerCase();
+      if (!key) return;
+      var current = byKey[key];
+      if (!current) {
+        byKey[key] = kw;
+        order.push(key);
+        return;
+      }
+      var rank = function (k) {
+        var i = KEYWORD_SOURCE_PRIORITY.indexOf(k.source);
+        return i === -1 ? 99 : i;
+      };
+      var keep = rank(kw) < rank(current) ? kw : current;
+      var other = keep === kw ? current : kw;
+      if (!keep.messymiddle_phase && other.messymiddle_phase) {
+        keep = Object.assign({}, keep, { messymiddle_phase: other.messymiddle_phase });
+      }
+      byKey[key] = keep;
+    });
+    return order.map(function (k) { return byKey[k]; });
+  }
+
+  // GEÄNDERT (25.09.2026, Kundenwunsch): Keywords-Liste jetzt als echte
+  // <table> mit Kopfzeile statt Flex-Divs ohne Header (gleiches Muster wie
+  // renderGscBlock/renderContentGapsSection). PAA-Fragen zeigen keine
+  // "Einschätzung" mehr: Sie kommen direkt aus Google, die Nachfrage gilt
+  // damit als bestätigt, eine zusätzliche Einschätzung wäre irreführend.
+  function renderKeywordsTable(keywords, enableExpansion, changelogEntries) {
+    keywords = dedupeKeywords(keywords);
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Thematisch passende Keywords';
+    section.appendChild(heading);
+
+    // NEU (16.09.2026): manuelles Keyword-Formular, analog zu renderManualPromptForm
+    if (state.activeTopicId) {
+      section.appendChild(renderManualKeywordForm(keywords, state.activeTopicId));
+    }
+
+    if (!keywords || keywords.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine Keyword-Daten verfügbar.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    // Group keywords by messymiddle_phase
+    var grouped = {};
+    PHASE_ORDER.forEach(function (p) { grouped[p] = []; });
+    grouped['__none__'] = [];
+    keywords.forEach(function (kw) {
+      var p = kw.messymiddle_phase;
+      if (p && grouped[p]) {
+        grouped[p].push(kw);
+      } else {
+        grouped['__none__'].push(kw);
+      }
+    });
+
+    var hasAnyPhase = PHASE_ORDER.some(function (p) { return grouped[p].length > 0; });
+
+    if (!hasAnyPhase) {
+      section.appendChild(_buildKeywordTable(keywords, enableExpansion, changelogEntries));
+      return section;
+    }
+
+    PHASE_ORDER.forEach(function (phase) {
+      if (grouped[phase].length === 0) return;
+      var phaseColor = PHASE_COLORS[phase] || '#4a5568';
+      var groupHeading = document.createElement('p');
+      groupHeading.className = 'cvz-prompt-phase-heading';
+      groupHeading.style.borderLeftColor = phaseColor;
+      groupHeading.textContent = PHASE_LABELS[phase] || phase;
+      section.appendChild(groupHeading);
+      section.appendChild(_buildKeywordTable(grouped[phase], enableExpansion, changelogEntries));
+    });
+
+    if (grouped['__none__'].length > 0) {
+      var noneHeading = document.createElement('p');
+      noneHeading.className = 'cvz-prompt-phase-heading';
+      noneHeading.style.borderLeftColor = '#4a5568';
+      noneHeading.textContent = 'Nicht zugeordnet';
+      section.appendChild(noneHeading);
+      section.appendChild(_buildKeywordTable(grouped['__none__'], enableExpansion, changelogEntries));
+    }
+
+    return section;
+  }
+
+  // NEU (25.09.2026): Baut eine <table> für eine Keyword-Liste, inkl.
+  // aufklappbarer Detail-Zeile (gleiches Prinzip wie renderGscBlock:
+  // <tr><td colspan> direkt unter der Zeile).
+  function _buildKeywordTable(kwList, enableExpansion, changelogEntries) {
+    var table = document.createElement('table');
+    table.className = 'cvz-table' + (enableExpansion ? ' cvz-table-clickable' : '');
+    // GEÄNDERT (25.09.2026): feste Breiten auf den Nicht-Keyword-Spalten.
+    // Jede Journey-Phase rendert ihre eigene <table>; ohne feste Breiten
+    // berechnet der Browser die Spaltenbreiten pro Tabelle unabhängig vom
+    // Inhalt, dadurch standen "Suchvolumen/Monat" & Co. in jeder Phase an
+    // einer anderen Position. Mit festen Breiten fluchten alle Tabellen.
+    table.innerHTML =
+      '<thead><tr>' +
+        '<th style="width:26px;"></th>' +
+        '<th>Keyword</th>' +
+        '<th style="width:150px;text-align:right;">Suchvolumen/Monat</th>' +
+        '<th style="width:230px;">Einschätzung</th>' +
+        '<th style="width:170px;">Quelle</th>' +
+        '<th style="width:50px;"></th>' +
+      '</tr></thead>';
+
+    var tbody = document.createElement('tbody');
+
+    kwList.forEach(function (kw) {
+      var rowId = kw.id || (kw.keyword + '|' + kw.source);
+      var linkedCount = (changelogEntries || []).filter(function (entry) {
+        return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
+      }).length;
+      var hasDetail = kw.organic_rank != null || kw.gsc_impressions != null || kw.gsc_position != null ||
+        kw.first_seen_at || linkedCount > 0 || (kw.top_serp_results && kw.top_serp_results.length > 0) || !!kw.messymiddle_phase;
+      var canExpand = !!(enableExpansion && hasDetail);
+
+      // GEÄNDERT (25.09.2026): PAA-Fragen (People Also Ask) kommen direkt
+      // von Google, die Nachfrage gilt damit als bestätigt. Die
+      // Einschätzung ("reine Idee" usw.) bezieht sich nur auf Keywords
+      // ohne diese Bestätigung, bleibt bei PAA-Fragen also leer.
+      var showStatus = !!kw.keyword_status_label && kw.source !== 'paa';
+
+      var tr = document.createElement('tr');
+      if (canExpand) {
+        tr.setAttribute('data-cvz-keyword-toggle', rowId);
+        tr.setAttribute('data-cvz-keyword-text', kw.keyword);
+      }
+      tr.innerHTML =
+        '<td class="cvz-prompt-expand-chevron">' + (canExpand ? (state.expandedKeywordId === rowId ? '\u25be' : '\u25b8') : '') + '</td>' +
+        '<td>' + escapeHtml(kw.keyword) +
+          (linkedCount > 0 ? ' <span class="cvz-changelog-linked-badge" title="' + linkedCount + ' verknüpfte Änderung(en)">✎</span>' : '') +
+        '</td>' +
+        '<td style="text-align:right;color:var(--cvz-text-muted,#8b98a5);">' +
+          (kw.search_volume == null ? '\u2013' : escapeHtml(kw.search_volume)) +
+        '</td>' +
+        '<td>' +
+          (showStatus
+            ? '<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;' +
+              'letter-spacing:.04em;padding:3px 8px;border-radius:9999px;white-space:nowrap;' +
+              'color:' + (KEYWORD_STATUS_COLORS[kw.keyword_status] || '#8b98a5') + ';' +
+              'background:' + (KEYWORD_STATUS_COLORS[kw.keyword_status] || '#8b98a5') + '1a;">' +
+              escapeHtml(kw.keyword_status_label) + '</span>'
+            : '') +
+        '</td>' +
+        '<td style="color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(KEYWORD_SOURCE_LABELS[kw.source] || kw.source) + '</td>' +
+        '<td style="white-space:nowrap;text-align:right;">' +
+          (kw.id ? '<button type="button" class="cvz-prompt-delete-btn" data-cvz-keyword-deactivate="' + kw.id + '" aria-label="Keyword deaktivieren" title="Keyword deaktivieren">\u00d7</button>' : '') +
+        '</td>';
+      tbody.appendChild(tr);
+
+      if (canExpand && state.expandedKeywordId === rowId) {
+        var expTr = document.createElement('tr');
+        var expTd = document.createElement('td');
+        expTd.colSpan = 6;
+        expTd.appendChild(renderKeywordExpansion(kw, rowId, changelogEntries));
+        expTr.appendChild(expTd);
+        tbody.appendChild(expTr);
+      }
+    });
+
+    table.appendChild(tbody);
+    var scrollWrap = document.createElement('div');
+    scrollWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    scrollWrap.appendChild(table);
+    return scrollWrap;
+  }
+
+  // NEU (15.09.2026): manuelle Korrektur der Messy-Middle-Phase eines
+  // Keywords/einer PAA-Frage, siehe main.py: update_keyword_phase_endpoint.
+  async function updateKeywordPhase(topicId, keywordId, phase) {
+    try {
+      await apiFetch('/topics/' + topicId + '/keywords/' + keywordId + '/phase', {
+        method: 'PATCH',
+        body: { messymiddle_phase: phase },
+      });
+      var cached = state.topicDetailCache[topicId];
+      var kw = cached && (cached.search_queries || []).filter(function (q) { return q.id === keywordId; })[0];
+      if (kw) {
+        kw.messymiddle_phase = phase;
+        kw.phase_manually_set = true;
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Phase konnte nicht gespeichert werden:', e);
+      await showCvzAlert('Phase konnte nicht gespeichert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    render();
+  }
+
+  function renderKeywordExpansion(kw, rowId, changelogEntries) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-prompt-expansion';
+
+    var linkedEntries = (changelogEntries || []).filter(function (entry) {
+      return (entry.linked_search_query_ids || []).indexOf(kw.id) !== -1;
+    });
+    var linkedHtml = '';
+    if (linkedEntries.length > 0) {
+      linkedHtml = '<div class="cvz-prompt-linked-changelog">' +
+        '<p class="cvz-changelog-guided-label">Verkn\u00fcpfte \u00c4nderungen</p>' +
+        linkedEntries.map(function (entry) {
+          return '<p class="cvz-changelog-linked">' + formatRelativeTime(entry.created_at) + ': ' + escapeHtml(entry.entry_text) + '</p>';
+        }).join('') +
+      '</div>';
+    }
+
+    var lines = [];
+    if (kw.organic_rank != null) {
+      lines.push(
+        '<p class="cvz-opportunity-description"><strong>Google-Position (organisch):</strong> ' +
+        escapeHtml(kw.organic_rank) + '</p>'
+      );
+    }
+    if (kw.gsc_impressions != null || kw.gsc_position != null) {
+      var gscParts = [];
+      if (kw.gsc_impressions != null) gscParts.push(escapeHtml(kw.gsc_impressions) + ' Impressionen');
+      if (kw.gsc_position != null) gscParts.push('Position ' + escapeHtml(Number(kw.gsc_position).toFixed(1)));
+      lines.push('<p class="cvz-opportunity-description"><strong>Google Search Console:</strong> ' + gscParts.join(', ') + '</p>');
+    }
+    if (kw.source === 'paa') {
+      lines.push('<p class="cvz-opportunity-topic">H\u00e4ufig gefragt laut Google (People Also Ask), nicht von ChatGPT/Gemini.</p>');
+    }
+    if (kw.first_seen_at) {
+      lines.push('<p class="cvz-opportunity-topic">Erstmals erfasst: ' + formatRelativeTime(kw.first_seen_at) + '</p>');
+    }
+
+    // NEU (15.09.2026): Korrektur-Chips für die Messy-Middle-Phase (siehe
+    // Chat-Verlauf 15.09.2026): Claude ordnet Keywords/PAA-Fragen
+    // automatisch einer Phase zu, hier kann der Nutzer das korrigieren.
+    var phaseChipsHtml = '';
+    if (kw.id) {
+      phaseChipsHtml =
+        '<p class="cvz-changelog-guided-label">Phase' + (kw.phase_manually_set ? ' (manuell gesetzt)' : '') + '</p>' +
+        '<div class="cvz-persona-filter">' +
+          PHASE_ORDER.map(function (phase) {
+            var isActive = kw.messymiddle_phase === phase;
+            return '<button type="button" class="cvz-persona-chip' + (isActive ? ' cvz-persona-chip-active' : '') + '" ' +
+              'data-cvz-keyword-phase-set="' + phase + '" data-cvz-keyword-phase-id="' + escapeHtml(kw.id) + '">' +
+              escapeHtml(PHASE_LABELS[phase]) + '</button>';
+          }).join('') +
+        '</div>';
+    }
+
+    wrap.innerHTML = linkedHtml + lines.join('') + renderSerpSummaryBlock(kw) + phaseChipsHtml;
+
+    if (state.loadingKeywordRankHistory[rowId]) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.textContent = 'Lädt Verlauf...';
+      wrap.appendChild(loading);
+      return wrap;
+    }
+
+    var snapshots = state.keywordRankHistoryCache[rowId];
+    if (snapshots && snapshots.length >= 2) {
+      var snapshotDates = snapshots.map(function (s) { return s.snapshot_at; });
+      var xLabels = snapshotDates.map(function (d) { return formatShortDate(d); });
+      var rankValues = snapshots.map(function (s) { return s.organic_rank; });
+      var gscPositionValues = snapshots.map(function (s) { return s.gsc_position; });
+      var hasRank = rankValues.some(function (v) { return v != null; });
+      var hasGsc = gscPositionValues.some(function (v) { return v != null; });
+      if (hasRank || hasGsc) {
+        var series = [];
+        if (hasRank) series.push({ label: 'Google-Position', values: rankValues, color: 'var(--cvz-teal)' });
+        if (hasGsc) series.push({ label: 'GSC-Position', values: gscPositionValues, color: 'var(--cvz-amber)' });
+        var markers = mapChangelogToMarkers(linkedEntries, snapshotDates);
+        var chartWrap = document.createElement('div');
+        chartWrap.className = 'cvz-card';
+        chartWrap.innerHTML =
+          buildLineChartSvg(series, xLabels, { markers: markers }) +
+          '<p class="cvz-chart-caption">Position im Verlauf, niedriger ist besser. Historie beginnt mit eurem ersten ' +
+          'Monatslauf nach Einf\u00fchrung dieser Auswertung, keine r\u00fcckwirkenden Daten. Gestrichelte Linien sind ' +
+          'Eintr\u00e4ge im \u00c4nderungsprotokoll, die ihr explizit mit diesem Keyword verkn\u00fcpft habt.</p>';
+        wrap.appendChild(chartWrap);
+      }
+    } else if (snapshots && snapshots.length === 1) {
+      var single = document.createElement('p');
+      single.className = 'cvz-card-placeholder-text';
+      single.textContent = 'Nur ein Messpunkt bisher, Verlauf entsteht mit dem n\u00e4chsten Monatslauf.';
+      wrap.appendChild(single);
+    }
+
+    return wrap;
+  }
+
+  function renderMarkdownLite(markdown) {
+    if (!markdown) return '';
+    var escaped = escapeHtml(markdown);
+    escaped = escaped.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function (m, text, url) {
+      return '<a href="' + url + '" target="_blank" rel="noopener">' + text + '</a>';
+    });
+    escaped = escaped.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    escaped = escaped.replace(/^###\s+(.+)$/gm, '<h5>$1</h5>');
+    escaped = escaped.replace(/^##\s+(.+)$/gm, '<h4>$1</h4>');
+
+    var html = '', inList = false;
+    escaped.split('\n').forEach(function (line) {
+      var t = line.trim();
+      if (t.indexOf('- ') === 0) {
+        if (!inList) { html += '<ul>'; inList = true; }
+        html += '<li>' + t.slice(2) + '</li>';
+      } else {
+        if (inList) { html += '</ul>'; inList = false; }
+        if (t === '') return;
+        html += (t.indexOf('<h4>') === 0 || t.indexOf('<h5>') === 0) ? t : '<p>' + t + '</p>';
+      }
+    });
+    if (inList) html += '</ul>';
+    return html;
+  }
+
+  function renderPromptExpansion(prompt, changelogEntries) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-prompt-expansion';
+
+    var linkedEntries = (changelogEntries || []).filter(function (entry) {
+      return (entry.linked_prompt_ids || []).indexOf(prompt.id) !== -1;
+    });
+    var linkedHtml = '';
+    if (linkedEntries.length > 0) {
+      linkedHtml = '<div class="cvz-prompt-linked-changelog">' +
+        '<p class="cvz-changelog-guided-label">Verkn\u00fcpfte \u00c4nderungen</p>' +
+        linkedEntries.map(function (entry) {
+          return '<p class="cvz-changelog-linked">' + formatRelativeTime(entry.created_at) + ': ' + escapeHtml(entry.entry_text) + '</p>';
+        }).join('') +
+      '</div>';
+    }
+    // NEU (23.09.2026): Rolle zuordnen, steht bewusst vor dem Laden der
+    // Antworten, damit es auch ohne Antwortdaten funktioniert.
+    linkedHtml = renderPromptRoleChipsHtml(prompt) + linkedHtml;
+
+    if (state.loadingPromptCitations[prompt.id]) {
+      wrap.innerHTML = linkedHtml + '<p class="cvz-card-placeholder-text">Lädt...</p>';
+      return wrap;
+    }
+    var data = state.promptCitationsCache[prompt.id];
+    if (!data) {
+      wrap.innerHTML = linkedHtml + '<p class="cvz-card-placeholder-text">Für diesen Prompt liegen noch keine Antwort-Daten vor.</p>';
+      return wrap;
+    }
+    if (linkedHtml) wrap.innerHTML = linkedHtml;
+
+    // Quellen-Zusammenfassung: wie viele Quellen wurden pro Engine zitiert?
+    // Hilft dem User einzuschätzen, welche Prompts priorisiert werden sollten.
+    var cptRuns = data.chat_gpt || [];
+    var gemRuns = data.gemini || [];
+    var cptSources = cptRuns.length > 0 && cptRuns[0].sources ? cptRuns[0].sources.length : null;
+    var gemSources = gemRuns.length > 0 && gemRuns[0].sources ? gemRuns[0].sources.length : null;
+    if (cptSources !== null || gemSources !== null) {
+      var sourceSummary = document.createElement('p');
+      sourceSummary.className = 'cvz-prompt-source-summary';
+      var parts = [];
+      if (cptSources !== null) parts.push(MODEL_LABELS.chat_gpt + ': ' + cptSources + ' Quellen');
+      if (gemSources !== null) parts.push(MODEL_LABELS.gemini + ': ' + gemSources + ' Quellen');
+      sourceSummary.textContent = parts.join(' · ');
+      wrap.appendChild(sourceSummary);
+    }
+
+    var engines = [
+      { id: 'chat_gpt', label: MODEL_LABELS.chat_gpt, runs: data.chat_gpt || [] },
+      { id: 'gemini', label: MODEL_LABELS.gemini, runs: data.gemini || [] },
+    ];
+
+    var engineNav = document.createElement('div');
+    engineNav.className = 'cvz-prompt-engine-nav';
+    engines.forEach(function (engine) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cvz-prompt-engine-btn' + (state.expandedPromptEngine[prompt.id] === engine.id ? ' cvz-prompt-engine-btn-active' : '');
+      btn.setAttribute('data-cvz-prompt-engine', engine.id);
+      btn.setAttribute('data-cvz-prompt-engine-owner', prompt.id);
+      btn.textContent = engine.label + ' (' + engine.runs.length + ')';
+      engineNav.appendChild(btn);
+    });
+    wrap.appendChild(engineNav);
+
+    var activeEngine = engines.filter(function (e) { return e.id === state.expandedPromptEngine[prompt.id]; })[0] || engines[0];
+    var runIndex = state.expandedPromptRunIndex[prompt.id] || 0;
+    var run = activeEngine.runs[runIndex];
+
+    if (!run) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Für ' + activeEngine.label + ' liegt noch kein Lauf vor.';
+      wrap.appendChild(empty);
+      return wrap;
+    }
+
+    if (activeEngine.runs.length > 1) {
+      var runNav = document.createElement('div');
+      runNav.className = 'cvz-prompt-run-nav';
+      activeEngine.runs.forEach(function (r, i) {
+        var runBtn = document.createElement('button');
+        runBtn.type = 'button';
+        runBtn.className = 'cvz-prompt-run-btn' + (i === runIndex ? ' cvz-prompt-run-btn-active' : '');
+        runBtn.setAttribute('data-cvz-run-select', i);
+        runBtn.setAttribute('data-cvz-run-owner', prompt.id);
+        runBtn.textContent = formatRelativeTime(r.collected_at);
+        runNav.appendChild(runBtn);
+      });
+      wrap.appendChild(runNav);
+    }
+
+    var _statusText = run.own_domain_cited
+      ? '\u2713 zitiert' + (run.own_domain_citation_position ? ' (Position ' + run.own_domain_citation_position + ')' : '')
+      : (run.own_domain_mentioned ? 'Nur erw\u00e4hnt, nicht zitiert' : '');
+    if (run.own_domain_recommended === true) _statusText += ' \u00b7 aktiv empfohlen';
+    if (_statusText) {
+      var statusLine = document.createElement('p');
+      statusLine.className = 'cvz-prompt-run-status';
+      statusLine.textContent = _statusText;
+      wrap.appendChild(statusLine);
+    }
+
+    var answerBlock = document.createElement('div');
+    answerBlock.className = 'cvz-prompt-answer';
+    answerBlock.innerHTML = renderMarkdownLite(run.answer_markdown);
+    wrap.appendChild(answerBlock);
+
+    var sourcesHeading = document.createElement('p');
+    sourcesHeading.className = 'cvz-section-label';
+    sourcesHeading.textContent = 'Zitierte Quellen (' + run.sources.length + ')';
+    wrap.appendChild(sourcesHeading);
+
+    if (run.sources.length === 0) {
+      var noSources = document.createElement('p');
+      noSources.className = 'cvz-card-placeholder-text';
+      noSources.textContent = 'Keine Quellen in dieser Antwort.';
+      wrap.appendChild(noSources);
+    } else {
+      var sourceList = document.createElement('div');
+      sourceList.className = 'cvz-prompt-source-list';
+      run.sources.forEach(function (s) {
+        var item = document.createElement('a');
+        item.className = 'cvz-prompt-source-item' + (s.is_competitor ? ' cvz-prompt-source-competitor' : '');
+        item.href = s.url || '#';
+        item.target = '_blank';
+        item.rel = 'noopener';
+        item.innerHTML =
+          '<img class="cvz-timeline-logo" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(s.domain || '') + '" alt="">' +
+          '<span>' + escapeHtml(s.title || s.domain || s.url) + '</span>' +
+          (s.is_competitor ? '<span class="cvz-competitor-badge">Wettbewerber</span>' : '');
+        sourceList.appendChild(item);
+      });
+      wrap.appendChild(sourceList);
+    }
+
+    if (run.competitor_mentioned_only && run.competitor_mentioned_only.length) {
+      var mentionedNote = document.createElement('p');
+      mentionedNote.className = 'cvz-card-placeholder-text cvz-prompt-mentioned-note';
+      mentionedNote.textContent = 'Im Text erw\u00e4hnt, aber nicht als Quelle zitiert: ' + run.competitor_mentioned_only.join(', ');
+      wrap.appendChild(mentionedNote);
+    }
+
+    return wrap;
+  }
+
+  function computePhaseRollup(prompts) {
+    return PHASE_ORDER.map(function (phase) {
+      var inPhase = prompts.filter(function (p) { return (p.messymiddle_phase || p.phase) === phase; });
+      var counts = { green: 0, yellow: 0, red: 0, unknown: 0 };
+      inPhase.forEach(function (p) {
+        var key = (p.total_runs == null || p.total_runs === 0)
+          ? 'unknown'
+          : (p.cited_count > 0 ? 'green' : 'red');
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      return { phase: phase, total: inPhase.length, counts: counts };
+    }).filter(function (row) { return row.total > 0; });
+  }
+
+  function renderPhaseRollup(prompts) {
+    var rollup = computePhaseRollup(prompts);
+    if (rollup.length === 0) return null;
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Sichtbarkeit über die Journey-Phasen';
+    section.appendChild(heading);
+
+    // NEU (15.09.2026): Klarstellung, siehe Chat-Verlauf 15.09.2026: die
+    // Balken hier messen AUSSCHLIESSLICH, ob die EIGENE Domain zitiert
+    // wurde, nicht ob überhaupt irgendeine Zitierung stattfand. Ein
+    // Wettbewerber kann im selben Prompt zitiert werden, ohne dass sich
+    // das hier niederschlägt. Beides sind bewusst getrennte Kennzahlen
+    // (siehe Wettbewerber-Tab für die andere Seite).
+    var clarification = document.createElement('p');
+    clarification.className = 'cvz-card-placeholder-text';
+    clarification.style.marginBottom = '8px';
+    clarification.textContent = 'Zeigt, in welchen Phasen der Customer Journey ihr erwähnt werdet.';
+    section.appendChild(clarification);
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-phase-rollup-grid';
+    rollup.forEach(function (row) {
+      var greenPct = Math.round((row.counts.green / row.total) * 100);
+      var yellowPct = Math.round((row.counts.yellow / row.total) * 100);
+      var redPct = Math.max(0, 100 - greenPct - yellowPct);
+
+      var card = document.createElement('div');
+      card.className = 'cvz-phase-rollup-card';
+      card.innerHTML =
+        '<p class="cvz-phase-rollup-label">' + escapeHtml(PHASE_LABELS[row.phase] || row.phase) + '</p>' +
+        '<div class="cvz-phase-rollup-bar">' +
+          (greenPct ? '<span class="cvz-phase-rollup-segment cvz-dot-green" style="width:' + greenPct + '%" title="' + row.counts.green + ' zitiert"></span>' : '') +
+          (yellowPct ? '<span class="cvz-phase-rollup-segment cvz-dot-yellow" style="width:' + yellowPct + '%" title="' + row.counts.yellow + ' erwähnt, nicht zitiert"></span>' : '') +
+          (redPct ? '<span class="cvz-phase-rollup-segment cvz-dot-red" style="width:' + redPct + '%" title="' + (row.counts.red + row.counts.unknown) + ' nicht vorhanden/unbekannt"></span>' : '') +
+        '</div>' +
+        '<p class="cvz-phase-rollup-count">' + (row.counts.green > 0 ? row.counts.green + ' von ' + row.total + ' zitiert' : 'Eigene Domain nicht sichtbar') + '</p>';
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+    return section;
+  }
+
+  function getDistinctPersonas(prompts) {
+    var seen = {};
+    var personas = [];
+    prompts.forEach(function (p) {
+      if (p.persona && !seen[p.persona]) {
+        seen[p.persona] = true;
+        personas.push(p.persona);
+      }
+    });
+    return personas.sort();
+  }
+
+  function renderPersonaFilterChips(prompts) {
+    var personas = getDistinctPersonas(prompts);
+    if (personas.length === 0) return null;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-persona-filter';
+
+    var allChip = document.createElement('button');
+    allChip.type = 'button';
+    allChip.className = 'cvz-persona-chip' + (!state.activePersonaFilter ? ' cvz-persona-chip-active' : '');
+    allChip.setAttribute('data-cvz-persona-filter', '');
+    allChip.textContent = 'Alle';
+    wrap.appendChild(allChip);
+
+    personas.forEach(function (persona) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cvz-persona-chip' + (state.activePersonaFilter === persona ? ' cvz-persona-chip-active' : '');
+      chip.setAttribute('data-cvz-persona-filter', persona);
+      chip.textContent = persona;
+      wrap.appendChild(chip);
+    });
+
+    return wrap;
+  }
+
+  var MAX_MANUAL_KEYWORDS = 10;
+
+  function renderManualKeywordForm(keywords, topicId) {
+    var manualCount = (keywords || []).filter(function (k) { return k.source === 'manual'; }).length;
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-changelog-form';
+    wrap.style.marginBottom = '16px';
+
+    if (manualCount >= MAX_MANUAL_KEYWORDS) {
+      wrap.innerHTML =
+        '<p class="cvz-card-placeholder-text">Maximal ' + MAX_MANUAL_KEYWORDS + ' manuell hinzugef\u00fcgte Keywords erreicht ' +
+        '(' + manualCount + '/' + MAX_MANUAL_KEYWORDS + '). Erst ein bestehendes manuelles Keyword deaktivieren.</p>';
+      return wrap;
+    }
+
+    // Label mit Tooltip
+    var kwLabelRow = document.createElement('div');
+    kwLabelRow.style.cssText = 'display:flex;align-items:center;margin-bottom:6px;';
+    var kwLabel = document.createElement('span');
+    kwLabel.className = 'cvz-section-label';
+    kwLabel.style.margin = '0';
+    kwLabel.textContent = 'Eigenes Keyword hinzuf\u00fcgen';
+    kwLabelRow.appendChild(kwLabel);
+    var kwSlotBadge = document.createElement('span');
+    kwSlotBadge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);font-weight:400;';
+    kwSlotBadge.textContent = manualCount + '\u202fvon\u202f' + MAX_MANUAL_KEYWORDS + ' Slots';
+    kwLabelRow.appendChild(kwSlotBadge);
+    kwLabelRow.appendChild(makeTip(
+      'Keywords, die du hier hinzuf\u00fcgst, werden beim n\u00e4chsten Datenlauf in die GSC-Abfrage einbezogen und mit KI-Pr\u00e4senz verglichen. Sie erscheinen sofort in der Liste, bekommen aber erst Daten, wenn der n\u00e4chste Lauf abgeschlossen ist.'
+    ));
+    wrap.appendChild(kwLabelRow);
+
+    var KW_MAX_CHARS = 80;
+    var kwInputRow = document.createElement('div');
+    kwInputRow.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
+    kwInputRow.innerHTML =
+      '<input type="text" id="cvz-manual-keyword-input" class="cvz-changelog-custom-input" style="flex:1;min-width:140px;" ' +
+        'maxlength="' + KW_MAX_CHARS + '" ' +
+        'placeholder="z.B. landingpage optimierung" ' +
+        'value="' + escapeHtml(state.manualKeywordDraftText || '') + '">' +
+      '<button type="button" class="cvz-changelog-submit-btn" data-cvz-manual-keyword-submit="' + topicId + '" ' +
+        (state.isSubmittingManualKeyword ? 'disabled' : '') + '>' +
+        (state.isSubmittingManualKeyword ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
+      '</button>';
+    wrap.appendChild(kwInputRow);
+    var kwHint = document.createElement('p');
+    kwHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    kwHint.textContent = 'max. ' + KW_MAX_CHARS + ' Zeichen';
+    wrap.appendChild(kwHint);
+
+    var inputEl = wrap.querySelector('#cvz-manual-keyword-input');
+    inputEl.addEventListener('input', function () {
+      state.manualKeywordDraftText = inputEl.value;
+    });
+
+    return wrap;
+  }
+
+  // ENTFERNT (23.09.2026): MAX_MANUAL_PROMPTS, siehe getPromptBudget.
+
+  // GEÄNDERT (23.09.2026): gemeinsamer Topf von 20 aktiven Prompts statt
+  // fester 4 eigener Plätze. Wer System-Prompts deaktiviert, bekommt
+  // entsprechend mehr Plätze für eigene. Werte kommen vom Backend
+  // (prompt_budget), Fallback-Rechnung nur, falls das Feld fehlt.
+  var MAX_TOTAL_PROMPTS = 24;
+
+  function getPromptBudget(prompts, topicId) {
+    var detail = state.topicDetailCache[topicId];
+    if (detail && detail.prompt_budget) return detail.prompt_budget;
+    var active = (prompts || []).filter(function (p) { return p.prompt_type === 'stable_core' && p.is_active !== false; }).length;
+    return { aktiv_gesamt: active, max_gesamt: MAX_TOTAL_PROMPTS, frei_eigene: Math.max(0, MAX_TOTAL_PROMPTS - active) };
+  }
+
+  function renderManualPromptForm(prompts, topicId) {
+    var budget = getPromptBudget(prompts, topicId);
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-changelog-form';
+    wrap.style.marginBottom = '16px';
+
+    if (budget.frei_eigene <= 0) {
+      wrap.innerHTML =
+        '<p class="cvz-card-placeholder-text">Alle ' + budget.max_gesamt + ' Prompt-Pl\u00e4tze sind belegt. ' +
+        'Deaktiviert einen Prompt, den ihr nicht braucht, dann k\u00f6nnt ihr hier einen eigenen hinzuf\u00fcgen.</p>';
+      return wrap;
+    }
+
+    // Zwei Zeilen: Label+Tooltip oben, Eingabe unten
+    var promptLabelRow = document.createElement('div');
+    promptLabelRow.style.cssText = 'display:flex;align-items:center;margin-bottom:6px;';
+    var promptLabel = document.createElement('span');
+    promptLabel.className = 'cvz-section-label';
+    promptLabel.style.margin = '0';
+    promptLabel.textContent = 'Eigenen Prompt hinzuf\u00fcgen';
+    promptLabelRow.appendChild(promptLabel);
+    var promptSlotBadge = document.createElement('span');
+    promptSlotBadge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);font-weight:400;';
+    promptSlotBadge.textContent = budget.aktiv_gesamt + '\u202fvon\u202f' + budget.max_gesamt + ' Prompts aktiv, noch\u202f' + budget.frei_eigene + '\u202ffrei';
+    promptSlotBadge.title = 'Bis zu 20 Prompts erstellt das System, insgesamt sind 24 m\u00f6glich. ' +
+      'Deaktivierte Prompts machen Platz f\u00fcr eigene.';
+    promptLabelRow.appendChild(promptSlotBadge);
+    promptLabelRow.appendChild(makeTip(
+      'Prompts sind die konkreten Fragen, die potenzielle Kunden bei ChatGPT, Gemini & Co. stellen. Das System sendet sie in regelm\u00e4\u00dfigen Abst\u00e4nden an die KI-Systeme und pr\u00fcft, ob deine Domain in der Antwort vorkommt. Neue Prompts bekommen erst Daten nach dem n\u00e4chsten Lauf.'
+    ));
+    wrap.appendChild(promptLabelRow);
+
+    var phaseLabelRow = document.createElement('div');
+    phaseLabelRow.style.cssText = 'display:flex;align-items:center;margin-bottom:6px;';
+    var phaseLabel = document.createElement('span');
+    phaseLabel.className = 'cvz-section-label';
+    phaseLabel.style.margin = '0';
+    phaseLabel.textContent = 'Journey-Phase';
+    phaseLabelRow.appendChild(phaseLabel);
+    phaseLabelRow.appendChild(makeTip(
+      'Exploration: breite, informationelle Fragen ("Was ist..."). Evaluation: konkrete Anbieter- oder Produktfragen. Vergleich: Alternativen gegeneinander. Entscheidung: kaufbereit, sucht letzten Anstoss. Die Phase bestimmt, wo dein Prompt im Dashboard angezeigt wird.'
+    ));
+    wrap.appendChild(phaseLabelRow);
+
+    var phaseOptionsHtml = PHASE_ORDER.map(function (phase) {
+      return '<option value="' + phase + '"' + (state.manualPromptDraftPhase === phase ? ' selected' : '') + '>' +
+        escapeHtml(PHASE_LABELS[phase] || phase) + '</option>';
+    }).join('');
+
+    var PROMPT_MAX_CHARS = 400;
+    var manualBc = state.buyingCenterCache[topicId];
+    var manualRoles = (manualBc && manualBc.rollen) || [];
+    var promptInputRow = document.createElement('div');
+    promptInputRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;';
+    promptInputRow.innerHTML =
+      '<textarea id="cvz-manual-prompt-input" class="cvz-changelog-input" rows="1" ' +
+        'maxlength="' + PROMPT_MAX_CHARS + '" ' +
+        'placeholder="z.B. Welches CRO-Tool lohnt sich f\u00fcr B2B-SaaS?">' +
+        escapeHtml(state.manualPromptDraftText || '') +
+      '</textarea>' +
+      '<select id="cvz-manual-prompt-phase" class="cvz-changelog-custom-input" style="max-width:160px;">' +
+        phaseOptionsHtml +
+      '</select>' +
+      // NEU (23.09.2026): optionale Rolle, nur wenn das Thema Rollen hat
+      (manualRoles.length
+        ? '<select id="cvz-manual-prompt-role" class="cvz-changelog-custom-input" style="max-width:180px;">' +
+            '<option value="">Ohne Rolle</option>' +
+            manualRoles.map(function (r) {
+              return '<option value="' + escapeHtml(r.role_id) + '"' + (state.manualPromptDraftRoleId === r.role_id ? ' selected' : '') + '>' +
+                escapeHtml(r.rolle) + '</option>';
+            }).join('') +
+          '</select>'
+        : '') +
+      '<button type="button" class="cvz-changelog-submit-btn" data-cvz-manual-prompt-submit="' + topicId + '" ' +
+        (state.isSubmittingManualPrompt ? 'disabled' : '') + '>' +
+        (state.isSubmittingManualPrompt ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
+      '</button>';
+    wrap.appendChild(promptInputRow);
+
+    var promptCharHint = document.createElement('p');
+    promptCharHint.id = 'cvz-prompt-char-hint';
+    promptCharHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    promptCharHint.textContent = 'max. ' + PROMPT_MAX_CHARS + ' Zeichen';
+    wrap.appendChild(promptCharHint);
+
+    var textareaEl = wrap.querySelector('#cvz-manual-prompt-input');
+    textareaEl.addEventListener('input', function () {
+      state.manualPromptDraftText = textareaEl.value;
+      var remaining = PROMPT_MAX_CHARS - textareaEl.value.length;
+      promptCharHint.textContent = remaining < 50
+        ? remaining + ' Zeichen \u00fcbrig'
+        : 'max. ' + PROMPT_MAX_CHARS + ' Zeichen';
+      promptCharHint.style.color = remaining < 20
+        ? 'var(--cvz-red,#de5b50)'
+        : 'var(--cvz-text-muted,#8b98a5)';
+    });
+    var selectEl = wrap.querySelector('#cvz-manual-prompt-phase');
+    selectEl.addEventListener('change', function () {
+      state.manualPromptDraftPhase = selectEl.value;
+    });
+    var roleSelectEl = wrap.querySelector('#cvz-manual-prompt-role');
+    if (roleSelectEl) {
+      roleSelectEl.addEventListener('change', function () {
+        state.manualPromptDraftRoleId = roleSelectEl.value;
+      });
+    }
+
+    return wrap;
+  }
+
+  // GEÄNDERT (25.09.2026, Kundenwunsch): Prompt-Liste jetzt als echte
+  // <table> mit Kopfzeile statt Flex-Divs ohne Header, gleiches Muster wie
+  // renderKeywordsTable/_buildKeywordTable.
+  function renderPromptsByPhase(prompts, enableCitations, changelogEntries) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Prompts nach Phase';
+    section.appendChild(heading);
+
+    var personaChips = renderPersonaFilterChips(prompts);
+    if (personaChips) section.appendChild(personaChips);
+
+    var filteredPrompts = state.activePersonaFilter
+      ? prompts.filter(function (p) { return p.persona === state.activePersonaFilter; })
+      : prompts;
+
+    var rollup = renderPhaseRollup(filteredPrompts);
+    if (rollup) section.appendChild(rollup);
+
+    section.appendChild(renderManualPromptForm(prompts, state.activeTopicId));
+
+    PHASE_ORDER.forEach(function (phase) {
+      var promptsInPhase = filteredPrompts.filter(function (p) { return p.phase === phase; });
+      if (promptsInPhase.length === 0) return;
+
+      var phaseHeading = document.createElement('p');
+      phaseHeading.className = 'cvz-phase-heading';
+      phaseHeading.textContent = PHASE_LABELS[phase] || phase;
+      section.appendChild(phaseHeading);
+
+      section.appendChild(_buildPromptTable(promptsInPhase, enableCitations, changelogEntries));
+    });
+
+    return section;
+  }
+
+  // NEU (25.09.2026): Baut eine <table> für eine Prompt-Liste einer Phase,
+  // inkl. aufklappbarer Antwort-Zeile (gleiches Prinzip wie _buildKeywordTable).
+  function _buildPromptTable(promptsInPhase, enableCitations, changelogEntries) {
+    var table = document.createElement('table');
+    table.className = 'cvz-table' + (enableCitations ? ' cvz-table-clickable' : '');
+    // GEÄNDERT (25.09.2026): feste Breiten auf den Nicht-Prompt-Spalten,
+    // gleicher Grund wie bei _buildKeywordTable: jede Phase hat ihre eigene
+    // <table>, ohne feste Breiten fluchten die Spalten nicht über die
+    // Phasen hinweg.
+    // GEÄNDERT (25.09.2026, Kundenwunsch): "Quelle"-Spalte entfernt — zeigte
+    // nur "Discovery" + Themen-Namen, Letzteres ist in dieser Ansicht (ein
+    // Topic pro Tabelle) nie gesetzt, die Spalte war also faktisch immer leer.
+    table.innerHTML =
+      '<thead><tr>' +
+        '<th style="width:26px;"></th>' +
+        '<th>Prompt</th>' +
+        '<th style="width:150px;">Zitiert</th>' +
+        '<th style="width:170px;">Typ / Rolle</th>' +
+        '<th style="width:50px;"></th>' +
+      '</tr></thead>';
+
+    var tbody = document.createElement('tbody');
+
+    promptsInPhase.forEach(function (prompt) {
+      var dotClass = prompt.visibility_status ? 'cvz-dot-' + prompt.visibility_status : 'cvz-dot-unknown';
+      var statusLabel = prompt.visibility_status ? VISIBILITY_LABELS[prompt.visibility_status] : 'Unbekannt';
+      var citationBadge = (prompt.total_runs !== null && prompt.total_runs !== undefined && prompt.total_runs > 0)
+        ? (prompt.cited_count > 0
+            ? '<span class="cvz-prompt-citation-count">' + prompt.cited_count + '/' + prompt.total_runs + ' zitiert</span>'
+            : '<span class="cvz-prompt-citation-count" style="color:var(--cvz-text-muted,#8b98a5);">nicht sichtbar</span>')
+        : '';
+
+      // NEU (18.09.2026): priorisierter Marker fuer Prompts, bei denen die
+      // eigene Domain zwar als Quelle genannt wird, aber ohne echten Link
+      // (siehe main.py: _compute_unlinked_citation_by_prompt).
+      var unlinkedBadge = prompt.cited_without_link
+        ? '<br><span class="cvz-prompt-citation-count" style="color:var(--cvz-orange,#e0a030);border:1px solid var(--cvz-orange,#e0a030);border-radius:4px;padding:1px 6px;" title="Wird als Quelle genannt, aber die KI setzt keinen echten Link. Priorisiert beheben (z.B. Struktur/Schema.org/Crawlability pruefen)">\u26a0 ohne Link zitiert</span>'
+        : '';
+
+      var contentTypeBadge = prompt.top_cited_content_type
+        ? '<span class="cvz-prompt-content-type" title="Typ der meistzitierten Quelle: ' + escapeHtml(CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || prompt.top_cited_content_type) + ' (' + escapeHtml(prompt.top_cited_domain || '') + ')">' +
+            (CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || escapeHtml(prompt.top_cited_content_type)) +
+          '</span>'
+        : '';
+
+      var personaBadge = prompt.persona
+        ? '<br><span class="cvz-prompt-persona">' + escapeHtml(prompt.persona) + '</span>'
+        : '';
+
+      var aiSearchVolumeBadge = prompt.ai_search_volume != null
+        ? '<br><span class="cvz-prompt-persona" title="Echte AI-Overview-Frage, laut DataForSEO ca. ' +
+            escapeHtml(prompt.ai_search_volume) + 'x/Monat gestellt">\u2713 ' +
+            escapeHtml(prompt.ai_search_volume) + '/Monat</span>'
+        : '';
+
+      // Changelog-Badge: shows an edit icon when this prompt is linked to changelog entries.
+      var promptLinkedCount = (changelogEntries || []).filter(function (entry) {
+        return (entry.linked_prompt_ids || []).indexOf(prompt.id) !== -1;
+      }).length;
+      var changelogBadgeHtml = promptLinkedCount > 0
+        ? ' <span class="cvz-changelog-linked-badge" title="' + promptLinkedCount + ' verknüpfte Änderung(en)">✎</span>'
+        : '';
+
+      // Favicons: cited_domains kommt direkt vom Backend (alle zitierten Domains
+      // sortiert nach Häufigkeit). Fallback auf top_cited_domain für ältere Responses.
+      var _favDomains = (prompt.cited_domains && prompt.cited_domains.length > 0)
+        ? prompt.cited_domains.slice(0, 6)
+        : (prompt.top_cited_domain ? [prompt.top_cited_domain] : []);
+      var faviconHtml = _favDomains.length > 0
+        ? '<span style="display:inline-flex;align-items:center;gap:2px;margin-left:6px;">' +
+            _favDomains.map(function (d) {
+              return '<img src="https://www.google.com/s2/favicons?sz=14&domain=' + encodeURIComponent(d) + '" style="width:14px;height:14px;border-radius:2px;" onerror="this.style.display=\'none\'" title="' + escapeHtml(d) + '">';
+            }).join('') +
+          '</span>'
+        : '';
+
+      var tr = document.createElement('tr');
+      if (enableCitations) tr.setAttribute('data-cvz-prompt-toggle', prompt.id);
+      tr.innerHTML =
+        '<td class="cvz-prompt-expand-chevron">' + (enableCitations ? (state.expandedPromptId === prompt.id ? '\u25be' : '\u25b8') : '') + '</td>' +
+        '<td>' +
+          '<span class="cvz-dot ' + dotClass + '" title="' + escapeHtml(statusLabel) + '"></span> ' +
+          escapeHtml(prompt.prompt_text) + changelogBadgeHtml + faviconHtml +
+        '</td>' +
+        '<td style="white-space:nowrap;">' + citationBadge + unlinkedBadge + '</td>' +
+        '<td style="white-space:nowrap;">' + contentTypeBadge + personaBadge + aiSearchVolumeBadge + '</td>' +
+        '<td style="white-space:nowrap;text-align:right;">' +
+          '<button type="button" class="cvz-prompt-delete-btn" data-cvz-prompt-delete="' + prompt.id + '" aria-label="Prompt deaktivieren" title="Prompt deaktivieren">\u00d7</button>' +
+        '</td>';
+      tbody.appendChild(tr);
+
+      if (enableCitations && state.expandedPromptId === prompt.id) {
+        var expTr = document.createElement('tr');
+        var expTd = document.createElement('td');
+        expTd.colSpan = 5;
+        expTd.appendChild(renderPromptExpansion(prompt, changelogEntries));
+        expTr.appendChild(expTd);
+        tbody.appendChild(expTr);
+      }
+    });
+
+    table.appendChild(tbody);
+    var scrollWrap = document.createElement('div');
+    scrollWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    scrollWrap.appendChild(table);
+    return scrollWrap;
+  }
+
+  // GSC-Keywords auf Themen-Relevanz filtern.
+  // Deutsches Compound-Matching: Topic-Term als Teilstring der Suchanfrage ODER
+  // ein Wort der Suchanfrage als Teilstring eines Topic-Terms.
+  function filterGscByTopicRelevance(gscRows, detail) {
+    if (!gscRows || gscRows.length === 0) return gscRows;
+
+    // Extended stop words: function words + generic IT/business terms that appear in
+    // nearly every tech topic and must NOT drive the relevance filter.
+    var STOP = [
+      // German function words
+      'und', 'der', 'die', 'das', 'von', 'mit', 'bei', 'zur', 'zum', 'ein', 'eine',
+      'ist', 'sind', 'oder', 'wie', 'was', 'als', 'fuer', 'auch', 'nach', 'noch',
+      // English function words
+      'for', 'the', 'and', 'of', 'vs', 'with', 'from', 'that', 'this', 'are', 'not',
+      // Generic IT / business terms too common to discriminate
+      'service', 'services', 'management', 'cloud', 'digital', 'system', 'systems',
+      'platform', 'platforms', 'solution', 'solutions', 'migration', 'strategie',
+      'beratung', 'ansatz', 'helpdesk', 'software', 'enterprise', 'business', 'support',
+      'infrastructure', 'infrastruktur', 'application', 'applications', 'applikation',
+      'integration', 'transformation', 'outsourcing', 'consulting', 'dienstleistung',
+      'provider', 'vendor', 'managed', 'hybrid', 'online', 'network', 'netzwerk',
+      'security', 'sicherheit', 'data', 'daten', 'analyse', 'analysis', 'marketing',
+      'tool', 'tools', 'produkt', 'produkte', 'anbieter', 'losung', 'losungen',
+    ];
+
+    var terms = [];   // specific terms (min length varies by source)
+    var abbrevs = []; // uppercase abbreviations from topic name / seed_keyword (e.g. "TI", "ERP")
+
+    function extractAbbrevs(str) {
+      // Capture 2-4 letter ALL-CAPS words from the original string before lowercasing
+      (str || '').split(/[\s\-_\/\.,;:+()\[\]]+/).forEach(function (w) {
+        if (w.length >= 2 && w.length <= 4 && w === w.toUpperCase() && /^[A-Z]+$/.test(w)) {
+          var lw = w.toLowerCase();
+          if (abbrevs.indexOf(lw) === -1) abbrevs.push(lw);
+        }
+      });
+    }
+
+    function addTerms(str, minLen) {
+      var min = minLen || 6;
+      (str || '').toLowerCase().split(/[\s\-_\/\.,;:+()\[\]]+/).forEach(function (w) {
+        if (w.length >= min && STOP.indexOf(w) === -1 && terms.indexOf(w) === -1) terms.push(w);
+      });
+    }
+
+    // Primary signal: seed_keyword (most discriminating; allow min 5 so specific
+    // short product names like "ariba" still qualify).
+    var seedKw = (detail.topic && detail.topic.seed_keyword) || '';
+    extractAbbrevs(seedKw);
+    addTerms(seedKw, 5);
+
+    // Topic name
+    var topicName = (detail.topic && detail.topic.name) || '';
+    extractAbbrevs(topicName);
+    addTerms(topicName, 6);
+
+    // Curated search queries (source !== 'gsc_near_miss' = hand-picked or AI-generated,
+    // not derived from GSC itself, so they carry stronger topic signal).
+    (detail.search_queries || []).forEach(function (q) {
+      if (q.source !== 'gsc_near_miss') addTerms(q.keyword || '', 7);
+    });
+
+    if (terms.length === 0 && abbrevs.length === 0) return gscRows;
+
+    return gscRows.filter(function (row) {
+      var q = (row.query || '').toLowerCase();
+      var qWords = q.split(/[\s\-_\/\.,;:+()\[\]]+/);
+
+      // Abbreviation match: whole-word only (e.g. topic "TI as a Service" -> "ti"
+      // must appear as a standalone word in the query, not inside a longer token).
+      if (abbrevs.some(function (ab) { return qWords.indexOf(ab) !== -1; })) return true;
+
+      return terms.some(function (term) {
+        if (term.length >= 10) {
+          // Long compound (e.g. "telematikinfrastruktur"): substring match is fine.
+          if (q.indexOf(term) !== -1) return true;
+        } else {
+          // Shorter specific term: require whole-word match to avoid "service"
+          // matching "application management services".
+          if (qWords.indexOf(term) !== -1) return true;
+        }
+        // Reverse direction: a query word appears as a component of a topic term
+        // (German compound decomposition, e.g. query "infrastruktur" in topic "telematikinfrastruktur").
+        return qWords.some(function (qw) {
+          return qw.length >= 6 && STOP.indexOf(qw) === -1 && term.indexOf(qw) !== -1;
+        });
+      });
+    });
+  }
+
+  function renderGscBlock(gscRows, topicId, changelogEntries) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var gscHeadRow = document.createElement('div');
+    gscHeadRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:10px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Google-Search-Console-Performance';
+    gscHeadRow.appendChild(heading);
+    gscHeadRow.appendChild(makeTip(
+      'Hier siehst du Keywords, bei denen du in Google auf Position 15+ rankst und mindestens 30 Impressionen hast ("Near-Miss"-Keywords). Das sind Seiten, die knapp an Seite 1 vorbeischrammen, mit gezielter Optimierung oft schnell verbesserbar.'
+    ));
+    section.appendChild(gscHeadRow);
+
+    var refreshBtn = document.createElement('button');
+    refreshBtn.type = 'button';
+    refreshBtn.className = 'cvz-create-toggle-btn';
+    refreshBtn.setAttribute('data-cvz-refresh-gsc', topicId);
+    refreshBtn.disabled = state.isRefreshingGsc;
+    refreshBtn.textContent = state.isRefreshingGsc ? 'Wird nachgezogen \u2026' : 'GSC-Daten jetzt nachziehen';
+    section.appendChild(refreshBtn);
+
+    if (!gscRows || gscRows.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine GSC-Daten verf\u00fcgbar. Falls die GSC-Verbindung erst k\u00fcrzlich hergestellt wurde, oben auf "GSC-Daten jetzt nachziehen" klicken, statt auf den n\u00e4chsten Monatslauf zu warten.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    // GEÄNDERT (15.09.2026): von einer reinen Tabelle auf aufklappbare
+    // Zeilen umgestellt (gleiches Prinzip wie Keywords/Prompts).
+    // GEÄNDERT (16.09.2026): URL-Spalte und Deactivate-Button ergänzt (page_url
+    // aus search_queries, gespeichert via save_gsc_near_miss in run_topic.py).
+    var table = document.createElement('table');
+    table.className = 'cvz-table';
+    table.innerHTML = '<thead><tr><th style="width:26px;"></th><th>Suchanfrage</th><th>Rankende URL</th><th>Klicks</th><th>Impressionen</th><th>CTR</th><th>Position</th><th>Verkn\u00fcpfte \u00c4nderungen</th><th></th></tr></thead>';
+    var tbody = document.createElement('tbody');
+    gscRows.forEach(function (row) {
+      var linkedEntries = (changelogEntries || []).filter(function (entry) {
+        return row.id && (entry.linked_search_query_ids || []).indexOf(row.id) !== -1;
+      });
+      var linkedCell = linkedEntries.length
+        ? escapeHtml(linkedEntries.map(function (e) { return e.entry_text; }).join('; '))
+        : '-';
+      var rowId = row.id || row.query;
+      var isExpanded = state.expandedGscRowId === rowId;
+      var tr = document.createElement('tr');
+      tr.className = 'cvz-gsc-row-clickable';
+      tr.setAttribute('data-cvz-gsc-toggle', rowId);
+      tr.setAttribute('data-cvz-gsc-text', row.query);
+      var pageUrlHtml = row.page_url
+        ? '<a href="' + escapeHtml(row.page_url) + '" target="_blank" rel="noopener" class="cvz-gsc-page-url" title="' + escapeHtml(row.page_url) + '">' +
+            escapeHtml(row.page_url.replace(/^https?:\/\/[^\/]+/, '').slice(0, 40) || '/') + '</a>'
+        : '-';
+      tr.innerHTML =
+        '<td class="cvz-prompt-expand-chevron">' + (isExpanded ? '\u25be' : '\u25b8') + '</td>' +
+        '<td>' + escapeHtml(row.query) + '</td>' +
+        '<td class="cvz-gsc-cell-url">' + pageUrlHtml + '</td>' +
+        '<td>' + escapeHtml(row.clicks) + '</td>' +
+        '<td>' + escapeHtml(row.impressions) + '</td>' +
+        '<td>' + escapeHtml((row.ctr * 100).toFixed(1)) + '%</td>' +
+        '<td>' + escapeHtml(row.position.toFixed(1)) + '</td>' +
+        '<td class="cvz-gsc-cell-linked">' + linkedCell + '</td>' +
+        '<td><button type="button" class="cvz-prompt-delete-btn" data-cvz-keyword-deactivate="' + (row.id || '') + '" aria-label="Keyword deaktivieren" title="Keyword deaktivieren">\u00d7</button></td>';
+      tbody.appendChild(tr);
+
+      if (isExpanded) {
+        var expansionTr = document.createElement('tr');
+        var expansionTd = document.createElement('td');
+        expansionTd.colSpan = 9;
+        expansionTd.appendChild(renderGscRowExpansion(row, rowId));
+        expansionTr.appendChild(expansionTd);
+        tbody.appendChild(expansionTr);
+      }
+    });
+    table.appendChild(tbody);
+    var tableScroll = document.createElement('div');
+    tableScroll.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    tableScroll.appendChild(table);
+    section.appendChild(tableScroll);
+    return section;
+  }
+
+  // NEU (15.09.2026): Entwicklung über die Zeit für eine GSC-Suchanfrage,
+  // dieselbe Datenquelle wie der Keyword-Rank-Verlauf (search_rank_
+  // snapshots über /rank-history, jetzt inkl. gsc_clicks).
+  function renderGscRowExpansion(row, rowId) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-prompt-expansion';
+
+    // NEU (15.09.2026): SERP-Block zuerst gebaut, nicht direkt angehängt.
+    // Die folgenden früh-verlassenden Zustände (lädt/kein Verlauf) setzen
+    // wrap.innerHTML komplett neu, das würde einen bereits angehängten
+    // SERP-Block sonst überschreiben.
+    var serpHtml = renderSerpSummaryBlock(row);
+
+    if (state.loadingGscRankHistory[rowId]) {
+      wrap.innerHTML = serpHtml + '<p class="cvz-card-placeholder-text">L\u00e4dt Verlauf...</p>';
+      return wrap;
+    }
+
+    var snapshots = state.gscRankHistoryCache[rowId];
+    if (!snapshots || snapshots.length < 2) {
+      wrap.innerHTML = serpHtml + '<p class="cvz-card-placeholder-text">Noch kein Verlauf verf\u00fcgbar, braucht mindestens zwei Monatsl\u00e4ufe mit Daten f\u00fcr diese Suchanfrage.</p>';
+      return wrap;
+    }
+
+    var xLabels = snapshots.map(function (s) { return formatShortDate(s.snapshot_at); });
+    var clicksValues = snapshots.map(function (s) { return s.gsc_clicks; });
+    var impressionsValues = snapshots.map(function (s) { return s.gsc_impressions; });
+    var positionValues = snapshots.map(function (s) { return s.gsc_position; });
+
+    var hasClicks = clicksValues.some(function (v) { return v != null; });
+    var hasImpressions = impressionsValues.some(function (v) { return v != null; });
+    var hasPosition = positionValues.some(function (v) { return v != null; });
+
+    if (!hasClicks && !hasImpressions && !hasPosition) {
+      wrap.innerHTML = serpHtml + '<p class="cvz-card-placeholder-text">Keine historisierten GSC-Werte f\u00fcr diese Suchanfrage.</p>';
+      return wrap;
+    }
+
+    wrap.innerHTML = serpHtml;
+
+    var series = [];
+    if (hasClicks) series.push({ label: 'Klicks', values: clicksValues, color: 'var(--cvz-teal)' });
+    if (hasImpressions) series.push({ label: 'Impressionen', values: impressionsValues, color: 'var(--cvz-amber)' });
+
+    var chartWrap = document.createElement('div');
+    chartWrap.className = 'cvz-card';
+    chartWrap.innerHTML =
+      buildLineChartSvg(series, xLabels, {}) +
+      '<p class="cvz-chart-caption">Klicks/Impressionen im Verlauf. Historie beginnt mit eurem ersten Monatslauf nach ' +
+      'Einf\u00fchrung dieser Auswertung, keine r\u00fcckwirkenden Daten.</p>';
+    wrap.appendChild(chartWrap);
+
+    if (hasPosition) {
+      var posChartWrap = document.createElement('div');
+      posChartWrap.className = 'cvz-card';
+      posChartWrap.innerHTML =
+        buildLineChartSvg([{ label: 'GSC-Position', values: positionValues, color: 'var(--cvz-red)' }], xLabels, {}) +
+        '<p class="cvz-chart-caption">Position im Verlauf, niedriger ist besser.</p>';
+      wrap.appendChild(posChartWrap);
+    }
+
+    return wrap;
+  }
+
+  function formatShortDate(isoString) {
+    if (!isoString) return null;
+    var d = new Date(isoString);
+    if (isNaN(d.getTime())) return null;
+    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
+  function showCvzModal(message, options) {
+    options = options || {};
+    var isConfirm = options.mode !== 'alert';
+
+    return new Promise(function(resolve) {
+      var overlay = document.createElement('div');
+      overlay.className = 'cvz-modal-overlay';
+
+      var box = document.createElement('div');
+      box.className = 'cvz-modal-box';
+
+      if (options.title) {
+        var titleEl = document.createElement('p');
+        titleEl.className = 'cvz-modal-title';
+        titleEl.textContent = options.title;
+        box.appendChild(titleEl);
+      }
+
+      var textEl = document.createElement('p');
+      textEl.className = 'cvz-modal-text';
+      textEl.textContent = message;
+      box.appendChild(textEl);
+
+      var actions = document.createElement('div');
+      actions.className = 'cvz-modal-actions';
+
+      function close(result) {
+        overlay.removeEventListener('click', onOverlayClick);
+        document.removeEventListener('keydown', onKeyDown);
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        resolve(result);
+      }
+
+      if (isConfirm) {
+        var cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'cvz-modal-btn cvz-modal-btn-secondary';
+        cancelBtn.textContent = options.cancelLabel || 'Abbrechen';
+        cancelBtn.addEventListener('click', function() { close(false); });
+        actions.appendChild(cancelBtn);
+      }
+
+      var okBtn = document.createElement('button');
+      okBtn.type = 'button';
+      okBtn.className = 'cvz-modal-btn cvz-modal-btn-primary';
+      okBtn.textContent = options.confirmLabel || 'OK';
+      okBtn.addEventListener('click', function() { close(true); });
+      actions.appendChild(okBtn);
+
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.documentElement.appendChild(overlay);
+      okBtn.focus();
+
+      function onOverlayClick(e) {
+        if (e.target === overlay) close(false);
+      }
+      overlay.addEventListener('click', onOverlayClick);
+
+      function onKeyDown(e) {
+        if (e.key === 'Escape') close(false);
+      }
+      document.addEventListener('keydown', onKeyDown);
+    });
+  }
+
+  function showCvzConfirm(message, options) {
+    return showCvzModal(message, options);
+  }
+
+  function showCvzAlert(message, options) {
+    var alertOptions = { mode: 'alert' };
+    if (options) {
+      for (var key in options) {
+        if (Object.prototype.hasOwnProperty.call(options, key)) alertOptions[key] = options[key];
+      }
+    }
+    return showCvzModal(message, alertOptions);
+  }
+
+  function formatRelativeTime(isoString) {
+    if (!isoString) return '-';
+    var diffSeconds = Math.round((Date.now() - new Date(isoString).getTime()) / 1000);
+    if (diffSeconds < 5) return 'gerade eben';
+    if (diffSeconds < 60) return 'vor ' + diffSeconds + ' Sek.';
+    var diffMinutes = Math.round(diffSeconds / 60);
+    if (diffMinutes < 60) return 'vor ' + diffMinutes + ' Min.';
+    var diffHours = Math.round(diffMinutes / 60);
+    if (diffHours < 24) return 'vor ' + diffHours + ' Std.';
+    var diffDays = Math.round(diffHours / 24);
+    return 'vor ' + diffDays + ' Tag' + (diffDays === 1 ? '' : 'en');
+  }
+
+  // NEU (25.09.2026, Kundenwunsch): Einheitlicher "Zuletzt aktualisiert"-Hinweis
+  // für Abschnitte, die aus einem Analyse-Lauf stammen (Opportunities,
+  // Content-Lücken, Quellen-Analyse, Outreach-Ziele, Keywords/Prompts/GSC im
+  // Daten-Tab). isoString sollte ein echter Zeitstempel aus den Daten sein,
+  // niemals erfunden — ohne Zeitstempel wird ein neutraler Hinweis gezeigt,
+  // statt so zu tun, als gäbe es ein Datum.
+  // NEU (25.09.2026, Kundenwunsch): Gegenstück zu formatRelativeTime für
+  // Zeitpunkte in der ZUKUNFT ("in X Tagen" statt "vor X Tagen").
+  // formatRelativeTime selbst wird bewusst NICHT umgebaut (negative Werte
+  // dort würden falsch "vor -3 Tagen" statt "in 3 Tagen" anzeigen) --
+  // eigene Funktion statt eines riskanten Eingriffs in eine bereits an
+  // 6 Stellen genutzte Funktion.
+  function formatRelativeFutureTime(isoString) {
+    if (!isoString) return '-';
+    var diffMs = new Date(isoString).getTime() - Date.now();
+    if (diffMs <= 0) return 'überfällig';
+    var diffDays = Math.round(diffMs / 86400000);
+    if (diffDays === 0) return 'heute';
+    if (diffDays === 1) return 'morgen';
+    return 'in ' + diffDays + ' Tagen';
+  }
+
+  // NEU (25.09.2026, Kundenwunsch): errechnet den nächsten fälligen
+  // Durchlauf rein aus Frontend-Daten (kein eigener Backend-Call nötig --
+  // dieselbe Logik wie get_due_topics() in run_topic.py: letzter Lauf (oder
+  // Anlage-Datum, falls noch nie gelaufen) + Kadenz in Tagen). WICHTIG:
+  // unser Cron prüft nur EINMAL TÄGLICH (3 Uhr weekly, 4 Uhr monthly, siehe
+  // Supabase pg_cron), das hier zeigt also "ab wann fällig", nicht die
+  // exakte Uhrzeit des tatsächlichen Laufs -- deshalb "ab dem X.X." statt
+  // "am X.X. um Y Uhr" in renderNextRunNote unten.
+  function computeNextRunIso(lastRunIso, createdAtIso, cadenceDays) {
+    var anchor = lastRunIso || createdAtIso;
+    if (!anchor) return null;
+    var anchorMs = new Date(anchor).getTime();
+    if (isNaN(anchorMs)) return null;
+    return new Date(anchorMs + cadenceDays * 86400000).toISOString();
+  }
+
+  // NEU (25.09.2026, Kundenwunsch): "Nächster Durchlauf"-Hinweis, Pendant
+  // zu renderDataFreshnessNote. cadenceDays: 7 für wöchentlich (Prompts/
+  // Zitationen) oder 30 für monatlich (Keywords, GSC, Content-Lücken,
+  // Opportunities, Aktionsplan, Zusammenfassung, KI-Wissens-Check -- siehe
+  // _monthly_background-Step-Liste in main.py).
+  function renderNextRunNote(topic, cadenceDays, label) {
+    var p = document.createElement('p');
+    p.className = 'cvz-freshness-note';
+    var baseLabel = label || 'Nächster Durchlauf';
+
+    if (!topic) {
+      p.textContent = baseLabel + ': unbekannt.';
+      return p;
+    }
+    if (topic.status === 'queued') {
+      p.textContent = baseLabel + ': sobald ein Platz frei wird (aktuell in der Warteschlange).';
+      return p;
+    }
+    if (topic.status === 'collecting' || topic.status === 'analyzing') {
+      p.textContent = baseLabel + ': läuft gerade.';
+      return p;
+    }
+
+    var lastRunIso = cadenceDays === 7 ? topic.last_weekly_collection_at : topic.last_monthly_collection_at;
+    var nextIso = computeNextRunIso(lastRunIso, topic.created_at, cadenceDays);
+    if (!nextIso) {
+      p.textContent = baseLabel + ': unbekannt.';
+      return p;
+    }
+
+    // Vorgemerkte Deaktivierung geht vor -- keinen Durchlauf ankündigen,
+    // der wegen der Archivierung am Ende des Monatszyklus gar nicht mehr
+    // stattfindet (siehe archive_topic_endpoint in main.py).
+    if (topic.archive_effective_at && new Date(topic.archive_effective_at).getTime() <= new Date(nextIso).getTime()) {
+      var archDate = formatShortDate(topic.archive_effective_at);
+      p.textContent = baseLabel + ': entfällt \u2013 Thema wird' + (archDate ? ' am ' + archDate : '') + ' deaktiviert.';
+      return p;
+    }
+
+    var abs = formatShortDate(nextIso);
+    p.textContent = baseLabel + ': ' + formatRelativeFutureTime(nextIso) + (abs ? ' (ab ' + abs + ')' : '');
+    p.title = nextIso;
+    return p;
+  }
+
+  function renderDataFreshnessNote(isoString, label) {
+    var p = document.createElement('p');
+    p.className = 'cvz-freshness-note';
+    if (isoString) {
+      var abs = formatShortDate(isoString);
+      p.textContent = (label || 'Datenstand') + ': ' + formatRelativeTime(isoString) +
+        (abs ? ' (' + abs + ')' : '');
+      p.title = isoString;
+    } else {
+      p.textContent = (label || 'Datenstand') + ': noch kein abgeschlossener Analyse-Lauf.';
+    }
+    return p;
+  }
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str == null ? '' : String(str);
+    return div.innerHTML;
+  }
+
+  /**
+   * Erstellt ein [?]-Tooltip-Icon als DOM-Element.
+   * @param {string} text  Der Erklaerungstext der im Hover-Popup erscheint.
+   * @param {string} [dir] Optional: 'right' oeffnet den Tooltip nach rechts statt oben.
+   */
+  function makeTip(text, dir) {
+    var span = document.createElement('span');
+    span.className = 'cvz-tip' + (dir === 'right' ? ' cvz-tip-right' : '');
+    span.textContent = '?';
+    span.setAttribute('data-cvz-tip', text);
+    span.setAttribute('aria-label', text);
+    return span;
+  }
+
+  // =========================================================================
+  // NEU (16.09.2026): JOURNEY-MAP-TAB
+  // Zeigt Phase-Scores (Zitierrate 0-100 % pro Kanal), Share-of-Voice der
+  // Wettbewerber und ein einfaches Content-Change-Log.
+  // API-Endpunkt: GET /topics/{id}/dashboard-data (siehe dashboard.py)
+  //               POST /topics/{id}/content-changes
+  // =========================================================================
+
+  function renderMessyMiddleTab(topicId) {
+    var wrap = document.createElement('div');
+
+    if (state.isLoadingDashboard) {
+      var loadEl = document.createElement('p');
+      loadEl.className = 'cvz-card-placeholder-text';
+      loadEl.innerHTML = '<span class="cvz-spinner"></span>Journey-Map wird geladen…';
+      wrap.appendChild(loadEl);
+      return wrap;
+    }
+
+    var data = state.dashboardDataCache[topicId];
+    if (!data) {
+      var errEl = document.createElement('div');
+      errEl.className = 'cvz-card cvz-card-placeholder';
+      // GEÄNDERT (16.09.2026): cvz-btn-secondary war nirgends in CSS definiert
+      // (Button erschien weiß auf weiß). Inline-Styles statt fehlender Klasse.
+      errEl.innerHTML = '<p class="cvz-card-placeholder-text">Noch keine Journey-Map-Daten vorhanden. Diese entstehen nach dem ersten vollstaendigen Analyse-Lauf.</p>' +
+        '<p style="margin-top:8px;"><button type="button" ' +
+        'style="padding:6px 14px;font-size:13px;border-radius:6px;border:1px solid var(--cvz-border,#e5e7eb);' +
+        'background:transparent;color:var(--cvz-text,#374151);cursor:pointer;" ' +
+        'data-cvz-journey-retry="' + topicId + '">Erneut laden</button></p>';
+      wrap.appendChild(errEl);
+      return wrap;
+    }
+
+    wrap.appendChild(renderPhaseScoreGrid(data.phase_scores));
+    wrap.appendChild(renderJourneyShareOfVoice(data.share_of_voice));
+    wrap.appendChild(renderContentChangesSection(topicId));
+    return wrap;
+  }
+
+  function renderPhaseScoreGrid(phaseScores) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'KI-Sichtbarkeit nach Journey-Phase';
+    section.appendChild(heading);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = 'Wie oft wird eure Domain pro Phase und Kanal als Quelle genannt (heller Balken) bzw. mit echtem Link zitiert (dunkler Balken), 0 bis 100 %.';
+    section.appendChild(sub);
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-journey-phase-grid';
+
+    PHASE_ORDER.forEach(function (phase) {
+      var scores = (phaseScores || {})[phase] || {};
+      var color = PHASE_COLORS[phase] || '#8b98a5';
+
+      var card = document.createElement('div');
+      card.className = 'cvz-journey-phase-card';
+      card.style.borderTopColor = color;
+
+      var phaseLabel = document.createElement('p');
+      phaseLabel.className = 'cvz-journey-phase-name';
+      phaseLabel.style.color = color;
+      phaseLabel.textContent = PHASE_LABELS[phase] || phase;
+      card.appendChild(phaseLabel);
+
+      CHANNEL_ORDER.forEach(function (channel) {
+        var ch = scores[channel] || { score: 0, cited: 0, total: 0, score_with_url: 0, cited_with_url: 0 };
+        var pct = Math.round(ch.score || 0);
+        // NEU (18.09.2026): engere Definition (own_domain_cited_with_url)
+        // als zweiter, kleinerer Balken innerhalb desselben Balkens, plus
+        // im Tooltip aufgeschluesselt. score_with_url ist immer <= score.
+        var pctLinked = Math.round(ch.score_with_url || 0);
+
+        var row = document.createElement('div');
+        row.className = 'cvz-journey-channel-row';
+
+        var lbl = document.createElement('span');
+        lbl.className = 'cvz-journey-channel-label';
+        lbl.textContent = CHANNEL_LABELS[channel] || channel;
+        row.appendChild(lbl);
+
+        var barWrap = document.createElement('div');
+        barWrap.className = 'cvz-journey-bar-wrap';
+        barWrap.style.position = 'relative';
+
+        var bar = document.createElement('div');
+        bar.className = 'cvz-journey-bar-fill';
+        bar.style.width = pct + '%';
+        bar.style.backgroundColor = color;
+        bar.style.opacity = '.45';
+        barWrap.appendChild(bar);
+
+        var barLinked = document.createElement('div');
+        barLinked.className = 'cvz-journey-bar-fill';
+        barLinked.style.width = pctLinked + '%';
+        barLinked.style.backgroundColor = color;
+        barLinked.style.position = 'absolute';
+        barLinked.style.left = '0';
+        barLinked.style.top = '0';
+        barWrap.appendChild(barLinked);
+        row.appendChild(barWrap);
+
+        var num = document.createElement('span');
+        num.className = 'cvz-journey-channel-num';
+        num.textContent = pct + '%';
+        if (ch.total > 0) {
+          num.title = ch.cited + ' von ' + ch.total + ' Prompts als Quelle genannt, davon ' + ch.cited_with_url + ' mit echtem Link zitiert (' + pctLinked + '%)';
+        }
+        row.appendChild(num);
+
+        // NEU (18.09.2026): prozentuale Entwicklung ggue. dem vorherigen
+        // Zeitraum gleicher Laenge (dashboard.py: _add_phase_score_deltas).
+        // null heisst "kein Vergleich moeglich" (z.B. Topic juenger als
+        // 2x der Fenstergroesse) und wird bewusst nicht angezeigt statt
+        // einer irrefuehrenden 0%-Aenderung.
+        if (ch.delta_pct != null) {
+          var deltaEl = document.createElement('span');
+          var deltaUp = ch.delta_pct > 0;
+          var deltaFlat = ch.delta_pct === 0;
+          deltaEl.className = 'cvz-journey-channel-delta ' + (deltaFlat ? 'cvz-delta-flat' : (deltaUp ? 'cvz-delta-up' : 'cvz-delta-down'));
+          deltaEl.textContent = (deltaFlat ? '\u2192 ' : (deltaUp ? '\u25b2 ' : '\u25bc ')) + Math.abs(ch.delta_pct) + ' Pp';
+          deltaEl.title = 'Vs. vorherige Periode gleicher Länge: ' + (deltaUp ? '+' : '') + ch.delta_pct + ' Prozentpunkte (als Quelle genannt)';
+          row.appendChild(deltaEl);
+        }
+
+        card.appendChild(row);
+      });
+
+      grid.appendChild(card);
+    });
+
+    section.appendChild(grid);
+    return section;
+  }
+
+  function renderJourneyShareOfVoice(shareOfVoice) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Wettbewerber-Sichtbarkeit pro Phase';
+    section.appendChild(heading);
+
+    var hasAny = false;
+    PHASE_ORDER.forEach(function (phase) {
+      var competitors = ((shareOfVoice || {})[phase] || []);
+      if (competitors.length === 0) return;
+      hasAny = true;
+
+      var phaseColor = PHASE_COLORS[phase] || '#8b98a5';
+
+      var phaseBlock = document.createElement('div');
+      phaseBlock.className = 'cvz-sov-phase-block';
+
+      var phaseHeader = document.createElement('button');
+      phaseHeader.type = 'button';
+      phaseHeader.className = 'cvz-sov-phase-header';
+      phaseHeader.setAttribute('data-cvz-journey-phase', phase);
+      phaseHeader.innerHTML =
+        '<span class="cvz-sov-phase-dot" style="background:' + phaseColor + '"></span>' +
+        '<span class="cvz-sov-phase-title">' + escapeHtml(PHASE_LABELS[phase] || phase) + '</span>' +
+        '<span class="cvz-sov-phase-count">' + competitors.length + ' Wettbewerber</span>' +
+        '<span class="cvz-sov-chevron">' + (state.journeyActivePhase === phase ? '▲' : '▼') + '</span>';
+      phaseBlock.appendChild(phaseHeader);
+
+      if (state.journeyActivePhase === phase) {
+        var table = document.createElement('table');
+        table.className = 'cvz-sov-table';
+        table.innerHTML =
+          '<thead><tr>' +
+            '<th>Domain</th>' +
+            '<th>Typ</th>' +
+            '<th>Zitierrate</th>' +
+            '<th>Differenzierungstipp</th>' +
+          '</tr></thead>';
+
+        var tbody = document.createElement('tbody');
+        competitors.forEach(function (comp) {
+          var pct = Math.round(comp.citation_rate || 0);
+          var tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td class="cvz-sov-domain">' + escapeHtml(comp.domain || '') + '</td>' +
+            '<td><span class="cvz-opportunity-type">' + escapeHtml(CONTENT_TYPE_LABELS[comp.content_type] || comp.content_type || '-') + '</span></td>' +
+            '<td class="cvz-sov-rate">' +
+              '<div class="cvz-journey-bar-wrap cvz-sov-bar-wrap">' +
+                '<div class="cvz-journey-bar-fill" style="width:' + pct + '%;background:' + phaseColor + '"></div>' +
+              '</div>' +
+              '<span>' + pct + '%</span>' +
+            '</td>' +
+            '<td class="cvz-sov-tip">' + escapeHtml(comp.differentiation_suggestion || '-') + '</td>';
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        var sovScrollWrap = document.createElement('div');
+        // NEU (18.09.2026): horizontales Scrollen innerhalb der Card auf
+        // Mobile: Tabelle war vorher breiter als der Viewport und die
+        // Spalten (Typ/Zitierrate/Differenzierungstipp) liefen einfach ab,
+        // ohne Möglichkeit sie zu erreichen. Gleiches Muster wie bei den
+        // anderen scrollbaren Tabellen (z.B. GSC-Tabelle).
+        sovScrollWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+        sovScrollWrap.appendChild(table);
+        phaseBlock.appendChild(sovScrollWrap);
+      }
+
+      section.appendChild(phaseBlock);
+    });
+
+    if (!hasAny) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch keine Wettbewerber-Analysen verfügbar. Beim nächsten Monatslauf werden neue Domains automatisch analysiert.';
+      section.appendChild(empty);
+    }
+
+    return section;
+  }
+
+  function renderContentChangesSection(topicId, searchQueries, prompts) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Content-Änderungen & Events';
+    section.appendChild(heading);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = 'Halte fest, wann ihr was geändert habt, so könnt ihr später sehen, ob sich die Sichtbarkeit danach verändert hat.';
+    section.appendChild(sub);
+
+    // Form
+    var formCard = document.createElement('div');
+    formCard.className = 'cvz-card cvz-content-change-form';
+
+    var formRow = document.createElement('div');
+    formRow.className = 'cvz-content-change-fields';
+
+    var d = state.contentChangeDraft;
+
+    var dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.className = 'cvz-create-input';
+    dateInput.value = d.changed_at || new Date().toISOString().slice(0, 10);
+    dateInput.addEventListener('input', function () {
+      state.contentChangeDraft.changed_at = dateInput.value;
+    });
+    formRow.appendChild(dateInput);
+
+    var typeSelect = document.createElement('select');
+    typeSelect.className = 'cvz-picker-select cvz-content-change-type-select';
+    CONTENT_CHANGE_TYPE_ORDER.forEach(function (t) {
+      var opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = CONTENT_CHANGE_TYPE_LABELS[t] || t;
+      if (t === d.change_type) opt.selected = true;
+      typeSelect.appendChild(opt);
+    });
+    typeSelect.addEventListener('change', function () {
+      state.contentChangeDraft.change_type = typeSelect.value;
+    });
+    formRow.appendChild(typeSelect);
+
+    var descInput = document.createElement('input');
+    descInput.type = 'text';
+    descInput.className = 'cvz-create-input';
+    descInput.placeholder = 'Was habt ihr geändert? (z.B. Headline der CRO-Landingpage überarbeitet)';
+    descInput.value = d.description;
+    descInput.addEventListener('input', function () {
+      state.contentChangeDraft.description = descInput.value;
+    });
+    formRow.appendChild(descInput);
+
+    var urlInput = document.createElement('input');
+    urlInput.type = 'url';
+    urlInput.className = 'cvz-create-input';
+    urlInput.placeholder = 'URL (optional)';
+    urlInput.value = d.url;
+    urlInput.addEventListener('input', function () {
+      state.contentChangeDraft.url = urlInput.value;
+    });
+    formRow.appendChild(urlInput);
+
+    var submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.className = 'cvz-create-submit-btn';
+    submitBtn.setAttribute('data-cvz-content-change-submit', '');
+    submitBtn.disabled = state.isSubmittingContentChange;
+    submitBtn.textContent = state.isSubmittingContentChange ? 'Speichert…' : 'Speichern';
+    formRow.appendChild(submitBtn);
+
+    formCard.appendChild(formRow);
+    section.appendChild(formCard);
+
+    // Link-Picker: Keywords und Prompts mit dieser Änderung verknüpfen
+    var _thKws = (searchQueries || []).filter(function (q) { return q.source !== 'gsc_near_miss'; });
+    section.appendChild(renderChangelogLinkPicker('keywords', _thKws, function (q) { return q.keyword; }));
+    section.appendChild(renderChangelogLinkPicker('prompts', prompts || [], function (p) {
+      return p.prompt_text && p.prompt_text.length > 60 ? p.prompt_text.slice(0, 57) + '…' : (p.prompt_text || '');
+    }));
+
+    // GEÄNDERT (20.09.2026): Die separate Liste eingetragener Änderungen an
+    // dieser Stelle wurde entfernt. Sie duplizierte 1:1 die weiter unten im
+    // Verlauf-Tab gerenderte "Änderungs-Chronik" (die zusätzlich auch
+    // System-Erkennungen zeigt, also die vollständigere Ansicht ist).
+    if (state.isLoadingContentChanges) {
+      var loadEl = document.createElement('p');
+      loadEl.className = 'cvz-card-placeholder-text';
+      loadEl.style.marginTop = '12px';
+      loadEl.innerHTML = '<span class="cvz-spinner"></span>Lädt…';
+      section.appendChild(loadEl);
+    } else {
+      var hintEl = document.createElement('p');
+      hintEl.className = 'cvz-card-placeholder-text';
+      hintEl.style.marginTop = '12px';
+      hintEl.textContent = 'Eingetragene Änderungen erscheinen unten in der Änderungs-Chronik.';
+      section.appendChild(hintEl);
+    }
+
+    return section;
+  }
+
+  // =========================================================================
+  // NEU (20.09.2026): Gezielter Retry einzelner Felder, KI-Wissens-Check,
+  // Wirkung der Änderungen. Backend: step_tracker.py, ai_knowledge.py,
+  // change_history.py, POST /topics/{id}/retry-step.
+  // =========================================================================
+
+  // --- Retry eines einzelnen Schritts -------------------------------------
+
+  async function retryStep(topicId, step) {
+    var key = topicId + '|' + step;
+    if (state.retryingSteps[key]) return;
+    state.retryingSteps[key] = true;
+    render();
+    try {
+      await apiFetch('/topics/' + topicId + '/retry-step', { method: 'POST', body: { step: step } });
+      // Sofort als "läuft" markieren, damit der Fehler-Button nicht kurz wieder aufblitzt.
+      var cached = state.topicDetailCache[topicId];
+      if (cached) {
+        cached.step_status = (cached.step_status || []).map(function (s) {
+          return s.step === step ? Object.assign({}, s, { state: 'running', message: null }) : s;
+        });
+      }
+      startStepPolling(topicId);
+    } catch (e) {
+      console.error('[CVZ Visibility] Schritt konnte nicht gestartet werden:', e);
+      await showCvzAlert('Der Vorgang konnte nicht gestartet werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    delete state.retryingSteps[key];
+    render();
+  }
+
+  // GEÄNDERT: Wenn keine Einzel-Analyse mehr läuft, werden jetzt auch die
+  // abgeleiteten Daten (Wettbewerbs-Chart, Verlauf, ...) neu geladen. Vorher
+  // blieb z. B. der Chart nach einer Neu-Analyse auf dem alten Stand.
+  function startStepPolling(topicId) {
+    if (state.stepPollTimer) return;
+    var attempts = 0;
+
+    state.stepPollTimer = setInterval(async function () {
+      attempts++;
+      var fresh = null;
+      try {
+        fresh = await loadTopicDetail(topicId);
+      } catch (e) {
+        console.error('[CVZ Visibility] Aktualisierung während einer Analyse fehlgeschlagen:', e);
+      }
+
+      if (fresh) {
+        state.topicDetailCache[topicId] = fresh;
+      } else if (attempts < 60) {
+        return; // Netzwerkfehler: beim nächsten Durchlauf erneut versuchen
+      }
+
+      var stillRunning = !!fresh && (fresh.step_status || []).some(function (s) { return s.state === 'running'; });
+
+      if (stillRunning && attempts < 60) {
+        render();
+        return;
+      }
+
+      clearInterval(state.stepPollTimer);
+      state.stepPollTimer = null;
+
+      // Analyse fertig (oder Zeitlimit erreicht): abgeleitete Daten neu laden.
+      delete state.dashboardDataCache[topicId];
+      delete state.contentChangesCache[topicId];
+      delete state.visibilityTrendCache[topicId];
+      delete state.monthlyOverviewTrendCache[topicId];
+      delete state.topicRankHistoryCache[topicId];
+
+      render();
+      if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
+        loadTabData(topicId);
+      }
+    }, 5000);
+  }
+
+  // Hinweis mit Button für Schritte, die fehlgeschlagen sind, fehlen oder gerade laufen.
+  // stepKeys: welche Schritte an dieser Stelle der Oberfläche relevant sind.
+  function renderStepNotice(detail, stepKeys) {
+    var entries = (detail.step_status || []).filter(function (s) { return stepKeys.indexOf(s.step) !== -1; });
+    if (entries.length === 0) return null;
+    var topicId = detail.topic.id;
+    var wrap = document.createElement('div');
+    entries.forEach(function (entry) {
+      var busy = entry.state === 'running' || !!state.retryingSteps[topicId + '|' + entry.step];
+      var box = document.createElement('div');
+      box.className = 'cvz-card cvz-collecting-banner' + (entry.state === 'failed' && !busy ? ' cvz-error-banner' : '');
+      var text = document.createElement('p');
+      text.className = 'cvz-collecting-banner-text';
+      if (busy) {
+        text.innerHTML = '<span class="cvz-spinner"></span>' + escapeHtml(entry.label) +
+          ' wird gerade erstellt. Diese Seite aktualisiert sich automatisch.';
+        box.appendChild(text);
+      } else {
+        text.textContent = entry.state === 'failed'
+          ? '\u26a0\ufe0f ' + entry.label + ' konnte nicht erstellt werden. ' + (entry.message || '')
+          : (entry.message || (entry.label + ' fehlt noch.'));
+        box.appendChild(text);
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cvz-retry-btn';
+        btn.setAttribute('data-cvz-retry-step', entry.step);
+        btn.textContent = entry.state === 'failed' ? 'Erneut erstellen' : 'Jetzt erstellen';
+        box.appendChild(btn);
+      }
+      wrap.appendChild(box);
+    });
+    return wrap;
+  }
+
+  // --- KI-Wissens-Check ---------------------------------------------------
+
+  var KNOWLEDGE_LEVELS = {
+    bekannt:          { label: 'Bekannt',         color: '#4ec68a' },
+    teilweise:        { label: 'Teilweise',       color: '#c98e2a' },
+    unbekannt:        { label: 'Unbekannt',       color: '#de5b50' },
+    widerspruechlich: { label: 'Widersprüchlich', color: '#8878ca' },
+    nicht_geprueft:   { label: 'Nicht geprüft',   color: '#8b98a5' },
+  };
+  var KNOWLEDGE_PRIORITY_COLORS = { hoch: '#de5b50', mittel: '#c98e2a', niedrig: '#8b98a5' };
+
+  function knowledgeBadge(level) {
+    var cfg = KNOWLEDGE_LEVELS[level] || KNOWLEDGE_LEVELS.unbekannt;
+    return '<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;' +
+      'white-space:nowrap;color:' + cfg.color + ';border:1px solid ' + cfg.color + ';">' + cfg.label + '</span>';
+  }
+
+  function renderKnowledgeSection(detail) {
+    var k = detail.ai_knowledge;
+    if (!k) return null;
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    section.style.marginBottom = '32px';
+
+    var headRow = document.createElement('div');
+    headRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:4px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Was ChatGPT und Gemini über euer Angebot wissen';
+    headRow.appendChild(heading);
+    headRow.appendChild(makeTip(
+      'Einmal im Monat fragen wir ChatGPT und Gemini, was sie über euer Unternehmen wissen und wie sie euch mit Wettbewerbern vergleichen würden. ' +
+      'Die Modelle nutzen dabei auch die Websuche. Ihr seht also, was ein Nutzer heute als Antwort bekommt. ' +
+      'Ob die Angaben stimmen, prüfen wir nicht. Wir zeigen nur Lücken und Widersprüche zwischen den Modellen.'
+    ));
+    section.appendChild(headRow);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = 'Geprüft am ' + (formatShortDate(k.checked_at) || '') + '. Abdeckung: Wie vollständig kennen die Modelle die acht wichtigsten Wissensbereiche.';
+    section.appendChild(sub);
+
+    var card = document.createElement('div');
+    card.className = 'cvz-card';
+
+    // Abdeckung je Modell
+    [['chatgpt', 'ChatGPT'], ['gemini', 'Gemini']].forEach(function (pair) {
+      var pct = k.coverage ? k.coverage[pair[0]] : null;
+      var prev = k.previous_coverage ? k.previous_coverage[pair[0]] : null;
+      var row = document.createElement('div');
+      row.className = 'cvz-journey-channel-row';
+      var deltaHtml = '';
+      if (pct != null && prev != null) {
+        var diff = pct - prev;
+        deltaHtml = '<span class="cvz-journey-channel-delta ' + (diff === 0 ? 'cvz-delta-flat' : (diff > 0 ? 'cvz-delta-up' : 'cvz-delta-down')) +
+          '" title="Veränderung zur vorherigen Prüfung">' + (diff === 0 ? '\u2192 ' : (diff > 0 ? '\u25b2 ' : '\u25bc ')) + Math.abs(diff) + ' Pp</span>';
+      }
+      row.innerHTML =
+        '<span class="cvz-journey-channel-label" style="font-weight:600;">' + pair[1] + '</span>' +
+        '<div class="cvz-journey-bar-wrap"><div class="cvz-journey-bar-fill" style="width:' + (pct || 0) + '%;background:#4fd1c5"></div></div>' +
+        '<span class="cvz-journey-channel-num" style="font-weight:600;">' + (pct == null ? '-' : pct + '%') + '</span>' + deltaHtml;
+      card.appendChild(row);
+    });
+
+    if (k.overall) {
+      var overall = document.createElement('p');
+      overall.className = 'cvz-summary-text';
+      overall.style.margin = '12px 0 0';
+      overall.textContent = k.overall;
+      card.appendChild(overall);
+    }
+    if (k.engines_failed && k.engines_failed.length) {
+      var failedNote = document.createElement('p');
+      failedNote.className = 'cvz-thin-data-note';
+      failedNote.textContent = 'Nicht alle Modelle konnten abgefragt werden: ' +
+        k.engines_failed.map(function (e) { return e === 'chatgpt' ? 'ChatGPT' : 'Gemini'; }).join(', ') + '.';
+      card.appendChild(failedNote);
+    }
+
+    // Tabelle je Wissensbereich
+    var rowsHtml = (k.dimensions || []).map(function (d) {
+      return '<tr>' +
+        '<td><strong>' + escapeHtml(d.label) + '</strong></td>' +
+        '<td>' + knowledgeBadge(d.chatgpt) + '</td>' +
+        '<td>' + knowledgeBadge(d.gemini) + '</td>' +
+        '<td style="color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(d.missing || d.conflict || d.known || '') + '</td>' +
+      '</tr>';
+    }).join('');
+    if (rowsHtml) {
+      var tableWrap = document.createElement('div');
+      tableWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:14px;';
+      tableWrap.innerHTML =
+        '<table class="cvz-table" style="min-width:560px;"><thead><tr><th>Bereich</th><th>ChatGPT</th><th>Gemini</th><th>Was fehlt bzw. was bekannt ist</th></tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody></table>';
+      card.appendChild(tableWrap);
+    }
+    section.appendChild(card);
+
+    // Fehlende Informationen für einen vollständigen Vergleich
+    var blockers = k.comparison_blockers || [];
+    if (blockers.length) {
+      var blockLabel = document.createElement('p');
+      blockLabel.className = 'cvz-changelog-guided-label';
+      blockLabel.style.marginTop = '16px';
+      blockLabel.textContent = 'Das fehlt für einen vollständigen Vergleich mit Wettbewerbern';
+      section.appendChild(blockLabel);
+      var grid = document.createElement('div');
+      grid.className = 'cvz-opportunity-grid cvz-opportunity-grid-stacked';
+      blockers.forEach(function (b) {
+        var color = KNOWLEDGE_PRIORITY_COLORS[b.priority] || '#8b98a5';
+        var c = document.createElement('div');
+        c.className = 'cvz-card cvz-idea-card';
+        c.style.borderLeftColor = color;
+        c.innerHTML =
+          '<p class="cvz-opportunity-type" style="color:' + color + ';">' + escapeHtml(b.info) + '</p>' +
+          (b.why ? '<p class="cvz-opportunity-description">' + escapeHtml(b.why) + '</p>' : '') +
+          (b.where_to_publish
+            ? '<div class="cvz-action-recommendation"><p class="cvz-changelog-guided-label">Wo veröffentlichen</p>' +
+              '<p class="cvz-opportunity-description">' + escapeHtml(b.where_to_publish) + '</p></div>'
+            : '');
+        // GEAENDERT (21.09.2026): keine konkreten Ziele (Domains) mehr im Wissens-Check.
+        // Die Zielliste steht weiterhin im Aktionsplan, siehe renderOutreachTargetsSection.
+        grid.appendChild(c);
+      });
+      section.appendChild(grid);
+    }
+
+    // Widersprüche zwischen den Modellen
+    var wrong = k.wrong_or_outdated || [];
+    if (wrong.length) {
+      var wrongLabel = document.createElement('p');
+      wrongLabel.className = 'cvz-changelog-guided-label';
+      wrongLabel.style.marginTop = '16px';
+      wrongLabel.textContent = 'Widersprüchliche Angaben, bitte prüfen';
+      section.appendChild(wrongLabel);
+      wrong.forEach(function (w) {
+        var p = document.createElement('p');
+        p.className = 'cvz-opportunity-description';
+        p.textContent = (w.model === 'chatgpt' ? 'ChatGPT: ' : (w.model === 'gemini' ? 'Gemini: ' : 'Beide Modelle: ')) +
+          w.statement + (w.correction_hint ? ' (' + w.correction_hint + ')' : '');
+        section.appendChild(p);
+      });
+    }
+
+    if (k.changes_effect) {
+      var eff = document.createElement('p');
+      eff.className = 'cvz-summary-text';
+      eff.textContent = k.changes_effect;
+      section.appendChild(eff);
+    }
+
+    // Quellen, auf die sich die Modelle stützen
+    if (k.sources) {
+      var srcParts = [];
+      [['chatgpt', 'ChatGPT'], ['gemini', 'Gemini']].forEach(function (pair) {
+        var domains = (k.sources[pair[0]] || []).map(function (s) { return s.domain; });
+        var ownUsed = k.own_domain_in_sources && k.own_domain_in_sources[pair[0]];
+        if (domains.length) {
+          srcParts.push(pair[1] + ': ' + domains.join(', ') + (ownUsed ? ' (eure Seite ist dabei)' : ' (eure Seite ist nicht dabei)'));
+        }
+      });
+      if (srcParts.length) {
+        var src = document.createElement('p');
+        src.className = 'cvz-thin-data-note';
+        src.textContent = 'Quellen, auf die sich die Modelle bei dieser Prüfung stützen. ' + srcParts.join(' | ');
+        section.appendChild(src);
+      }
+    }
+    return section;
+  }
+
+  // --- Ziele für Bewertungen und Digital PR ---------------------------------
+  // Backend: outreach_targets.py. Ziele stammen aus zitierten Quellen und Google-Rankings,
+  // nie von Claude erfunden. Einträge mit checked === false sind Ranking-Kandidaten, deren
+  // Typ noch nicht eingeordnet ist.
+
+  function targetLink(target) {
+    var href = target.url && /^https?:\/\//i.test(target.url) ? target.url : 'https://' + target.domain;
+    var a = document.createElement('a');
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.style.cssText = 'font-weight:600;color:var(--cvz-teal,#4fd1c5);text-decoration:none;';
+    a.textContent = target.domain;
+    return a;
+  }
+
+  function renderTargetList(targets) {
+    if (!Array.isArray(targets) || targets.length === 0) return null;
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px solid var(--cvz-border,#232b36);';
+    var label = document.createElement('p');
+    label.className = 'cvz-changelog-guided-label';
+    label.style.margin = '0 0 6px';
+    label.textContent = 'Mögliche Ziele';
+    wrap.appendChild(label);
+
+    targets.forEach(function (t) {
+      var row = document.createElement('div');
+      row.style.cssText = 'margin-bottom:8px;';
+      var head = document.createElement('div');
+      head.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;';
+      var icon = document.createElement('img');
+      icon.className = 'cvz-inline-favicon';
+      icon.alt = '';
+      icon.src = 'https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(t.domain);
+      head.appendChild(icon);
+      head.appendChild(targetLink(t));
+      var chips = [t.content_type_label];
+      if (t.checked === false) chips.push('noch zu prüfen');
+      if (t.can_publish === true) chips.push('selbst veröffentlichen möglich');
+      chips.forEach(function (c) {
+        if (!c) return;
+        var chip = document.createElement('span');
+        chip.className = 'cvz-persona-chip';
+        chip.style.cursor = 'default';
+        chip.textContent = c;
+        head.appendChild(chip);
+      });
+      row.appendChild(head);
+      if (t.reason) {
+        var reason = document.createElement('p');
+        reason.style.cssText = 'margin:2px 0 0;font-size:12px;color:var(--cvz-text-muted,#8b98a5);line-height:1.4;';
+        reason.textContent = t.reason;
+        row.appendChild(reason);
+      }
+      wrap.appendChild(row);
+    });
+
+    var note = document.createElement('p');
+    note.className = 'cvz-thin-data-note';
+    note.textContent = 'Kandidaten aus euren Daten. Ob dort eine Listung, Bewertung oder ein Beitrag möglich ist, ist nicht geprüft.';
+    wrap.appendChild(note);
+    return wrap;
+  }
+
+  var OUTREACH_GROUP_TITLES = {
+    bewertungsportale: 'Bewertungsportale (für Bewertungen und Kundenstimmen)',
+    medien: 'Medien und Fachartikel (für Digital PR, Gastbeiträge, Listungen)',
+    community: 'Community und Video (für aktive Beteiligung)',
+    // NEU (21.09.2026, siehe Chat-Verlauf 21.09.2026): eigene Gruppe für
+    // Domains, die zwar oft zitiert werden, aber kein realistisches
+    // Gastbeitrags-/Digital-PR-Ziel sind (z.B. offizielle Hersteller-
+    // Dokumentation wie help.sap.com), siehe outreach_targets.py: pitchable.
+    recherche: 'Rechercheziele (kein Gastbeitrag realistisch, aber hilfreich für eigene FAQs/Wissensartikel)',
+  };
+
+  function renderOutreachTargetsSection(detail) {
+    var o = detail.outreach_targets;
+    if (!o) return null;
+    var groups = o.groups || {};
+    var hasAny = ['bewertungsportale', 'medien', 'community', 'recherche'].some(function (g) { return (groups[g] || []).length; }) ||
+      (o.zu_pruefen || []).length;
+    if (!hasAny) return null;
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    section.style.marginTop = '28px';
+
+    var headRow = document.createElement('div');
+    headRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:4px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Mögliche Ziele für Bewertungen und Digital PR';
+    headRow.appendChild(heading);
+    headRow.appendChild(makeTip(
+      'Diese Portale, Medien und Communities werden von ChatGPT, Gemini oder Google AI Overview zu diesem Thema als Quelle genannt oder stehen in den Google-Top-10 zu euren Keywords. ' +
+      'Wettbewerber, eure eigene Seite und Anbieter-Seiten sind ausgeschlossen. Ob eine Listung oder Bewertung dort möglich ist, ist nicht geprüft.'
+    ));
+    section.appendChild(headRow);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = 'Berechnet aus den Quellen der KI-Antworten (' + (o.prompts_gesamt || 0) + ' Prompts) und den Google-Rankings zu ' +
+      (o.keywords_mit_serp || 0) + ' Keywords.' +
+      (o.nicht_eingeordnet_anzahl ? ' ' + o.nicht_eingeordnet_anzahl + ' weitere zitierte Quellen sind noch nicht eingeordnet und werden mit dem nächsten Monatslauf geprüft.' : '');
+    section.appendChild(sub);
+    section.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at));
+    section.appendChild(renderNextRunNote(detail.topic, 30));
+
+    ['bewertungsportale', 'medien', 'community', 'recherche'].forEach(function (g) {
+      var list = renderTargetList(groups[g]);
+      if (!list) return;
+      var card = document.createElement('div');
+      card.className = 'cvz-card';
+      card.style.marginBottom = '10px';
+      var title = document.createElement('p');
+      title.style.cssText = 'margin:0;font-size:13px;font-weight:600;';
+      title.textContent = OUTREACH_GROUP_TITLES[g];
+      card.appendChild(title);
+      // Überschrift und Hinweis der Liste je Gruppe nicht wiederholen
+      list.removeChild(list.firstChild);
+      list.removeChild(list.lastChild);
+      card.appendChild(list);
+      section.appendChild(card);
+    });
+
+    var check = renderTargetList((o.zu_pruefen || []).map(function (t) { return Object.assign({}, t, { checked: false }); }));
+    if (check) {
+      var checkCard = document.createElement('div');
+      checkCard.className = 'cvz-card';
+      var checkTitle = document.createElement('p');
+      checkTitle.style.cssText = 'margin:0;font-size:13px;font-weight:600;';
+      checkTitle.textContent = 'Noch zu prüfen (ranken gut zu Keywords, Typ noch nicht eingeordnet)';
+      checkCard.appendChild(checkTitle);
+      check.removeChild(check.firstChild);
+      checkCard.appendChild(check);
+      section.appendChild(checkCard);
+    }
+    return section;
+  }
+
+  // --- Umgesetzte Änderungen und ihre Wirkung -----------------------------
+
+  var VERDICT_COLORS = {
+    verbessert: '#4ec68a', verschlechtert: '#de5b50', gemischt: '#c98e2a',
+    unveraendert: '#c98e2a', zu_frueh: '#8b98a5', zu_wenig_daten: '#8b98a5',
+  };
+
+  function renderChangeAssessmentSection(detail) {
+    var ca = detail.change_assessment;
+    if (!ca || !ca.items || ca.items.length === 0) return null;
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    section.style.marginTop = '28px';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Bereits umgesetzt und was sich seitdem getan hat';
+    section.appendChild(heading);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = 'Diese Maßnahmen empfehlen wir nicht erneut. Bewertet wird frühestens nach 4 Wochen. ' +
+      'Gemessen wird ein zeitlicher Zusammenhang, kein Beweis für Ursache und Wirkung.';
+    section.appendChild(sub);
+
+    ca.items.forEach(function (it) {
+      var color = VERDICT_COLORS[it.verdict] || '#8b98a5';
+      var card = document.createElement('div');
+      card.className = 'cvz-card';
+      card.style.cssText = 'padding:12px 16px;margin-bottom:8px;border-left:3px solid ' + color + ';';
+      var weeks = it.weeks_since < 1 ? 'diese Woche' : 'vor ' + it.weeks_since + (it.weeks_since === 1 ? ' Woche' : ' Wochen');
+      card.innerHTML =
+        '<p style="margin:0 0 4px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);">' +
+          escapeHtml(formatShortDate(it.date) || '') + ' (' + weeks + ') \u00b7 ' + escapeHtml(it.type_label) + '</p>' +
+        '<p style="margin:0 0 6px;font-size:14px;">' + escapeHtml(it.description) +
+          (it.url ? ' <a class="cvz-content-change-url" href="' + escapeHtml(it.url) + '" target="_blank" rel="noopener">Link \u2197</a>' : '') + '</p>' +
+        '<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;color:' + color +
+          ';border:1px solid ' + color + ';">' + escapeHtml(it.verdict_label) + '</span>' +
+        (it.evidence || []).map(function (e) {
+          return '<p style="margin:6px 0 0;font-size:12px;color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(e) + '</p>';
+        }).join('') +
+        (it.stagnation
+          ? '<p style="margin:8px 0 0;font-size:12px;color:#c98e2a;">Seit mindestens 8 Wochen umgesetzt, aber keine erkennbare Wirkung. ' +
+            'Mögliche Ursachen (Vermutung): Der Inhalt ist noch nicht stark genug, es fehlen Bewertungen und Kundenstimmen, ' +
+            'es fehlen Erwähnungen auf Drittseiten (Digital PR) oder die Seite ist für KI-Systeme schwer erfassbar.</p>'
+          : '');
+      section.appendChild(card);
+    });
+    return section;
+  }
+
+  function injectStyles() {
+    if (document.getElementById('cvz-visibility-styles')) return;
+
+    var style = document.createElement('style');
+    style.id = 'cvz-visibility-styles';
+    style.textContent =
+      // Force the host page to always reserve scrollbar space so the layout
+      // never shifts when content expands or collapses and a scrollbar appears.
+      'html { overflow-y: scroll; }' +
+
+      '#cvz-visibility-app {' +
+        '--cvz-navy: #0d1117;' +
+        '--cvz-navy-raised: #141b24;' +
+        '--cvz-teal: #4fd1c5;' +
+        '--cvz-red: #de5b50;' +
+        '--cvz-amber: #c98e2a;' +
+        '--cvz-green: #4ec68a;' +
+        '--cvz-text: #e6edf3;' +
+        '--cvz-text-muted: #8b98a5;' +
+        '--cvz-border: #232b36;' +
+        'font-family: "Geist", sans-serif;' +
+        'color: var(--cvz-text);' +
+        'min-height: 640px;' +
+      '}' +
+      '#cvz-visibility-app h3 { font-family: "Syne", sans-serif; }' +
+
+      '@keyframes cvz-spin { to { transform: rotate(360deg); } }' +
+      '.cvz-spinner {' +
+        'display: inline-block; width: 14px; height: 14px; margin-right: 8px; vertical-align: middle;' +
+        'border: 2px solid var(--cvz-border); border-top-color: var(--cvz-teal); border-radius: 50%;' +
+        'animation: cvz-spin 0.8s linear infinite;' +
+      '}' +
+
+      '.cvz-initial-loading {' +
+        'min-height: 640px; display: flex; align-items: center; justify-content: center;' +
+      '}' +
+      '.cvz-spinner-lg {' +
+        'width: 40px; height: 40px; border: 3px solid var(--cvz-border); border-top-color: var(--cvz-teal);' +
+        'border-radius: 50%; animation: cvz-spin 0.8s linear infinite;' +
+      '}' +
+
+      '.cvz-picker-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }' +
+      '.cvz-picker-select {' +
+        'flex: 1; min-width: 160px; max-width: 280px; box-sizing: border-box;' +
+        'font-family: "Geist", sans-serif; font-size: 14px; padding: 10px 12px;' +
+        'background: var(--cvz-navy-raised); color: var(--cvz-text);' +
+        'border: 1px solid var(--cvz-border); border-radius: 0;' +
+      '}' +
+      '.cvz-picker-select:focus { outline: none; border-color: var(--cvz-teal); }' +
+      '.cvz-picker-select:disabled { opacity: 0.5; cursor: default; }' +
+
+      '.cvz-topic-usage-badge { font-size: 13px; color: var(--cvz-text-muted); margin: 0 0 16px; }' +
+
+      '.cvz-collecting-banner {' +
+        'border-left: 3px solid var(--cvz-teal); padding: 12px 16px; margin: 0 0 16px; display: flex;' +
+        'align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;' +
+      '}' +
+      '.cvz-collecting-banner-text { font-size: 13px; color: var(--cvz-text-muted); margin: 0; flex: 1 1 320px; }' +
+      '.cvz-error-banner { border-left-color: var(--cvz-red); }' +
+      '.cvz-soft-error-banner { border-left-color: var(--cvz-amber); }' +
+      '.cvz-run-error-detail { font-size: 12px; color: var(--cvz-text-muted); font-family: monospace; }' +
+
+      '.cvz-create-form { margin-bottom: 16px; }' +
+      '.cvz-create-toggle-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 13px; color: var(--cvz-teal);' +
+        'background: none; border: 1px solid var(--cvz-teal); padding: 8px 14px; border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-create-form-fields { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }' +
+      '.cvz-create-input {' +
+        'font-family: "Geist", sans-serif; font-size: 14px; padding: 8px 10px; flex: 1; min-width: 180px;' +
+        'background: var(--cvz-navy-raised); color: var(--cvz-text); border: 1px solid var(--cvz-border); border-radius: 0;' +
+      '}' +
+      '.cvz-create-submit-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 14px; padding: 8px 16px;' +
+        'background: var(--cvz-teal); color: var(--cvz-navy); border: none; border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-create-submit-btn:disabled { opacity: 0.6; cursor: default; }' +
+      '.cvz-create-error { width: 100%; font-size: 13px; color: var(--cvz-red); margin: 6px 0 0; }' +
+      '.cvz-create-buy-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 14px; padding: 8px 16px; margin-top: 8px;' +
+        'background: none; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-create-buy-btn:disabled { opacity: 0.6; cursor: default; }' +
+
+      '.cvz-back-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 13px; color: var(--cvz-text-muted);' +
+        'background: none; border: none; cursor: pointer; padding: 0 0 16px; display: block;' +
+      '}' +
+      '.cvz-back-btn:hover { color: var(--cvz-teal); }' +
+
+      '.cvz-card {' +
+        'background: var(--cvz-navy-raised); border: 1px solid var(--cvz-border);' +
+        'border-radius: 0; padding: 20px; cursor: default;' +
+      '}' +
+      '.cvz-card-placeholder { margin-bottom: 16px; }' +
+      '.cvz-card-placeholder-text { color: var(--cvz-text-muted); font-size: 14px; margin: 0; }' +
+      '.cvz-card-eyebrow { font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
+      '.cvz-domain-header { margin-bottom: 24px; }' +
+
+      '.cvz-tab-nav { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--cvz-border); margin-bottom: 20px; background: var(--cvz-navy); padding-top: 8px; }' +
+      '@media (max-width: 600px) { .cvz-opp-rec-col { display: none; } .cvz-opp-rec-header { display: none; } }' +
+      '.cvz-tab-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 14px; padding: 10px 16px; margin-bottom: -1px;' +
+        'background: none; color: var(--cvz-text-muted); border: none; border-bottom: 2px solid transparent;' +
+        'border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-tab-btn:hover { color: var(--cvz-text); }' +
+      '.cvz-tab-btn-active { color: var(--cvz-teal); border-bottom-color: var(--cvz-teal); }' +
+      // NEU (25.09.2026, Kundenwunsch): Zeitraum-Preset-Picker (4/12/26 Wochen).
+      '.cvz-weeks-preset-picker { display: flex; gap: 6px; flex-shrink: 0; }' +
+      '.cvz-weeks-preset-btn { padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius: 9999px; ' +
+        'border: 1px solid var(--cvz-border,#30363d); background: transparent; color: var(--cvz-text-muted,#8b98a5); cursor: pointer; }' +
+      '.cvz-weeks-preset-btn:hover { border-color: var(--cvz-teal); color: var(--cvz-teal); }' +
+      '.cvz-weeks-preset-btn-active { border-color: var(--cvz-teal); color: var(--cvz-teal); background: rgba(13,148,136,.14); }' +
+
+      '.cvz-timeline-logo {' +
+        'width: 20px; height: 20px; border-radius: 0; border: 1px solid var(--cvz-border);' +
+        'background: var(--cvz-text); cursor: pointer; display: inline-block; vertical-align: middle;' +
+      '}' +
+      '.cvz-inline-favicon {' +
+        'width: 16px; height: 16px; border-radius: 0; border: 1px solid var(--cvz-border);' +
+        'background: var(--cvz-text); vertical-align: middle; margin-right: 6px;' +
+      '}' +
+
+      '.cvz-status-badge { font-size: 12px; padding: 3px 8px; border: 1px solid; }' +
+      '.cvz-status-hint { display: block; font-size: 11px; color: var(--cvz-text-muted); margin-top: 4px; }' +
+      '.cvz-retry-btn {' +
+        'display: block; margin-top: 4px; font-family: "Geist", sans-serif; font-size: 11px; padding: 2px 8px;' +
+        'background: none; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-retry-btn:disabled { opacity: 0.6; cursor: default; }' +
+      '.cvz-archive-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 10px;' +
+        'background: none; color: var(--cvz-text-muted); border: 1px solid var(--cvz-border); border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-archive-btn:hover { color: var(--cvz-text); border-color: var(--cvz-text-muted); }' +
+      '.cvz-archive-btn:disabled { opacity: 0.6; cursor: default; }' +
+      '.cvz-delete-topic-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 11px; padding: 4px 0 4px 10px;' +
+        'background: none; color: var(--cvz-text-muted); border: none; text-decoration: underline; cursor: pointer;' +
+      '}' +
+      '.cvz-delete-topic-btn:hover { color: var(--cvz-red); }' +
+      '.cvz-delete-topic-btn:disabled { opacity: 0.6; cursor: default; }' +
+      '.cvz-top-action-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }' +
+      '.cvz-top-action-row .cvz-back-btn { padding: 0; margin: 0; }' +
+      '.cvz-archived-notice { font-size: 13px; color: var(--cvz-text-muted); margin: 0 0 8px; font-style: italic; }' +
+      '.cvz-status-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
+      '.cvz-status-collecting { color: var(--cvz-amber); border-color: var(--cvz-amber); }' +
+      '.cvz-status-analyzing { color: var(--cvz-amber); border-color: var(--cvz-amber); }' +
+      '.cvz-status-error { color: var(--cvz-red); border-color: var(--cvz-red); }' +
+      '.cvz-status-archived { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
+      '.cvz-status-queued { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
+      '.cvz-create-info { width: 100%; font-size: 13px; color: var(--cvz-text-muted); margin: 6px 0 0; }' +
+      '.cvz-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 16px; }' +
+      '.cvz-modal-box { background: #141b24; border: 1px solid #232b36; border-radius: 4px; padding: 20px; max-width: 380px; width: 100%; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }' +
+      // GEFIXT (21.09.2026): var(--cvz-text-muted) ohne Fallback zeigte hier
+      // hell/weiss statt grau. Grund: die --cvz-*-Variablen sind auf
+      // #cvz-visibility-app gescoped (siehe weiter oben), der Modal-Overlay
+      // haengt aber direkt an document.documentElement (siehe showCvzModal),
+      // liegt also ausserhalb dieses Scopes und erbt die Variable nicht -
+      // var() ohne gueltigen Wert macht die color-Deklaration ungueltig,
+      // die Schrift faellt auf die geerbte (helle) Seitenfarbe zurueck.
+      // Fester Hex-Wert statt var(), analog zu .cvz-modal-text direkt
+      // darunter, die aus demselben Grund schon fest kodiert ist.
+      '.cvz-modal-title { font-family: "Geist", sans-serif; font-size: 15px; font-weight: 600; color: #8b98a5; margin: 0 0 8px; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
+      '.cvz-modal-text { font-family: "Geist", sans-serif; font-size: 13px; color: #8b98a5; margin: 0 0 20px; line-height: 1.5; }' +
+      '.cvz-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }' +
+      '.cvz-modal-btn { font-family: "Geist", sans-serif; font-size: 12px; padding: 6px 14px; border-radius: 0; cursor: pointer; border: 1px solid transparent; }' +
+      '.cvz-modal-btn-secondary { background: none; color: #8b98a5; border-color: #232b36; }' +
+      '.cvz-modal-btn-secondary:hover { color: #e6edf3; border-color: #8b98a5; }' +
+      '.cvz-modal-btn-primary { background: none; color: #4fd1c5; border-color: #4fd1c5; }' +
+      '.cvz-modal-btn-primary:hover { background: #4fd1c5; color: #0d1117; }' +
+
+      '.cvz-section { margin-bottom: 24px; }' +
+      // NEU (15.09.2026): Kundenwunsch: Grafiken der Übersichtsseite auf
+      // Desktop kleiner und nebeneinander statt einzeln über volle Breite.
+      // auto-fit/minmax fällt auf schmalen Bildschirmen automatisch auf
+      // eine Spalte zurück, keine eigene Media-Query nötig. Die einzelnen
+      // .cvz-section-Elemente darin behalten ihren eigenen margin-bottom
+      // nicht (siehe Regel direkt darunter), das Grid-"gap" übernimmt den
+      // Abstand stattdessen.
+      '.cvz-charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }' +
+      '.cvz-charts-grid > .cvz-section { margin-bottom: 0; }' +
+      '.cvz-section-label { font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
+      '.cvz-section-title { margin: 0 0 4px; font-size: 22px; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
+
+      '.cvz-summary-card { margin-bottom: 24px; }' +
+      '.cvz-ai-attribution { margin: 20px 0 0; padding-top: 12px; border-top: 1px solid var(--cvz-border); font-size: 11px; color: var(--cvz-text-muted); opacity: 0.6; }' +
+      '.cvz-summary-text { font-size: 15px; line-height: 1.5; margin: 12px 0 0; color: var(--cvz-text-muted); }' +
+      '.cvz-summary-subsection { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-summary-phase-block { margin-top: 12px; }' +
+      '.cvz-thin-data-note { font-size: 12px; color: var(--cvz-text-muted); font-style: italic; margin: 6px 0 0; }' +
+      // NEU (25.09.2026): neutraler "Datenstand"-Hinweis, bewusst nicht kursiv
+      // (kein Warnhinweis wie .cvz-thin-data-note, nur eine Zeitangabe).
+      '.cvz-freshness-note { font-size: 11px; color: var(--cvz-text-muted); margin: -4px 0 12px; }' +
+
+      '.cvz-opportunity-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }' +
+      '.cvz-opportunity-grid-stacked { grid-template-columns: 1fr; }' +
+      '.cvz-opportunity-card { border-left: 3px solid var(--cvz-red); padding: 16px; }' +
+      '.cvz-idea-card { border-left: 3px solid var(--cvz-teal); padding: 16px; }' +
+      '.cvz-opportunity-type { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--cvz-red); }' +
+      '.cvz-opportunity-description { margin: 0 0 8px; font-size: 14px; line-height: 1.4; color: var(--cvz-text-muted); }' +
+      '.cvz-opportunity-topic { margin: 0; font-size: 11px; color: var(--cvz-text-muted); }' +
+      '.cvz-action-recommendation { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-competitor-prompt-list { margin: 2px 0 8px; padding-left: 16px; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-competitor-prompt-list li { margin: 2px 0; }' +
+
+      '.cvz-phase-section-heading { margin: 16px 0 8px; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
+      '.cvz-inline-favicon { width:16px;height:16px;border-radius:2px;vertical-align:middle;margin-right:4px;object-fit:contain; }' +
+      '.cvz-gap-priority-hoch { border-left-color: var(--cvz-red); }' +
+      '.cvz-gap-priority-mittel { border-left-color: var(--cvz-amber); }' +
+      '.cvz-gap-priority-niedrig { border-left-color: var(--cvz-teal); }' +
+      '.cvz-gap-priority-hoch .cvz-opportunity-type { color: var(--cvz-red); }' +
+      '.cvz-gap-priority-mittel .cvz-opportunity-type { color: var(--cvz-amber); }' +
+      '.cvz-gap-priority-niedrig .cvz-opportunity-type { color: var(--cvz-text-muted); }' +
+
+      // GEÄNDERT (25.09.2026, Kundenwunsch): table-layout:fixed ergänzt.
+      // Vorher hatten wir zwar feste width-Werte auf den <th>-Elementen,
+      // aber unter dem Standard "table-layout:auto" sind das nur Hinweise
+      // -- der Browser darf sie je nach Zeileninhalt trotzdem anders
+      // verteilen. Bei Phasen mit z.B. nur PAA-Fragen (kurzer Text, leere
+      // Einschätzung-Zelle) kam so eine ANDERE Spaltenaufteilung heraus als
+      // bei Phasen mit langen Keywords + befüllter Einschätzung -- genau
+      // das "nicht einheitlich"-Symptom. table-layout:fixed erzwingt die
+      // in der ersten Zeile (Kopfzeile) deklarierten Breiten hart, unabhängig
+      // vom tatsächlichen Zeileninhalt -- damit fluchten alle <table>-Blöcke
+      // (auch über mehrere Phasen-Tabellen hinweg) garantiert exakt.
+      '.cvz-table { width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }' +
+      '.cvz-table th { text-align: left; font-weight: 600; color: var(--cvz-text-muted); font-size: 12px; padding: 8px 12px; border-bottom: 1px solid var(--cvz-border); }' +
+      '.cvz-table td { padding: 8px 12px; border-bottom: 1px solid var(--cvz-border); }' +
+      '.cvz-table-clickable tbody tr { cursor: pointer; }' +
+      '.cvz-table-clickable tbody tr:hover { background: rgba(79, 209, 197, 0.06); }' +
+      '.cvz-gsc-page-url { color: var(--cvz-teal); font-size: 11px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; display: inline-block; vertical-align: middle; }' +
+        '.cvz-gsc-cell-url { max-width: 150px; overflow: hidden; }' +
+        '.cvz-gsc-cell-linked { color: var(--cvz-teal); max-width: 280px; }' +
+      '.cvz-gsc-row-clickable { cursor: pointer; }' +
+      '.cvz-gsc-row-clickable:hover { background: rgba(79, 209, 197, 0.06); }' +
+
+      '.cvz-phase-heading { font-family: "Syne", sans-serif; font-size: 14px; margin: 16px 0 8px; color: var(--cvz-text-muted); hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
+      '.cvz-prompt-list { display: flex; flex-direction: column; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch; }' +
+      '.cvz-prompt-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 14px; min-width: max-content; }' +
+      '.cvz-prompt-text { flex: 1; min-width: 160px; color: var(--cvz-text-muted); }' +
+      '.cvz-prompt-source { font-size: 11px; color: var(--cvz-text-muted); }' +
+      '.cvz-prompt-citation-count { font-size: 11px; color: var(--cvz-text-muted); white-space: nowrap; }' +
+      '.cvz-prompt-delete-btn {' +
+        'background: none; border: none; color: var(--cvz-text-muted); font-size: 16px; line-height: 1;' +
+        'cursor: pointer; padding: 0 2px; flex-shrink: 0;' +
+      '}' +
+      '.cvz-prompt-delete-btn:hover { color: var(--cvz-red); }' +
+
+      '.cvz-prompt-row-clickable { cursor: pointer; }' +
+      '.cvz-prompt-row-clickable:hover { background: rgba(79, 209, 197, 0.06); }' +
+      // GEÄNDERT (25.09.2026, Kundenwunsch): war 11px in gedecktem Grau,
+      // kaum zu erkennen. Jetzt eigene, breitere Spalte (siehe th/td-Breiten
+      // in _buildKeywordTable/_buildPromptTable/renderGscBlock), größer,
+      // fett und in der Akzentfarbe, damit sofort klar ist: hier lässt sich
+      // etwas aufklappen.
+      '.cvz-prompt-expand-chevron { color: var(--cvz-teal); font-size: 16px; font-weight: 700; text-align: center; vertical-align: middle; }' +
+      '.cvz-prompt-expansion { margin: 4px 0 12px 18px; padding: 14px; border-left: 2px solid var(--cvz-teal); background: rgba(79, 209, 197, 0.03); }' +
+      '.cvz-prompt-engine-nav, .cvz-prompt-run-nav { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }' +
+      '.cvz-prompt-engine-btn, .cvz-prompt-run-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 10px;' +
+        'background: none; color: var(--cvz-text-muted); border: 1px solid var(--cvz-border); border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-prompt-engine-btn-active, .cvz-prompt-run-btn-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
+      '.cvz-prompt-run-status { font-size: 13px; margin: 0 0 10px; color: var(--cvz-text-muted); }' +
+      '.cvz-prompt-answer { font-size: 13px; line-height: 1.5; margin-bottom: 14px; }' +
+      '.cvz-prompt-answer h4, .cvz-prompt-answer h5 { font-size: 13px; margin: 10px 0 4px; color: var(--cvz-text-muted); }' +
+      '.cvz-prompt-answer p { margin: 0 0 8px; }' +
+      '.cvz-prompt-answer ul { margin: 0 0 8px; padding-left: 18px; }' +
+      '.cvz-prompt-answer a { color: var(--cvz-teal); }' +
+      '.cvz-prompt-source-list { display: flex; flex-direction: column; gap: 6px; }' +
+      '.cvz-prompt-source-item {' +
+        'display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--cvz-text-muted); text-decoration: none;' +
+      '}' +
+      '.cvz-prompt-source-item:hover { color: var(--cvz-teal); }' +
+      '.cvz-prompt-source-competitor { font-weight: 600; }' +
+      '.cvz-competitor-badge {' +
+        'font-size: 10px; padding: 1px 6px; border: 1px solid var(--cvz-red); color: var(--cvz-red); margin-left: 4px;' +
+      '}' +
+      '.cvz-prompt-mentioned-note { margin-top: 8px; }' +
+
+      '.cvz-dot { width: 8px; height: 8px; flex-shrink: 0; display: inline-block; }' +
+      '.cvz-dot-green { background: var(--cvz-green); }' +
+      '.cvz-dot-yellow { background: var(--cvz-amber); }' +
+      '.cvz-dot-red { background: var(--cvz-red); }' +
+      '.cvz-dot-unknown { background: var(--cvz-border); }' +
+
+      '.cvz-phase-rollup-grid { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0 20px; }' +
+      '.cvz-phase-rollup-card { flex: 1; min-width: 140px; }' +
+      '.cvz-phase-rollup-label { font-size: 13px; margin: 0 0 6px; color: var(--cvz-text-muted); }' +
+      '.cvz-phase-rollup-bar { display: flex; height: 8px; width: 100%; background: var(--cvz-border); overflow: hidden; }' +
+      '.cvz-phase-rollup-segment { height: 100%; }' +
+      '.cvz-phase-rollup-count { font-size: 11px; margin: 4px 0 0; color: var(--cvz-text-muted); }' +
+
+      '.cvz-persona-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }' +
+      '.cvz-persona-chip {' +
+        'font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 10px;' +
+        'background: none; color: var(--cvz-text-muted); border: 1px solid var(--cvz-border); border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-persona-chip-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
+
+      '.cvz-prompt-content-type {' +
+        'font-size: 11px; color: var(--cvz-amber); white-space: nowrap;' +
+      '}' +
+      '.cvz-prompt-persona {' +
+        'font-size: 11px; color: var(--cvz-text-muted); white-space: nowrap; border-left: 1px solid var(--cvz-border); padding-left: 8px;' +
+      '}' +
+
+      '.cvz-chart-svg { width: 100%; height: auto; display: block; }' +
+      '.cvz-chart-axis { stroke: var(--cvz-border); stroke-width: 1; }' +
+      '.cvz-chart-line { fill: none; stroke: var(--cvz-teal); stroke-width: 2; }' +
+      '.cvz-chart-dot { fill: var(--cvz-teal); }' +
+      '.cvz-chart-caption { font-size: 12px; color: var(--cvz-text-muted); margin: 8px 0 0; }' +
+
+      '.cvz-chart-legend { display: flex; gap: 16px; margin-top: 8px; flex-wrap: wrap; }' +
+      '.cvz-chart-legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }' +
+      '.cvz-legend-marker { width: 2px; height: 10px; background: var(--cvz-text-muted); display: inline-block; }' +
+      '.cvz-chart-marker-line { stroke: var(--cvz-text-muted); stroke-width: 1; stroke-dasharray: 3,3; opacity: 0.7; }' +
+      '.cvz-chart-marker-dot { fill: var(--cvz-text-muted); cursor: pointer; }' +
+      '.cvz-chart-hit { cursor: pointer; }' +
+      '.cvz-chart-dot { cursor: pointer; }' +
+
+      '.cvz-week-detail { margin-top: 12px; border-left: 2px solid var(--cvz-teal); }' +
+      '.cvz-week-detail-header { display: flex; align-items: center; justify-content: space-between; }' +
+      '.cvz-week-detail-close-btn {' +
+        'background: none; border: none; color: var(--cvz-text-muted); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;' +
+      '}' +
+      '.cvz-week-detail-row { font-size: 13px; margin: 4px 0; color: var(--cvz-text-muted); }' +
+
+      '.cvz-changelog-form { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: flex-start; }' +
+      '.cvz-changelog-input {' +
+        'flex: 1; min-width: 240px; font-family: "Geist", sans-serif; font-size: 14px; padding: 8px 10px;' +
+        'background: var(--cvz-navy-raised); color: var(--cvz-text); border: 1px solid var(--cvz-border); border-radius: 0;' +
+        'resize: vertical;' +
+      '}' +
+      '.cvz-changelog-submit-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 14px; padding: 8px 16px;' +
+        'background: var(--cvz-teal); color: var(--cvz-navy); border: none; border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-changelog-submit-btn:disabled { opacity: 0.6; cursor: default; }' +
+      '.cvz-changelog-more-btn {' +
+        'margin-top: 10px; font-family: "Geist", sans-serif; font-size: 13px; padding: 6px 14px;' +
+        'background: none; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer;' +
+      '}' +
+      '.cvz-changelog-table-wrap { overflow-x: auto; margin-top: 4px; }' +
+      '.cvz-changelog-table { width: 100%; border-collapse: collapse; font-size: 13px; }' +
+      '.cvz-changelog-table th {' +
+        'text-align: left; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em;' +
+        'color: var(--cvz-text-muted); padding: 6px 10px; border-bottom: 1px solid var(--cvz-border); white-space: nowrap;' +
+      '}' +
+      '.cvz-changelog-table td { padding: 8px 10px; border-bottom: 1px solid var(--cvz-border); vertical-align: top; }' +
+      '.cvz-changelog-cell-text { min-width: 220px; }' +
+      '.cvz-changelog-cell-linked { color: var(--cvz-text-muted); white-space: nowrap; }' +
+      '.cvz-delta-up { color: var(--cvz-teal); font-weight: 700; }' +
+      '.cvz-delta-down { color: var(--cvz-red); font-weight: 700; }' +
+      '.cvz-changelog-cell-meta { color: var(--cvz-text-muted); white-space: nowrap; }' +
+      '.cvz-changelog-cell-action { text-align: right; white-space: nowrap; }' +
+      '.cvz-changelog-row-deleted td { opacity: 0.75; }' +
+      '.cvz-changelog-guided-label { font-size: 12px; color: var(--cvz-text-muted); margin: 10px 0 4px; }' +
+      '.cvz-changelog-custom-input {' +
+        'display: block; width: 100%; max-width: 320px; margin: 6px 0 0;' +
+        'font-family: "Geist", sans-serif; font-size: 13px; padding: 6px 8px;' +
+        'background: var(--cvz-navy-raised); color: var(--cvz-text); border: 1px solid var(--cvz-border); border-radius: 0;' +
+      '}' +
+      '.cvz-changelog-link-picker { margin: 10px 0; }' +
+      '.cvz-changelog-link-chip-list { margin-top: 8px; }' +
+      '.cvz-changelog-linked { font-size: 11px; color: var(--cvz-text-muted); margin: 2px 0; }' +
+      '.cvz-changelog-linked-badge { color: var(--cvz-text-muted); font-size: 12px; }' +
+      '.cvz-prompt-linked-changelog { margin: 0 0 12px; }' +
+      '.cvz-serp-results-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }' +
+      '.cvz-serp-results-list li { display: flex; align-items: center; gap: 6px; font-size: 12px; }' +
+      '.cvz-serp-results-list a { color: var(--cvz-text-muted); text-decoration: none; }' +
+      '.cvz-serp-results-list a:hover { color: var(--cvz-teal); }' +
+      '.cvz-serp-rank { color: var(--cvz-text-muted); font-size: 11px; }' +
+      '.cvz-serp-feature-risk { color: var(--cvz-red); border-color: var(--cvz-red); }' +
+      '.cvz-changelog-delete-btn {' +
+        'background: none; border: none; color: var(--cvz-text-muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; flex-shrink: 0;' +
+      '}' +
+      '.cvz-changelog-delete-btn:hover { color: var(--cvz-red); }' +
+      '.cvz-changelog-toggle-deleted-btn {' +
+        'margin-top: 14px; font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 0;' +
+        'background: none; color: var(--cvz-text-muted); border: none; text-decoration: underline; cursor: pointer;' +
+      '}' +
+      '.cvz-changelog-restore-btn {' +
+        'font-family: "Geist", sans-serif; font-size: 11px; padding: 3px 10px; flex-shrink: 0;' +
+        'background: none; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer;' +
+      '}' +
+
+      /* NEU (16.09.2026): Journey-Map-Tab */
+      '.cvz-journey-phase-grid {' +
+        'display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 4px;' +
+      '}' +
+      '.cvz-journey-phase-card {' +
+        'background: var(--cvz-navy-raised); border: 1px solid var(--cvz-border); border-top: 3px solid; padding: 16px;' +
+      '}' +
+      '.cvz-journey-phase-name {' +
+        'font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 12px;' +
+      '}' +
+      '.cvz-journey-channel-row {' +
+        'display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px;' +
+      '}' +
+      '.cvz-journey-channel-label {' +
+        'flex: 0 0 120px; color: var(--cvz-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' +
+      '}' +
+      '.cvz-journey-bar-wrap {' +
+        'flex: 1; height: 6px; background: var(--cvz-border); border-radius: 3px; overflow: hidden;' +
+      '}' +
+      '.cvz-journey-bar-fill {' +
+        'height: 100%; border-radius: 3px; transition: width 0.3s ease;' +
+      '}' +
+      '.cvz-journey-channel-num {' +
+        'flex: 0 0 32px; text-align: right; font-size: 11px; color: var(--cvz-text-muted); font-variant-numeric: tabular-nums;' +
+      '}' +
+
+      // NEU (18.09.2026): Delta-Badge im Phasen-Score-Grid, siehe Chat-Verlauf
+      // 18.09.2026 ("prozentuale Entwicklung pro Journey-Phase").
+      '.cvz-journey-channel-delta {' +
+        'flex: 0 0 auto; font-size: 10px; font-weight: 600; margin-left: 4px; padding: 1px 5px; border-radius: 3px; white-space: nowrap;' +
+      '}' +
+      '.cvz-delta-up { color: var(--cvz-teal); background: rgba(13,148,136,0.12); }' +
+      '.cvz-delta-down { color: var(--cvz-red); background: rgba(222,91,80,0.12); }' +
+      '.cvz-delta-flat { color: var(--cvz-text-muted); background: rgba(139,152,165,0.12); }' +
+
+      '.cvz-sov-phase-block { margin-bottom: 8px; border: 1px solid var(--cvz-border); }' +
+      '.cvz-sov-phase-header {' +
+        'width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 16px;' +
+        'background: var(--cvz-navy-raised); border: none; color: var(--cvz-text); cursor: pointer; text-align: left;' +
+        'font-family: "Geist", sans-serif; font-size: 14px;' +
+      '}' +
+      '.cvz-sov-phase-header:hover { background: var(--cvz-navy); }' +
+      '.cvz-sov-phase-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }' +
+      '.cvz-sov-phase-title { font-weight: 600; flex: 1; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
+      '.cvz-sov-phase-count { font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-sov-chevron { font-size: 11px; color: var(--cvz-text-muted); }' +
+      '.cvz-sov-table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 13px; }' +
+      '.cvz-sov-table th {' +
+        'text-align: left; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em;' +
+        'color: var(--cvz-text-muted); padding: 8px 16px; border-bottom: 1px solid var(--cvz-border);' +
+      '}' +
+      '.cvz-sov-table td { padding: 10px 16px; border-bottom: 1px solid var(--cvz-border); vertical-align: top; }' +
+      '.cvz-sov-table tr:last-child td { border-bottom: none; }' +
+      '.cvz-sov-domain { font-weight: 500; }' +
+      '.cvz-sov-rate { display: flex; align-items: center; gap: 8px; white-space: nowrap; }' +
+      '.cvz-sov-bar-wrap { width: 80px; flex-shrink: 0; }' +
+      '.cvz-sov-tip { color: var(--cvz-text-muted); max-width: 300px; }' +
+
+      '.cvz-content-change-form { margin-bottom: 12px; }' +
+      '.cvz-content-change-fields {' +
+        'display: flex; gap: 8px; flex-wrap: wrap; align-items: center;' +
+      '}' +
+      '.cvz-content-change-type-select {' +
+        'flex: 0 0 160px; min-width: 140px; max-width: 160px;' +
+      '}' +
+      '.cvz-content-change-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }' +
+      '.cvz-content-change-linked { display:block;margin-top:3px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);font-style:italic; }' +
+      '.cvz-content-change-item {' +
+        'display: flex; align-items: baseline; gap: 10px; padding: 10px 0;' +
+        'border-bottom: 1px solid var(--cvz-border); flex-wrap: wrap; font-size: 13px;' +
+      '}' +
+      '.cvz-content-change-date {' +
+        'flex: 0 0 auto; color: var(--cvz-text-muted); font-size: 12px; font-variant-numeric: tabular-nums;' +
+      '}' +
+      '.cvz-content-change-desc { flex: 1; min-width: 140px; }' +
+      '.cvz-content-change-url {' +
+        'color: var(--cvz-teal); font-size: 12px; text-decoration: none; white-space: nowrap;' +
+      '}' +
+      '.cvz-content-change-url:hover { text-decoration: underline; }' +
+      '.cvz-prompt-phase-heading {font-family: "Syne", sans-serif; font-size: 13px; margin: 16px 0 6px; padding-left: 8px; border-left: 3px solid var(--cvz-teal); color: var(--cvz-text-muted); hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
+      '.cvz-prompt-source-summary {font-size: 12px; color: var(--cvz-text-muted); margin-bottom: 8px; padding: 5px 8px; background: var(--cvz-navy-raised); border-radius: 4px; font-variant-numeric: tabular-nums; }' +
+      '.cvz-competitor-url-row { overflow: hidden; white-space: nowrap; max-width: 100%; }' +
+      '.cvz-competitor-url {display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cvz-teal); font-size: 12px; text-decoration: none; max-width: 100%; }' +
+      '.cvz-competitor-url:hover { text-decoration: underline; }' +
+
+      /* Tooltip-Komponente: [?] Icon mit Hover-Popup */
+      '.cvz-tip {' +
+        'position:relative;display:inline-flex;align-items:center;justify-content:center;' +
+        'box-sizing:border-box;padding:0;' +
+        'font-size:11px;font-weight:700;line-height:1;' +
+        'width:16px;height:16px;text-align:center;' +
+        'border-radius:50%;border:1px solid var(--cvz-border,#232b36);' +
+        'color:var(--cvz-text-muted,#8b98a5);background:var(--cvz-navy-raised,#141b24);' +
+        'cursor:default;vertical-align:middle;margin-left:5px;flex-shrink:0;' +
+        'user-select:none;' +
+      '}' +
+      '.cvz-tip::after {' +
+        'content:attr(data-cvz-tip);' +
+        'position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);' +
+        'min-width:200px;max-width:280px;' +
+        'padding:8px 10px;' +
+        'background:#1e2a36;border:1px solid var(--cvz-border,#232b36);border-radius:4px;' +
+        'font-size:12px;font-weight:400;line-height:1.5;' +
+        'color:var(--cvz-text,#e6edf3);text-align:left;white-space:normal;' +
+        'box-shadow:0 4px 16px rgba(0,0,0,.4);' +
+        'pointer-events:none;opacity:0;transition:opacity .15s ease;' +
+        'z-index:1000;' +
+      '}' +
+      '.cvz-tip:hover::after { opacity:1; }' +
+      /* Pfeil nach unten zeigend */
+      '.cvz-tip::before {' +
+        'content:"";' +
+        'position:absolute;bottom:calc(100% + 2px);left:50%;transform:translateX(-50%);' +
+        'border:5px solid transparent;border-top:5px solid var(--cvz-border,#232b36);' +
+        'pointer-events:none;opacity:0;transition:opacity .15s ease;z-index:1001;' +
+      '}' +
+      '.cvz-tip:hover::before { opacity:1; }' +
+      /* Variante: Tooltip öffnet sich nach rechts (für Elemente am linken Rand) */
+      '.cvz-tip-right::after {' +
+        'left:calc(100% + 8px);bottom:auto;top:50%;transform:translateY(-50%);' +
+      '}' +
+      '.cvz-tip-right::before {' +
+        'left:calc(100% + 0px);bottom:auto;top:50%;transform:translateY(-50%);' +
+        'border:5px solid transparent;border-right:5px solid var(--cvz-border,#232b36);border-top:none;' +
+      '}';
+
+    document.head.appendChild(style);
+  }
+
+  function renderInitialLoadingState() {
+    var container = document.getElementById('cvz-visibility-app');
+    if (!container) return;
+    container.innerHTML =
+      '<div class="cvz-initial-loading">' +
+        '<div class="cvz-spinner-lg" role="status" aria-label="Convertlyze Visibility Tracker lädt"></div>' +
+      '</div>';
+  }
+
+  function showNoUserMessage() {
+    var container = document.getElementById('cvz-visibility-app');
+    if (container) {
+      container.innerHTML =
+        '<div class="cvz-initial-loading"><p class="cvz-card-placeholder-text">Bitte logge dich ein, um das Dashboard zu sehen.</p></div>';
+    }
+  }
+
+  function showErrorMessage(message) {
+    var container = document.getElementById('cvz-visibility-app');
+    if (container) {
+      container.innerHTML =
+        '<div class="cvz-initial-loading"><p class="cvz-card-placeholder-text">' + escapeHtml(message) + '</p></div>';
+    }
+  }
+
+  // =========================================================================
+  // NEU (16.09.2026): 4 NEUE HAUPT-VIEWS
+  // =========================================================================
+
+  // ─── SITUATION ────────────────────────────────────────────────────────────
+  // Schnell-Übersicht: Wo stehen wir in jeder Phase + Top-Chancen auf einen
+  // Blick. Ziel: Marketer bekommt in 30 Sekunden das Wichtigste.
+  // NEU (16.09.2026): interne Fehlermeldungen aus main.py (z.B.
+  // "[generate_summary] Claude-Antwort war kein valides JSON") nutzerfreundlich
+  // aufbereiten, bevor sie im Frontend angezeigt werden. Rohe Step-Namen und
+  // technische Detail-Strings sollen nicht beim Endnutzer ankommen.
+  function sanitizeRunError(raw) {
+    if (!raw) return '';
+    // Internen Step-Namen "[step_name] " am Anfang entfernen
+    var cleaned = raw.replace(/^\[[^\]]+\]\s*/, '');
+    // Bekannte technische Muster auf nutzerfreundliche Texte mappen
+    var MAP = [
+      ['kein valides JSON', 'Analyse konnte nicht vollständig abgeschlossen werden. Beim nächsten Lauf wird es erneut versucht.'],
+      ['Claude-API-Fehler', 'Claude-API vorübergehend nicht erreichbar. Beim nächsten Lauf wird es erneut versucht.'],
+      ['timeout', 'Zeitüberschreitung beim Analyse-Lauf. Beim nächsten Lauf wird es erneut versucht.'],
+      ['connection', 'Verbindungsproblem beim Analyse-Lauf. Beim nächsten Lauf wird es erneut versucht.'],
+    ];
+    for (var i = 0; i < MAP.length; i++) {
+      if (cleaned.toLowerCase().indexOf(MAP[i][0].toLowerCase()) !== -1) return MAP[i][1];
+    }
+    return cleaned;
+  }
+
+  // --- VISIBILITY COMPARISON CHART ---
+  // Zeigt per Liniendiagramm: eigene Zitierrate pro Journey-Phase vs. Top-5-Wettbewerber.
+  // X-Achse = 4 Journey-Phasen, Y-Achse = Zitierrate 0-100 %.
+  function renderVisibilityComparisonChart(topicId, detail) {
+    var dashData = state.dashboardDataCache[topicId];
+    if (!dashData || dashData._error || !dashData.phase_scores) return null;
+
+    var sov = dashData.share_of_voice || {};
+
+    // Top-5-Wettbewerber: Summe der citation_rate ueber alle Phasen
+    var compTotals = {};
+    PHASE_ORDER.forEach(function (phase) {
+      (sov[phase] || []).forEach(function (c) {
+        if (c.domain) compTotals[c.domain] = (compTotals[c.domain] || 0) + (c.citation_rate || 0);
+      });
+    });
+    var topComps = Object.keys(compTotals)
+      .sort(function (a, b) { return compTotals[b] - compTotals[a]; })
+      .slice(0, 5);
+
+    // (Show chart even without competitor data, just own domain)
+
+    // NEU (17.09.2026): Gepinnte Wettbewerber aus localStorage laden
+    var _pinnedKey = 'cvz_chart_pins_' + topicId;
+    var pinnedComps = [];
+    try { pinnedComps = JSON.parse(localStorage.getItem(_pinnedKey) || '[]'); } catch (e) { pinnedComps = []; }
+    // Nur Domains anzeigen, die nicht bereits unter den Auto-Top-5 sind (max. 3)
+    var extraComps = pinnedComps.filter(function (d) { return topComps.indexOf(d) === -1; }).slice(0, 3);
+
+    // 5 Auto-Farben + 3 Extra-Farben fuer gepinnte Wettbewerber
+    var COMP_COLORS = ['#c98e2a', '#de5b50', '#8878ca', '#4ec68a', '#5aacd2', '#e8855b', '#a3c97a', '#c97ab5'];
+    var ownDomain = (detail.topic && detail.topic.own_domain) ? detail.topic.own_domain : 'Eure Domain';
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    section.style.marginTop = '24px';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Sichtbarkeit im Wettbewerbsvergleich';
+    section.appendChild(heading);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '14px';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt alle zitierten Domains, auch nicht best\u00e4tigte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck.';
+    section.appendChild(sub);
+
+    // Favicon-Hilfsfunktion
+    function _faviconImg(domain) {
+      var img = document.createElement('img');
+      img.src = 'https://www.google.com/s2/favicons?sz=16&domain=' + encodeURIComponent(domain);
+      img.style.cssText = 'width:14px;height:14px;flex-shrink:0;border-radius:2px;';
+      img.onerror = function () { this.style.display = 'none'; };
+      return img;
+    }
+
+    // Legende
+    var legend = document.createElement('div');
+    legend.style.cssText = 'display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;';
+
+    function _legendItem(label, color, own, domain) {
+      var hidden = domain ? isChartDomainHidden(topicId, domain) : false;
+      var item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'cvz-chart-legend-item' + (hidden ? ' cvz-chart-legend-item-hidden' : '');
+      item.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;background:none;border:none;padding:0;margin:0;' +
+        (domain ? 'cursor:pointer;' : '') +
+        (own ? 'color:var(--cvz-text,#e6edf3);font-weight:600;' : 'color:var(--cvz-text-muted,#8b98a5);');
+      if (domain) {
+        item.setAttribute('data-cvz-chart-domain-toggle', domain);
+        item.setAttribute('data-cvz-chart-domain-topic', topicId);
+        item.title = hidden ? 'Klicken zum Einblenden' : 'Klicken zum Ausblenden';
+      }
+      var swatch = document.createElement('span');
+      swatch.style.cssText = 'width:24px;height:3px;border-radius:2px;background:' + color + ';flex-shrink:0;' + (own ? '' : 'opacity:.75;');
+      item.appendChild(swatch);
+      if (domain) item.appendChild(_faviconImg(domain));
+      item.appendChild(document.createTextNode(label));
+      return item;
+    }
+
+    function _legendItemDashed(label, color, domain) {
+      var hidden = domain ? isChartDomainHidden(topicId, domain) : false;
+      var item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'cvz-chart-legend-item' + (hidden ? ' cvz-chart-legend-item-hidden' : '');
+      item.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);background:none;border:none;padding:0;margin:0;' +
+        (domain ? 'cursor:pointer;' : '');
+      if (domain) {
+        item.setAttribute('data-cvz-chart-domain-toggle', domain);
+        item.setAttribute('data-cvz-chart-domain-topic', topicId);
+        item.title = hidden ? 'Klicken zum Einblenden' : 'Klicken zum Ausblenden';
+      }
+      var swatch = document.createElement('span');
+      swatch.style.cssText =
+        'width:24px;height:3px;border-radius:2px;flex-shrink:0;opacity:.7;' +
+        'background:repeating-linear-gradient(90deg,' + color + ' 0,' + color + ' 5px,transparent 5px,transparent 9px);';
+      item.appendChild(swatch);
+      if (domain) item.appendChild(_faviconImg(domain));
+      item.appendChild(document.createTextNode(label));
+      return item;
+    }
+
+    legend.appendChild(_legendItem(ownDomain, '#4fd1c5', true, ownDomain));
+    topComps.forEach(function (domain, i) {
+      legend.appendChild(_legendItem(domain, COMP_COLORS[i], false, domain));
+    });
+    extraComps.forEach(function (domain, i) {
+      legend.appendChild(_legendItemDashed(domain, COMP_COLORS[5 + i], domain));
+    });
+    section.appendChild(legend);
+
+    // Datenpunkte aufbauen
+    var SVG_W = 580, SVG_P = 32;
+
+    // Nur Phasen mit tatsaechlichen Daten als X-Achse zeigen.
+    // Phasen ohne Läufe (total=0 fuer alle Kanaele UND kein Wettbewerber) werden ausgeblendet.
+    var PHASE_LABEL_MAP = { exploration: 'Exploration', evaluation: 'Evaluation', comparison: 'Vergleich', decision: 'Entscheidung' };
+    var activePhases = PHASE_ORDER.filter(function (phase) {
+      var scores = dashData.phase_scores[phase] || {};
+      var hasOwnData = CHANNEL_ORDER.some(function (ch) { var s = scores[ch]; return s && s.total > 0; });
+      var hasCompData = (sov[phase] || []).length > 0;
+      return hasOwnData || hasCompData;
+    });
+
+    // Wenn keine Phase Daten hat: Platzhalter statt leerem Chart
+    if (activePhases.length === 0) {
+      var noDataMsg = document.createElement('p');
+      noDataMsg.className = 'cvz-card-placeholder-text';
+      noDataMsg.style.cssText = 'margin-top:8px;font-style:italic;';
+      noDataMsg.textContent = 'Noch keine Vergleichsdaten vorhanden. Der Chart erscheint, sobald die erste Analyse abgeschlossen ist.';
+      section.appendChild(noDataMsg);
+      return section;
+    }
+
+    var xLabels = activePhases.map(function (p) { return PHASE_LABEL_MAP[p] || p; });
+
+    // Eigene Zitierrate: Durchschnitt ueber Kanaele mit Daten (null fuer inaktive Phasen)
+    var ownValues = activePhases.map(function (phase) {
+      var scores = dashData.phase_scores[phase] || {};
+      var total = 0, count = 0;
+      CHANNEL_ORDER.forEach(function (ch) {
+        var s = scores[ch];
+        if (s && s.total > 0) { total += (s.score || 0); count++; }
+      });
+      return count > 0 ? Math.round(total / count) : 0;
+    });
+
+    var seriesList = [{ label: ownDomain, color: '#4fd1c5', values: ownValues }];
+
+    // Wettbewerber-Zitierraten pro aktiver Phase
+    topComps.forEach(function (domain, i) {
+      var values = activePhases.map(function (phase) {
+        var entry = (sov[phase] || []).filter(function (c) { return c.domain === domain; })[0];
+        return entry ? Math.round(entry.citation_rate || 0) : 0;
+      });
+      seriesList.push({ label: domain, color: COMP_COLORS[i], values: values });
+    });
+    // NEU (17.09.2026): Gepinnte Extra-Wettbewerber (gestrichelte Linien)
+    extraComps.forEach(function (domain, i) {
+      var values = activePhases.map(function (phase) {
+        var entry = (sov[phase] || []).filter(function (c) { return c.domain === domain; })[0];
+        return entry ? Math.round(entry.citation_rate || 0) : 0;
+      });
+      seriesList.push({ label: domain, color: COMP_COLORS[5 + i], values: values, dashed: true });
+    });
+
+    // Chart-Karte
+    var chartCard = document.createElement('div');
+    chartCard.className = 'cvz-card';
+    chartCard.style.cssText = 'padding:16px 18px;';
+
+    // SVG einbetten
+    var svgWrap = document.createElement('div');
+    svgWrap.style.cssText = 'position:relative;';
+    svgWrap.innerHTML = buildLineChartSvg(seriesList, xLabels, { maxY: 100, height: 200, width: SVG_W });
+    var svgNode = svgWrap.querySelector('svg');
+    if (svgNode) {
+      svgNode.style.cssText = 'width:100%;display:block;';
+      svgNode.removeAttribute('width');
+      svgNode.removeAttribute('height');
+    }
+
+    // X-Achsen-Labels: als absolut positionierte Spans unter dem SVG
+    // Die Chart-Punkte liegen bei x = SVG_P + i * stepX (in SVG-Koordinaten)
+    // => als % von SVG_W gibt das die korrekte Position im responsiven SVG.
+    var stepX = xLabels.length > 1 ? (SVG_W - SVG_P * 2) / (xLabels.length - 1) : 0;
+    var labelRow = document.createElement('div');
+    labelRow.style.cssText = 'position:relative;height:18px;margin-top:3px;';
+    xLabels.forEach(function (lbl, i) {
+      var pct = ((SVG_P + i * stepX) / SVG_W * 100).toFixed(2) + '%';
+      var el = document.createElement('span');
+      el.style.cssText =
+        'position:absolute;left:' + pct + ';transform:translateX(-50%);' +
+        'font-size:10px;color:var(--cvz-text-muted,#8b98a5);white-space:nowrap;';
+      el.textContent = lbl;
+      labelRow.appendChild(el);
+    });
+    svgWrap.appendChild(labelRow);
+
+    chartCard.appendChild(svgWrap);
+    section.appendChild(chartCard);
+
+    // NEU (17.09.2026): Pin-Verwaltungs-UI unter dem Chart
+    var pinWrap = document.createElement('div');
+    pinWrap.style.cssText = 'margin-top:12px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;';
+
+    var pinLabel = document.createElement('span');
+    pinLabel.style.cssText = 'font-size:11px;color:var(--cvz-text-muted,#8b98a5);flex-shrink:0;';
+    pinLabel.textContent = 'Weitere Wettbewerber:';
+    pinWrap.appendChild(pinLabel);
+
+    // Alle bekannten Domains aus sov (ausser ownDomain und top-5) fuer Autocomplete
+    var _knownDomains = [];
+    PHASE_ORDER.forEach(function (phase) {
+      (sov[phase] || []).forEach(function (c) {
+        if (c.domain && c.domain !== ownDomain && topComps.indexOf(c.domain) === -1 && _knownDomains.indexOf(c.domain) === -1) {
+          _knownDomains.push(c.domain);
+        }
+      });
+    });
+    _knownDomains.sort();
+
+    function _rebuildPinUi() {
+      while (pinWrap.firstChild) pinWrap.removeChild(pinWrap.firstChild);
+      pinWrap.appendChild(pinLabel);
+
+      try { pinnedComps = JSON.parse(localStorage.getItem(_pinnedKey) || '[]'); } catch (e) { pinnedComps = []; }
+      var currentExtra = pinnedComps.filter(function (d) { return topComps.indexOf(d) === -1; }).slice(0, 3);
+
+      currentExtra.forEach(function (domain) {
+        var chip = document.createElement('span');
+        chip.style.cssText =
+          'display:inline-flex;align-items:center;gap:4px;padding:2px 6px 2px 5px;' +
+          'border-radius:20px;border:1px dashed var(--cvz-border,#30363d);' +
+          'font-size:11px;color:var(--cvz-text-muted,#8b98a5);background:var(--cvz-card-bg,#161b22);';
+        chip.appendChild(_faviconImg(domain));
+        chip.appendChild(document.createTextNode(domain));
+        var rm = document.createElement('button');
+        rm.type = 'button';
+        rm.style.cssText =
+          'background:none;border:none;padding:0 0 0 3px;cursor:pointer;line-height:1;' +
+          'font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+        rm.textContent = '✕';
+        rm.title = 'Entfernen';
+        rm.onclick = function () {
+          try {
+            var arr = JSON.parse(localStorage.getItem(_pinnedKey) || '[]');
+            arr = arr.filter(function (d) { return d !== domain; });
+            localStorage.setItem(_pinnedKey, JSON.stringify(arr));
+          } catch (e) {}
+          render();
+        };
+        chip.appendChild(rm);
+        pinWrap.appendChild(chip);
+      });
+
+      if (currentExtra.length < 3) {
+        var addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.style.cssText =
+          'display:inline-flex;align-items:center;gap:3px;padding:2px 8px;' +
+          'border-radius:20px;border:1px dashed var(--cvz-border,#30363d);' +
+          'font-size:11px;color:var(--cvz-text-muted,#8b98a5);background:none;cursor:pointer;';
+        addBtn.textContent = '+ Wettbewerber hinzufügen';
+        addBtn.onclick = function () {
+          pinWrap.removeChild(addBtn);
+
+          var datalistId = 'cvz-pin-dl-' + topicId;
+          if (!document.getElementById(datalistId)) {
+            var dl = document.createElement('datalist');
+            dl.id = datalistId;
+            _knownDomains.forEach(function (d) {
+              var opt = document.createElement('option');
+              opt.value = d;
+              dl.appendChild(opt);
+            });
+            pinWrap.appendChild(dl);
+          }
+
+          var inp = document.createElement('input');
+          inp.type = 'text';
+          inp.placeholder = 'domain.com';
+          inp.setAttribute('list', datalistId);
+          inp.style.cssText =
+            'font-size:11px;padding:2px 8px;border-radius:20px;' +
+            'border:1px solid var(--cvz-border,#30363d);background:var(--cvz-card-bg,#161b22);' +
+            'color:var(--cvz-text,#e6edf3);outline:none;width:145px;';
+
+          var okBtn = document.createElement('button');
+          okBtn.type = 'button';
+          okBtn.textContent = '✓';
+          okBtn.style.cssText =
+            'padding:2px 7px;border-radius:4px;border:none;background:var(--cvz-accent,#4fd1c5);' +
+            'color:#000;font-size:11px;cursor:pointer;';
+
+          function _commit() {
+            var val = inp.value.trim().toLowerCase()
+              .replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            if (!val) { _rebuildPinUi(); return; }
+            try {
+              var arr = JSON.parse(localStorage.getItem(_pinnedKey) || '[]');
+              var extra = arr.filter(function (d) { return topComps.indexOf(d) === -1; });
+              if (arr.indexOf(val) === -1 && extra.length < 3) arr.push(val);
+              localStorage.setItem(_pinnedKey, JSON.stringify(arr));
+            } catch (e) {}
+            render();
+          }
+
+          inp.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); _commit(); }
+            if (e.key === 'Escape') { _rebuildPinUi(); }
+          });
+          okBtn.onclick = _commit;
+
+          pinWrap.appendChild(inp);
+          pinWrap.appendChild(okBtn);
+          inp.focus();
+        };
+        pinWrap.appendChild(addBtn);
+      }
+    }
+
+    _rebuildPinUi();
+    section.appendChild(pinWrap);
+
+    return section;
+  }
+
+  function renderSituationTab(topicId, detail) {
+    var wrap = document.createElement('div');
+
+    // NEU (20.09.2026): Hinweis + Retry-Button für Schritte, die hier auf
+    // dieser Seite auftauchen (Zusammenfassung, Handlungsfelder,
+    // KI-Wissens-Check) und fehlgeschlagen sind, fehlen oder gerade laufen.
+    var situationStepNotice = renderStepNotice(detail, ['summary', 'opportunities', 'ai_knowledge']);
+    if (situationStepNotice) wrap.appendChild(situationStepNotice);
+
+    // Phase-Score-Übersicht (Dashboard-Daten, falls geladen)
+    // dashData === { _error: true }  → Ladefehler, einmalig gespeichert damit kein Endlos-Retry
+    // dashData === undefined          → noch nicht geladen (kommt nie hier an, da maybeLoad vorher)
+    var dashData = state.dashboardDataCache[topicId];
+    var dashError = dashData && dashData._error;
+    if (state.isLoadingDashboard) {
+      var loadEl = document.createElement('p');
+      loadEl.className = 'cvz-card-placeholder-text';
+      loadEl.innerHTML = '<span class="cvz-spinner"></span>KI-Sichtbarkeit wird geladen…';
+      wrap.appendChild(loadEl);
+    } else if (dashError) {
+      var errEl = document.createElement('p');
+      errEl.className = 'cvz-card-placeholder-text';
+      errEl.style.cssText = 'margin-bottom:12px;';
+      errEl.innerHTML =
+        'KI-Sichtbarkeitsdaten konnten nicht geladen werden. ' +
+        '<button type="button" data-cvz-journey-retry="' + escapeHtml(topicId) + '" ' +
+        'class="cvz-link-btn" style="font-size:inherit;">Erneut versuchen</button>';
+      wrap.appendChild(errEl);
+    } else if (!dashData || dashError) {
+      // Fallback: Phasen-Rollup aus den Prompts des Topic-Detaildatensatzes
+      var rollup = renderPhaseRollup(detail.prompts);
+      if (rollup) wrap.appendChild(rollup);
+    }
+    // GEÄNDERT (20.09.2026): Die kompakte Phasen-Scorecard, die hier stand,
+    // ist entfernt. Sie zeigte dieselbe Kennzahl (Zitierrate pro Phase inkl.
+    // Top-Wettbewerber) doppelt: einmal hier als Karten, direkt darunter noch
+    // einmal als vollständiger Chart (Wettbewerbsvergleich). Die identische
+    // Karten-Variante gab es außerdem nochmal im Journey-Map-Tab. Diese
+    // zweite Version bleibt dort (inkl. Kanal-Aufschlüsselung), hier reicht
+    // der Chart als einzige Quelle für "Zitierrate pro Phase".
+
+    // Wettbewerbs-Sichtbarkeitsvergleich (Chart)
+    var compChart = renderVisibilityComparisonChart(topicId, detail);
+    if (compChart) wrap.appendChild(compChart);
+
+    // NEU (23.09.2026): Sichtbarkeit je Rolle, inkl. Rollen bearbeiten
+    wrap.appendChild(renderRoleVisibilitySection(topicId, detail));
+
+    // VERSCHOBEN (20.09.2026): Die Wettbewerber-Tabelle mit Differenzierungs-
+    // Tipps pro Phase stand bisher nur im Journey-Map-Tab, war dort aber
+    // eingeklappt und stand hinter mehreren anderen Abschnitten, für eine
+    // so wichtige Analyse zu gut versteckt. Sie steht jetzt direkt hier,
+    // gleich hinter dem Wettbewerbsvergleich, im ersten Tab.
+    wrap.appendChild(renderJourneyShareOfVoice(dashData && dashData.share_of_voice));
+
+    // Beste Content-Chancen
+    var bestChances = renderBestContentChancesSection(detail.best_content_chances, detail.topic);
+    if (bestChances) wrap.appendChild(bestChances);
+
+    // Top Opportunities (max 3, kompakt)
+    var openOpps = (detail.opportunities || []).filter(function (o) {
+      return o.status === 'new' || o.status === 'reviewed';
+    });
+    if (openOpps.length > 0) {
+      var oppSection = document.createElement('div');
+      oppSection.className = 'cvz-section';
+
+      // Heading mit Tooltip
+      var oppHeadRow = document.createElement('div');
+      oppHeadRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
+      var oppHeading = document.createElement('p');
+      oppHeading.className = 'cvz-section-label';
+      oppHeading.style.margin = '0';
+      oppHeading.textContent = 'Wichtigste Handlungsfelder';
+      oppHeadRow.appendChild(oppHeading);
+      oppHeadRow.appendChild(makeTip(
+        'Das System erkennt automatisch Chancen aus deinen KI-Sichtbarkeits- und GSC-Daten: wo du fast rankst, wo Konkurrenten dich verdrängen, wo neue Fragen auftauchen. Jede Zeile aufklappen, um die konkreten Keywords oder Domains dahinter zu sehen.'
+      ));
+      oppSection.appendChild(oppHeadRow);
+
+      // Subtitle
+      var oppSub = document.createElement('p');
+      oppSub.className = 'cvz-card-placeholder-text';
+      oppSub.style.marginBottom = '14px';
+      oppSub.textContent = 'Automatisch erkannte Chancen auf Basis eurer KI-Sichtbarkeits- und GSC-Daten, sortiert nach Priorität. Konkrete Umsetzungsempfehlungen im Aktionsplan-Tab.';
+      oppSection.appendChild(oppSub);
+      oppSection.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at));
+      oppSection.appendChild(renderNextRunNote(detail.topic, 30));
+
+      // Sort by priority
+      var PRIORITY_ORDER = [
+        'near_miss_ranking', 'high_demand_low_visibility',
+        'google_visible_ai_invisible', 'competitor_citation',
+        'ai_visible_competitor_dominates', 'new_question',
+      ];
+      var sortedOpps = openOpps.slice().sort(function (a, b) {
+        return PRIORITY_ORDER.indexOf(a.opportunity_type) - PRIORITY_ORDER.indexOf(b.opportunity_type);
+      });
+
+      // Fallback-Empfehlungen pro Opportunity-Typ (wenn content_recommendation noch leer)
+      var OPP_FALLBACK_RECOMMENDATION = {
+        'near_miss_ranking': 'Content gezielt auf diese Keywords optimieren: Meta-Title/H1 schärfen, Suchintention prüfen (informationell vs. transaktional), interne Verlinkung stärken. Ziel: von Position 15+ in die Top 10.',
+        'high_demand_low_visibility': 'Dedizierten Content für diese Keywords erstellen oder bestehende Seiten ausbauen. Format: FAQ, Ratgeber oder Vergleichsseite je nach Suchintention.',
+        'google_visible_ai_invisible': 'Bestehende Seiten so ausbauen, dass KI-Systeme sie als zitierwürdige Quelle einordnen: klare Autorenschaft, konkrete Aussagen mit Zahlen, strukturierte Antworten auf die Fragen hinter dem Keyword.',
+        'competitor_citation': 'Analysieren, welche Inhalte die häufig zitierten Domains zu diesem Thema haben, und ähnliche Inhalte mit klarer Differenzierung erstellen (eigene Daten, Expertise, Perspektive).',
+        'ai_visible_competitor_dominates': 'Eigene Leitseite zum Thema erstellen: strukturierte Antwort auf die Top-Fragen, mit nachprüfbaren Fakten und klarer Autorenschaft, damit KI-Systeme sie als Alternative zitieren.',
+        'new_question': 'Diese neuen Suchintentionen frühzeitig besetzen: dedizierten Content erstellen, bevor der Wettbewerb aufholt. FAQ-Block oder eigenständige Seite je nach Volumen.',
+      };
+
+      // Erklaerungstexte fuer die Typ-Chips (werden als Tooltip am Chip angezeigt)
+      var OPP_TYPE_TOOLTIPS = {
+        'near_miss_ranking': 'Ihr ranktet schon auf Seite 2 für dieses Keyword (Position 15+, mind. 30 Impressionen). Kleine SEO-Hebel können hier schnell auf Seite 1 bringen.',
+        'high_demand_low_visibility': 'Dieses Keyword hat viel Suchvolumen, aber ihr seid weder in Google noch in KI-Antworten sichtbar. Großes Potenzial, noch kein Fuß in der Tür.',
+        'google_visible_ai_invisible': 'Ihr ranktet gut in Google, aber KI-Systeme wie ChatGPT zitieren euch nicht. Bestehender Content muss "KI-tauglicher" werden.',
+        'competitor_citation': 'Eine konkrete Wettbewerber-Domain wird regelmäßig an eurer Stelle zitiert. Hier lohnt sich ein direkter Inhaltsvergleich.',
+        'ai_visible_competitor_dominates': 'KI-Systeme zitieren euch zwar, aber ein Wettbewerber deutlich häufiger. Eure Positionierung oder Tiefe reicht noch nicht aus.',
+        'new_question': 'Neue Fragen, die in KI-Prompts auftauchen und die ihr noch nicht beantwortet. Frühzeitig Content erstellen, bevor Wettbewerber das Thema besetzen.',
+      };
+
+      // Table wrapper (mobile scrollable)
+      var oppTableWrap = document.createElement('div');
+      oppTableWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+
+      var oppTable = document.createElement('table');
+      oppTable.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+
+      // Header: toggle | Typ | Was wir sehen | Empfohlene Massnahme
+      var oppThead = document.createElement('thead');
+      var oppHeaderRow = document.createElement('tr');
+      [['', 'width:24px;', ''], ['Typ', 'width:148px;white-space:nowrap;', ''], ['Was wir sehen', '', ''], ['Empfohlene Massnahme', 'width:28%;', 'cvz-opp-rec-header']].forEach(function (pair) {
+        var th = document.createElement('th');
+        th.textContent = pair[0];
+        if (pair[2]) th.className = pair[2];
+        th.style.cssText =
+          'text-align:left;padding:7px 10px;' +
+          'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
+          'color:var(--cvz-text-muted,#8b98a5);' +
+          'border-bottom:1px solid var(--cvz-border,#232b36);' + pair[1];
+        oppHeaderRow.appendChild(th);
+      });
+      oppThead.appendChild(oppHeaderRow);
+      oppTable.appendChild(oppThead);
+
+      // Body
+      var oppTbody = document.createElement('tbody');
+      sortedOpps.forEach(function (opp, idx) {
+        var tcfg = OPP_TYPE_CONFIG[opp.opportunity_type] || { color: '#8b98a5', bg: 'rgba(139,152,165,.08)', border: 'rgba(139,152,165,.3)' };
+        var typeLabel = OPPORTUNITY_TYPE_LABELS[opp.opportunity_type] || opp.opportunity_type;
+        var oppId = opp.id || (opp.opportunity_type + '_' + idx);
+        var isExpanded = state.expandedOppId === oppId;
+        var rowBg = idx % 2 === 1 ? 'rgba(255,255,255,.025)' : 'transparent';
+
+        var tr = document.createElement('tr');
+        tr.style.cssText = 'border-bottom:1px solid var(--cvz-border,#232b36);cursor:pointer;background:' + rowBg + ';';
+        tr.setAttribute('data-cvz-opp-toggle', oppId);
+
+        // Col 0: chevron toggle
+        var tdToggle = document.createElement('td');
+        tdToggle.style.cssText = 'padding:12px 6px 12px 10px;vertical-align:top;color:var(--cvz-text-muted,#8b98a5);font-size:11px;user-select:none;';
+        tdToggle.textContent = isExpanded ? '▾' : '▸';
+        tr.appendChild(tdToggle);
+
+        // Col 1: Typ chip (mit Tooltip)
+        var tdTyp = document.createElement('td');
+        tdTyp.style.cssText = 'padding:12px 10px;vertical-align:top;';
+        var chipWrap = document.createElement('div');
+        chipWrap.style.cssText = 'display:flex;align-items:center;gap:5px;';
+        var chip = document.createElement('span');
+        chip.textContent = typeLabel;
+        chip.style.cssText =
+          'display:inline-block;' +
+          'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
+          'padding:3px 8px;border-radius:9999px;white-space:nowrap;' +
+          'color:' + tcfg.color + ';background:' + tcfg.bg + ';border:1px solid ' + tcfg.border + ';';
+        chipWrap.appendChild(chip);
+        var tipText = OPP_TYPE_TOOLTIPS[opp.opportunity_type];
+        if (tipText) chipWrap.appendChild(makeTip(tipText));
+        tdTyp.appendChild(chipWrap);
+        tr.appendChild(tdTyp);
+
+        // Col 2: Beschreibung (max 3 Zeilen, Rest per Expand sichtbar)
+        var tdDesc = document.createElement('td');
+        tdDesc.style.cssText = 'padding:12px 10px;vertical-align:top;line-height:1.65;color:var(--cvz-text-muted,#8b98a5);';
+        var descInner = document.createElement('div');
+        // GEAENDERT (18.09.2026): Klammerung (line-clamp:3) faellt weg, wenn
+        // die Zeile aufgeklappt ist. Vorher blieb der Text auch nach dem
+        // Klick auf 3 Zeilen begrenzt, das Aufklappen zeigte nur die
+        // Keywords/Domains-Tabelle darunter, nicht den vollen Beschreibungs-
+        // text. Auf Mobile (keine Maus fuer Hover/Tooltip) war der
+        // abgeschnittene Text dadurch nirgends vollstaendig lesbar.
+        if (!isExpanded) {
+          descInner.style.cssText = 'display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;';
+        }
+        descInner.textContent = opp.description || '';
+        tdDesc.appendChild(descInner);
+        tr.appendChild(tdDesc);
+
+        // Col 3: Massnahme, auf Mobile ausgeblendet (steht ausführlich im Aktionsplan-Tab)
+        var tdRec = document.createElement('td');
+        tdRec.className = 'cvz-opp-rec-col';
+        tdRec.style.cssText = 'padding:12px 10px;vertical-align:top;line-height:1.5;font-size:12px;';
+        var recText = opp.content_recommendation || OPP_FALLBACK_RECOMMENDATION[opp.opportunity_type] || '';
+        var recInner = document.createElement('div');
+        // GEAENDERT (18.09.2026): gleiche Begruendung wie bei descInner oben.
+        if (!isExpanded) {
+          recInner.style.cssText = 'display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;';
+        }
+        recInner.style.color = 'var(--cvz-text-muted,#8b98a5)';
+        recInner.textContent = recText || '-';
+        tdRec.appendChild(recInner);
+        tr.appendChild(tdRec);
+        oppTbody.appendChild(tr);
+
+        // Expansion row: Keywords oder Domains aus supporting_data
+        if (isExpanded) {
+          var expTr = document.createElement('tr');
+          expTr.style.cssText = 'background:' + rowBg + ';';
+          var expTd = document.createElement('td');
+          expTd.colSpan = 4;
+          expTd.style.cssText = 'padding:0 10px 14px 38px;';
+
+          var sd = opp.supporting_data || {};
+          var expContent = document.createElement('div');
+          expContent.style.cssText = 'padding:10px 0 2px;';
+
+          if (sd.keywords && sd.keywords.length > 0) {
+            // Keywords-Tabelle (near_miss_ranking, high_demand_low_visibility, google_visible_ai_invisible, new_question)
+            var kwTable = document.createElement('table');
+            kwTable.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;max-width:560px;';
+            var kwHead = document.createElement('thead');
+            var kwHr = document.createElement('tr');
+            var kwCols = [];
+            var first = sd.keywords[0];
+            if (first.search_volume !== undefined) kwCols = [['Keyword', ''], ['Suchvolumen/Monat', 'width:140px;text-align:right;']];
+            else if (first.organic_rank !== undefined) kwCols = [['Keyword', ''], ['Google-Position', 'width:130px;text-align:right;']];
+            else kwCols = [['Keyword', ''], ['Impressionen', 'width:100px;text-align:right;'], ['Position', 'width:80px;text-align:right;']];
+            kwCols.forEach(function (c) {
+              var th = document.createElement('th');
+              th.textContent = c[0];
+              th.style.cssText = 'padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#232b36);text-align:left;' + c[1];
+              kwHr.appendChild(th);
+            });
+            kwHead.appendChild(kwHr);
+            kwTable.appendChild(kwHead);
+            var kwBody = document.createElement('tbody');
+            sd.keywords.forEach(function (k, ki) {
+              var ktr = document.createElement('tr');
+              ktr.style.cssText = ki % 2 === 1 ? 'background:rgba(255,255,255,.02);' : '';
+              var cells = [];
+              if (first.search_volume !== undefined) {
+                cells = [[k.keyword || '', 'text-align:left;'], [k.search_volume != null ? String(k.search_volume) : '-', 'text-align:right;color:var(--cvz-teal,#4fd1c5);']];
+              } else if (first.organic_rank !== undefined) {
+                cells = [[k.keyword || '', 'text-align:left;'], [k.organic_rank != null ? String(k.organic_rank) : '-', 'text-align:right;color:var(--cvz-amber,#c98e2a);']];
+              } else {
+                cells = [
+                  [k.keyword || '', 'text-align:left;'],
+                  [k.impressions != null ? String(k.impressions) : '-', 'text-align:right;color:var(--cvz-teal,#4fd1c5);'],
+                  [k.position != null ? Number(k.position).toFixed(1) : '-', 'text-align:right;color:var(--cvz-amber,#c98e2a);'],
+                ];
+              }
+              cells.forEach(function (cell) {
+                var ktd = document.createElement('td');
+                ktd.textContent = cell[0];
+                ktd.style.cssText = 'padding:5px 8px;border-bottom:1px solid rgba(35,43,54,.5);' + cell[1];
+                ktr.appendChild(ktd);
+              });
+              kwBody.appendChild(ktr);
+            });
+            kwTable.appendChild(kwBody);
+            expContent.appendChild(kwTable);
+
+          } else if ((sd.cited_domains || sd.competitor_domains_cited) && (sd.cited_domains || sd.competitor_domains_cited).length > 0) {
+            // Domains-Liste (competitor_citation, ai_visible_competitor_dominates)
+            var domains = sd.cited_domains || sd.competitor_domains_cited;
+            var domLabel = document.createElement('p');
+            domLabel.style.cssText = 'margin:0 0 6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#8b98a5);';
+            domLabel.textContent = 'Zitierte Domains';
+            expContent.appendChild(domLabel);
+            var domList = document.createElement('div');
+            domList.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+            domains.forEach(function (d) {
+              var pill = document.createElement('span');
+              pill.textContent = d;
+              pill.style.cssText = 'display:inline-block;padding:3px 10px;border-radius:9999px;font-size:11px;background:rgba(139,152,165,.1);border:1px solid rgba(139,152,165,.25);color:var(--cvz-text-muted,#8b98a5);';
+              domList.appendChild(pill);
+            });
+            expContent.appendChild(domList);
+
+          } else {
+            var noData = document.createElement('p');
+            noData.style.cssText = 'margin:0;font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+            noData.textContent = 'Keine Detail-Daten verfügbar.';
+            expContent.appendChild(noData);
+          }
+
+          expTd.appendChild(expContent);
+          expTr.appendChild(expTd);
+          oppTbody.appendChild(expTr);
+        }
+      });
+      oppTable.appendChild(oppTbody);
+      oppTableWrap.appendChild(oppTable);
+      oppSection.appendChild(oppTableWrap);
+      wrap.appendChild(oppSection);
+    }
+
+    // NEU (20.09.2026): KI-Wissens-Check: was ChatGPT/Gemini über euch
+    // wissen. War bisher nur als Funktion vorhanden, wurde aber in keinem
+    // Tab tatsächlich angezeigt.
+    var knowledgeSection = renderKnowledgeSection(detail);
+    if (knowledgeSection) wrap.appendChild(knowledgeSection);
+
+    return wrap;
+  }
+
+  // ─── JOURNEY MAP ──────────────────────────────────────────────────────────
+  // Detaillierte Phasenanalyse: Eigene Sichtbarkeit + welche Wettbewerber-
+  // Inhalte dominieren pro Phase + Wettbewerber-Detailtabellen.
+  function renderJourneyMapTab(topicId, detail) {
+    var wrap = document.createElement('div');
+
+    // NEU (20.09.2026): Retry-Hinweis für die Schritte, die in diesem Tab
+    // dargestellt werden (Content-Lücken, Quellen-Analyse, SERP-Check,
+    // Wettbewerber-Vorschläge).
+    var journeyStepNotice = renderStepNotice(detail, ['gap_analysis', 'source_analysis', 'serp_check', 'competitor_suggestions']);
+    if (journeyStepNotice) wrap.appendChild(journeyStepNotice);
+
+    if (state.isLoadingDashboard) {
+      var loadEl = document.createElement('p');
+      loadEl.className = 'cvz-card-placeholder-text';
+      loadEl.innerHTML = '<span class="cvz-spinner"></span>Journey-Map wird geladen…';
+      wrap.appendChild(loadEl);
+      return wrap;
+    }
+
+    var data = state.dashboardDataCache[topicId];
+    if (!data || data._error) {
+      var errEl = document.createElement('div');
+      errEl.className = 'cvz-card cvz-card-placeholder';
+      var errMsg = data && data._error
+        ? 'Journey-Map-Daten konnten nicht geladen werden.'
+        : 'Noch keine Journey-Map-Daten vorhanden. Diese entstehen nach dem ersten vollstaendigen Analyse-Lauf.';
+      errEl.innerHTML = '<p class="cvz-card-placeholder-text">' + escapeHtml(errMsg) + '</p>' +
+        '<p style="margin-top:8px;"><button type="button" ' +
+        'style="padding:6px 14px;font-size:13px;border-radius:6px;border:1px solid var(--cvz-border,#e5e7eb);' +
+        'background:transparent;color:var(--cvz-text,#374151);cursor:pointer;" ' +
+        'data-cvz-journey-retry="' + topicId + '">Erneut laden</button></p>';
+      wrap.appendChild(errEl);
+      return wrap;
+    }
+
+    wrap.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at, 'Datenstand dieses Tabs'));
+    // GEÄNDERT (25.09.2026, Kundenwunsch): Phasen-Zitierraten in diesem Tab
+    // speisen sich aus BEIDEN Kadenzen -- Content-Lücken/Quellen-Profile
+    // (monatlich) UND Prompt-Zitationen (wöchentlich, _weekly_background).
+    // Zwei getrennte Hinweise, sonst wäre einer davon falsch.
+    wrap.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Content-Lücken, Quellen)'));
+    wrap.appendChild(renderNextRunNote(detail.topic, 7, 'Nächster Durchlauf (Zitationen)'));
+
+    // Phasen-Detail-Grid: Pro Phase eigene Zitierrate + Kanal-Aufschluss + Top-Wettbewerber-Inhalt
+    var phaseSection = document.createElement('div');
+    phaseSection.className = 'cvz-section';
+    var phaseHeading = document.createElement('p');
+    phaseHeading.className = 'cvz-section-label';
+    phaseHeading.textContent = 'KI-Sichtbarkeit nach Journey-Phase';
+    phaseSection.appendChild(phaseHeading);
+    var phaseSub = document.createElement('p');
+    phaseSub.className = 'cvz-card-placeholder-text';
+    phaseSub.style.marginBottom = '12px';
+    phaseSub.textContent = 'Wie oft wird eure Domain pro Phase und KI-Kanal zitiert (0-100 %). Darunter: dominierender Wettbewerber-Content.';
+    phaseSection.appendChild(phaseSub);
+
+    var phaseGrid = document.createElement('div');
+    phaseGrid.className = 'cvz-journey-phase-grid';
+
+    PHASE_ORDER.forEach(function (phase) {
+      var scores = (data.phase_scores || {})[phase] || {};
+      var color = PHASE_COLORS[phase] || '#8b98a5';
+      var competitors = ((data.share_of_voice || {})[phase] || []);
+      var promptCount = (data.prompt_count_by_phase || {})[phase] || 0;
+
+      var card = document.createElement('div');
+      card.className = 'cvz-journey-phase-card';
+      card.style.borderTopColor = color;
+
+      var nameEl = document.createElement('p');
+      nameEl.className = 'cvz-journey-phase-name';
+      nameEl.style.color = color;
+      nameEl.textContent = PHASE_LABELS[phase] || phase;
+      if (promptCount > 0) {
+        nameEl.textContent += ' (' + promptCount + ')';
+      }
+      card.appendChild(nameEl);
+
+      // Per-channel rows
+      CHANNEL_ORDER.forEach(function (channel) {
+        var ch = scores[channel] || { score: 0, cited: 0, total: 0 };
+        var pct = Math.round(ch.score || 0);
+        var row = document.createElement('div');
+        row.className = 'cvz-journey-channel-row';
+        var lbl = document.createElement('span');
+        lbl.className = 'cvz-journey-channel-label';
+        lbl.textContent = CHANNEL_LABELS[channel] || channel;
+        row.appendChild(lbl);
+        var barWrap = document.createElement('div');
+        barWrap.className = 'cvz-journey-bar-wrap';
+        var bar = document.createElement('div');
+        bar.className = 'cvz-journey-bar-fill';
+        bar.style.width = pct + '%';
+        bar.style.backgroundColor = color;
+        barWrap.appendChild(bar);
+        row.appendChild(barWrap);
+        var num = document.createElement('span');
+        num.className = 'cvz-journey-channel-num';
+        num.textContent = pct + '%';
+        if (ch.total > 0) num.title = ch.cited + ' von ' + ch.total + ' Prompts zitiert';
+        row.appendChild(num);
+        card.appendChild(row);
+      });
+
+      // Top competitor for this phase
+      if (competitors.length > 0) {
+        var divider = document.createElement('div');
+        divider.style.cssText = 'margin:8px 0 6px;border-top:1px solid var(--cvz-border,#e5e7eb);';
+        card.appendChild(divider);
+        var compLabel = document.createElement('p');
+        compLabel.style.cssText = 'margin:0 0 4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--cvz-text-muted,#6b7280);';
+        compLabel.textContent = 'Top-Wettbewerber';
+        card.appendChild(compLabel);
+        competitors.slice(0, 2).forEach(function (comp) {
+          var compPct = Math.round(comp.citation_rate || 0);
+          var compRow = document.createElement('div');
+          compRow.className = 'cvz-journey-channel-row';
+          compRow.innerHTML =
+            '<span class="cvz-journey-channel-label" style="color:var(--cvz-text-muted,#6b7280);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(comp.domain) + '">' + escapeHtml(comp.domain) + '</span>' +
+            '<div class="cvz-journey-bar-wrap"><div class="cvz-journey-bar-fill" style="width:' + compPct + '%;background:#d1d5db"></div></div>' +
+            '<span class="cvz-journey-channel-num" style="color:var(--cvz-text-muted,#6b7280);">' + compPct + '%</span>';
+          card.appendChild(compRow);
+          if (comp.content_type) {
+            var typeEl = document.createElement('p');
+            typeEl.style.cssText = 'margin:1px 0 3px;font-size:10px;color:var(--cvz-text-muted,#9ca3af);padding-left:4px;';
+            typeEl.textContent = CONTENT_TYPE_LABELS[comp.content_type] || comp.content_type;
+            card.appendChild(typeEl);
+          }
+        });
+      }
+
+      phaseGrid.appendChild(card);
+    });
+
+    phaseSection.appendChild(phaseGrid);
+    wrap.appendChild(phaseSection);
+
+    // VERSCHOBEN (20.09.2026): Die detaillierte Wettbewerber-Tabelle pro
+    // Phase (mit Differenzierungs-Tipps) steht jetzt im Situation-Tab, gleich
+    // hinter dem Wettbewerbsvergleichs-Chart, dort ist sie sofort sichtbar
+    // statt hier hinter mehreren anderen Abschnitten versteckt.
+
+    // Content-Lücken aus Gap-Analyse (GEAENDERT 17.09.2026: topicId + Phase-Filter)
+    wrap.appendChild(renderContentGapsSection(detail.content_gaps, topicId));
+
+    // Quellen-Analyse (GEAENDERT 17.09.2026: phase-gruppiert via share_of_voice)
+    var _sov = data.share_of_voice || {};
+    var _hasSov = PHASE_ORDER.some(function (p) { return _sov[p] && _sov[p].length; });
+    if (_hasSov || (detail.source_profiles && detail.source_profiles.length > 0)) {
+      wrap.appendChild(renderSourceProfilesSection(detail.source_profiles, topicId, _sov));
+    }
+
+    // VERSCHOBEN (17.09.2026): Wettbewerber-Verwaltung gehoert zur Journey Map,
+    // weil die bestaetigten Domains den Alert „Wettbewerber ueberholt euch" und
+    // die Share-of-Voice-Analyse in diesem Tab steuern.
+    var compManageWrap = document.createElement('div');
+    compManageWrap.style.cssText = 'margin-top:28px;padding-top:20px;border-top:1px solid var(--cvz-border,#30363d);';
+    var compManageHeading = document.createElement('p');
+    compManageHeading.className = 'cvz-section-label';
+    compManageHeading.textContent = 'Beobachtete Wettbewerber';
+    compManageWrap.appendChild(compManageHeading);
+    var compManageSub = document.createElement('p');
+    compManageSub.className = 'cvz-card-placeholder-text';
+    compManageSub.style.marginBottom = '10px';
+    compManageSub.textContent =
+      'Diese Domains steuern den Alert „Wettbewerber überholt euch“ ' +
+      'und werden in der Share-of-Voice-Analyse oben gesondert hervorgehoben. ' +
+      'Der Vergleichs-Chart im Überblick zeigt davon unabhängig alle KI-zitierten Domains.';
+    compManageWrap.appendChild(compManageSub);
+    compManageWrap.appendChild(renderCompetitorManageSection(detail, topicId));
+    wrap.appendChild(compManageWrap);
+
+    return wrap;
+  }
+
+  // ─── SUPPORTING DATA TABLE ────────────────────────────────────────────────
+  // Baut eine kleine Datentabelle (DOM), die die Rohdaten hinter einem
+  // Aktionsplan-Item auflistet: je nach Kategorie Prompts, Keywords oder
+  // Wettbewerber.
+  // GEAENDERT (21.09.2026): 4. Parameter "item" (das Aktionsplan-Item selbst).
+  // Die Google-Tabelle zeigte bisher ALLE GSC-Keywords der Domain (auch aus anderen
+  // Geschaeftsbereichen, z.B. 55 Zeilen mit brownfield/BTP unter "SAP Archivierung").
+  // Jetzt nur noch die Zeilen, die zu diesem Item gehoeren (siehe _pickGscRowsForItem).
+  // Laesst sich keine Zeile eindeutig zuordnen, erscheint keine Tabelle.
+  function _normalizeUrlForMatch(u) {
+    return String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/[#?].*$/, '').replace(/\/+$/, '');
+  }
+  function _pickGscRowsForItem(kws, item) {
+    var ev = (item && item.evidence) || {};
+    // 1) Keywords, die auf dieselbe URL zeigen wie der Beleg des Items
+    var evUrl = ev.page_url ? _normalizeUrlForMatch(ev.page_url) : '';
+    if (evUrl) {
+      var byUrl = kws.filter(function (q) { return _normalizeUrlForMatch(q.page_url) === evUrl; });
+      if (byUrl.length) return byUrl;
+    }
+    // 2) Keywords, die im Text des Items vorkommen
+    var text = [item && item.title, item && item.situation, item && item.recommendation].join(' ').toLowerCase();
+    var byText = kws.filter(function (q) { return q.keyword && text.indexOf(String(q.keyword).toLowerCase()) !== -1; });
+    if (byText.length) return byText;
+    // 3) Die Zeile mit genau der Position und den Impressionen aus dem Beleg
+    if (ev.position != null && ev.impressions != null) {
+      var byNum = kws.filter(function (q) {
+        return Math.abs(Number(q.gsc_position) - Number(ev.position)) < 0.06 && Number(q.gsc_impressions) === Number(ev.impressions);
+      });
+      if (byNum.length) return byNum;
+    }
+    return [];
+  }
+  function _buildSupportingDataTable(catKey, phase, detail, item) {
+    var rows = [];
+    var headers = [];
+
+    if (catKey === 'ki_sichtbarkeit') {
+      var prompts = (detail.prompts || []).filter(function (p) {
+        return (phase === 'alle_phasen' || p.messymiddle_phase === phase)
+          && p.total_runs > 0;
+      }).sort(function (a, b) { return (b.cited_count || 0) - (a.cited_count || 0); });
+      if (prompts.length === 0) return null;
+      headers = ['Prompt', 'Zitiert', 'Läufe', 'Rate'];
+      rows = prompts.map(function (p) {
+        var rate = p.total_runs > 0 ? Math.round((p.cited_count / p.total_runs) * 100) : 0;
+        return [
+          p.prompt_text || '',
+          String(p.cited_count || 0),
+          String(p.total_runs || 0),
+          rate + '%'
+        ];
+      });
+    } else if (catKey === 'google_ranking') {
+      var kws = (detail.search_queries || []).filter(function (q) {
+        return (phase === 'alle_phasen' || q.messymiddle_phase === phase)
+          && q.gsc_position != null;
+      }).sort(function (a, b) { return (a.gsc_position || 999) - (b.gsc_position || 999); });
+      kws = _pickGscRowsForItem(kws, item);
+      if (kws.length === 0) return null;
+      headers = ['Keyword', 'Position', 'Impressionen'];
+      rows = kws.map(function (q) {
+        return [
+          q.keyword || '',
+          q.gsc_position != null ? (Math.round(q.gsc_position * 10) / 10).toLocaleString('de-DE') : '',
+          q.gsc_impressions != null ? Number(q.gsc_impressions).toLocaleString('de-DE') : ''
+        ];
+      });
+    } else if (catKey === 'wettbewerb') {
+      var comps = (detail.competitor_insights || []).filter(function (c) { return c.domain; });
+      if (comps.length === 0) return null;
+      headers = ['Wettbewerber', 'Stärke', 'Schwäche'];
+      rows = comps.map(function (c) {
+        return [
+          c.domain || '',
+          c.strength || '',
+          c.weakness || ''
+        ];
+      });
+    } else if (catKey === 'content_luecke') {
+      var gaps = (detail.prompts || []).filter(function (p) {
+        return (phase === 'alle_phasen' || p.messymiddle_phase === phase)
+          && p.cited_count === 0 && p.total_runs > 0;
+      });
+      if (gaps.length === 0) return null;
+      headers = ['Prompt ohne eigene Zitierung', 'Läufe'];
+      rows = gaps.map(function (p) {
+        return [p.prompt_text || '', String(p.total_runs || 0)];
+      });
+    }
+
+    if (rows.length === 0) return null;
+
+    var wrapper = document.createElement('div');
+    wrapper.style.cssText = 'margin-top:4px;';
+
+    var lbl = document.createElement('p');
+    lbl.style.cssText = 'margin:0 0 6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--cvz-text-muted,#8b98a5);';
+    lbl.textContent = 'Zugrunde liegende Daten';
+    wrapper.appendChild(lbl);
+
+    var tbl = document.createElement('table');
+    tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;';
+
+    var thead = document.createElement('thead');
+    var trh = document.createElement('tr');
+    headers.forEach(function (h, hi) {
+      var th = document.createElement('th');
+      th.style.cssText = 'text-align:' + (hi === 0 ? 'left' : 'right') + ';padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#232b36);white-space:nowrap;';
+      th.textContent = h;
+      trh.appendChild(th);
+    });
+    thead.appendChild(trh);
+    tbl.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    rows.forEach(function (row, ri) {
+      var tr = document.createElement('tr');
+      tr.style.cssText = (ri % 2 === 0 ? 'background:transparent;' : 'background:rgba(255,255,255,.03);');
+      row.forEach(function (cell, ci) {
+        var td = document.createElement('td');
+        td.style.cssText = 'padding:5px 8px;color:var(--cvz-text-muted,#8b98a5);vertical-align:top;' +
+          (ci === 0 ? 'text-align:left;word-break:break-word;max-width:220px;' : 'text-align:right;white-space:nowrap;');
+        td.textContent = cell;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+
+    var scrollWrap = document.createElement('div');
+    scrollWrap.style.cssText = 'overflow-x:auto;border:1px solid var(--cvz-border,#232b36);border-radius:6px;';
+    scrollWrap.appendChild(tbl);
+    wrapper.appendChild(scrollWrap);
+    return wrapper;
+  }
+
+  // ─── AKTIONSPLAN ──────────────────────────────────────────────────────────
+  // Strukturierte Aktions-Karten: Situation / Was rankt & wird zitiert / Empfehlung.
+  // Priorisiert nach Impact; near-miss Keywords mit URL, Position und SERP-Kontext.
+  // NEU (16.09.2026): Aktionsplan-Tab liest jetzt detail.action_plan statt
+  // detail.opportunities + detail.content_ideas. Claude generiert die Items
+  // phasengerecht mit typisierten Evidence-Bloecken.
+  function renderAktionsplanTab(detail) {
+    var wrap = document.createElement('div');
+
+    // NEU (20.09.2026): Retry-Hinweis, falls die Aktionsplan-Generierung
+    // fehlgeschlagen ist oder noch fehlt.
+    var apStepNotice = renderStepNotice(detail, ['action_plan']);
+    if (apStepNotice) wrap.appendChild(apStepNotice);
+
+    var PHASE_ORDER = ['alle_phasen', 'exploration', 'evaluation', 'comparison', 'decision'];
+    var PHASE_LABEL_MAP = {
+      exploration: 'Exploration',
+      evaluation:  'Bewertung',
+      comparison:  'Vergleich',
+      decision:    'Entscheidung',
+      alle_phasen: 'Alle Phasen',
+    };
+    var PHASE_COLOR_MAP = {
+      exploration: '#8878ca',
+      evaluation:  '#5aacd2',
+      comparison:  '#4ec68a',
+      decision:    '#c98e2a',
+      alle_phasen: '#4a5568',
+    };
+    var CAT_LABEL_MAP = {
+      ki_sichtbarkeit: 'KI-Sichtbarkeit',
+      google_ranking:  'Google-Ranking',
+      wettbewerb:      'Wettbewerb',
+      content_luecke:  'Content-Lücke',
+    };
+    var IMPACT_COLOR_MAP = { hoch: '#de5b50', mittel: '#c98e2a', niedrig: '#4a5568' };
+    var IMPACT_LABEL_MAP = { hoch: 'Hoch', mittel: 'Mittel', niedrig: 'Niedrig' };
+
+    var ap = detail.action_plan || {};
+    // DIAGNOSE-LOG (17.09.2026): zeigt im Browser-DevTools-Console was der Server liefert.
+    // Kann nach Bestätigung dass alles funktioniert wieder entfernt werden.
+    console.log('[CVZ] renderAktionsplanTab, action_plan vom Server:', JSON.stringify(ap).slice(0, 500));
+    var items = ap.items || [];
+    // NEU (17.09.2026): erledigte Items: Array mit 0-basierten Original-Indizes
+    var completedIndices = ap.completed_item_indices || [];
+
+    // ----- Empty / waiting state -----
+    if (items.length === 0) {
+      var emptyWrap = document.createElement('div');
+      emptyWrap.style.cssText = 'text-align:center;padding:48px 24px;';
+      var emptyTxt = document.createElement('p');
+      emptyTxt.className = 'cvz-card-placeholder-text';
+      if (ap.generated_at) {
+        // Plan existiert, aber ohne Items: mehr Daten nötig
+        emptyTxt.textContent = 'Der Aktionsplan wurde generiert, enthält aber noch keine konkreten Empfehlungen. Es werden mehr Daten benötigt (mindestens einige ausgewertete Prompts und GSC-Daten). Empfehlungen erscheinen nach dem nächsten Analyse-Lauf mit ausreichend Datenlage.';
+      } else {
+        // Noch gar kein Plan: Generierung anbieten
+        emptyTxt.textContent = 'Für dieses Topic wurde noch kein Aktionsplan generiert.';
+        // Manueller Trigger-Button: ruft POST /topics/{id}/generate-action-plan auf.
+        // Der Endpunkt startet die KI-Generierung im Hintergrund (202) und dauert etwa 30 bis 60 s.
+        var genBtn = document.createElement('button');
+        genBtn.style.cssText = 'display:inline-block;margin-top:16px;padding:10px 22px;background:var(--cvz-accent,#5aacd2);color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;';
+        genBtn.textContent = 'Aktionsplan jetzt generieren';
+        (function(btn, statusEl, topicId) {
+          btn.addEventListener('click', function() {
+            btn.disabled = true;
+            btn.style.opacity = '0.6';
+            btn.textContent = 'Wird generiert …';
+            apiFetch('/topics/' + topicId + '/generate-action-plan', { method: 'POST' })
+              .then(function() {
+                statusEl.textContent = 'Generierung gestartet. Das dauert einige Minuten. Die Seite wird automatisch neu geladen …';
+                btn.style.display = 'none';
+                // Pollt alle 10 s max. 12x (2 min), bricht ab wenn generated_at gesetzt
+                var attempts = 0;
+                var poller = setInterval(function() {
+                  attempts++;
+                  delete state.topicDetailCache[topicId];
+                  loadTopicDetail(topicId)
+                    .then(function(freshDetail) {
+                      if (freshDetail && freshDetail.action_plan && freshDetail.action_plan.generated_at) {
+                        clearInterval(poller);
+                        state.topicDetailCache[topicId] = freshDetail;
+                        state.isLoadingDetail = false;
+                        render();
+                      } else if (attempts >= 12) {
+                        clearInterval(poller);
+                        statusEl.textContent = 'Generierung läuft noch oder ist fehlgeschlagen. Bitte Seite manuell neu laden.';
+                      }
+                    })
+                    .catch(function() {
+                      if (attempts >= 12) clearInterval(poller);
+                    });
+                }, 10000);
+              })
+              .catch(function(err) {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.textContent = 'Aktionsplan jetzt generieren';
+                statusEl.textContent = 'Fehler beim Starten der Generierung. Bitte erneut versuchen.';
+                console.error('[CVZ] generate-action-plan Fehler:', err);
+              });
+          });
+        })(genBtn, emptyTxt, state.activeTopicId);
+        emptyWrap.appendChild(emptyTxt);
+        emptyWrap.appendChild(genBtn);
+        wrap.appendChild(emptyWrap);
+        return wrap; // früher return, emptyTxt wurde bereits angehängt
+      }
+      emptyWrap.appendChild(emptyTxt);
+      wrap.appendChild(emptyWrap);
+    } else {
+      // Intro line with generation timestamp
+      if (ap.generated_at) {
+        var introEl = document.createElement('p');
+        introEl.className = 'cvz-card-placeholder-text';
+        introEl.style.cssText = 'margin-bottom:20px;font-size:12px;';
+        var genDate = new Date(ap.generated_at);
+        introEl.textContent = 'Zuletzt generiert: ' + genDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ', ' + genDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr. ' + items.length + ' Massnahmen priorisiert nach Phase und Impact.';
+        wrap.appendChild(introEl);
+      }
+
+      // Group by phase. NEU (17.09.2026): _origIdx merken, damit completed_item_indices korrekt sind
+      var itemsWithIdx = items.map(function(item, idx) {
+        return Object.assign({}, item, { _origIdx: idx });
+      });
+      var groups = {};
+      itemsWithIdx.forEach(function (item) {
+        var ph = item.phase || 'alle_phasen';
+        if (!groups[ph]) groups[ph] = [];
+        groups[ph].push(item);
+      });
+
+      PHASE_ORDER.forEach(function (ph) {
+        if (!groups[ph] || groups[ph].length === 0) return;
+        var phItems = groups[ph].slice().sort(function (a, b) { return (a.priority || 99) - (b.priority || 99); });
+        var phColor = PHASE_COLOR_MAP[ph] || '#6b7280';
+
+        var phSection = document.createElement('div');
+        phSection.style.marginBottom = '32px';
+
+        // Phase section heading
+        var phHdr = document.createElement('div');
+        phHdr.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid ' + phColor + ';';
+        var phDot = document.createElement('span');
+        phDot.style.cssText = 'width:10px;height:10px;border-radius:50%;background:' + phColor + ';flex-shrink:0;display:inline-block;';
+        var phLbl = document.createElement('span');
+        phLbl.style.cssText = 'font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:' + phColor + ';';
+        phLbl.textContent = (PHASE_LABEL_MAP[ph] || ph) + ' (' + phItems.length + ')';
+        phHdr.appendChild(phDot);
+        phHdr.appendChild(phLbl);
+        phSection.appendChild(phHdr);
+
+        var phList = document.createElement('div');
+        phList.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+
+        phItems.forEach(function (item, cardIdx) {
+          // NEU (17.09.2026): Erledigt-Status prüfen
+          var origIdx    = item._origIdx;
+          var isCompleted = completedIndices.indexOf(origIdx) !== -1;
+
+          var card = document.createElement('div');
+          card.className = 'cvz-card';
+          card.style.cssText = 'padding:0;overflow:hidden;' + (isCompleted ? 'opacity:0.45;' : '');
+
+          var impactLvl = (item.impact || 'mittel').toLowerCase();
+          var impColor  = IMPACT_COLOR_MAP[impactLvl] || '#d97706';
+          var impLabel  = IMPACT_LABEL_MAP[impactLvl] || 'Mittel';
+          var catKey    = item.category || 'ki_sichtbarkeit';
+          var catLabel  = CAT_LABEL_MAP[catKey] || catKey;
+          var ev        = item.evidence || {};
+
+          // ---- Header ----
+          var hdr = document.createElement('div');
+          hdr.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--cvz-border,#232b36);background:var(--cvz-navy,#0d1117);flex-wrap:wrap;';
+
+          var numSp = document.createElement('span');
+          numSp.style.cssText = 'font-size:11px;font-weight:700;color:var(--cvz-text-muted,#8b98a5);min-width:24px;flex-shrink:0;';
+          numSp.textContent = '#' + (item.priority || (cardIdx + 1));
+          hdr.appendChild(numSp);
+
+          var impBadge = document.createElement('span');
+          impBadge.style.cssText = 'display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;color:#fff;background:' + impColor + ';flex-shrink:0;';
+          impBadge.textContent = impLabel;
+          hdr.appendChild(impBadge);
+
+          var catSp = document.createElement('span');
+          catSp.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#8b98a5);';
+          catSp.textContent = catLabel;
+          hdr.appendChild(catSp);
+
+          // NEU (17.09.2026): Erledigt-Toggle: rechts im Header
+          var spacer = document.createElement('span');
+          spacer.style.cssText = 'flex:1;';
+          hdr.appendChild(spacer);
+
+          var doneBtn = document.createElement('button');
+          doneBtn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:9999px;cursor:pointer;transition:all .15s;border:1px solid;flex-shrink:0;' +
+            (isCompleted
+              ? 'background:rgba(78,198,138,.12);border-color:rgba(78,198,138,.45);color:#4ec68a;'
+              : 'background:transparent;border-color:var(--cvz-border,#232b36);color:var(--cvz-text-muted,#8b98a5);');
+          doneBtn.innerHTML = isCompleted
+            ? '<span style="font-size:13px;">✓</span> Erledigt'
+            : '<span style="font-size:11px;">○</span> Als erledigt markieren';
+          doneBtn.title = isCompleted ? 'Erledigt-Markierung aufheben' : 'Item als erledigt markieren';
+
+          // Closure: Klick-Handler mit aktuellem Kontext
+          (function(btn, topicId, itemOrigIdx, itemTitle, itemPhase, itemIsCompleted, apObj) {
+            btn.addEventListener('click', function(e) {
+              e.stopPropagation();
+              btn.disabled = true;
+              btn.style.opacity = '0.5';
+              var newComplete = !itemIsCompleted;
+              apiFetch('/topics/' + topicId + '/action-plan/toggle-item', {
+                method: 'POST',
+                // apiFetch ruft selbst JSON.stringify(options.body) auf, kein manuelles Stringify hier!
+                body: {
+                  item_index: itemOrigIdx,
+                  item_title: itemTitle || ('Item #' + (itemOrigIdx + 1)),
+                  item_phase: itemPhase || 'alle_phasen',
+                  complete: newComplete,
+                },
+              }).then(function(resp) {
+                // Cache aktualisieren
+                var cached = state.topicDetailCache[topicId];
+                if (cached && cached.action_plan) {
+                  cached.action_plan.completed_item_indices = resp.completed_item_indices || [];
+                }
+                // Wenn ein content_change zurückkam, contentChangesCache updaten
+                if (resp.content_change && state.contentChangesCache) {
+                  if (!state.contentChangesCache[topicId]) {
+                    state.contentChangesCache[topicId] = [];
+                  }
+                  state.contentChangesCache[topicId].push(resp.content_change);
+                }
+                // NEU (18.09.2026): Beim Zurücksetzen entfernt das Backend die
+                // zugehörigen content_changes-/topic_changelog-Einträge wieder
+                // (siehe main.py toggle_action_plan_item_endpoint): Caches
+                // hier entsprechend bereinigen, sonst bleiben die Einträge bis
+                // zum nächsten vollständigen Neuladen sichtbar.
+                if (resp.removed_content_change_ids && resp.removed_content_change_ids.length && state.contentChangesCache[topicId]) {
+                  state.contentChangesCache[topicId] = state.contentChangesCache[topicId].filter(function (ch) {
+                    return resp.removed_content_change_ids.indexOf(ch.id) === -1;
+                  });
+                }
+                if (resp.removed_changelog_ids && resp.removed_changelog_ids.length && cached && cached.changelog) {
+                  cached.changelog = cached.changelog.filter(function (e) {
+                    return resp.removed_changelog_ids.indexOf(e.id) === -1;
+                  });
+                }
+                render();
+              }).catch(function(err) {
+                console.error('[CVZ] toggle-action-plan-item Fehler:', err);
+                btn.disabled = false;
+                btn.style.opacity = '1';
+              });
+            });
+          })(doneBtn, state.activeTopicId, origIdx, item.title, item.phase, isCompleted, ap);
+
+          hdr.appendChild(doneBtn);
+          card.appendChild(hdr);
+
+          // ---- Body ----
+          var body = document.createElement('div');
+          body.style.cssText = 'padding:14px 16px;display:flex;flex-direction:column;gap:14px;';
+
+          // Title. NEU (17.09.2026): durchgestrichen wenn erledigt
+          if (item.title) {
+            var titleEl = document.createElement('p');
+            titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:700;line-height:1.4;color:var(--cvz-text-muted,#8b98a5);' + (isCompleted ? 'text-decoration:line-through;' : '');
+            titleEl.textContent = item.title;
+            body.appendChild(titleEl);
+          }
+
+          // ---- SITUATION ----
+          if (item.situation) {
+            var sitDiv = document.createElement('div');
+            var sitLbl = document.createElement('p');
+            sitLbl.style.cssText = 'margin:0 0 5px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--cvz-text-muted,#8b98a5);';
+            sitLbl.textContent = 'Situation';
+            var sitTxt = document.createElement('p');
+            sitTxt.style.cssText = 'margin:0;font-size:13px;color:var(--cvz-text-muted,#8b98a5);line-height:1.55;';
+            sitTxt.textContent = item.situation;
+            sitDiv.appendChild(sitLbl);
+            sitDiv.appendChild(sitTxt);
+            body.appendChild(sitDiv);
+          }
+
+          // ---- EVIDENCE (kategorie-spezifisch) ----
+          if (Object.keys(ev).length > 0) {
+            var evDiv = document.createElement('div');
+            var evSectionLbl = document.createElement('p');
+            evSectionLbl.style.cssText = 'margin:0 0 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--cvz-text-muted,#8b98a5);';
+            evSectionLbl.textContent =
+              catKey === 'google_ranking' ? 'Ranking-Daten' :
+              catKey === 'content_luecke' ? 'Beispiel-Frage' :
+              'Zitierungsrate';
+            evDiv.appendChild(evSectionLbl);
+
+            if (catKey === 'ki_sichtbarkeit' || catKey === 'wettbewerb') {
+              // Citation rate comparison boxes
+              var rateRow = document.createElement('div');
+              rateRow.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;';
+              if (ev.own_citation_rate_pct != null) {
+                var ownBox = document.createElement('div');
+                ownBox.style.cssText = 'background:rgba(79,209,197,.1);border:1px solid rgba(79,209,197,.35);border-radius:6px;padding:6px 12px;min-width:90px;';
+                ownBox.innerHTML = '<div style="font-size:10px;font-weight:700;color:#4fd1c5;text-transform:uppercase;margin-bottom:2px;">Eure Rate</div><div style="font-size:22px;font-weight:800;color:#4fd1c5;">' + ev.own_citation_rate_pct + '%</div>';
+                rateRow.appendChild(ownBox);
+              }
+              if (ev.top_competitor && ev.competitor_citation_rate_pct != null) {
+                var compBox = document.createElement('div');
+                compBox.style.cssText = 'background:rgba(229,72,77,.1);border:1px solid rgba(229,72,77,.35);border-radius:6px;padding:6px 12px;min-width:90px;';
+                compBox.innerHTML = '<div style="font-size:10px;font-weight:700;color:#de5b50;text-transform:uppercase;margin-bottom:2px;">' + escapeHtml(ev.top_competitor) + '</div><div style="font-size:22px;font-weight:800;color:#de5b50;">' + ev.competitor_citation_rate_pct + '%</div>';
+                rateRow.appendChild(compBox);
+              }
+              evDiv.appendChild(rateRow);
+              if (ev.example_prompt) {
+                var epBox = document.createElement('div');
+                epBox.style.cssText = 'background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--cvz-text-muted,#8b98a5);font-style:italic;line-height:1.5;';
+                epBox.textContent = '"' + ev.example_prompt + '"';
+                evDiv.appendChild(epBox);
+              }
+            } else if (catKey === 'google_ranking') {
+              // Position + impressions stats
+              var statsRow = document.createElement('div');
+              statsRow.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;';
+              if (ev.position != null) {
+                var posStat = document.createElement('div');
+                posStat.style.cssText = 'background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.35);border-radius:6px;padding:6px 12px;';
+                posStat.innerHTML = '<div style="font-size:10px;font-weight:700;color:#5aacd2;text-transform:uppercase;margin-bottom:2px;">Position</div><div style="font-size:22px;font-weight:800;color:#5aacd2;">' + (Math.round(ev.position * 10) / 10) + '</div>';
+                statsRow.appendChild(posStat);
+              }
+              if (ev.impressions != null) {
+                var impStat = document.createElement('div');
+                impStat.style.cssText = 'background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:6px;padding:6px 12px;';
+                impStat.innerHTML = '<div style="font-size:10px;font-weight:700;color:var(--cvz-text-muted,#8b98a5);text-transform:uppercase;margin-bottom:2px;">Impressionen</div><div style="font-size:22px;font-weight:800;color:var(--cvz-text,#e6edf3);">' + Number(ev.impressions).toLocaleString('de-DE') + '</div>';
+                statsRow.appendChild(impStat);
+              }
+              evDiv.appendChild(statsRow);
+              if (ev.page_url) {
+                var pgUrlRow = document.createElement('div');
+                pgUrlRow.style.cssText = 'display:flex;align-items:baseline;gap:6px;margin-bottom:8px;flex-wrap:wrap;';
+                var pgUrlLbl = document.createElement('span');
+                pgUrlLbl.style.cssText = 'font-size:11px;font-weight:600;color:var(--cvz-text-muted,#8b98a5);flex-shrink:0;';
+                pgUrlLbl.textContent = 'Rankende Seite:';
+                var pgUrlVal = document.createElement('span');
+                pgUrlVal.style.cssText = 'font-size:12px;font-family:monospace;color:#5aacd2;word-break:break-all;';
+                pgUrlVal.textContent = ev.page_url;
+                pgUrlRow.appendChild(pgUrlLbl);
+                pgUrlRow.appendChild(pgUrlVal);
+                evDiv.appendChild(pgUrlRow);
+              }
+              if (ev.serp_top3 && ev.serp_top3.length > 0) {
+                var serpRowLbl = document.createElement('p');
+                serpRowLbl.style.cssText = 'margin:0 0 5px;font-size:11px;font-weight:600;color:var(--cvz-text-muted,#8b98a5);';
+                serpRowLbl.textContent = 'Top-Ergebnisse auf der SERP:';
+                evDiv.appendChild(serpRowLbl);
+                var serpChips = document.createElement('div');
+                serpChips.style.cssText = 'display:flex;flex-wrap:wrap;gap:5px;';
+                ev.serp_top3.forEach(function (dom) {
+                  var chip = document.createElement('span');
+                  chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:6px;color:var(--cvz-text-muted,#8b98a5);';
+                  chip.innerHTML = '<img src="https://www.google.com/s2/favicons?sz=12&domain=' + encodeURIComponent(dom) + '" style="width:12px;height:12px;flex-shrink:0;" onerror="this.style.display=\'none\'">' + escapeHtml(dom);
+                  serpChips.appendChild(chip);
+                });
+                evDiv.appendChild(serpChips);
+              }
+            } else if (catKey === 'content_luecke') {
+              if (ev.example_prompt) {
+                var gapQ = document.createElement('div');
+                gapQ.style.cssText = 'background:rgba(136,120,202,.12);border:1px solid rgba(136,120,202,.35);border-radius:6px;padding:10px 12px;font-size:13px;color:#8878ca;font-style:italic;line-height:1.55;';
+                gapQ.textContent = '"' + ev.example_prompt + '"';
+                evDiv.appendChild(gapQ);
+              }
+            }
+            body.appendChild(evDiv);
+          }
+
+          // ---- ZUGRUNDE LIEGENDE DATEN ----
+          var dataTable = _buildSupportingDataTable(catKey, item.phase || 'alle_phasen', detail, item);
+          if (dataTable) body.appendChild(dataTable);
+
+          // ---- EMPFEHLUNG. NEU (17.09.2026): durchgestrichen wenn erledigt ----
+          if (item.recommendation) {
+            var recDiv = document.createElement('div');
+            recDiv.style.cssText = 'background:rgba(79,209,197,.1);border-left:3px solid #4fd1c5;border-radius:0 4px 4px 0;padding:10px 12px;';
+            var recLbl = document.createElement('p');
+            recLbl.style.cssText = 'margin:0 0 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4fd1c5;';
+            recLbl.textContent = isCompleted ? 'Empfehlung (erledigt)' : 'Empfehlung';
+            var recTxt = document.createElement('p');
+            recTxt.style.cssText = 'margin:0;font-size:13px;color:#4fd1c5;line-height:1.55;' + (isCompleted ? 'text-decoration:line-through;' : '');
+            recTxt.textContent = item.recommendation;
+            recDiv.appendChild(recLbl);
+            recDiv.appendChild(recTxt);
+            body.appendChild(recDiv);
+          }
+
+          card.appendChild(body);
+          phList.appendChild(card);
+        });
+
+        phSection.appendChild(phList);
+        wrap.appendChild(phSection);
+      });
+    }
+
+    // ENTFERNT (20.09.2026): "Plattformen mit Veröffentlichungs-Chance" stand
+    // hier direkt über der neuen Outreach-Targets-Sektion und deckte im Kern
+    // dieselbe Frage ab ("wo können wir veröffentlichen"), nur aus einer
+    // anderen, schmaleren Datenquelle (source_profiles statt der dedizierten
+    // outreach_targets.py-Logik mit Bewertungsportale/Medien/Community-
+    // Gruppierung). Zwei Listen mit vermutlich überlappenden Domains
+    // nebeneinander wirkten nicht vollständiger, sondern unklar. Die
+    // strukturierte Sektion unten bleibt die einzige Quelle dafür.
+
+    // NEU (20.09.2026): Mögliche Ziele für Bewertungen und Digital PR
+    // (outreach_targets.py), war bisher nur als Funktion vorhanden, wurde
+    // aber in keinem Tab tatsächlich angezeigt.
+    var outreachSection = renderOutreachTargetsSection(detail);
+    if (outreachSection) wrap.appendChild(outreachSection);
+
+    return wrap;
+  }
+
+  // ─── VERLAUF ──────────────────────────────────────────────────────────────
+  // Monats-Timeline aus Timeseries-Daten + Content-Aenderungen als Marker.
+  // Ziel: Marketer kann Aenderungen schnell mit Sichtbarkeits-Effekten korrelieren.
+  function renderVerlaufTab(topicId, detail) {
+    var wrap = document.createElement('div');
+
+    // GEÄNDERT (20.09.2026): Formular zum Eintragen einer Änderung steht
+    // jetzt ganz oben im Tab (vorher stand es hinter Wirkungs-Analyse, Chart
+    // und Chronik, dadurch war es kaum auffindbar, obwohl es der einzige
+    // Ort ist, an dem man aktiv etwas eintragen kann statt nur zu lesen).
+    wrap.appendChild(renderContentChangesSection(topicId, detail.search_queries, detail.prompts));
+
+    // NEU (20.09.2026): Bereits umgesetzte Änderungen und ihre gemessene
+    // Wirkung (change_history.py), war bisher nur als Funktion vorhanden,
+    // wurde aber in keinem Tab tatsächlich angezeigt.
+    var changeAssessmentSection = renderChangeAssessmentSection(detail);
+    if (changeAssessmentSection) wrap.appendChild(changeAssessmentSection);
+
+    // Chart section
+    // GEÄNDERT (25.09.2026, Kundenwunsch): Zeitraum wählbar (4/12/26
+    // Wochen). Bei 12 (Default) weiterhin dashboardDataCache -- keine
+    // Doppel-Anfrage für den häufigsten Fall, siehe Kommentar am State-
+    // Feld phaseTrendWeeksByTopic oben in der state-Definition.
+    var selectedWeeks = state.phaseTrendWeeksByTopic[topicId] || 12;
+    var isDefaultWeeks = selectedWeeks === 12;
+    var phaseTrendKey = topicId + ':' + selectedWeeks;
+    var data = isDefaultWeeks ? state.dashboardDataCache[topicId] : state.phaseTrendCache[phaseTrendKey];
+    var isLoading = isDefaultWeeks ? state.isLoadingDashboard : !!state.isLoadingPhaseTrend[phaseTrendKey];
+
+    var chartSection = document.createElement('div');
+    chartSection.className = 'cvz-section';
+    var chartHeadRow = document.createElement('div');
+    chartHeadRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;';
+    var chartHeading = document.createElement('p');
+    chartHeading.className = 'cvz-section-label';
+    chartHeading.style.margin = '0';
+    chartHeading.textContent = 'Sichtbarkeits-Verlauf pro Phase';
+    chartHeadRow.appendChild(chartHeading);
+    chartHeadRow.appendChild(renderWeeksPresetPicker(topicId, selectedWeeks));
+    chartSection.appendChild(chartHeadRow);
+
+    if (isLoading) {
+      var loadEl = document.createElement('p');
+      loadEl.className = 'cvz-card-placeholder-text';
+      loadEl.innerHTML = '<span class="cvz-spinner"></span>Verlauf wird geladen…';
+      chartSection.appendChild(loadEl);
+    } else if (!data && !isDefaultWeeks) {
+      // Preset gewählt, aber noch nicht geladen (z.B. direkt nach einem
+      // Preset-Klick, bevor der erste render() im Ladezustand landet) --
+      // Ladezustand statt "kein Verlauf" zeigen, sonst blitzt kurz die
+      // falsche Leermeldung auf.
+      var pendingEl = document.createElement('p');
+      pendingEl.className = 'cvz-card-placeholder-text';
+      pendingEl.innerHTML = '<span class="cvz-spinner"></span>Verlauf wird geladen…';
+      chartSection.appendChild(pendingEl);
+    } else if (!data || !data.timeseries || !data.timeseries.weeks || data.timeseries.weeks.length < 2) {
+      var emptyEl = document.createElement('p');
+      emptyEl.className = 'cvz-card-placeholder-text';
+      emptyEl.textContent = 'Noch kein Verlauf verfügbar. Es werden mindestens zwei Wochen mit Analyse-Läufen benötigt.';
+      chartSection.appendChild(emptyEl);
+    } else {
+      var ts = data.timeseries;
+      var weeks = ts.weeks; // ["2026-W28", ...]
+      // Convert week keys to short display labels
+      var xLabels = weeks.map(function (w) {
+        var m = w.match(/^(\d{4})-W(\d{2})$/);
+        if (!m) return w;
+        return 'KW' + m[2];
+      });
+
+      // Build series: per phase, average across channels for that week
+      var series = PHASE_ORDER.map(function (phase) {
+        var phaseSeries = (ts.series || {})[phase] || {};
+        var values = weeks.map(function (w, wi) {
+          var total = 0, count = 0;
+          CHANNEL_ORDER.forEach(function (ch) {
+            var arr = phaseSeries[ch];
+            if (arr && arr[wi] != null) { total += arr[wi]; count++; }
+          });
+          return count > 0 ? Math.round(total / count) : null;
+        });
+        return { label: PHASE_LABELS[phase] || phase, values: values, color: PHASE_COLORS[phase] };
+      });
+
+      // NEU (18.09.2026): zweite, gestrichelte Linie pro Phase: die engere
+      // Definition own_domain_cited_with_url ("mit echtem Link zitiert"),
+      // aus ts.series_with_url (dashboard.py: _compute_weekly_timeseries).
+      // Gleiche Farbe wie die durchgezogene Linie derselben Phase, damit die
+      // Zuordnung klar bleibt; dashed:true wird von buildLineChartSvg direkt
+      // unterstützt (Strichelung + reduzierte Deckkraft).
+      var seriesWithUrl = PHASE_ORDER.map(function (phase) {
+        var phaseSeries = (ts.series_with_url || {})[phase] || {};
+        var values = weeks.map(function (w, wi) {
+          var total = 0, count = 0;
+          CHANNEL_ORDER.forEach(function (ch) {
+            var arr = phaseSeries[ch];
+            if (arr && arr[wi] != null) { total += arr[wi]; count++; }
+          });
+          return count > 0 ? Math.round(total / count) : null;
+        });
+        return { label: (PHASE_LABELS[phase] || phase) + ' (mit Link zitiert)', values: values, color: PHASE_COLORS[phase], dashed: true };
+      });
+
+      // Markers from content changes
+      var contentChanges = state.contentChangesCache[topicId] || [];
+      var markers = contentChanges.map(function (ch) {
+        var chDate = ch.changed_at;
+        var chTime = new Date(chDate).getTime();
+        var closestIndex = 0, closestDiff = Infinity;
+        weeks.forEach(function (wk, i) {
+          // Convert "2026-W28" to a comparable date
+          var m2 = wk.match(/^(\d{4})-W(\d{2})$/);
+          if (!m2) return;
+          var year2 = parseInt(m2[1]), week2 = parseInt(m2[2]);
+          var jan4 = new Date(Date.UTC(year2, 0, 4));
+          var dow = jan4.getUTCDay() || 7;
+          var weekMs = jan4.getTime() + (week2 - 1) * 7 * 86400000 - (dow - 1) * 86400000;
+          var diff = Math.abs(weekMs - chTime);
+          if (diff < closestDiff) { closestDiff = diff; closestIndex = i; }
+        });
+        return {
+          index: closestIndex,
+          label: (CONTENT_CHANGE_TYPE_LABELS[ch.change_type] || ch.change_type) + ': ' + ch.description,
+          date: chDate,
+        };
+      });
+
+      var chartCard = document.createElement('div');
+      chartCard.className = 'cvz-card';
+      chartCard.innerHTML =
+        buildLineChartSvg(series.concat(seriesWithUrl), xLabels, { maxY: 100, markers: markers }) +
+        '<div class="cvz-chart-legend">' +
+          PHASE_ORDER.map(function (phase) {
+            return '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background:' + PHASE_COLORS[phase] + '"></span>' + escapeHtml(PHASE_LABELS[phase] || phase) + '</span>';
+          }).join('') +
+        '</div>' +
+        '<p class="cvz-chart-caption">Durchgezogene Linie: eure Domain wird als Quelle genannt. Gestrichelte Linie: davon mit echtem Link zitiert. Beides in Prozent (0 bis 100) je Journey-Phase und Woche, gemittelt über alle KI-Kanäle. Senkrechte Linien markieren eingetragene Content-Änderungen.</p>';
+      chartSection.appendChild(chartCard);
+    }
+    wrap.appendChild(chartSection);
+
+    // Timeline: Content-Änderungen (user-logged) + detail.changelog (system)
+    // GEAENDERT (18.09.2026): Eintraege mit change_type 'aktionsplan'
+    // (automatisch beim Erledigen eines Aktionsplan-Items angelegt, siehe
+    // main.py toggle_action_plan_item_endpoint) werden hier bewusst
+    // ausgeblendet. Sie bleiben in "Content-Änderungen & Events" sowie als
+    // Marker im Trend-Chart sichtbar, sollen aber nicht zusätzlich in der
+    // Änderungs-Chronik auftauchen.
+    var combined = [];
+    (state.contentChangesCache[topicId] || []).forEach(function (ch) {
+      if (ch.change_type === 'aktionsplan') return;
+      combined.push({
+        date: ch.changed_at,
+        type: 'change',
+        typeLabel: CONTENT_CHANGE_TYPE_LABELS[ch.change_type] || ch.change_type,
+        text: ch.description,
+        url: ch.url || null,
+        color: '#0d9488',
+      });
+    });
+    (detail.changelog || []).forEach(function (entry) {
+      combined.push({
+        date: entry.created_at ? entry.created_at.slice(0, 10) : '',
+        type: 'system',
+        typeLabel: 'System-Erkennung',
+        text: entry.entry_text || '',
+        url: null,
+        color: '#8878ca',
+      });
+    });
+    // Sort by date descending
+    combined.sort(function (a, b) { return b.date.localeCompare(a.date); });
+
+    if (combined.length > 0) {
+      var timelineSection = document.createElement('div');
+      timelineSection.className = 'cvz-section';
+      var tlHeading = document.createElement('p');
+      tlHeading.className = 'cvz-section-label';
+      tlHeading.textContent = 'Änderungs-Chronik';
+      timelineSection.appendChild(tlHeading);
+      var tlSub = document.createElement('p');
+      tlSub.className = 'cvz-card-placeholder-text';
+      tlSub.style.marginBottom = '12px';
+      tlSub.textContent = 'Alle eingetragenen Content-Änderungen und System-Erkennungen, chronologisch.';
+      timelineSection.appendChild(tlSub);
+
+      var timeline = document.createElement('div');
+      timeline.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+      combined.forEach(function (item) {
+        var row = document.createElement('div');
+        row.className = 'cvz-card';
+        row.style.cssText = 'display:flex;gap:12px;align-items:flex-start;padding:10px 14px;';
+
+        var dot = document.createElement('div');
+        dot.style.cssText = 'flex-shrink:0;width:10px;height:10px;border-radius:50%;background:' + item.color + ';margin-top:3px;';
+        row.appendChild(dot);
+
+        var inner = document.createElement('div');
+        inner.style.cssText = 'flex:1 1 0;';
+
+        var meta = document.createElement('p');
+        meta.style.cssText = 'margin:0 0 2px;font-size:11px;color:var(--cvz-text-muted,#6b7280);';
+        meta.textContent = item.date + ' · ' + item.typeLabel;
+        inner.appendChild(meta);
+
+        var text = document.createElement('p');
+        text.style.cssText = 'margin:0;font-size:13px;line-height:1.4;';
+        text.textContent = item.text;
+        inner.appendChild(text);
+
+        if (item.url) {
+          var link = document.createElement('a');
+          link.href = item.url;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.style.cssText = 'font-size:12px;color:var(--cvz-teal,#0d9488);word-break:break-all;';
+          link.textContent = item.url;
+          inner.appendChild(link);
+        }
+
+        row.appendChild(inner);
+        timeline.appendChild(row);
+      });
+      timelineSection.appendChild(timeline);
+      wrap.appendChild(timelineSection);
+    }
+
+    // Visibility trend from prompt data (weekly cite/mention rates)
+    var visWeeks = state.visibilityTrendCache[topicId];
+    if (visWeeks && visWeeks.length >= 2) {
+      wrap.appendChild(renderVisibilityTrendSection(visWeeks, false, detail.changelog));
+    }
+
+    return wrap;
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+})();
