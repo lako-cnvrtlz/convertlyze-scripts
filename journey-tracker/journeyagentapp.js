@@ -5658,14 +5658,22 @@
     // berechnet der Browser die Spaltenbreiten pro Tabelle unabhängig vom
     // Inhalt, dadurch standen "Suchvolumen/Monat" & Co. in jeder Phase an
     // einer anderen Position. Mit festen Breiten fluchten alle Tabellen.
+    // GEÄNDERT (25.09.2026): Keyword-Spalte hat jetzt eine feste Breite
+    // (340px), die Quelle-Spalte bekommt stattdessen den Restplatz. Vorher
+    // war es umgekehrt: Keyword nahm allen freien Platz, die übrigen Spalten
+    // wurden nach rechts gedrückt, und das Einschätzungs-Badge (breiter als
+    // die alten 230px) lief in die Quelle-Spalte hinein. min-width sorgt
+    // dafür, dass auf schmalen Bildschirmen horizontal gescrollt wird,
+    // statt dass Spalten zusammengequetscht werden.
+    table.style.minWidth = '920px';
     table.innerHTML =
       '<thead><tr>' +
         '<th style="width:26px;"></th>' +
-        '<th>Keyword</th>' +
-        '<th style="width:150px;text-align:right;">Suchvolumen/Monat</th>' +
-        '<th style="width:230px;">Einschätzung</th>' +
-        '<th style="width:170px;">Quelle</th>' +
-        '<th style="width:50px;"></th>' +
+        '<th style="width:340px;">Keyword</th>' +
+        '<th style="width:140px;text-align:right;">Suchvolumen/Monat</th>' +
+        '<th style="width:300px;padding-left:24px;">Einschätzung</th>' +
+        '<th>Quelle</th>' +
+        '<th style="width:44px;"></th>' +
       '</tr></thead>';
 
     var tbody = document.createElement('tbody');
@@ -5698,10 +5706,13 @@
         '<td style="text-align:right;color:var(--cvz-text-muted,#8b98a5);">' +
           (kw.search_volume == null ? '\u2013' : escapeHtml(kw.search_volume)) +
         '</td>' +
-        '<td>' +
+        '<td style="padding-left:24px;">' +
           (showStatus
-            ? '<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;' +
-              'letter-spacing:.04em;padding:3px 8px;border-radius:9999px;white-space:nowrap;' +
+            // GEÄNDERT (25.09.2026): max-width + Ellipsis, damit ein zu
+            // langes Badge nie mehr in die Nachbarspalte ragt. Der volle
+            // Text steht dann im Tooltip (title).
+            ? '<span title="' + escapeHtml(kw.keyword_status_label) + '" style="display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;font-size:10px;font-weight:700;text-transform:uppercase;' +
+              'letter-spacing:.04em;padding:3px 8px;border-radius:9999px;white-space:nowrap;box-sizing:border-box;' +
               'color:' + (KEYWORD_STATUS_COLORS[kw.keyword_status] || '#8b98a5') + ';' +
               'background:' + (KEYWORD_STATUS_COLORS[kw.keyword_status] || '#8b98a5') + '1a;">' +
               escapeHtml(kw.keyword_status_label) + '</span>'
