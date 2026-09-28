@@ -49,11 +49,18 @@
 
   // ── Data layer ───────────────────────────────────────────────────────────────
 
+  // NEU (28.09.2026): stripe-portal prüft das Memberstack-Token auf dem Server.
+  // memberstackId wird nur noch für die Übergangszeit mitgeschickt.
+  async function getMemberToken() {
+    try { return await window.$memberstackDom.getMemberCookie(); }
+    catch (e) { return null; }
+  }
+
   async function fetchPortalUrl(memberstackId, stripeCustomerId) {
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/stripe-portal', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ memberstackId, stripeCustomerId }),
+      body:    JSON.stringify({ memberstack_token: await getMemberToken(), memberstackId: memberstackId }),
     });
     var data = await res.json();
     return data?.url || null;
