@@ -1,3 +1,9 @@
+/**
+ * pricing-script.js
+ * GEÄNDERT: Der automatische Checkout nach Registrierung/Login (autoResumeCheckout) ist entfernt.
+ * Das uebernimmt ausschliesslich das site-weite "CVZ CHECKOUT RESUME"-Script im Webflow-Site-Footer.
+ * Beide zusammen starteten auf /member/willkommen und /preise doppelt einen Checkout.
+ */
 (function () {
   'use strict';
 
@@ -63,17 +69,6 @@
     return !!window.$memberstackDom && !!window.supabase?.createClient;
   }
 
-  // Cookie-Utilities, um den Plan-Wunsch zu lesen, den das Register-Script
-  // vor dem Signup/Login als 'cvz_plan'/'cvz_billing' gesetzt hat.
-  function getCookie(name) {
-    var match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
-    return match ? match[1] : null;
-  }
-
-  function clearCookie(name) {
-    document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
-  }
-
   // ── Data layer ───────────────────────────────────────────────────────────────
   async function fetchCurrentPriceId(memberstackId) {
     var res = await sb
@@ -117,35 +112,6 @@
     });
     var data = await res.json();
     return data?.url || null;
-  }
-
-  // Gleicher pending_checkouts-Fallback wie im Register-Script, falls das
-  // 'cvz_plan'-Cookie mal fehlt (z.B. Login-Code in anderem Browser eingegeben).
-  async function fetchPendingCheckout(email) {
-    if (!email) return null;
-    try {
-      var res = await fetch(
-        CONFIG.supabaseUrl + '/rest/v1/pending_checkouts?email=eq.' + encodeURIComponent(email) + '&limit=1',
-        { headers: { 'apikey': CONFIG.supabaseAnonKey, 'Authorization': 'Bearer ' + CONFIG.supabaseAnonKey } }
-      );
-      var data = await res.json();
-      return data?.[0] || null;
-    } catch (e) {
-      console.warn('[CVZ] fetchPendingCheckout error:', e);
-      return null;
-    }
-  }
-
-  async function deletePendingCheckout(email) {
-    if (!email) return;
-    try {
-      await fetch(
-        CONFIG.supabaseUrl + '/rest/v1/pending_checkouts?email=eq.' + encodeURIComponent(email),
-        { method: 'DELETE', headers: { 'apikey': CONFIG.supabaseAnonKey, 'Authorization': 'Bearer ' + CONFIG.supabaseAnonKey } }
-      );
-    } catch (e) {
-      console.warn('[CVZ] deletePendingCheckout error:', e);
-    }
   }
 
   // ── UI: Pricing Toggle ───────────────────────────────────────────────────────
@@ -388,68 +354,6 @@
     }
   }
 
-  // Löst den Checkout automatisch aus, wenn vor dem Signup/Login schon ein
-  // Plan gewählt wurde (Cookie 'cvz_plan'/'cvz_billing', gesetzt vom Register-
-  // Script). Damit muss auf der Willkommens-Seite niemand die Preis-Karte noch
-  // einmal anklicken. Bei einem bestehenden Abo (Starter/Pro/Enterprise) wird
-  // NICHT automatisch das Billing-Portal geöffnet - da bleibt der manuelle
-  // Klick nötig, das soll niemanden ungefragt dorthin schicken.
-  // GEÄNDERT: Tracker wird gesondert geprüft (Mitglied oder schon gebucht
-  // -> nichts tun, Erfolgsseite = Einstellungen).
-  async function autoResumeCheckout(memberstackId) {
-    if (!memberstackId) return;
-
-    var plan       = getCookie('cvz_plan');
-    var billing    = getCookie('cvz_billing') || 'monthly';
-    var fromCookie = !!plan;
-
-    if (!plan) {
-      try {
-        var member = await window.$memberstackDom.getCurrentMember();
-        var email  = member?.data?.auth?.email || member?.data?.email;
-        var pending = await fetchPendingCheckout(email);
-        if (pending) {
-          plan    = pending.plan;
-          billing = pending.billing || 'monthly';
-          await deletePendingCheckout(email);
-        }
-      } catch (e) {
-        console.warn('[CVZ] autoResumeCheckout fallback error:', e);
-      }
-    }
-
-    if (fromCookie) { clearCookie('cvz_plan'); clearCookie('cvz_billing'); }
-    if (!plan) return;
-
-    var billingKey = billing === 'annual' ? 'annual' : 'monthly';
-    var priceId    = CONFIG.priceIds[plan]?.[billingKey];
-    if (!priceId) {
-      console.warn('[CVZ] autoResumeCheckout: unbekannter Plan-Key', plan);
-      return;
-    }
-
-    var successPath = '/member/danke';
-
-    if (CONFIG.trackerPriceIds.indexOf(priceId) !== -1) {
-      var ctx = await fetchTrackerContext(memberstackId);
-      if (!ctx || ctx.teamRole === 'member' || ctx.topicsPurchased > 0) return;
-      successPath = TRACKER_SUCCESS_PATH;
-    } else {
-      var isPPU          = CONFIG.ppuPriceIds.indexOf(priceId) !== -1;
-      var currentPriceId = await fetchCurrentPriceId(memberstackId);
-      if (currentPriceId && !isPPU) return;
-    }
-
-    try {
-      await window.$memberstackDom.purchasePlansWithCheckout({
-        priceId:    priceId,
-        successUrl: window.location.origin + successPath,
-      });
-    } catch (e) {
-      console.error('[CVZ] autoResumeCheckout Checkout error:', e);
-    }
-  }
-
   async function initPlanButtons() {
     // Handler immer anhaengen, unabhaengig vom Login-Status
     document.querySelectorAll('a[href*="/register?plan="]').forEach(function (btn) {
@@ -487,11 +391,6 @@
       });
     });
 
-    // Fuer autoResumeCheckout (laeuft direkt nach dem Laden, nicht bei Klick)
-    // weiterhin einmal den aktuellen Member liefern - dort ist die Verzoegerung
-    // durch den vorherigen retry(depsReady, ...)-Schritt meist schon aufgeholt,
-    // und selbst falls nicht, ist die einzige Folge, dass autoResumeCheckout
-    // ohne Wirkung bleibt (kein falscher Redirect wie beim Button-Klick oben).
     var member = await window.$memberstackDom.getCurrentMember();
     return member?.data?.id || null;
   }
@@ -505,9 +404,6 @@
         // Supabase-Client initialisieren sobald SDK bereit ist
         sb = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey);
         return initPlanButtons();
-      })
-      .then(function (memberstackId) {
-        return autoResumeCheckout(memberstackId);
       })
       .catch(function (err) { console.warn('[CVZ] Init failed:', err); });
   }
