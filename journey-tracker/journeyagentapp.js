@@ -12,9 +12,13 @@
     // GEFIXT (20.09.2026): Platzhalter durch die echte Supabase-Projekt-URL ersetzt.
     stripeCheckoutUrl: 'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/stripe-topic-slot-checkout',
     useMockData: false,  // TODO: für den echten Test
-    // NEU (28.09.2026): Optionaler Link zur Anleitung "Search Console verbinden".
-    // Steht hier null, zeigt die Warnung beim Anlegen eines Themas keinen Button.
-    gscSetupUrl: null,
+    // NEU (28.09.2026): Ziel des Buttons "Search Console verbinden" in der
+    // GSC-Warnung beim Anlegen eines Themas. Das Verbinden selbst passiert im
+    // Content-Strategie-Tool (OAuth-Flow liegt dort, siehe Kopf von
+    // google_search_console.py), deshalb verlinken wir auf dessen
+    // Einstellungsseite, am besten direkt mit Sprungmarke auf die GSC-Section.
+    // Steht hier null, erscheint kein Button.
+    gscSetupUrl: null,  // TODO: z. B. 'https://app.convertlyze.com/einstellungen#google-search-console'
   };
 
   var CHANGELOG_DELETED_RETENTION_DAYS = 90;
@@ -166,6 +170,11 @@
     // ("Cannot read properties of undefined").
     retryingSteps: {},
     stepPollTimer: null,
+    // NEU (28.09.2026): Merkt sich, ob im Anlege-Formular gerade die
+    // GSC-Warnung sichtbar ist, und wann der GSC-Status zuletzt neu geprüft
+    // wurde (siehe refreshGscStatusOnReturn).
+    gscWarningVisible: false,
+    gscStatusCheckedAt: 0,
   };
 
   function getProjectById(id) {
@@ -2718,6 +2727,11 @@
       'Danach im Daten-Tab auf "GSC-Daten jetzt nachziehen" klicken, statt auf den n\u00e4chsten Monatslauf zu warten.';
     box.appendChild(text);
 
+    // GEÄNDERT (28.09.2026): Button öffnet die GSC-Section der
+    // Einstellungsseite in einem NEUEN Tab. Grund: Im selben Tab gingen die
+    // Formulareingaben verloren (state.createDraft liegt nur im Speicher).
+    // Kommt der Nutzer zurück, prüfen wir den Status automatisch neu, siehe
+    // refreshGscStatusOnReturn.
     if (CONFIG.gscSetupUrl) {
       var link = document.createElement('a');
       link.className = 'cvz-retry-btn';
@@ -2725,11 +2739,47 @@
       link.target = '_blank';
       link.rel = 'noopener';
       link.style.textDecoration = 'none';
-      link.textContent = 'Search Console verbinden';
+      link.textContent = 'Search Console verbinden \u2197';
       box.appendChild(link);
     }
     return box;
   }
+
+  // NEU (28.09.2026): Sobald der Nutzer in diesen Tab zurückkehrt (z. B. nach
+  // dem Verbinden der GSC im anderen Tab), laden wir den GSC-Status neu und
+  // blenden die Warnung aus, wenn die Verbindung jetzt steht. Läuft nur,
+  // solange die Warnung sichtbar ist, und höchstens alle 5 Sekunden.
+  // Aktualisiert NUR gsc_connected in state.projects, nicht die ganze
+  // Projektliste, damit sich das ausgewählte Projekt nicht ändert.
+  async function refreshGscStatusOnReturn() {
+    if (CONFIG.useMockData) return;
+    if (!state.showCreateForm || !state.gscWarningVisible) return;
+    if (Date.now() - state.gscStatusCheckedAt < 5000) return;
+    state.gscStatusCheckedAt = Date.now();
+
+    var data;
+    try {
+      data = await apiFetch('/projects');
+    } catch (e) {
+      console.error('[CVZ Visibility] GSC-Status konnte nicht neu geladen werden:', e);
+      return;
+    }
+
+    var changed = false;
+    (data.projects || []).forEach(function (fresh) {
+      var project = getProjectById(fresh.id);
+      if (project && typeof fresh.gsc_connected === 'boolean' && project.gsc_connected !== fresh.gsc_connected) {
+        project.gsc_connected = fresh.gsc_connected;
+        changed = true;
+      }
+    });
+    if (changed) render();
+  }
+
+  window.addEventListener('focus', refreshGscStatusOnReturn);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') refreshGscStatusOnReturn();
+  });
 
   function renderCreateTopicForm() {
     var wrap = document.createElement('div');
@@ -2833,6 +2883,7 @@
       var warning = renderGscCreateWarning(domainSelect.value);
       if (warning) gscWarningSlot.appendChild(warning);
       gscWarningSlot.style.display = warning ? '' : 'none';
+      state.gscWarningVisible = !!warning;
     }
     updateGscWarning();
 
