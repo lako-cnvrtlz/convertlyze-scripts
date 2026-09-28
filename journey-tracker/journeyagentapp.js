@@ -16,9 +16,9 @@
     // GSC-Warnung beim Anlegen eines Themas. Das Verbinden selbst passiert im
     // Content-Strategie-Tool (OAuth-Flow liegt dort, siehe Kopf von
     // google_search_console.py), deshalb verlinken wir auf dessen
-    // Einstellungsseite, am besten direkt mit Sprungmarke auf die GSC-Section.
+    // Einstellungsseite, direkt mit Sprungmarke auf die Section "integrationen".
     // Steht hier null, erscheint kein Button.
-    gscSetupUrl: null,  // TODO: z. B. 'https://app.convertlyze.com/einstellungen#google-search-console'
+    gscSetupUrl: 'https://www.convertlyze.com/member/einstellungen#integrationen',
   };
 
   var CHANGELOG_DELETED_RETENTION_DAYS = 90;
