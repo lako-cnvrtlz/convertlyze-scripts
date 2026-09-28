@@ -12,13 +12,16 @@
     // GEFIXT (20.09.2026): Platzhalter durch die echte Supabase-Projekt-URL ersetzt.
     stripeCheckoutUrl: 'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/stripe-topic-slot-checkout',
     useMockData: false,  // TODO: für den echten Test
+    // NEU (28.09.2026): Optionaler Link zur Anleitung "Search Console verbinden".
+    // Steht hier null, zeigt die Warnung beim Anlegen eines Themas keinen Button.
+    gscSetupUrl: null,
   };
 
   var CHANGELOG_DELETED_RETENTION_DAYS = 90;
 
   var MOCK_PROJECTS = [
-    { id: 'proj-1', name: 'Kunde A GmbH', domain: 'kunde-a.de' },
-    { id: 'proj-2', name: 'Kunde B AG', domain: 'kunde-b.de' },
+    { id: 'proj-1', name: 'Kunde A GmbH', domain: 'kunde-a.de', gsc_connected: true },
+    { id: 'proj-2', name: 'Kunde B AG', domain: 'kunde-b.de', gsc_connected: false },
   ];
 
   var MOCK_TOPICS = [
@@ -2680,6 +2683,54 @@
     render();
   }
 
+  // NEU (28.09.2026): GSC-Status der im Formular gewählten Domain.
+  // Erwartet vom Backend (GET /projects) pro Projekt das Feld gsc_connected
+  // (true/false). Fehlt das Feld, zeigen wir bewusst KEINE Warnung, damit
+  // Kunden mit verbundener GSC keinen falschen Alarm sehen.
+  // Rückgabe: 'connected' | 'missing' | 'unknown'
+  function getGscState(domainValue) {
+    // Eine neue Domain hat noch kein Projekt, also auch keine GSC-Verbindung.
+    if (domainValue === '__new__') return 'missing';
+    var project = getProjectById(domainValue);
+    if (!project || typeof project.gsc_connected !== 'boolean') return 'unknown';
+    return project.gsc_connected ? 'connected' : 'missing';
+  }
+
+  // NEU (28.09.2026): Warnung beim Anlegen eines Themas, wenn für die gewählte
+  // Domain die Google Search Console noch nicht verbunden ist. Blockiert das
+  // Anlegen nicht: Keywords und Prompts laufen auch ohne GSC.
+  function renderGscCreateWarning(domainValue) {
+    if (getGscState(domainValue) !== 'missing') return null;
+
+    var project = getProjectById(domainValue);
+    var domainLabel = project ? project.domain : 'die neue Domain';
+
+    var box = document.createElement('div');
+    box.className = 'cvz-card cvz-collecting-banner cvz-soft-error-banner';
+    box.style.cssText = 'flex:1 1 100%;margin:0;';
+
+    var text = document.createElement('p');
+    text.className = 'cvz-collecting-banner-text';
+    text.textContent =
+      '\u26a0\ufe0f F\u00fcr ' + domainLabel + ' ist die Google Search Console noch nicht verbunden. ' +
+      'Ihr k\u00f6nnt das Thema trotzdem anlegen, Keywords und Prompts laufen normal. ' +
+      'Die GSC-Performance bleibt aber leer, bis die Verbindung steht. ' +
+      'Danach im Daten-Tab auf "GSC-Daten jetzt nachziehen" klicken, statt auf den n\u00e4chsten Monatslauf zu warten.';
+    box.appendChild(text);
+
+    if (CONFIG.gscSetupUrl) {
+      var link = document.createElement('a');
+      link.className = 'cvz-retry-btn';
+      link.href = CONFIG.gscSetupUrl;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.style.textDecoration = 'none';
+      link.textContent = 'Search Console verbinden';
+      box.appendChild(link);
+    }
+    return box;
+  }
+
   function renderCreateTopicForm() {
     var wrap = document.createElement('div');
     wrap.className = 'cvz-create-form';
@@ -2772,9 +2823,23 @@
       state.createDraft.newDomainText = newDomainInput.value;
     });
 
+    // NEU (28.09.2026): Platz für die GSC-Warnung. Wird beim Domainwechsel
+    // direkt ausgetauscht statt das ganze Formular neu zu zeichnen, damit der
+    // Fokus im Feld "Neue Domain" erhalten bleibt.
+    var gscWarningSlot = document.createElement('div');
+    gscWarningSlot.style.cssText = 'flex:1 1 100%;';
+    function updateGscWarning() {
+      gscWarningSlot.innerHTML = '';
+      var warning = renderGscCreateWarning(domainSelect.value);
+      if (warning) gscWarningSlot.appendChild(warning);
+      gscWarningSlot.style.display = warning ? '' : 'none';
+    }
+    updateGscWarning();
+
     domainSelect.addEventListener('change', function () {
       state.createDraft.domainValue = domainSelect.value;
       newDomainInput.style.display = (domainSelect.value === '__new__') ? '' : 'none';
+      updateGscWarning();
       if (domainSelect.value === '__new__') newDomainInput.focus();
     });
 
@@ -2835,6 +2900,7 @@
 
     form.appendChild(domainSelect);
     form.appendChild(newDomainInput);
+    form.appendChild(gscWarningSlot);
     form.appendChild(topicFieldWrap);
     form.appendChild(urlFieldWrap);
     form.appendChild(submitBtn);
