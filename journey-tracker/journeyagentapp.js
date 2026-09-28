@@ -2593,20 +2593,70 @@
     render();
   }
 
+  // GEÄNDERT (28.09.2026): Vor dem Kauf holt die Edge Function eine Vorschau
+  // (preview: true, bucht NICHTS). Bei bestehendem Abo muss der Kunde den
+  // neuen Monatspreis und den sofort fälligen Betrag bestätigen, bevor
+  // gebucht wird. Ohne Abo geht es direkt in den Stripe-Checkout, der den
+  // Preis selbst anzeigt.
+  function formatEuroCents(cents) {
+    return (cents / 100).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+  }
+
+  async function callTopicSlotFunction(payload) {
+    var response = await fetch(CONFIG.stripeCheckoutUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ memberstack_token: state.memberToken }, payload)),
+    });
+    var data = {};
+    try { data = await response.json(); } catch (e) {}
+    if (!response.ok) {
+      throw new Error(data.error || data.detail || ('Checkout fehlgeschlagen (' + response.status + ')'));
+    }
+    return data;
+  }
+
   async function submitBuyTopicSlot() {
+    if (state.isBuyingSlot) return;
     state.isBuyingSlot = true;
+    state.createError = null;
     render();
 
     try {
-      var response = await fetch(CONFIG.stripeCheckoutUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ memberstack_token: state.memberToken, quantity: 1 }),
-      });
-      var data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || data.detail || ('Checkout fehlgeschlagen (' + response.status + ')'));
+      var preview = await callTopicSlotFunction({ quantity: 1, preview: true });
+      var expectedCurrent;
+
+      if (preview.has_subscription) {
+        var lines = [
+          'Topics: ' + preview.current_quantity + ' → ' + preview.new_quantity,
+          'Neuer Monatspreis: ' + formatEuroCents(preview.new_monthly_cents) +
+            ' (bisher ' + formatEuroCents(preview.current_monthly_cents) + ')',
+        ];
+        if (preview.prorated_now_cents !== null && preview.prorated_now_cents !== undefined) {
+          lines.push('Heute fällig: ca. ' + formatEuroCents(preview.prorated_now_cents) +
+            ' (anteilig bis zum Ende des Abrechnungszeitraums)');
+        }
+        lines.push('', 'Alle Beträge zzgl. USt. Die Zahlung erfolgt über die hinterlegte Zahlungsmethode.');
+
+        var confirmed = await showCvzConfirm(lines.join('\n'), {
+          title:        '1 Topic-Slot kostenpflichtig buchen?',
+          confirmLabel: 'Kostenpflichtig buchen',
+          cancelLabel:  'Abbrechen',
+          preLine:      true,
+          focusCancel:  true,
+        });
+        if (!confirmed) {
+          state.isBuyingSlot = false;
+          render();
+          return;
+        }
+        expectedCurrent = preview.current_quantity;
       }
+
+      var data = await callTopicSlotFunction({
+        quantity: 1,
+        expected_current_quantity: expectedCurrent,
+      });
 
       if (data.mode === 'checkout_created' && data.checkout_url) {
         window.location.href = data.checkout_url;
@@ -6727,6 +6777,8 @@
       var textEl = document.createElement('p');
       textEl.className = 'cvz-modal-text';
       textEl.textContent = message;
+      // NEU (28.09.2026): Zeilenumbrüche im Text erhalten (z.B. Preisübersicht)
+      if (options.preLine) textEl.style.whiteSpace = 'pre-line';
       box.appendChild(textEl);
 
       var actions = document.createElement('div');
@@ -6758,7 +6810,10 @@
       box.appendChild(actions);
       overlay.appendChild(box);
       document.documentElement.appendChild(overlay);
-      okBtn.focus();
+      // NEU (28.09.2026): Bei kostenpflichtigen Aktionen startet der Fokus auf
+      // "Abbrechen", damit ein versehentliches Enter nichts bucht.
+      if (options.focusCancel && cancelBtn) cancelBtn.focus();
+      else okBtn.focus();
 
       function onOverlayClick(e) {
         if (e.target === overlay) close(false);
