@@ -200,12 +200,19 @@ async function deletePendingCheckout(email) {
 
 // ── Stripe Portal ─────────────────────────────────────────────────────────────
 
+// NEU (28.09.2026): stripe-portal prüft das Memberstack-Token auf dem Server.
+// memberstackId wird nur noch für die Übergangszeit mitgeschickt.
+async function getMemberToken() {
+  try { return await window.$memberstackDom.getMemberCookie(); }
+  catch (e) { return null; }
+}
+
 async function openStripePortal(memberstackId) {
   try {
     const res  = await fetch(PORTAL_ENDPOINT, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
-      body:    JSON.stringify({ memberstackId })
+      body:    JSON.stringify({ memberstack_token: await getMemberToken(), memberstackId })
     });
     const data = await res.json();
     if (data.url) {
