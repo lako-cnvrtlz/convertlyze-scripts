@@ -1,6 +1,6 @@
 /**
- * dashboard-v9.js
- * ----------------
+ * dashboard-v10.js
+ * -----------------
  * Member-Dashboard: Stat-Karten, Aktions-Buttons, Analysen-Liste, PDF-Download,
  * Team-Einladungen (Sichtbarkeit), "Zuletzt aktiv"-Uebersicht - komplett aus JS
  * generiert, kein Custom-Attribute-Bauplan mehr in Webflow noetig.
@@ -9,60 +9,23 @@
  * Embedding: jsDelivr (<script src=".../dashboard-v9.js">)
  * Dependencies: window.supabase (global), window.$memberstackDom
  *
- * ÄNDERUNGEN ggü. v8 (RLS-Bugfix "Zuletzt aktiv"):
- *   - BUGFIX: "Zuletzt aktiv" zeigte in v8 nur Analysen, nie Aufbau-Projekte
- *     oder KI-Agent-Chats, obwohl beide vorhanden waren. Ursache: v8 fragte
- *     page_projects/ai_chat_sessions per direktem Tabellen-Select ab. Diese
- *     Tabellen sind RLS-geschuetzt, das Frontend authentifiziert sich aber
- *     ueber Memberstack + Anon-Key statt echtem Supabase Auth - auth.uid()
- *     ist bei jedem Request also null, RLS filtert dadurch still ALLE Zeilen
- *     raus (200 OK, leeres Array, kein Fehler im Log). get_analyses_for_member
- *     umgeht das schon laenger ueber eine SECURITY DEFINER RPC - genau dieses
- *     Muster fehlte bei den zwei neuen Quellen. Fix: zwei neue RPCs
- *     get_recent_page_projects(p_user_id, p_limit) und
- *     get_recent_agent_sessions(p_user_id, p_limit), beide SECURITY DEFINER,
- *     muessen VOR diesem Script per SQL in Supabase angelegt werden (siehe
- *     recent-activity-rpcs.sql). fetchRecentPageProjects/
- *     fetchRecentAgentSessions rufen jetzt diese RPCs statt .from(...).select(...) auf.
- *   - get_recent_agent_sessions liefert landing_page_url/keyword jetzt als
- *     flache Felder (SQL JOIN in der RPC) statt als verschachteltes
- *     PostgREST-Embed wie in v8 (s.analyses.keyword) - buildAgentActivityItems()
- *     entsprechend angepasst.
- *
- * ÄNDERUNGEN ggü. v7 (neue Section "Zuletzt aktiv"):
- *   - NEU: Section "Zuletzt aktiv" oberhalb der Stat-Karten. Zeigt die
- *     jeweils letzten Aktivitaeten aus drei Quellen zusammengefuehrt und
- *     nach Zeitstempel sortiert (neueste zuerst, max. CONFIG.RECENT_ACTIVITY_LIMIT
- *     Eintraege): Analysen (aus den ohnehin geladenen state.analysesData),
- *     Aufbau-Projekte (Tabelle page_projects) und KI-Agent-Chats (Tabelle
- *     ai_chat_sessions, nur Sessions mit total_messages > 0, damit leere,
- *     nie genutzte Sessions nicht auftauchen). Klick auf einen Eintrag
- *     oeffnet die jeweilige Zielseite in einem neuen Tab, genauso wie die
- *     bestehenden Ansicht-/KI-Agent-Icons in der Analysen-Tabelle.
- *   - ANNAHME (bitte pruefen): Die URL fuer ein bestehendes Aufbau-Projekt
- *     wurde als '/member/landingpage-assistant?project_id=<id>' geraten,
- *     abgeleitet aus dem Muster von CONFIG.NEW_LANDINGPAGE_URL. Falls die
- *     tatsaechliche Route anders aussieht: siehe buildAufbauProjectUrl().
- *   - EINSCHRAENKUNG: Aufbau-Projekte werden per .eq('user_id', ...) nur
- *     fuer den eingeloggten User selbst geladen. Laut bisherigen Notizen
- *     sind Aufbau-Projekte inzwischen team-weit sichtbar (analog zum
- *     Session-Kontingent) - dafuer gibt es aber (anders als
- *     get_analyses_for_member fuer Analysen) noch keine team-faehige RPC,
- *     und page_projects hat aktuell keine erkennbare Team-Spalte.
- *     Team-Mitglieder sehen hier also NUR ihre eigenen Aufbau-Projekte,
- *     nicht die des ganzen Teams. Bewusst NICHT den Filter entfernt und
- *     auf RLS verlassen, da unklar ist, ob die RLS-Policy auf page_projects
- *     bereits team-scoped ist - im Zweifel lieber zu wenig zeigen als
- *     versehentlich fremde Projekte anzuzeigen. Falls Team-Sichtbarkeit
- *     hier wichtig ist: RPC analog zu get_analyses_for_member bauen.
- *   - KI-Agent-Sessions werden bewusst weiterhin nur fuer den eingeloggten
- *     User geladen (kein Team-Fall) - das deckt sich mit der bestehenden
- *     Regel, dass der KI-Agent nur dem Ersteller der Analyse zur Verfuegung
- *     steht (siehe agentEnabled = isCompleted && isCreator weiter unten).
- *   - "Zuletzt aktiv" aktualisiert sich NICHT live ueber Realtime/Polling,
- *     anders als die Analysen-Tabelle - nur beim initialen Laden der Seite.
- *     Bewusste Vereinfachung fuer den ersten Wurf; bei Bedarf laesst sich
- *     ein Aufruf von loadRecentActivity() leicht in silentRefresh() ergaenzen.
+ * ÄNDERUNGEN ggü. v9 (Tracker, Kontingent-Hinweis, neuer Analysen-Look):
+ *   - NEU: Customer Journey Tracker im Dashboard: zwei Stat-Karten (Topics belegt / frei)
+ *     und der Button "Tracker öffnen". Das Limit kommt aus users.ai_visibility_topics_limit
+ *     (Zeile des Owners bzw. Käufers, bei Team-Mitgliedern also die des Owners). Die Zahl
+ *     belegter Topics liefert die neue RPC get_tracker_topic_usage (siehe
+ *     tracker-topic-usage-rpc.sql, VOR dem Deployment in Supabase anlegen). Ohne die RPC
+ *     zeigen die Karten nur das Limit.
+ *   - NEU: Hinweis-Fenster, wenn jemand auf "Neue Analyse", "Landingpage aufbauen",
+ *     "Content-Strategie erstellen" oder einen der "Erste/Neue ..."-Links in den Tabs klickt
+ *     und für dieses Tool weder Plan-Kontingent noch Pay-per-Use-Guthaben übrig hat.
+ *     Beim Tracker greift die Sperre nur, wenn gar keine Topics vorhanden sind, sonst
+ *     könnten Nutzer ihre bestehenden Topics nicht mehr ansehen. Die Berechnung ist reine
+ *     UX, die Backends prüfen das Kontingent weiterhin selbst.
+ *   - GEÄNDERT: Die Analysen-Liste nutzt jetzt denselben Karten-Look wie Strategien und
+ *     Aufbau (cvz-p-row statt Tabellenzeilen). Die Spaltenüberschriften entfallen. Die
+ *     Zeile ist bei abgeschlossenen Analysen klickbar (öffnet das Ergebnis).
+ *   - NEU: Die Kontingent-Karten aktualisieren sich, wenn der Browser-Tab wieder sichtbar wird.
  *
  * In Webflow wird NUR EIN leerer Container gebraucht:
  *   <div id="cvz-dashboard-app"></div>
@@ -146,6 +109,11 @@
     // WHY doppelt gepflegt: page-projects-embed.html hat dieselbe Konstante,
     // laueft aber als eigenstaendiges, unabhaengiges Script - beide manuell synchron halten.
     NEW_LANDINGPAGE_URL: '/member/landingpage-assistant?new=1',
+    // NEU (v10): Tracker-Einstieg und Preisseiten-Anker fuer den Kontingent-Hinweis.
+    // Die Anker (#pay-per-use, #tracker) muessen als ID auf der Preisseite existieren.
+    TRACKER_URL:         '/member/customer-journey-tracker',
+    PPU_PRICING_URL:     '/preise#pay-per-use',
+    TRACKER_PRICING_URL: '/preise#tracker',
     // WHY dreifach gepflegt: pageAgentApiBase steht identisch auch in
     // page-projects-embed.html (CONFIG.pageAgentApiBase) und als
     // DEFAULT_CONFIG.apiBaseUrl / window.CVZ_CONTENT_STRATEGY_CONFIG.apiBaseUrl
@@ -200,6 +168,12 @@
     aufbauPage:         1,
     aufbauTotalPages:   1,
     aufbauLoaded:       false, // lazy - erst beim ersten Oeffnen des Tabs geladen
+    // -- NEU (v10): Kontingent-Stand fuer den Hinweis beim Klick und das Neu-Laden
+    credits:              null, // { analyse, aufbau, strategie, topicsLimit }, gesetzt in renderStatCards
+    creditCtx:            null, // { isMember, isFree, isPaid, renewal, planLimit }
+    sessionsLimit:        0,
+    contentStrategyLimit: 0,
+    limitsLoaded:         false,
   };
 
   // -- Utilities --------------------------------------------------------------
@@ -313,7 +287,7 @@
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       var result = await window.supabase
         .from('users')
-        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, ppu_aufbau_credits, reserved_ppu_aufbau_credits, ppu_strategy_credits, reserved_ppu_strategy_credits, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start')
+        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, ppu_aufbau_credits, reserved_ppu_aufbau_credits, ppu_strategy_credits, reserved_ppu_strategy_credits, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start, ai_visibility_topics_limit, ai_visibility_topics_plan_included, ai_visibility_topics_purchased')
         .eq('memberstack_id', memberstackId)
         .single();
       if (result.data) {
@@ -325,7 +299,7 @@
             // Pendant) schon immer mitgeholt wurde - ohne diese beiden Felder waeren die neuen
             // Karten 8/9 fuer Team-Members (billing laeuft ueber bu, siehe WHY-Kommentar oben)
             // immer leer geblieben.
-            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start')
+            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start, ai_visibility_topics_limit, ai_visibility_topics_plan_included, ai_visibility_topics_purchased')
             .eq('id', result.data.owner_user_id)
             .single();
           if (ownerResult.data) result.data._billingUser = ownerResult.data;
@@ -386,6 +360,22 @@
       return [];
     }
     return result.data || [];
+  }
+
+  // NEU (v10): Anzahl belegter (aktiver) Tracker-Topics des Teams. Laeuft wie die anderen
+  // RLS-geschuetzten Abfragen ueber eine SECURITY DEFINER RPC (siehe
+  // tracker-topic-usage-rpc.sql), weil auth.uid() im Frontend null ist. Gibt null zurueck,
+  // wenn die RPC fehlt oder fehlschlaegt: dann zeigen die Karten nur das Limit.
+  async function fetchTrackerUsage(userId) {
+    if (!userId) return null;
+    var result = await window.supabase.rpc('get_tracker_topic_usage', { p_user_id: userId });
+    if (result.error) {
+      console.warn('[CVZ] fetchTrackerUsage:', result.error);
+      return null;
+    }
+    if (result.data == null) return null;
+    var n = Number(result.data);
+    return isNaN(n) ? null : Math.max(0, Math.round(n));
   }
 
   // Letzte Aufbau-Projekte fuer "Zuletzt aktiv". Laeuft ueber eine SECURITY
@@ -569,28 +559,15 @@
       '.cvz-d-btn-outline{background:transparent;color:var(--cvz-teal);border-color:var(--cvz-teal);' +
         'font-size:13px;}' +
       '.cvz-d-title{font-size:22px;font-weight:700;color:var(--cvz-text);margin:0 0 16px;}' +
-      '.cvz-a-card{background:var(--cvz-card);border:1px solid var(--cvz-border);border-radius:0;overflow:hidden;}' +
-      '.cvz-a-header{display:grid;grid-template-columns:minmax(160px,1.6fr) minmax(110px,1fr) 120px 90px 56px 56px 56px 70px;' +
-        'gap:8px;padding:14px 20px;background:#10141b;text-transform:uppercase;letter-spacing:.06em;font-size:11px;' +
-        'font-weight:600;color:var(--cvz-muted);}' +
       '.cvz-a-body-empty{padding:60px 20px;text-align:center;color:var(--cvz-muted);}' +
       '.cvz-a-body-error{padding:60px 20px;text-align:center;color:#f87171;}' +
       '.cvz-a-body-error .cvz-a-error-sub{font-size:14px;color:var(--cvz-muted);margin-top:8px;}' +
       '.cvz-a-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;}' +
       '.cvz-a-loading p{margin-top:20px;color:var(--cvz-muted);font-size:14px;}' +
-      '.cvz-a-row{display:grid;grid-template-columns:minmax(160px,1.6fr) minmax(110px,1fr) 120px 90px 56px 56px 56px 70px;' +
-        'gap:8px;padding:16px 20px;align-items:center;border-top:1px solid var(--cvz-row-border);}' +
-      '.cvz-a-row:hover{background:rgba(255,255,255,0.02);}' +
-      '.cvz-a-url{color:var(--cvz-teal);font-size:14px;word-break:break-word;}' +
-      '.cvz-a-keyword{color:#c9d1d9;font-size:14px;word-break:break-word;}' +
-      '.cvz-a-date{color:var(--cvz-muted);font-size:14px;}' +
-      '.cvz-a-badge{display:inline-flex;padding:6px 14px;border-radius:0;font-size:12px;font-weight:600;}' +
-      '.cvz-a-actions{display:contents;}' +
       '.cvz-a-icon-btn{width:36px;height:36px;border-radius:0;background:#21262d;border:none;display:flex;' +
         'align-items:center;justify-content:center;cursor:pointer;color:#e8edf5;text-decoration:none;}' +
       '.cvz-a-icon-btn.cvz-a-disabled{opacity:.35;cursor:not-allowed;}' +
       '.cvz-a-icon-btn.cvz-a-loading-btn svg{animation:cvz-spin 1s linear infinite;}' +
-      '.cvz-a-score-cell{display:flex;align-items:center;justify-content:center;}' +
       '.cvz-a-pagination{display:none;align-items:center;justify-content:center;gap:12px;margin-top:20px;}' +
       '.cvz-a-pagebtn{background:var(--cvz-card);border:1px solid var(--cvz-border);color:var(--cvz-muted);' +
         'font-family:inherit;font-size:.85rem;font-weight:600;padding:8px 18px;border-radius:0;cursor:pointer;}' +
@@ -662,13 +639,26 @@
         'background:var(--cvz-bg);border:1px solid var(--cvz-row-border);border-radius:0;padding:18px 20px;margin-bottom:10px;}' +
       '.cvz-p-skeleton-block{border-radius:0;background:linear-gradient(90deg,#1a2133 25%,#252d3d 50%,#1a2133 75%);' +
         'background-size:400px 100%;animation:cvz-shimmer 1.4s infinite;}' +
+      // -- NEU (v10): Analysen im Karten-Look (gleiche cvz-p-row-Karten wie Strategien/Aufbau) ----
+      '.cvz-p-main{flex:1;min-width:0;}' +
+      '.cvz-p-side{display:flex;align-items:center;gap:10px;flex-shrink:0;}' +
+      '.cvz-p-row-analysis{gap:16px;}' +
+      '.cvz-p-row-analysis .cvz-p-name,.cvz-p-row-analysis .cvz-p-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+      // -- NEU (v10): Hinweis-Fenster "Kein Kontingent mehr" (feste Farben, da an document.body gehaengt) --
+      '.cvz-nc-overlay{position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;' +
+        'align-items:center;justify-content:center;backdrop-filter:blur(4px);padding:16px;}' +
+      '.cvz-nc-box{background:#161b22;border:1px solid #30363d;border-radius:0;padding:32px;max-width:460px;width:100%;' +
+        'text-align:center;font-family:Geist,ui-sans-serif,-apple-system,BlinkMacSystemFont,sans-serif;box-sizing:border-box;}' +
+      '.cvz-nc-title{margin:0 0 12px;font-size:20px;font-weight:700;color:#e6edf3;}' +
+      '.cvz-nc-text{margin:0 0 24px;font-size:14px;line-height:1.6;color:#8b98a5;}' +
+      '.cvz-nc-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;}' +
+      '.cvz-nc-btn{font-family:inherit;font-size:14px;font-weight:600;padding:12px 22px;border-radius:0;cursor:pointer;' +
+        'text-decoration:none;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;}' +
+      '.cvz-nc-btn-primary{background:#4fd1c5;color:#0d1117;}' +
+      '.cvz-nc-btn-secondary{background:transparent;color:#e6edf3;border-color:#30363d;}' +
       '@media (max-width:768px){' +
-        '.cvz-a-header{display:none;}' +
-        '.cvz-a-row{grid-template-columns:1fr 1fr;row-gap:10px;padding:18px 16px;}' +
-        '.cvz-a-url,.cvz-a-keyword{grid-column:1/-1;}' +
-        '.cvz-a-date{text-align:right;}' +
-        '.cvz-a-score-cell{grid-column:1/-1;margin-top:4px;}' +
-        '.cvz-a-actions{display:flex!important;grid-column:1/-1;justify-content:center;gap:20px;margin-top:8px;}' +
+        '.cvz-p-main{width:100%;}' +
+        '.cvz-p-side{width:100%;flex-wrap:wrap;}' +
         '.cvz-ract-time{display:none;}' +
         '.cvz-p-row{flex-direction:column;align-items:flex-start;gap:8px;}' +
       '}';
@@ -687,6 +677,7 @@
     cart:      '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10" cy="20" r="1.4" fill="#4fd1c5"/><circle cx="18" cy="20" r="1.4" fill="#4fd1c5"/><path d="M3 4h2l2.4 11.2a2 2 0 002 1.6h8.4a2 2 0 002-1.6L21 8H6.2" stroke="#4fd1c5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     aufbau:    '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="1.5" stroke="#4fd1c5" stroke-width="2"/><path d="M3.5 9.5h17" stroke="#4fd1c5" stroke-width="2"/><path d="M8 9.5V20" stroke="#4fd1c5" stroke-width="2"/></svg>',
     strategy:  '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19V9.5l8-5 8 5V19" stroke="#4fd1c5" stroke-width="2" stroke-linejoin="round"/><path d="M9 19v-6h6v6" stroke="#4fd1c5" stroke-width="2" stroke-linejoin="round"/><path d="M4 12h16" stroke="#4fd1c5" stroke-width="2"/></svg>',
+    tracker:   '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" stroke="#4fd1c5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   };
 
   function statCardHtml(opts) {
@@ -730,17 +721,23 @@
         statCardHtml({ wrapperId: 'cvz-d-c8', iconKey: 'strategy', label: 'Content-Strategien diesen Monat', valueId: 'cvz-d-c8-value', subId: 'cvz-d-c8-sub', withBar: true, barFillId: 'cvz-d-c8-bar', hidden: true }) +
         statCardHtml({ wrapperId: 'cvz-d-c9', iconKey: 'check',    label: 'Verbleibende Content-Strategien', valueId: 'cvz-d-c9-value', subId: 'cvz-d-c9-sub', withBar: false, hidden: true }) +
         statCardHtml({ wrapperId: 'cvz-d-c10', iconKey: 'cart',    label: 'Pay-per-Use Content-Strategien', valueId: 'cvz-d-c10-value', subId: 'cvz-d-c10-sub', withBar: false, hidden: true }) +
+        // NEU (v10): Customer Journey Tracker. Beide Karten starten hidden und werden in
+        // renderStatCards() nur eingeblendet, wenn Topics vorhanden sind (inklusive oder gebucht).
+        statCardHtml({ wrapperId: 'cvz-d-c11', iconKey: 'tracker', label: 'Tracker-Topics',  valueId: 'cvz-d-c11-value', subId: 'cvz-d-c11-sub', withBar: true, barFillId: 'cvz-d-c11-bar', hidden: true }) +
+        statCardHtml({ wrapperId: 'cvz-d-c12', iconKey: 'check',   label: 'Freie Topics',    valueId: 'cvz-d-c12-value', subId: 'cvz-d-c12-sub', withBar: false, hidden: true }) +
       '</div>' +
       '<div class="cvz-d-actions">' +
-        '<a id="cvz-d-btn-new-analysis" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">Neue Analyse</a>' +
-        '<a id="cvz-d-btn-new-page" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">Landingpage aufbauen</a>' +
+        '<a id="cvz-d-btn-new-analysis" data-cvz-tool="analyse" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">Neue Analyse</a>' +
+        '<a id="cvz-d-btn-new-page" data-cvz-tool="aufbau" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">Landingpage aufbauen</a>' +
         // GEÄNDERT (siehe Chat-Verlauf, Lasse: "Plan ändern kann raus, dafür Content-Strategie
         // erstellen rein") - "Plan ändern" (Link auf /preise) ist damit nicht mehr direkt aus
         // dem Dashboard erreichbar. Gleiche Sichtbarkeits-Logik wie die anderen beiden CTA-
         // Buttons: immer sichtbar, unabhaengig von hasStrategyAccess - Zugriffs-/Kontingent-
         // Pruefung passiert auf der Zielseite selbst (siehe fehlendes Kontingent -> 402 in
         // routes/contentStrategyAgent.ts), nicht durch Verstecken des Einstiegspunkts.
-        '<a id="cvz-d-btn-new-strategy" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.CONTENT_STRATEGY_PAGE_URL + '">Content-Strategie erstellen</a>' +
+        '<a id="cvz-d-btn-new-strategy" data-cvz-tool="strategie" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.CONTENT_STRATEGY_PAGE_URL + '">Content-Strategie erstellen</a>' +
+        // NEU (v10): Tracker-Einstieg. Gesperrt (Hinweis-Fenster) nur, wenn gar keine Topics vorhanden sind.
+        '<a id="cvz-d-btn-tracker" data-cvz-tool="tracker" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.TRACKER_URL + '">Tracker öffnen</a>' +
       '</div>' +
       // "Zuletzt aktiv" startet unsichtbar (display:none) - wird von loadRecentActivity()
       // eingeblendet, sobald geladen wird / Daten da sind. So flackert beim ersten Rendern keine
@@ -759,12 +756,7 @@
       '</div>' +
       '<div id="cvz-tab-panel-analysen" class="cvz-tab-panel">' +
         '<h2 class="cvz-d-title" id="cvz-analysen-title">Meine Analysen</h2>' +
-        '<div class="cvz-a-card">' +
-          '<div class="cvz-a-header">' +
-            '<div>URL</div><div>KEYWORD</div><div>STATUS</div><div>DATUM</div>' +
-            '<div style="text-align:center">ANSICHT</div><div style="text-align:center">KI-AGENT</div>' +
-            '<div style="text-align:center">REPORT</div><div style="text-align:center">SCORE</div>' +
-          '</div>' +
+        '<div class="cvz-p-card">' +
           '<div id="cvz-a-body"></div>' +
         '</div>' +
         '<div id="cvz-a-pagination" class="cvz-a-pagination">' +
@@ -822,6 +814,10 @@
     Array.prototype.forEach.call(document.querySelectorAll('.cvz-tab-btn'), function (btn) {
       btn.addEventListener('click', function () { switchTab(btn.getAttribute('data-tab')); });
     });
+    // NEU (v10): ein einziger delegierter Klick-Handler fuer alle [data-cvz-tool]-Elemente
+    // (Aktions-Buttons oben, "Erste ..."-Links in den Tabs). Fangen Klicks ab, solange
+    // fuer das Tool kein Kontingent mehr da ist, und zeigen stattdessen den Hinweis.
+    root.addEventListener('click', handleToolClick);
     showAnalysesLoading();
   }
   // -- UI: Tab-Umschaltung ------------------------------------------------------
@@ -867,7 +863,7 @@
 
   // -- UI: Stat-Karten befuellen -------------------------------------------------
 
-  function renderStatCards(user, sessionsLimit, contentStrategyLimit) {
+  function renderStatCards(user, sessionsLimit, contentStrategyLimit, activeTopics) {
     var bu           = user._billingUser || user;
     var reserved     = Math.max(0, Math.round(Number(bu.reserved_credits || 0)));
     var used         = Math.round(Number(bu.credits_used_current_period || 0));
@@ -1036,6 +1032,50 @@
     setText('cvz-d-c10-value', ppuStrategyAvailable);
     setText('cvz-d-c10-sub', ppuStrategyLabelText);
     showEl(document.getElementById('cvz-d-c10'), ppuStrategyCredits > 0, 'flex');
+    // Karte 11+12: Customer Journey Tracker (nur wenn Topics vorhanden sind, inklusive oder
+    // gebucht). Das Limit liegt auf der Owner-/Kaeufer-Zeile (bu), nicht auf der Zeile eines
+    // Team-Mitglieds. activeTopics ist null, solange die RPC fehlt: dann nur das Limit zeigen.
+    var topicsLimit    = Math.round(Number(bu.ai_visibility_topics_limit || 0));
+    var topicsIncluded = Math.round(Number(bu.ai_visibility_topics_plan_included || 0));
+    var topicsBought   = Math.round(Number(bu.ai_visibility_topics_purchased || 0));
+    var topicsKnown    = activeTopics != null;
+    var topicsUsed     = topicsKnown ? activeTopics : 0;
+    var topicsFree     = Math.max(topicsLimit - topicsUsed, 0);
+    var topicsPercent  = topicsLimit ? (topicsUsed / topicsLimit) * 100 : 0;
+    var showTrackerCards = topicsLimit > 0;
+    setText('cvz-d-c11-value', topicsKnown ? (topicsUsed + '/' + topicsLimit + ' Topics') : (topicsLimit + ' Topics'));
+    setText('cvz-d-c11-sub', topicsKnown ? (Math.round(topicsPercent) + '% der Topics belegt') : 'Limit deines Plans');
+    var bar11 = document.getElementById('cvz-d-c11-bar');
+    if (bar11) bar11.style.width = (topicsKnown ? Math.min(topicsPercent, 100) : 0) + '%';
+    showEl(document.getElementById('cvz-d-c11'), showTrackerCards, 'flex');
+    var topicsSplit = [];
+    if (topicsIncluded > 0) topicsSplit.push(topicsIncluded + ' im Plan enthalten');
+    if (topicsBought > 0)   topicsSplit.push(topicsBought + ' gebucht');
+    setText('cvz-d-c12-value', topicsKnown ? topicsFree : '-');
+    setText('cvz-d-c12-sub', topicsSplit.length ? topicsSplit.join(', ') : '-');
+    showEl(document.getElementById('cvz-d-c12'), showTrackerCards, 'flex');
+
+    // NEU (v10): Kontingent-Stand fuer den Hinweis beim Klick auf die Aktions-Buttons.
+    // Verfuegbar = Plan-Kontingent + Pay-per-Use-Guthaben (PPU liegt auf der eigenen Zeile des
+    // Members, das Plan-Kontingent auf bu). Nur UX, die Backends pruefen weiterhin selbst.
+    state.credits = {
+      analyse:     analysesLeft + ppuAvailable,
+      aufbau:      sessionsLeft + ppuAufbauAvailable,
+      strategie:   strategyLeft + ppuStrategyAvailable,
+      topicsLimit: topicsLimit,
+    };
+    state.creditCtx = {
+      isMember:  !!user.owner_user_id,
+      isFree:    isFreePlan,
+      isPaid:    isPaid,
+      planLimit: { analyse: limit, aufbau: sessionsLimitNum, strategie: strategyLimitNum },
+      renewal: {
+        analyse:   renewalDate || null,
+        aufbau:    (typeof aufbauRenewalDate !== 'undefined' && aufbauRenewalDate) ? aufbauRenewalDate.toLocaleDateString('de-DE') : null,
+        strategie: (typeof strategyRenewalDate !== 'undefined' && strategyRenewalDate) ? strategyRenewalDate.toLocaleDateString('de-DE') : null,
+      },
+    };
+
     // User-Kopfbereich (weiterhin Webflow-Elemente, unveraendert)
     setUserHeader(user);
   }
@@ -1050,6 +1090,150 @@
     if (avatarEl) {
       avatarEl.textContent = getInitials(user.full_name || '');
       avatarEl.style.cssText += ';display:flex;align-items:center;justify-content:center';
+    }
+  }
+
+  // -- UI: Hinweis "Kein Kontingent mehr" (v10) ----------------------------------
+  // Erscheint direkt beim Klick auf einen Aktions-Button ([data-cvz-tool]), wenn fuer das
+  // Tool weder Plan-Kontingent noch Pay-per-Use-Guthaben uebrig ist. Die Berechnung stuetzt
+  // sich auf die zuletzt geladenen User-Daten (state.credits) und ist reine UX: die Backends
+  // pruefen das Kontingent weiterhin selbst. Solange state.credits noch nicht gesetzt ist
+  // (Daten laden noch), wird nie blockiert.
+  var TOOL_TEXTS = {
+    analyse:   { noun: 'Analysen',           ctaLabel: 'Analysen kaufen'    },
+    aufbau:    { noun: 'Aufbau-Sessions',    ctaLabel: 'Sessions kaufen'    },
+    strategie: { noun: 'Content-Strategien', ctaLabel: 'Strategien kaufen'  },
+  };
+
+  function getNoCreditsInfo(tool) {
+    var c = state.credits;
+    var ctx = state.creditCtx;
+    if (!c || !ctx) return null;
+
+    // Tracker: nur sperren, wenn ueberhaupt keine Topics vorhanden sind. Sind alle Topics
+    // belegt, muss der Tracker trotzdem erreichbar bleiben (Ansehen der bestehenden Topics).
+    if (tool === 'tracker') {
+      if (c.topicsLimit > 0) return null;
+      return {
+        title:    'Noch keine Tracker-Topics',
+        text:     ctx.isMember
+                    ? 'Dein Team hat noch keine Topics im Customer Journey Tracker. Bitte wende dich an den Account-Inhaber.'
+                    : 'Du hast noch keine Topics im Customer Journey Tracker. Buche Topics, um Phase für Phase zu sehen, wo du in KI-Antworten zitiert wirst.',
+        ctaLabel: ctx.isMember ? null : 'Topics buchen',
+        ctaHref:  CONFIG.TRACKER_PRICING_URL,
+      };
+    }
+
+    var t = TOOL_TEXTS[tool];
+    if (!t || c[tool] > 0) return null;
+
+    var notIncluded = ctx.planLimit[tool] === 0;
+    var text;
+    if (ctx.isFree) {
+      text = 'Dein kostenloses Kontingent ist aufgebraucht. Kaufe einzelne ' + t.noun + ' oder wähle einen Plan, um weiterzumachen.';
+    } else if (notIncluded) {
+      text = t.noun + ' sind in deinem Plan nicht enthalten. Du kannst einzelne ' + t.noun + ' kaufen' +
+             (ctx.isMember ? '.' : ' oder in einen Plan wechseln, der sie enthält.');
+    } else if (ctx.isMember) {
+      text = 'Das Kontingent deines Teams für ' + t.noun + ' ist aufgebraucht. Bitte wende dich an den Account-Inhaber. Einzelne ' + t.noun + ' kannst du auch selbst dazukaufen.';
+    } else if (ctx.isPaid) {
+      text = 'Dein Monatskontingent für ' + t.noun + ' ist aufgebraucht' +
+             (ctx.renewal[tool] ? ' und erneuert sich am ' + ctx.renewal[tool] : '') +
+             '. Du kannst jederzeit einzelne ' + t.noun + ' dazukaufen oder deinen Plan wechseln.';
+    } else {
+      text = 'Du hast keine ' + t.noun + ' mehr übrig. Kaufe weitere, um fortzufahren.';
+    }
+    return {
+      title:    'Keine ' + t.noun + ' verfügbar',
+      text:     text,
+      ctaLabel: t.ctaLabel,
+      ctaHref:  CONFIG.PPU_PRICING_URL,
+    };
+  }
+
+  function handleNoCreditsEscape(e) {
+    if (e.key === 'Escape') closeNoCreditsModal();
+  }
+
+  function closeNoCreditsModal() {
+    var m = document.getElementById('cvz-nc-modal');
+    if (m) m.remove();
+    document.removeEventListener('keydown', handleNoCreditsEscape);
+  }
+
+  function showNoCreditsModal(info) {
+    closeNoCreditsModal();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'cvz-nc-modal';
+    overlay.className = 'cvz-nc-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+
+    var box = document.createElement('div');
+    box.className = 'cvz-nc-box';
+
+    var h = document.createElement('h3');
+    h.className = 'cvz-nc-title';
+    h.textContent = info.title;
+
+    var p = document.createElement('p');
+    p.className = 'cvz-nc-text';
+    p.textContent = info.text;
+
+    var row = document.createElement('div');
+    row.className = 'cvz-nc-actions';
+
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'cvz-nc-btn cvz-nc-btn-secondary';
+    closeBtn.textContent = 'Schließen';
+    closeBtn.addEventListener('click', closeNoCreditsModal);
+    row.appendChild(closeBtn);
+
+    if (info.ctaLabel && info.ctaHref) {
+      var cta = document.createElement('a');
+      cta.className = 'cvz-nc-btn cvz-nc-btn-primary';
+      cta.href = info.ctaHref;
+      cta.textContent = info.ctaLabel;
+      row.appendChild(cta);
+    }
+
+    box.appendChild(h);
+    box.appendChild(p);
+    box.appendChild(row);
+    overlay.appendChild(box);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeNoCreditsModal(); });
+    document.addEventListener('keydown', handleNoCreditsEscape);
+    document.body.appendChild(overlay);
+    closeBtn.focus();
+  }
+
+  function handleToolClick(e) {
+    var el = e.target && e.target.closest ? e.target.closest('[data-cvz-tool]') : null;
+    if (!el) return;
+    var info = getNoCreditsInfo(el.getAttribute('data-cvz-tool'));
+    if (!info) return; // Kontingent vorhanden: Link normal ausfuehren
+    e.preventDefault();
+    e.stopPropagation();
+    showNoCreditsModal(info);
+  }
+
+  // Laedt User + Topic-Nutzung neu und aktualisiert Karten und Kontingent-Stand. Wird
+  // aufgerufen, wenn der Browser-Tab wieder sichtbar wird (z.B. nach einer Analyse in einem
+  // anderen Tab), damit Karten und Hinweis nicht mit altem Stand arbeiten.
+  async function refreshCredits() {
+    if (!state.limitsLoaded || !state.memberstackId) return;
+    try {
+      var u = await fetchUser(state.memberstackId, 1);
+      if (!u) return;
+      var ubu = u._billingUser || u;
+      var topics = (Math.round(Number(ubu.ai_visibility_topics_limit || 0)) > 0)
+        ? await fetchTrackerUsage(u.id)
+        : null;
+      renderStatCards(u, state.sessionsLimit, state.contentStrategyLimit, topics);
+    } catch (e) {
+      console.warn('[CVZ] refreshCredits:', e);
     }
   }
 
@@ -1160,75 +1344,70 @@
       });
     } catch (e) {}
 
+    var resultUrl = '/analyse/resultat?id=' + encodeURIComponent(analysis.id);
+
+    // v10: gleicher Karten-Look wie Strategien und Aufbau (cvz-p-row). Abgeschlossene Analysen
+    // sind als ganze Zeile klickbar (oeffnet das Ergebnis), nicht abgeschlossene bekommen
+    // wie bei den Strategien den Disabled-Stil ohne Hover-Effekt.
     var row = document.createElement('div');
-    row.className = 'cvz-a-row';
+    row.className = 'cvz-p-row cvz-p-row-analysis' + (isCompleted ? '' : ' cvz-p-row-disabled');
     row.setAttribute('data-analysis-id', analysis.id);
 
-    // URL
-    var urlCell = document.createElement('div');
-    urlCell.className = 'cvz-a-url';
-    urlCell.textContent = truncate(analysis.landing_page_url, 90);
-    row.appendChild(urlCell);
+    // Links: URL als Titel, Keyword und Datum als Meta-Zeile
+    var main = document.createElement('div');
+    main.className = 'cvz-p-main';
+    var nameEl = document.createElement('div');
+    nameEl.className = 'cvz-p-name';
+    nameEl.textContent = truncate(analysis.landing_page_url, 90);
+    var metaEl = document.createElement('div');
+    metaEl.className = 'cvz-p-meta';
+    var kw = analysis.keyword ? truncate(analysis.keyword, 50) : '';
+    metaEl.textContent = (kw ? kw + ' · ' : '') + formattedDate;
+    main.appendChild(nameEl);
+    main.appendChild(metaEl);
+    row.appendChild(main);
 
-    // Keyword
-    var kwCell = document.createElement('div');
-    kwCell.className = 'cvz-a-keyword';
-    kwCell.textContent = truncate(analysis.keyword, 50);
-    row.appendChild(kwCell);
+    // Rechts: Status, Score, Aktionen
+    var side = document.createElement('div');
+    side.className = 'cvz-p-side';
 
-    // Status
-    var statusCell = document.createElement('div');
     var badge = document.createElement('span');
-    badge.className = 'cvz-a-badge';
+    badge.className = 'cvz-p-badge';
     badge.textContent = statusInfo.text;
-    badge.style.background = statusInfo.bg;
-    badge.style.color      = statusInfo.color;
-    statusCell.appendChild(badge);
-    row.appendChild(statusCell);
+    badge.style.color = statusInfo.color;
+    side.appendChild(badge);
 
-    // Datum
-    var dateCell = document.createElement('div');
-    dateCell.className = 'cvz-a-date';
-    dateCell.textContent = formattedDate;
-    row.appendChild(dateCell);
+    var scoreVal = parseFloat(analysis.overall_score_weighted);
+    side.appendChild(createScoreBadge(scoreVal));
 
-    // Aktionen (Ansicht / KI-Agent / Report) - display:contents auf Desktop,
-    // flex-Reihe auf Mobile (siehe CSS)
-    var actionsCell = document.createElement('div');
-    actionsCell.className = 'cvz-a-actions';
+    // Klicks auf die Icons duerfen nicht zusaetzlich den Zeilen-Klick ausloesen.
+    function stop(ev) { ev.stopPropagation(); }
 
     var viewBtn = document.createElement('a');
     viewBtn.className = 'cvz-a-icon-btn' + (isCompleted ? '' : ' cvz-a-disabled');
     viewBtn.innerHTML = ICONS.eye;
     viewBtn.target = '_blank';
     if (isCompleted) {
-      viewBtn.href = '/analyse/resultat?id=' + encodeURIComponent(analysis.id);
+      viewBtn.href = resultUrl;
       viewBtn.title = 'Ansehen';
+      viewBtn.addEventListener('click', stop);
     } else {
-      // WHY href='#' + preventDefault statt nur pointer-events:none: Die CSS-Regel
-      // pointer-events:none wurde entfernt, damit der native title-Tooltip auf
-      // ausgegrauten Icons wieder per Hover ausgeloest wird (pointer-events:none
-      // unterdrueckt auch mouseover, nicht nur click). Der Klickschutz muss daher
-      // jetzt hier explizit passieren, sonst waere der Button trotz "disabled"-
-      // Optik navigierbar.
+      // WHY href='#' + preventDefault statt pointer-events:none: pointer-events:none wuerde
+      // auch den Hover-Tooltip (title) unterdruecken. Der Klickschutz passiert daher hier.
       viewBtn.href = '#';
       viewBtn.setAttribute('aria-disabled', 'true');
-      // WHY pointer-events:auto !important inline: Auf der Seite existiert
-      // vermutlich eine Regel wie a[aria-disabled="true"]{pointer-events:none
-      // !important;} (gaengiges Pattern fuer nicht-native disabled-Links,
-      // z.B. aus Memberstack/Webflow-Nav-Komponenten). Ein einfaches
-      // style.pointerEvents='auto' (ohne !important) verliert gegen eine
-      // !important-Regel im externen Stylesheet, unabhaengig von Spezifitaet -
-      // nur ein ebenfalls mit !important gesetzter Inline-Wert gewinnt
-      // zuverlaessig dagegen.
+      // WHY !important inline: Auf der Seite existiert vermutlich eine Regel wie
+      // a[aria-disabled="true"]{pointer-events:none !important;}. Nur ein ebenfalls mit
+      // !important gesetzter Inline-Wert gewinnt zuverlaessig dagegen.
       viewBtn.style.setProperty('pointer-events', 'auto', 'important');
       viewBtn.title = 'Analyse ist noch nicht abgeschlossen';
       viewBtn.addEventListener('click', function (e) {
         e.preventDefault();
+        e.stopPropagation();
         showClickHint(viewBtn, viewBtn.title);
       });
     }
-    actionsCell.appendChild(viewBtn);
+    side.appendChild(viewBtn);
 
     var agentEnabled = isCompleted && isCreator;
     var agentBtn = document.createElement('a');
@@ -1238,23 +1417,21 @@
     if (agentEnabled) {
       agentBtn.href = '/analyse/optimization-agent?analysis_id=' + encodeURIComponent(analysis.id);
       agentBtn.title = 'Mit KI-Agent optimieren';
+      agentBtn.addEventListener('click', stop);
     } else {
       agentBtn.href = '#';
       agentBtn.setAttribute('aria-disabled', 'true');
-      // WHY !important: siehe Kommentar bei viewBtn weiter oben. Betrifft hier
-      // vermutlich haeufiger sichtbar, weil der Agent-Button in der Praxis
-      // oefter im disabled-Zustand getestet wird (Nicht-Ersteller) als der
-      // View-Button.
       agentBtn.style.setProperty('pointer-events', 'auto', 'important');
       agentBtn.title = !isCompleted
         ? 'Analyse ist noch nicht abgeschlossen'
         : 'Der KI-Agent steht nur dem Ersteller der Analyse zur Verfügung';
       agentBtn.addEventListener('click', function (e) {
         e.preventDefault();
+        e.stopPropagation();
         showClickHint(agentBtn, agentBtn.title);
       });
     }
-    actionsCell.appendChild(agentBtn);
+    side.appendChild(agentBtn);
 
     var isFreeAnalysis = (analysis.analysis_source || '').toLowerCase() === 'free';
     var downloadTitle = !isCompleted
@@ -1271,23 +1448,20 @@
     dlBtn.setAttribute('aria-label', 'Report herunterladen');
     dlBtn.title = downloadTitle;
     if (canDownload) {
-      dlBtn.addEventListener('click', function () { handleReportDownload(dlBtn, analysis.id); });
+      dlBtn.addEventListener('click', function (e) { e.stopPropagation(); handleReportDownload(dlBtn, analysis.id); });
     } else {
-      // WHY eigener Handler statt Wegfall: vorher passierte bei Klick auf den
-      // deaktivierten Button gar nichts - keine Rueckmeldung, warum. Jetzt
-      // zeigt der Klick denselben Text wie der (Hover-)Tooltip.
-      dlBtn.addEventListener('click', function () { showClickHint(dlBtn, downloadTitle); });
+      // Klick auf den deaktivierten Button zeigt denselben Text wie der Hover-Tooltip.
+      dlBtn.addEventListener('click', function (e) { e.stopPropagation(); showClickHint(dlBtn, downloadTitle); });
     }
-    actionsCell.appendChild(dlBtn);
+    side.appendChild(dlBtn);
 
-    row.appendChild(actionsCell);
+    row.appendChild(side);
 
-    // Score
-    var scoreCell = document.createElement('div');
-    scoreCell.className = 'cvz-a-score-cell';
-    var scoreVal = parseFloat(analysis.overall_score_weighted);
-    scoreCell.appendChild(createScoreBadge(scoreVal));
-    row.appendChild(scoreCell);
+    if (isCompleted) {
+      row.addEventListener('click', function () {
+        window.open(resultUrl, '_blank', 'noopener');
+      });
+    }
 
     return row;
   }
@@ -1413,7 +1587,7 @@
     el.innerHTML =
       '<div class="cvz-p-empty">' +
         '<p style="margin:0 0 20px;">Noch keine Landingpage-Projekte vorhanden.</p>' +
-        '<a class="cvz-p-new-btn" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">Erste Landingpage starten</a>' +
+        '<a class="cvz-p-new-btn" data-cvz-tool="aufbau" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">Erste Landingpage starten</a>' +
       '</div>';
   }
   function renderAufbauError(el) {
@@ -1451,6 +1625,7 @@
     var newBtn = document.createElement('a');
     newBtn.className = 'cvz-p-new-btn';
     newBtn.href = CONFIG.NEW_LANDINGPAGE_URL;
+    newBtn.setAttribute('data-cvz-tool', 'aufbau');
     newBtn.textContent = '+ Neue Landingpage';
     el.appendChild(newBtn);
     updateGenericPaginationInfo('cvz-p-pagination', 'cvz-p-pageinfo', 'cvz-p-prev', 'cvz-p-next', state.aufbauPage, state.aufbauTotalPages);
@@ -1711,16 +1886,17 @@
 
   function showEmptyState() {
     if (!state.container) return;
+    // v10: gleicher Leer-Zustand wie bei den Aufbau-Projekten (cvz-p-empty + Button)
     state.container.innerHTML =
-      '<div class="cvz-a-body-empty">' +
-        '<p style="margin:0 0 10px;font-weight:500;">Noch keine Analysen vorhanden</p>' +
-        '<p style="margin:0;font-size:14px;">Starte deine erste Analyse!</p>' +
+      '<div class="cvz-p-empty">' +
+        '<p style="margin:0 0 20px;">Noch keine Analysen vorhanden.</p>' +
+        '<a class="cvz-p-new-btn" data-cvz-tool="analyse" href="' + CONFIG.NEW_ANALYSIS_URL + '">Erste Analyse starten</a>' +
       '</div>';
   }
 
   function showDotsLoader() {
     if (!state.container || document.getElementById('cvz-dots-loader')) return;
-    Array.prototype.forEach.call(state.container.querySelectorAll('.cvz-a-row'), function (r) { r.style.opacity = '0.4'; });
+    Array.prototype.forEach.call(state.container.querySelectorAll('.cvz-p-row'), function (r) { r.style.opacity = '0.4'; });
     state.container.insertAdjacentHTML('afterbegin', CVZ_DOTS_LOADER);
   }
 
@@ -1728,7 +1904,7 @@
     var loader = document.getElementById('cvz-dots-loader');
     if (loader) loader.remove();
     if (state.container) {
-      Array.prototype.forEach.call(state.container.querySelectorAll('.cvz-a-row'), function (r) { r.style.opacity = ''; });
+      Array.prototype.forEach.call(state.container.querySelectorAll('.cvz-p-row'), function (r) { r.style.opacity = ''; });
     }
   }
 
@@ -1869,12 +2045,11 @@
         : null;
       if (!row) return;
 
-      var badge   = row.querySelector('.cvz-a-badge');
+      var badge   = row.querySelector('.cvz-p-badge');
       var newInfo = STATUS_STYLES[fresh.status] || STATUS_STYLES.completed;
       if (badge) {
-        badge.textContent   = newInfo.text;
-        badge.style.background = newInfo.bg;
-        badge.style.color      = newInfo.color;
+        badge.textContent = newInfo.text;
+        badge.style.color = newInfo.color;
       }
       // Bei Abschluss oder Fehler: Row neu aufbauen um Buttons zu aktivieren
       if (fresh.status === 'completed' || fresh.status === 'error') {
@@ -1903,8 +2078,10 @@
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
       stopPolling();
-    } else if (hasProcessingAnalyses()) {
-      silentRefresh().then(startPolling);
+    } else {
+      // NEU (v10): Karten/Kontingent mit frischen User-Daten aktualisieren
+      refreshCredits();
+      if (hasProcessingAnalyses()) silentRefresh().then(startPolling);
     }
   });
 
@@ -2054,7 +2231,15 @@
       var ppuAufbauCredits = Math.round(Number(currentUser.ppu_aufbau_credits || 0));
       state.hasAufbauAccess = sessionsLimit > 0 || ppuAufbauCredits > 0;
       applyTabVisibility();
-      renderStatCards(currentUser, sessionsLimit, contentStrategyLimit);
+      // NEU (v10): Tracker-Nutzung nur abfragen, wenn ueberhaupt Topics vorhanden sind.
+      var trackerBu    = currentUser._billingUser || currentUser;
+      var activeTopics = (Math.round(Number(trackerBu.ai_visibility_topics_limit || 0)) > 0)
+        ? await fetchTrackerUsage(currentUser.id)
+        : null;
+      state.sessionsLimit        = sessionsLimit;
+      state.contentStrategyLimit = contentStrategyLimit;
+      renderStatCards(currentUser, sessionsLimit, contentStrategyLimit, activeTopics);
+      state.limitsLoaded = true;
       await loadAndRenderAnalyses(false);
       // "Zuletzt aktiv" erst NACH loadAndRenderAnalyses(), weil
       // buildAnalyseActivityItems() auf state.analysesData zugreift.
