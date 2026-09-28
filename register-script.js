@@ -18,8 +18,13 @@
       'strategie-1':  { monthly: 'prc_strategie-1--kpn10a65',  annual: 'prc_strategie-1--kpn10a65'  },
       'strategie-5':  { monthly: 'prc_strategie-5--05mj0j7r',  annual: 'prc_strategie-5--05mj0j7r'  },
       'strategie-10': { monthly: 'prc_strategie-10--1jn30a61', annual: 'prc_strategie-10--1jn30a61' },
+      // NEU: Customer Journey Tracker (ein Preis, Menge wird im Checkout gewaehlt)
+      'tracker':      { monthly: 'prc_conversion-journey-1--gj1oi0uck', annual: 'prc_conversion-journey-1--gj1oi0uck' },
     },
   };
+  // HINWEIS: Diese Map wird in diesem Script aktuell nicht gelesen. Den Checkout nach dem Signup
+  // startet das site-weite "CVZ CHECKOUT RESUME"-Script im Webflow-Site-Footer (eigene PRICE_IDS-Map).
+  // Beide Maps muessen synchron bleiben, sonst startet nach der Registrierung kein Checkout.
   // ── URL-Parameter ────────────────────────────────────────────────────────────
   var params = new URLSearchParams(window.location.search);
   var urlEmail       = params.get('email')   ? decodeURIComponent(params.get('email')) : '';
