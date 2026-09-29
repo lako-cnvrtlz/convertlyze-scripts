@@ -7547,9 +7547,162 @@
       'white-space:nowrap;color:' + cfg.color + ';border:1px solid ' + cfg.color + ';">' + cfg.label + '</span>';
   }
 
+  // =========================================================================
+  // ERSETZT (29.09.2026): renderKnowledgeSection mit Quellen je Information.
+  // Ersetzt in app.js den kompletten Block von "function renderKnowledgeSection(detail) {"
+  // bis zur schließenden Klammer dieser Funktion (direkt vor
+  // "// --- Ziele für Bewertungen und Digital PR ---").
+  // KNOWLEDGE_LEVELS, KNOWLEDGE_PRIORITY_COLORS und knowledgeBadge bleiben unverändert.
+  //
+  // Backend-Felder (ai_knowledge.py, Stand 29.09.2026):
+  //   k.source_registry = { chatgpt: [{id, url, domain, title, published, found_in}], gemini: [...] }
+  //   k.dimensions[].sources = { chatgpt: ['c1'], gemini: ['g2'] }
+  //   k.wrong_or_outdated[].source_ids = ['c2', 'g1']
+  // Alte Prüfungen ohne source_registry zeigen weiter den grauen Quellen-Block.
+  // =========================================================================
+
+  var KNOWLEDGE_ENGINE_LABELS = { chatgpt: 'ChatGPT', gemini: 'Gemini' };
+  var KNOWLEDGE_CHIP_MAX_CHARS = 38;
+
+  // escapeHtml maskiert keine Anführungszeichen. Für Attribute (href, title) daher eigene Funktion,
+  // sonst könnte eine URL mit " aus dem Attribut ausbrechen.
+  function knowledgeAttr(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function knowledgeCleanDomain(domain) {
+    return String(domain || '').toLowerCase().replace(/^www\./, '').replace(/\.$/, '');
+  }
+
+  // Exakter Treffer oder Subdomain. "convertlyze.de" trifft "blog.convertlyze.de",
+  // aber nicht "notconvertlyze.de" (das Backend prüft per Teilstring, das ist zu locker).
+  function knowledgeIsOwnDomain(domain, ownDomain) {
+    var d = knowledgeCleanDomain(domain);
+    var own = knowledgeCleanDomain(ownDomain);
+    if (!d || !own) return false;
+    return d === own || d.slice(-(own.length + 1)) === '.' + own;
+  }
+
+  function knowledgeSafeUrl(url) {
+    return (typeof url === 'string' && /^https?:\/\//i.test(url)) ? url : null;
+  }
+
+  function knowledgeTruncate(text, max) {
+    text = String(text || '');
+    return text.length > max ? text.slice(0, max - 1).trim() + '…' : text;
+  }
+
+  // Pfad einer URL ohne Domain, z.B. "/preise". Leer bei Startseite.
+  function knowledgeUrlPath(url) {
+    try {
+      var p = new URL(url).pathname.replace(/\/+$/, '');
+      return p || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // Index {id: entry} über beide Modelle. null, wenn die Prüfung noch kein Verzeichnis hat.
+  function buildKnowledgeSourceIndex(k) {
+    var reg = k && k.source_registry;
+    if (!reg || typeof reg !== 'object') return null;
+    var index = {};
+    var any = false;
+    ['chatgpt', 'gemini'].forEach(function (engine) {
+      (reg[engine] || []).forEach(function (entry) {
+        if (entry && entry.id) {
+          index[entry.id] = Object.assign({ engine: engine }, entry);
+          any = true;
+        }
+      });
+    });
+    // Ein leeres Verzeichnis (Modelle haben nichts verlinkt) ist trotzdem das neue Format.
+    return any || Array.isArray(reg.chatgpt) || Array.isArray(reg.gemini) ? index : null;
+  }
+
+  function ensureKnowledgeSourceStyles() {
+    if (document.getElementById('cvz-knowledge-source-styles')) return;
+    var style = document.createElement('style');
+    style.id = 'cvz-knowledge-source-styles';
+    style.textContent =
+      '.cvz-ks-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}' +
+      '.cvz-ks-chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;font-size:11px;line-height:1.3;' +
+        'padding:2px 8px;border-radius:9999px;border:1px solid var(--cvz-border,#232b36);' +
+        'color:var(--cvz-text-muted,#8b98a5);background:transparent;text-decoration:none;white-space:nowrap;' +
+        'overflow:hidden;text-overflow:ellipsis;}' +
+      'a.cvz-ks-chip:hover{border-color:var(--cvz-teal,#4fd1c5);color:var(--cvz-teal,#4fd1c5);}' +
+      '.cvz-ks-chip-own{border-color:var(--cvz-teal,#4fd1c5);color:var(--cvz-teal,#4fd1c5);' +
+        'background:rgba(79,209,197,0.10);font-weight:600;}' +
+      '.cvz-ks-chip-engine{font-weight:600;}' +
+      '.cvz-ks-chip-arrow{opacity:0.7;}' +
+      '.cvz-ks-cell p{margin:0;}' +
+      '.cvz-ks-cell p + p{margin-top:4px;}' +
+      '.cvz-ks-missing{color:var(--cvz-text-muted,#8b98a5);}' +
+      '.cvz-ks-conflict{color:#8878ca;}' +
+      '.cvz-ks-wrong{margin:0 0 12px;}' +
+      '.cvz-ks-wrong-src{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:4px;font-size:12px;' +
+        'color:var(--cvz-text-muted,#8b98a5);}';
+    document.head.appendChild(style);
+  }
+
+  // Ein Chip als HTML-String. entry aus buildKnowledgeSourceIndex.
+  function knowledgeSourceChipHtml(entry, ownDomain) {
+    var isOwn = knowledgeIsOwnDomain(entry.domain, ownDomain);
+    var url = knowledgeSafeUrl(entry.url);
+    var engineLabel = KNOWLEDGE_ENGINE_LABELS[entry.engine] || '';
+
+    // Eigene Seite: Pfad zeigen, damit sichtbar ist, WELCHE Seite zitiert wird.
+    // Fremde Seite: Titel, sonst Domain. Ohne URL: nur Domain.
+    var text;
+    if (!url) {
+      text = entry.domain;
+    } else if (isOwn) {
+      text = (knowledgeCleanDomain(entry.domain) + knowledgeUrlPath(url)) || entry.title || entry.domain;
+    } else {
+      text = entry.title || entry.domain;
+    }
+    text = knowledgeTruncate(text, KNOWLEDGE_CHIP_MAX_CHARS);
+
+    var tooltip = (isOwn ? 'Eure Seite. ' : '') +
+      (entry.title ? entry.title + '\n' : '') +
+      (url || entry.domain + ' (keine genaue URL übermittelt)') +
+      (entry.published ? '\nVeröffentlicht: ' + entry.published : '');
+
+    var inner =
+      '<span class="cvz-ks-chip-engine">' + escapeHtml(engineLabel) + ':</span> ' +
+      escapeHtml(text) +
+      (url ? ' <span class="cvz-ks-chip-arrow">↗</span>' : '');
+    var cls = 'cvz-ks-chip' + (isOwn ? ' cvz-ks-chip-own' : '');
+
+    if (url) {
+      return '<a class="' + cls + '" href="' + knowledgeAttr(url) + '" target="_blank" rel="noopener noreferrer" ' +
+        'title="' + knowledgeAttr(tooltip) + '">' + inner + '</a>';
+    }
+    return '<span class="' + cls + '" title="' + knowledgeAttr(tooltip) + '">' + inner + '</span>';
+  }
+
+  // Chips für eine Liste von Marker-IDs. Unbekannte IDs werden übersprungen.
+  function knowledgeSourceChipsHtml(ids, index, ownDomain) {
+    if (!index || !Array.isArray(ids) || ids.length === 0) return '';
+    var seen = {};
+    var chips = ids.map(function (id) {
+      var entry = index[id];
+      if (!entry || seen[id]) return '';
+      seen[id] = true;
+      return knowledgeSourceChipHtml(entry, ownDomain);
+    }).filter(Boolean);
+    return chips.length ? '<div class="cvz-ks-chips">' + chips.join('') + '</div>' : '';
+  }
+
   function renderKnowledgeSection(detail) {
     var k = detail.ai_knowledge;
     if (!k) return null;
+
+    ensureKnowledgeSourceStyles();
+    var sourceIndex = buildKnowledgeSourceIndex(k);          // null = alte Prüfung
+    var ownDomain = detail.topic && detail.topic.own_domain;
 
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -7565,7 +7718,8 @@
     headRow.appendChild(makeTip(
       'Einmal im Monat fragen wir ChatGPT und Gemini, was sie über euer Unternehmen wissen und wie sie euch mit Wettbewerbern vergleichen würden. ' +
       'Die Modelle nutzen dabei auch die Websuche. Ihr seht also, was ein Nutzer heute als Antwort bekommt. ' +
-      'Ob die Angaben stimmen, prüfen wir nicht. Wir zeigen nur Lücken und Widersprüche zwischen den Modellen.'
+      'Ob die Angaben stimmen, prüfen wir nicht. Wir zeigen nur Lücken und Widersprüche zwischen den Modellen. ' +
+      'Die Quellen unter einer Angabe sind die Seiten, die das Modell selbst direkt an diese Aussage geschrieben hat.'
     ));
     section.appendChild(headRow);
 
@@ -7588,7 +7742,7 @@
       if (pct != null && prev != null) {
         var diff = pct - prev;
         deltaHtml = '<span class="cvz-journey-channel-delta ' + (diff === 0 ? 'cvz-delta-flat' : (diff > 0 ? 'cvz-delta-up' : 'cvz-delta-down')) +
-          '" title="Veränderung zur vorherigen Prüfung">' + (diff === 0 ? '\u2192 ' : (diff > 0 ? '\u25b2 ' : '\u25bc ')) + Math.abs(diff) + ' Pp</span>';
+          '" title="Veränderung zur vorherigen Prüfung">' + (diff === 0 ? '→ ' : (diff > 0 ? '▲ ' : '▼ ')) + Math.abs(diff) + ' Pp</span>';
       }
       row.innerHTML =
         '<span class="cvz-journey-channel-label" style="font-weight:600;">' + pair[1] + '</span>' +
@@ -7612,13 +7766,31 @@
       card.appendChild(failedNote);
     }
 
-    // Tabelle je Wissensbereich
+    // Tabelle je Wissensbereich.
+    // Neues Format: "Bekannt" mit Quellen-Chips, darunter "Fehlt" und ggf. Widerspruch.
+    // Die Quellen gehören zu "known", deshalb stehen sie direkt darunter und nicht unter "Fehlt".
+    // Altes Format: wie bisher nur ein Text (missing || conflict || known).
     var rowsHtml = (k.dimensions || []).map(function (d) {
+      var cell;
+      if (sourceIndex) {
+        var ids = [];
+        var src = d.sources || {};
+        ['chatgpt', 'gemini'].forEach(function (e) { ids = ids.concat(src[e] || []); });
+        var parts = [];
+        if (d.known) {
+          parts.push('<p>' + escapeHtml(d.known) + '</p>' + knowledgeSourceChipsHtml(ids, sourceIndex, ownDomain));
+        }
+        if (d.missing) parts.push('<p class="cvz-ks-missing"><strong>Fehlt:</strong> ' + escapeHtml(d.missing) + '</p>');
+        if (d.conflict) parts.push('<p class="cvz-ks-conflict"><strong>Widerspruch:</strong> ' + escapeHtml(d.conflict) + '</p>');
+        cell = parts.length ? parts.join('') : '<p class="cvz-ks-missing">Keine Angaben.</p>';
+      } else {
+        cell = '<p class="cvz-ks-missing">' + escapeHtml(d.missing || d.conflict || d.known || '') + '</p>';
+      }
       return '<tr>' +
         '<td><strong>' + escapeHtml(d.label) + '</strong></td>' +
         '<td>' + knowledgeBadge(d.chatgpt) + '</td>' +
         '<td>' + knowledgeBadge(d.gemini) + '</td>' +
-        '<td style="color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(d.missing || d.conflict || d.known || '') + '</td>' +
+        '<td class="cvz-ks-cell">' + cell + '</td>' +
       '</tr>';
     }).join('');
     if (rowsHtml) {
@@ -7660,7 +7832,7 @@
       section.appendChild(grid);
     }
 
-    // Widersprüche zwischen den Modellen
+    // Widersprüche zwischen den Modellen, mit der Quelle, die das Modell an die Aussage geschrieben hat.
     var wrong = k.wrong_or_outdated || [];
     if (wrong.length) {
       var wrongLabel = document.createElement('p');
@@ -7669,11 +7841,28 @@
       wrongLabel.textContent = 'Widersprüchliche Angaben, bitte prüfen';
       section.appendChild(wrongLabel);
       wrong.forEach(function (w) {
+        var box = document.createElement('div');
+        box.className = 'cvz-ks-wrong';
         var p = document.createElement('p');
         p.className = 'cvz-opportunity-description';
+        p.style.margin = '0';
         p.textContent = (w.model === 'chatgpt' ? 'ChatGPT: ' : (w.model === 'gemini' ? 'Gemini: ' : 'Beide Modelle: ')) +
           w.statement + (w.correction_hint ? ' (' + w.correction_hint + ')' : '');
-        section.appendChild(p);
+        box.appendChild(p);
+
+        if (sourceIndex) {
+          var chips = knowledgeSourceChipsHtml(w.source_ids, sourceIndex, ownDomain);
+          var srcRow = document.createElement('div');
+          srcRow.className = 'cvz-ks-wrong-src';
+          // Bewusst "belegt mit" und nicht "verursacht durch": die Quelle ist die Seite, die das
+          // Modell an die Aussage geschrieben hat. Ob die Seite falsch ist oder das Modell sie
+          // falsch gelesen hat, wissen wir nicht.
+          srcRow.innerHTML = chips
+            ? '<span>Das Modell stützt diese Aussage auf:</span>' + chips.replace('class="cvz-ks-chips"', 'class="cvz-ks-chips" style="margin-top:0;"')
+            : '<span>Das Modell nennt für diese Aussage keine Quelle.</span>';
+          box.appendChild(srcRow);
+        }
+        section.appendChild(box);
       });
     }
 
@@ -7684,8 +7873,27 @@
       section.appendChild(eff);
     }
 
-    // Quellen, auf die sich die Modelle stützen
-    if (k.sources) {
+    if (sourceIndex) {
+      // Neues Format: welche eurer Seiten die Modelle überhaupt zitieren, auch wenn die
+      // Quelle keiner Dimension zugeordnet wurde.
+      var ownParts = [];
+      [['chatgpt', 'ChatGPT'], ['gemini', 'Gemini']].forEach(function (pair) {
+        if ((k.engines_failed || []).indexOf(pair[0]) !== -1) return;
+        var own = ((k.source_registry || {})[pair[0]] || []).filter(function (e) {
+          return knowledgeIsOwnDomain(e.domain, ownDomain);
+        });
+        var chips = knowledgeSourceChipsHtml(own.map(function (e) { return e.id; }), sourceIndex, ownDomain);
+        ownParts.push(chips || ('<span class="cvz-ks-chip"><span class="cvz-ks-chip-engine">' + pair[1] + ':</span> keine eurer Seiten zitiert</span>'));
+      });
+      if (ownParts.length) {
+        var ownBox = document.createElement('div');
+        ownBox.className = 'cvz-thin-data-note';
+        ownBox.innerHTML = '<span>Eure Seiten, die die Modelle bei dieser Prüfung zitieren:</span>' +
+          '<div class="cvz-ks-chips">' + ownParts.join('').replace(/<\/?div[^>]*>/g, '') + '</div>';
+        section.appendChild(ownBox);
+      }
+    } else if (k.sources) {
+      // Fallback für alte Prüfungen ohne source_registry (vor 29.09.2026).
       var srcParts = [];
       [['chatgpt', 'ChatGPT'], ['gemini', 'Gemini']].forEach(function (pair) {
         var domains = (k.sources[pair[0]] || []).map(function (s) { return s.domain; });
