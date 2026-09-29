@@ -1,10 +1,5 @@
 // contentStrategyWhiteLabel.app.js
 //
-// Einstellungen-Widget für Logo + Akzentfarbe des White-Label-PDF-Exports (Content-Strategie).
-// Eigener Abschnitt auf /member/einstellungen (Lasse hat bestätigt: es gibt dort noch KEINEN
-// "Branding"-Abschnitt, den man mitbenutzen könnte - daher bewusst analog zum bereits
-// bestehenden "Integrationen"-Abschnitt als eigener, neuer Block aufgebaut, siehe
-// contentStrategySettings.app.js/.style.css für das identische Muster).
 //
 // Gleiches Look&Feel wie contentStrategySettings.app.js (Dark Theme, cvly-card/cvly-badge/
 // cvly-action-btn), eigener Wurzel-Container "cvly-white-label" + eigenes CSS-Prefix
@@ -96,7 +91,7 @@
     var t = document.createElement('div');
     t.style.cssText =
       'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a2133;color:#e8edf5;' +
-      'padding:12px 20px;border-radius:10px;font-size:14px;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,0.4);' +
+      'padding:12px 20px;border-radius:0px;font-size:14px;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,0.4);' +
       'max-width:420px;text-align:center;line-height:1.5;border:1px solid ' +
       (type === 'error' ? '#4a1f1f' : 'rgba(79,209,197,0.3)') +
       ';border-left:3px solid ' +
