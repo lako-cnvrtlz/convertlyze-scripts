@@ -4640,20 +4640,20 @@
       var phaseRowsHtml = PHASE_ORDER.map(function (phase) {
         var p = phaseSummaries[phase];
         if (!p || !p.summary) return '';
+        // GEÄNDERT (29.09.2026): Phase als Überschrift, Einschätzung darunter statt Tabelle.
+        // Die Tabelle war auf dem Handy abgeschnitten (table-layout: fixed + min-width).
         return (
-          '<tr>' +
-            '<td style="color:var(--cvz-text-muted,#8b98a5);"><strong>' + escapeHtml(PHASE_LABELS[phase] || phase) + '</strong></td>' +
-            '<td style="color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(p.summary) + (phasenDuenn[phase] ? THIN_DATA_NOTE : '') + '</td>' +
-          '</tr>'
+          '<div class="cvz-stack-item">' +
+            '<p class="cvz-stack-title">' + escapeHtml(PHASE_LABELS[phase] || phase) + '</p>' +
+            '<p class="cvz-stack-text" style="margin-top:4px;">' + escapeHtml(p.summary) + '</p>' +
+            (phasenDuenn[phase] ? THIN_DATA_NOTE : '') +
+          '</div>'
         );
       }).join('');
       if (phaseRowsHtml) {
         html += '<div class="cvz-summary-subsection">' +
           '<p class="cvz-section-label">Je Phase</p>' +
-          '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">' +
-          '<table class="cvz-table" style="min-width:360px;"><thead><tr><th>Phase</th><th>Einsch\u00e4tzung</th></tr></thead>' +
-          '<tbody>' + phaseRowsHtml + '</tbody></table>' +
-          '</div>' +
+          '<div>' + phaseRowsHtml + '</div>' +
           (maturity.content_luecken_duenn ? THIN_DATA_NOTE : '') +
           '</div>';
       }
@@ -7766,40 +7766,49 @@
       card.appendChild(failedNote);
     }
 
-    // Tabelle je Wissensbereich.
-    // Neues Format: "Bekannt" mit Quellen-Chips, darunter "Fehlt" und ggf. Widerspruch.
-    // Die Quellen gehören zu "known", deshalb stehen sie direkt darunter und nicht unter "Fehlt".
-    // Altes Format: wie bisher nur ein Text (missing || conflict || known).
-    var rowsHtml = (k.dimensions || []).map(function (d) {
-      var cell;
+    // GEÄNDERT (29.09.2026): Bereich als Überschrift mit den Einstufungen daneben,
+    // Text und Quellen darunter. Vorher Tabelle, die auf dem Handy abgeschnitten war.
+    // Neues Format: Bekannt + Quellen-Chips, darunter "Fehlt" und ggf. Widerspruch.
+    // Altes Format (ohne source_registry): wie bisher nur ein Text (missing || conflict || known).
+    var dimsHtml = (k.dimensions || []).map(function (d) {
+      var body = '';
       if (sourceIndex) {
         var ids = [];
         var src = d.sources || {};
         ['chatgpt', 'gemini'].forEach(function (e) { ids = ids.concat(src[e] || []); });
-        var parts = [];
         if (d.known) {
-          parts.push('<p>' + escapeHtml(d.known) + '</p>' + knowledgeSourceChipsHtml(ids, sourceIndex, ownDomain));
+          body += '<p class="cvz-stack-text">' + escapeHtml(d.known) + '</p>' + knowledgeSourceChipsHtml(ids, sourceIndex, ownDomain);
         }
-        if (d.missing) parts.push('<p class="cvz-ks-missing"><strong>Fehlt:</strong> ' + escapeHtml(d.missing) + '</p>');
-        if (d.conflict) parts.push('<p class="cvz-ks-conflict"><strong>Widerspruch:</strong> ' + escapeHtml(d.conflict) + '</p>');
-        cell = parts.length ? parts.join('') : '<p class="cvz-ks-missing">Keine Angaben.</p>';
+        if (d.missing) body += '<p class="cvz-stack-text"><strong>Fehlt:</strong> ' + escapeHtml(d.missing) + '</p>';
+        if (d.conflict) body += '<p class="cvz-stack-text cvz-ks-conflict"><strong>Widerspruch:</strong> ' + escapeHtml(d.conflict) + '</p>';
+        if (!body) body = '<p class="cvz-stack-text">Keine Angaben.</p>';
       } else {
-        cell = '<p class="cvz-ks-missing">' + escapeHtml(d.missing || d.conflict || d.known || '') + '</p>';
+        var oldText = d.missing || d.conflict || d.known || '';
+        if (oldText) body = '<p class="cvz-stack-text">' + escapeHtml(oldText) + '</p>';
       }
-      return '<tr>' +
-        '<td><strong>' + escapeHtml(d.label) + '</strong></td>' +
-        '<td>' + knowledgeBadge(d.chatgpt) + '</td>' +
-        '<td>' + knowledgeBadge(d.gemini) + '</td>' +
-        '<td class="cvz-ks-cell">' + cell + '</td>' +
-      '</tr>';
+      return '<div class="cvz-stack-item">' +
+        '<div class="cvz-stack-head">' +
+          '<p class="cvz-stack-title">' + escapeHtml(d.label) + '</p>' +
+          '<div class="cvz-stack-badges">' +
+            '<span>ChatGPT ' + knowledgeBadge(d.chatgpt) + '</span>' +
+            '<span>Gemini ' + knowledgeBadge(d.gemini) + '</span>' +
+          '</div>' +
+        '</div>' +
+        body +
+      '</div>';
     }).join('');
-    if (rowsHtml) {
-      var tableWrap = document.createElement('div');
-      tableWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:14px;';
-      tableWrap.innerHTML =
-        '<table class="cvz-table" style="min-width:560px;"><thead><tr><th>Bereich</th><th>ChatGPT</th><th>Gemini</th><th>Was fehlt bzw. was bekannt ist</th></tr></thead>' +
-        '<tbody>' + rowsHtml + '</tbody></table>';
-      card.appendChild(tableWrap);
+    if (dimsHtml) {
+      var dimsWrap = document.createElement('div');
+      dimsWrap.style.marginTop = '14px';
+      dimsWrap.innerHTML = dimsHtml;
+      card.appendChild(dimsWrap);
+    }
+    if (!sourceIndex) {
+      // Alte Prüfung: macht sichtbar, warum unter den Angaben noch keine Quellen stehen.
+      var noSrc = document.createElement('p');
+      noSrc.className = 'cvz-thin-data-note';
+      noSrc.textContent = 'Quellen je Angabe gibt es ab der nächsten Prüfung. Diese Prüfung stammt aus der Zeit davor.';
+      card.appendChild(noSrc);
     }
     section.appendChild(card);
 
@@ -8298,6 +8307,31 @@
       '.cvz-ai-attribution { margin: 20px 0 0; padding-top: 12px; border-top: 1px solid var(--cvz-border); font-size: 11px; color: var(--cvz-text-muted); opacity: 0.6; }' +
       '.cvz-summary-text { font-size: 15px; line-height: 1.5; margin: 12px 0 0; color: var(--cvz-text-muted); }' +
       '.cvz-summary-subsection { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--cvz-border); }' +
+      // NEU (29.09.2026): gestapelte Blöcke (Überschrift, Text darunter) statt Tabellen
+      // für "Je Phase" und den KI-Wissens-Check. Funktioniert auf allen Breiten gleich.
+      '.cvz-stack-item { padding: 14px 0; border-bottom: 1px solid var(--cvz-border); }' +
+      '.cvz-stack-item:first-of-type { padding-top: 6px; }' +
+      '.cvz-stack-item:last-child { border-bottom: none; padding-bottom: 0; }' +
+      '.cvz-stack-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: 0 0 6px; }' +
+      '.cvz-stack-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--cvz-text, #e6edf3); line-height: 1.35; }' +
+      '.cvz-stack-badges { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-stack-badges > span { display: inline-flex; align-items: center; gap: 6px; }' +
+      '.cvz-stack-text { margin: 0; font-size: 14px; line-height: 1.55; color: var(--cvz-text-muted); overflow-wrap: anywhere; }' +
+      '.cvz-stack-text + .cvz-stack-text, .cvz-ks-chips + .cvz-stack-text { margin-top: 6px; }' +
+      // NEU (29.09.2026): "Wichtigste Handlungsfelder" auf dem Handy untereinander statt nebeneinander.
+      // Zeile 1: Pfeil + Typ-Chip, Zeile 2: Beschreibung über die volle Breite.
+      '@media (max-width: 600px) {' +
+        '.cvz-opp-table, .cvz-opp-table > tbody { display: block; width: 100%; }' +
+        '.cvz-opp-table > thead { display: none; }' +
+        '.cvz-opp-table > tbody > tr[data-cvz-opp-toggle] { display: grid; grid-template-columns: 22px minmax(0, 1fr); padding: 10px 4px 12px; }' +
+        '.cvz-opp-table > tbody > tr[data-cvz-opp-toggle] > td { display: block; padding: 0 !important; min-width: 0; }' +
+        '.cvz-opp-table .cvz-opp-toggle-col { padding-top: 3px !important; }' +
+        '.cvz-opp-table .cvz-opp-rec-col { display: none !important; }' +
+        '.cvz-opp-table .cvz-opp-desc-col { grid-column: 2; margin-top: 8px; font-size: 14px; }' +
+        '.cvz-opp-table .cvz-opp-type-chip { white-space: normal !important; line-height: 1.35; }' +
+        '.cvz-opp-table > tbody > tr.cvz-opp-exp-row, .cvz-opp-table > tbody > tr.cvz-opp-exp-row > td { display: block; width: 100%; }' +
+        '.cvz-opp-table > tbody > tr.cvz-opp-exp-row > td { padding: 0 4px 14px 26px !important; box-sizing: border-box; }' +
+      '}' +
       '.cvz-summary-phase-block { margin-top: 12px; }' +
       '.cvz-thin-data-note { font-size: 12px; color: var(--cvz-text-muted); font-style: italic; margin: 6px 0 0; }' +
       // NEU (25.09.2026): neutraler "Datenstand"-Hinweis, bewusst nicht kursiv
@@ -9134,6 +9168,7 @@
       oppTableWrap.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
 
       var oppTable = document.createElement('table');
+      oppTable.className = 'cvz-opp-table';
       oppTable.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
 
       // Header: toggle | Typ | Was wir sehen | Empfohlene Massnahme
@@ -9168,6 +9203,7 @@
 
         // Col 0: chevron toggle
         var tdToggle = document.createElement('td');
+        tdToggle.className = 'cvz-opp-toggle-col';
         tdToggle.style.cssText = 'padding:12px 6px 12px 10px;vertical-align:top;color:var(--cvz-text-muted,#8b98a5);font-size:11px;user-select:none;';
         tdToggle.textContent = isExpanded ? '▾' : '▸';
         tr.appendChild(tdToggle);
@@ -9178,6 +9214,7 @@
         var chipWrap = document.createElement('div');
         chipWrap.style.cssText = 'display:flex;align-items:center;gap:5px;';
         var chip = document.createElement('span');
+        chip.className = 'cvz-opp-type-chip';
         chip.textContent = typeLabel;
         chip.style.cssText =
           'display:inline-block;' +
@@ -9192,6 +9229,7 @@
 
         // Col 2: Beschreibung (max 3 Zeilen, Rest per Expand sichtbar)
         var tdDesc = document.createElement('td');
+        tdDesc.className = 'cvz-opp-desc-col';
         tdDesc.style.cssText = 'padding:12px 10px;vertical-align:top;line-height:1.65;color:var(--cvz-text-muted,#8b98a5);';
         var descInner = document.createElement('div');
         // GEAENDERT (18.09.2026): Klammerung (line-clamp:3) faellt weg, wenn
@@ -9226,6 +9264,7 @@
         // Expansion row: Keywords oder Domains aus supporting_data
         if (isExpanded) {
           var expTr = document.createElement('tr');
+          expTr.className = 'cvz-opp-exp-row';
           expTr.style.cssText = 'background:' + rowBg + ';';
           var expTd = document.createElement('td');
           expTd.colSpan = 4;
