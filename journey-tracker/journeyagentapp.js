@@ -1257,8 +1257,8 @@
   };
 
   var PHASE_LABELS = {
-    exploration: 'Exploration',
-    evaluation:  'Evaluation',
+    exploration: 'Erforschung',
+    evaluation:  'Bewertung',
     comparison:  'Vergleich',
     decision:    'Entscheidung',
   };
@@ -3305,7 +3305,7 @@
       // GEÄNDERT (23.09.2026): Beschriftung über den beiden Textfeldern.
       // Vorher standen dort nur die Sätze, ohne erkennbar, was sie bedeuten.
       [['motivation', 'Motivation', 'Was will diese Rolle mit dem Kauf erreichen?',
-        'Daraus entstehen die Fragen am Anfang der Journey (Exploration, Evaluation).', '-mot-'],
+        'Daraus entstehen die Fragen am Anfang der Journey (Erforschung, Bewertung).', '-mot-'],
        ['einwand', 'Einwand', 'Woran kann der Kauf bei dieser Rolle scheitern?',
         'Daraus entstehen die Fragen kurz vor der Entscheidung (Vergleich, Entscheidung).', '-obj-']].forEach(function (cfg) {
         var fieldLabel = document.createElement('div');
@@ -6690,7 +6690,7 @@
     phaseLabel.textContent = 'Journey-Phase';
     phaseLabelRow.appendChild(phaseLabel);
     phaseLabelRow.appendChild(makeTip(
-      'Exploration: breite, informationelle Fragen ("Was ist..."). Evaluation: konkrete Anbieter- oder Produktfragen. Vergleich: Alternativen gegeneinander. Entscheidung: kaufbereit, sucht letzten Anstoss. Die Phase bestimmt, wo dein Prompt im Dashboard angezeigt wird.'
+      'Erforschung: breite, informationelle Fragen ("Was ist..."). Bewertung: konkrete Anbieter- oder Produktfragen. Vergleich: Alternativen gegeneinander. Entscheidung: kaufbereit, sucht letzten Anstoss. Die Phase bestimmt, wo dein Prompt im Dashboard angezeigt wird.'
     ));
     wrap.appendChild(phaseLabelRow);
 
@@ -9167,7 +9167,7 @@
 
     // Nur Phasen mit tatsaechlichen Daten als X-Achse zeigen.
     // Phasen ohne Läufe (total=0 fuer alle Kanaele UND kein Wettbewerber) werden ausgeblendet.
-    var PHASE_LABEL_MAP = { exploration: 'Exploration', evaluation: 'Evaluation', comparison: 'Vergleich', decision: 'Entscheidung' };
+    var PHASE_LABEL_MAP = { exploration: 'Erforschung', evaluation: 'Bewertung', comparison: 'Vergleich', decision: 'Entscheidung' };
     var activePhases = PHASE_ORDER.filter(function (phase) {
       var scores = dashData.phase_scores[phase] || {};
       var hasOwnData = CHANNEL_ORDER.some(function (ch) { var s = scores[ch]; return s && s.total > 0; });
@@ -10028,7 +10028,7 @@
 
     var PHASE_ORDER = ['alle_phasen', 'exploration', 'evaluation', 'comparison', 'decision'];
     var PHASE_LABEL_MAP = {
-      exploration: 'Exploration',
+      exploration: 'Erforschung',
       evaluation:  'Bewertung',
       comparison:  'Vergleich',
       decision:    'Entscheidung',
