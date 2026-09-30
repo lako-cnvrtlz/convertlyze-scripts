@@ -5803,7 +5803,7 @@
     var hasAnyPhase = PHASE_ORDER.some(function (p) { return grouped[p].length > 0; });
 
     if (!hasAnyPhase) {
-      section.appendChild(_buildKeywordTable(keywords, enableExpansion, changelogEntries));
+      _appendKeywordGroup(section, keywords, enableExpansion, changelogEntries, '__all__');
       return section;
     }
 
@@ -5815,7 +5815,7 @@
       groupHeading.style.borderLeftColor = phaseColor;
       groupHeading.textContent = PHASE_LABELS[phase] || phase;
       section.appendChild(groupHeading);
-      section.appendChild(_buildKeywordTable(grouped[phase], enableExpansion, changelogEntries));
+      _appendKeywordGroup(section, grouped[phase], enableExpansion, changelogEntries, phase);
     });
 
     if (grouped['__none__'].length > 0) {
@@ -5824,10 +5824,40 @@
       noneHeading.style.borderLeftColor = '#4a5568';
       noneHeading.textContent = 'Nicht zugeordnet';
       section.appendChild(noneHeading);
-      section.appendChild(_buildKeywordTable(grouped['__none__'], enableExpansion, changelogEntries));
+      _appendKeywordGroup(section, grouped['__none__'], enableExpansion, changelogEntries, '__none__');
     }
 
     return section;
+  }
+
+  // NEU (30.09.2026): KI-Vorschl\u00e4ge (Quelle problem_question) haben keine
+  // Nachfragedaten und stehen deshalb nicht mehr mitten zwischen den echten
+  // Keywords, sondern eingeklappt darunter. Der Auf-/Zuklapp-Zustand pro
+  // Phase bleibt in state.openKeywordIdeaGroups erhalten, weil render() die
+  // Ansicht bei jeder Interaktion neu aufbaut.
+  function _appendKeywordGroup(section, list, enableExpansion, changelogEntries, groupKey) {
+    var real = list.filter(function (k) { return k.source !== 'problem_question'; });
+    var ideas = list.filter(function (k) { return k.source === 'problem_question'; });
+    if (real.length > 0 || ideas.length === 0) {
+      section.appendChild(_buildKeywordTable(real, enableExpansion, changelogEntries));
+    }
+    if (ideas.length === 0) return;
+
+    if (!state.openKeywordIdeaGroups) state.openKeywordIdeaGroups = {};
+    var details = document.createElement('details');
+    details.className = 'cvz-keyword-ideas';
+    details.style.cssText = 'margin:8px 0 16px;';
+    if (state.openKeywordIdeaGroups[groupKey]) details.open = true;
+    var summary = document.createElement('summary');
+    summary.style.cssText = 'cursor:pointer;font-size:12px;color:var(--cvz-text-muted,#8b98a5);padding:6px 0;';
+    summary.textContent = ideas.length + (ideas.length === 1 ? ' KI-Idee' : ' KI-Ideen') +
+      ' ohne Nachfragedaten' + (real.length === 0 ? ' (f\u00fcr diese Phase gibt es keine echten Keywords)' : '');
+    details.appendChild(summary);
+    details.appendChild(_buildKeywordTable(ideas, enableExpansion, changelogEntries));
+    details.addEventListener('toggle', function () {
+      state.openKeywordIdeaGroups[groupKey] = details.open;
+    });
+    section.appendChild(details);
   }
 
   // NEU (25.09.2026): Baut eine <table> für eine Keyword-Liste, inkl.
