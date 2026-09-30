@@ -217,6 +217,50 @@
 
       /* ---- Report Sections ---- */
       '.cvz-cs-report-section{margin-bottom:36px;}',
+      /* ---- Content-Flow-Diagramm ---- */
+      '#cvz-content-strategy-agent .cvz-flow{border:1px solid var(--cvz-border);background:rgba(255,255,255,.02);}',
+      '#cvz-content-strategy-agent .cvz-flow.is-fullscreen{position:fixed;inset:0;z-index:99999;background:var(--cvz-bg);display:flex;flex-direction:column;}',
+      '#cvz-content-strategy-agent .cvz-flow-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px;border-bottom:1px solid var(--cvz-border);}',
+      '#cvz-content-strategy-agent .cvz-flow-spacer{flex:1 1 auto;}',
+      '#cvz-content-strategy-agent .cvz-flow-btn{background:var(--cvz-surface);color:var(--cvz-text);border:1px solid var(--cvz-border-strong);padding:5px 10px;font:inherit;font-size:13px;line-height:1.3;cursor:pointer;}',
+      '#cvz-content-strategy-agent .cvz-flow-btn:hover{background:var(--cvz-surface-hover);border-color:var(--cvz-teal);}',
+      '#cvz-content-strategy-agent .cvz-flow-btn.is-disabled{opacity:.45;}',
+      '#cvz-content-strategy-agent .cvz-flow-btn-icon{min-width:32px;text-align:center;}',
+      '#cvz-content-strategy-agent .cvz-flow-btn-danger{border-color:rgba(239,68,68,.5);color:#fca5a5;}',
+      '#cvz-content-strategy-agent .cvz-flow-save{font-size:12px;color:var(--cvz-muted);margin-left:8px;}',
+      '#cvz-content-strategy-agent .cvz-flow-save-saved{color:var(--cvz-teal);}',
+      '#cvz-content-strategy-agent .cvz-flow-save-error{color:#fca5a5;}',
+      '#cvz-content-strategy-agent .cvz-flow-stage{display:flex;flex-wrap:wrap;}',
+      '#cvz-content-strategy-agent .cvz-flow.is-fullscreen .cvz-flow-stage{flex:1 1 auto;min-height:0;flex-wrap:nowrap;}',
+      '#cvz-content-strategy-agent .cvz-flow-canvas-wrap{position:relative;flex:1 1 560px;min-width:0;height:560px;background:var(--cvz-bg);background-image:radial-gradient(rgba(255,255,255,.07) 1px,transparent 1px);background-size:22px 22px;}',
+      '#cvz-content-strategy-agent .cvz-flow.is-fullscreen .cvz-flow-canvas-wrap{height:auto;}',
+      '#cvz-content-strategy-agent .cvz-flow-canvas-wrap.cvz-flow-connecting .cvz-flow-svg{cursor:crosshair;}',
+      '#cvz-content-strategy-agent .cvz-flow-svg{width:100%;height:100%;display:block;touch-action:none;outline:none;cursor:grab;user-select:none;-webkit-user-select:none;}',
+      '#cvz-content-strategy-agent .cvz-flow-svg:active{cursor:grabbing;}',
+      '#cvz-content-strategy-agent .cvz-flow-banner{position:absolute;left:12px;top:12px;right:12px;background:rgba(79,209,197,.15);border:1px solid var(--cvz-teal);color:var(--cvz-heading);padding:6px 10px;font-size:13px;pointer-events:none;}',
+      '#cvz-content-strategy-agent .cvz-flow-node{cursor:pointer;}',
+      '#cvz-content-strategy-agent .cvz-flow-node-box{fill:#161b22;stroke-width:1.5;}',
+      '#cvz-content-strategy-agent .cvz-flow-node.is-selected .cvz-flow-node-box{stroke-width:2.5;}',
+      '#cvz-content-strategy-agent .cvz-flow-node.is-custom .cvz-flow-node-box{stroke-dasharray:5 4;}',
+      '#cvz-content-strategy-agent .cvz-flow-node-tag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;fill:#8b949e;font-family:inherit;}',
+      '#cvz-content-strategy-agent .cvz-flow-node-label{font-size:12.5px;font-weight:500;fill:#f0f4f8;font-family:inherit;}',
+      '#cvz-content-strategy-agent .cvz-flow-node-phase{font-size:10px;font-family:inherit;}',
+      '#cvz-content-strategy-agent .cvz-flow-node-note{font-size:12px;fill:#f59e0b;font-family:inherit;}',
+      '#cvz-content-strategy-agent .cvz-flow-edge-hit{stroke:transparent;stroke-width:14;pointer-events:stroke;cursor:pointer;}',
+      '#cvz-content-strategy-agent .cvz-flow-edge-line{pointer-events:none;stroke-width:1.6;}',
+      '#cvz-content-strategy-agent .cvz-flow-edge-line.is-hierarchy{stroke:rgba(226,232,240,.6);}',
+      '#cvz-content-strategy-agent .cvz-flow-edge-line.is-link{stroke:rgba(79,209,197,.6);stroke-dasharray:6 5;}',
+      '#cvz-content-strategy-agent .cvz-flow-edge.is-selected .cvz-flow-edge-line{stroke:#f0f4f8;stroke-width:2.6;}',
+      '#cvz-content-strategy-agent .cvz-flow-panel{flex:0 0 280px;max-width:100%;padding:14px;border-left:1px solid var(--cvz-border);overflow:auto;}',
+      '@media (max-width:820px){#cvz-content-strategy-agent .cvz-flow-panel{flex:1 1 100%;border-left:0;border-top:1px solid var(--cvz-border);}#cvz-content-strategy-agent .cvz-flow-canvas-wrap{flex-basis:100%;height:420px;}}',
+      '#cvz-content-strategy-agent .cvz-flow-panel-title{font-family:"Syne",sans-serif;font-weight:600;color:var(--cvz-heading);margin:0 0 8px;}',
+      '#cvz-content-strategy-agent .cvz-flow-field{display:block;margin:0 0 10px;}',
+      '#cvz-content-strategy-agent .cvz-flow-field-label{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--cvz-muted);margin-bottom:3px;}',
+      '#cvz-content-strategy-agent .cvz-flow-input{width:100%;background:var(--cvz-surface);color:var(--cvz-text);border:1px solid var(--cvz-border-strong);padding:6px 8px;font:inherit;font-size:13px;}',
+      '#cvz-content-strategy-agent .cvz-flow-actions{display:flex;flex-direction:column;gap:6px;margin-top:6px;}',
+      '#cvz-content-strategy-agent .cvz-flow-reasoning{font-size:12.5px;color:var(--cvz-muted);margin:0 0 10px;}',
+      '#cvz-content-strategy-agent .cvz-flow-legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:12px;color:var(--cvz-muted);}',
+      '#cvz-content-strategy-agent .cvz-flow-legend-item i{display:inline-block;width:10px;height:10px;margin-right:5px;vertical-align:middle;}',
       '.cvz-cs-report-section-title{',
         'font-family:"Syne",sans-serif;font-size:1.05rem;font-weight:700;',
         'color:var(--cvz-heading);padding-bottom:8px;',
@@ -1025,6 +1069,787 @@
     return el('div', { class: 'cvz-cs-topic-recommendation-box' }, children);
   }
 
+  // ==================== CONTENT-FLOW-DIAGRAMM (bearbeitbar) ====================
+  // Bearbeitbare Ansicht auf den Bericht: Conversion-Seite oben, darunter Pillar Pages und
+  // Spezial-Seiten als Themen-Baum. Knoten verschieben, Seiten anlegen und entfernen, Hierarchie
+  // ändern, interne Links setzen. Der Editor-Zustand wird pro Strategie im Backend gespeichert
+  // (PUT /api/content-strategy/:id/flow). Der Bericht selbst wird dadurch nie verändert.
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  var FLOW_NODE_W = 210;
+  var FLOW_NODE_H = 84;
+  var FLOW_GAP_X = 36;
+  var FLOW_GAP_Y = 86;
+  var FLOW_LIMITS = { nodes: 60, edges: 150, label: 120, note: 600, coord: 5000 };
+  var FLOW_PHASE_COLORS = {
+    exploration: '#3b82f6',
+    evaluation: '#f59e0b',
+    comparison: '#a78bfa',
+    decision: '#34d399',
+    legacy: '#6e7681',
+  };
+  var FLOW_PHASE_ORDER = { exploration: 0, evaluation: 1, comparison: 2, decision: 3, legacy: 4 };
+  var FLOW_STATUS_COLORS = { vorgeschlagen: '#6e7681', geplant: '#3b82f6', in_arbeit: '#f59e0b', live: '#34d399' };
+  var FLOW_CUSTOM_TYPES = [
+    'pillar_page', 'topic_coverage', 'use_case', 'comparison', 'conversion_landingpage',
+    'pricing_roi', 'calculator_tool', 'template_download', 'review', 'integration',
+  ];
+
+  function svgEl(tag, attrs, children) {
+    var node = document.createElementNS(SVG_NS, tag);
+    Object.keys(attrs || {}).forEach(function (key) { node.setAttribute(key, attrs[key]); });
+    (children || []).forEach(function (child) {
+      if (child) node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+    });
+    return node;
+  }
+
+  function flowNewId(prefix, taken) {
+    var id;
+    do { id = prefix + Math.random().toString(36).slice(2, 9); } while (taken[id]);
+    return id;
+  }
+
+  function flowClone(value) { return JSON.parse(JSON.stringify(value)); }
+
+  function flowClamp(v) { return Math.max(-FLOW_LIMITS.coord, Math.min(FLOW_LIMITS.coord, v)); }
+
+  // Gültigen parent_index aus dem Bericht lesen. Ungültige Werte (eigener Index, außerhalb,
+  // Kreis) führen dazu, dass die Seite direkt unter der Conversion-Seite hängt.
+  function flowResolveParents(pages) {
+    var parents = pages.map(function (page, i) {
+      var p = page.parent_index;
+      if (typeof p !== 'number' || Math.floor(p) !== p || p < -1 || p >= pages.length || p === i) return -1;
+      return p;
+    });
+    for (var i = 0; i < parents.length; i++) {
+      var seen = {};
+      seen[i] = true;
+      var cur = parents[i];
+      while (cur !== -1) {
+        if (seen[cur]) { parents[i] = -1; break; }
+        seen[cur] = true;
+        cur = parents[cur];
+      }
+    }
+    return parents;
+  }
+
+  function flowBuildFromResult(result) {
+    var pages = result.supporting_pages || [];
+    var nodes = [];
+    var edges = [];
+    nodes.push({
+      id: 'conv', kind: 'conversion', page_ref: -1,
+      label: result.conversion_page.topic, page_type: 'conversion_landingpage',
+      x: 0, y: 0,
+    });
+    pages.forEach(function (page, i) {
+      nodes.push({
+        id: 'p' + i, kind: 'page', page_ref: i,
+        label: page.topic, page_type: page.page_type,
+        phase: FLOW_PHASE_ORDER.hasOwnProperty(page.messy_middle_phase) ? page.messy_middle_phase : 'legacy',
+        x: 0, y: 0,
+      });
+    });
+    var parents = flowResolveParents(pages);
+    pages.forEach(function (page, i) {
+      edges.push({ id: 'h' + i, from: parents[i] === -1 ? 'conv' : 'p' + parents[i], to: 'p' + i, type: 'hierarchy' });
+    });
+    var seenPairs = {};
+    edges.forEach(function (e) { seenPairs[e.from + '>' + e.to] = true; seenPairs[e.to + '>' + e.from] = true; });
+    (result.internal_links || []).forEach(function (link, k) {
+      var from = link.from_index === -1 ? 'conv' : 'p' + link.from_index;
+      var to = link.to_index === -1 ? 'conv' : 'p' + link.to_index;
+      var known = function (id) { return id === 'conv' || (id.charAt(0) === 'p' && pages[Number(id.slice(1))]); };
+      if (from === to || !known(from) || !known(to) || seenPairs[from + '>' + to]) return;
+      seenPairs[from + '>' + to] = true;
+      edges.push({ id: 'l' + k, from: from, to: to, type: 'link' });
+    });
+    var diagram = { version: 1, nodes: nodes, edges: edges };
+    flowAutoLayout(diagram);
+    return diagram;
+  }
+
+  // Themen-Baum von oben nach unten. Loses (ohne Eltern-Knoten, nicht die Conversion-Seite)
+  // steht als eigene Wurzel rechts daneben.
+  function flowAutoLayout(diagram) {
+    var byId = {};
+    diagram.nodes.forEach(function (n) { byId[n.id] = n; });
+    var children = {};
+    var hasParent = {};
+    diagram.edges.forEach(function (e) {
+      if (e.type !== 'hierarchy') return;
+      (children[e.from] = children[e.from] || []).push(e.to);
+      hasParent[e.to] = true;
+    });
+    var order = function (a, b) {
+      var na = byId[a], nb = byId[b];
+      var pa = FLOW_PHASE_ORDER[na.phase] != null ? FLOW_PHASE_ORDER[na.phase] : 5;
+      var pb = FLOW_PHASE_ORDER[nb.phase] != null ? FLOW_PHASE_ORDER[nb.phase] : 5;
+      if (pa !== pb) return pa - pb;
+      return (na.page_ref == null ? 999 : na.page_ref) - (nb.page_ref == null ? 999 : nb.page_ref);
+    };
+    Object.keys(children).forEach(function (k) { children[k].sort(order); });
+    var roots = diagram.nodes.filter(function (n) { return !hasParent[n.id]; }).map(function (n) { return n.id; });
+    roots.sort(function (a, b) {
+      if (byId[a].kind === 'conversion') return -1;
+      if (byId[b].kind === 'conversion') return 1;
+      return order(a, b);
+    });
+    var cursor = 0;
+    var unit = FLOW_NODE_W + FLOW_GAP_X;
+    function place(id, depth) {
+      var kids = children[id] || [];
+      var x;
+      if (kids.length === 0) {
+        x = cursor;
+        cursor += unit;
+      } else {
+        var xs = kids.map(function (kid) { return place(kid, depth + 1); });
+        x = (xs[0] + xs[xs.length - 1]) / 2;
+      }
+      byId[id].x = flowClamp(Math.round(x));
+      byId[id].y = flowClamp(depth * (FLOW_NODE_H + FLOW_GAP_Y));
+      return x;
+    }
+    roots.forEach(function (id) { place(id, 0); });
+  }
+
+  function flowSanitizeStored(stored) {
+    if (!stored || stored.version !== 1 || !Array.isArray(stored.nodes) || !Array.isArray(stored.edges)) return null;
+    return { version: 1, nodes: flowClone(stored.nodes), edges: flowClone(stored.edges) };
+  }
+
+  function flowWrapText(text, maxChars, maxLines) {
+    var words = String(text).split(/\s+/);
+    var lines = [];
+    var line = '';
+    words.forEach(function (word) {
+      while (word.length > maxChars) {
+        if (line) { lines.push(line); line = ''; }
+        lines.push(word.slice(0, maxChars - 1) + '-');
+        word = word.slice(maxChars - 1);
+      }
+      if (!line) line = word;
+      else if ((line + ' ' + word).length <= maxChars) line += ' ' + word;
+      else { lines.push(line); line = word; }
+    });
+    if (line) lines.push(line);
+    if (lines.length > maxLines) {
+      lines = lines.slice(0, maxLines);
+      lines[maxLines - 1] = lines[maxLines - 1].replace(/.{0,1}$/, '') + '…';
+    }
+    return lines;
+  }
+
+  function renderFlowSection(sessionId, result, session) {
+    var diagram = flowSanitizeStored(session && session.flow_diagram) || flowBuildFromResult(result);
+    var ui = {
+      selected: null,          // { type: 'node' | 'edge', id }
+      mode: null,              // null | 'connect-hierarchy' | 'connect-link'
+      showLinks: true,
+      view: { x: 40, y: 40, k: 1 },
+      undo: [],
+      drag: null,
+      saveState: sessionId ? 'idle' : 'unsaved',
+      saveTimer: null,
+      fullscreen: false,
+      hasFitted: false,
+    };
+    var pages = result.supporting_pages || [];
+
+    var root = el('div', { class: 'cvz-flow' });
+    var toolbar = el('div', { class: 'cvz-flow-toolbar' });
+    var stage = el('div', { class: 'cvz-flow-stage' });
+    var canvasWrap = el('div', { class: 'cvz-flow-canvas-wrap' });
+    var panel = el('div', { class: 'cvz-flow-panel' });
+    var banner = el('div', { class: 'cvz-flow-banner', style: 'display:none' });
+    var svg = svgEl('svg', { class: 'cvz-flow-svg', tabindex: '0', role: 'application', 'aria-label': 'Content-Flow-Diagramm' });
+    var defs = svgEl('defs', {}, [
+      svgEl('marker', { id: 'cvz-flow-arrow', viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' }, [
+        svgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'rgba(226,232,240,.75)' }),
+      ]),
+      svgEl('marker', { id: 'cvz-flow-arrow-link', viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '6', markerHeight: '6', orient: 'auto-start-reverse' }, [
+        svgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'rgba(79,209,197,.85)' }),
+      ]),
+    ]);
+    var viewport = svgEl('g', { class: 'cvz-flow-viewport' });
+    var edgeLayer = svgEl('g', {});
+    var nodeLayer = svgEl('g', {});
+    viewport.appendChild(edgeLayer);
+    viewport.appendChild(nodeLayer);
+    svg.appendChild(defs);
+    svg.appendChild(viewport);
+    canvasWrap.appendChild(svg);
+    canvasWrap.appendChild(banner);
+    stage.appendChild(canvasWrap);
+    stage.appendChild(panel);
+    root.appendChild(toolbar);
+    root.appendChild(stage);
+
+    // ---------- Hilfsfunktionen ----------
+    function nodeById(id) {
+      for (var i = 0; i < diagram.nodes.length; i++) if (diagram.nodes[i].id === id) return diagram.nodes[i];
+      return null;
+    }
+    function edgeById(id) {
+      for (var i = 0; i < diagram.edges.length; i++) if (diagram.edges[i].id === id) return diagram.edges[i];
+      return null;
+    }
+    function parentEdgeOf(id) {
+      for (var i = 0; i < diagram.edges.length; i++) {
+        var e = diagram.edges[i];
+        if (e.type === 'hierarchy' && e.to === id) return e;
+      }
+      return null;
+    }
+    function isDescendant(candidateId, ancestorId) {
+      // true, wenn candidateId im Teilbaum unter ancestorId liegt
+      var cur = candidateId;
+      var guard = 0;
+      while (cur && guard++ < 200) {
+        var pe = parentEdgeOf(cur);
+        if (!pe) return false;
+        if (pe.from === ancestorId) return true;
+        cur = pe.from;
+      }
+      return false;
+    }
+    function takenIds() {
+      var t = {};
+      diagram.nodes.forEach(function (n) { t[n.id] = true; });
+      diagram.edges.forEach(function (e) { t[e.id] = true; });
+      return t;
+    }
+    function pushUndo() {
+      ui._lastUndoKey = null;
+      ui.undo.push(flowClone({ nodes: diagram.nodes, edges: diagram.edges }));
+      if (ui.undo.length > 30) ui.undo.shift();
+    }
+    function undo() {
+      var prev = ui.undo.pop();
+      if (!prev) return;
+      diagram.nodes = prev.nodes;
+      diagram.edges = prev.edges;
+      if (ui.selected && ui.selected.type === 'node' && !nodeById(ui.selected.id)) ui.selected = null;
+      if (ui.selected && ui.selected.type === 'edge' && !edgeById(ui.selected.id)) ui.selected = null;
+      changed();
+    }
+    function notice(text) {
+      banner.textContent = text;
+      banner.style.display = 'block';
+      clearTimeout(notice._t);
+      notice._t = setTimeout(function () { if (!ui.mode) banner.style.display = 'none'; }, 3500);
+    }
+    function setMode(mode) {
+      ui.mode = mode;
+      canvasWrap.className = 'cvz-flow-canvas-wrap' + (mode ? ' cvz-flow-connecting' : '');
+      if (mode) {
+        banner.textContent = (mode === 'connect-hierarchy'
+          ? 'Klicke die Seite, die unter „' + (nodeById(ui.selected && ui.selected.id) || {}).label + '“ hängen soll. '
+          : 'Klicke die Seite, auf die verlinkt werden soll. ') + 'Esc bricht ab.';
+        banner.style.display = 'block';
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+
+    // ---------- Speichern ----------
+    function scheduleSave() {
+      if (!sessionId) { ui.saveState = 'unsaved'; renderToolbar(); return; }
+      ui.saveState = 'dirty';
+      renderToolbar();
+      clearTimeout(ui.saveTimer);
+      ui.saveTimer = setTimeout(save, 900);
+    }
+    function save(keepalive) {
+      if (!sessionId) return Promise.resolve();
+      clearTimeout(ui.saveTimer);
+      ui.saveState = 'saving';
+      renderToolbar();
+      var body = JSON.stringify({ version: 1, nodes: diagram.nodes, edges: diagram.edges });
+      var options = { method: 'PUT', body: body };
+      if (keepalive === true) options.keepalive = true;
+      return apiFetch('/api/content-strategy/' + sessionId + '/flow', options)
+        .then(function () { ui.saveState = 'saved'; renderToolbar(); })
+        .catch(function (err) {
+          ui.saveState = 'error';
+          ui.saveError = err && err.message ? err.message : 'Unbekannter Fehler';
+          renderToolbar();
+        });
+    }
+    if (state.flowFlushHandler) document.removeEventListener('visibilitychange', state.flowFlushHandler);
+    state.flowFlushHandler = function () {
+      if (document.visibilityState === 'hidden' && ui.saveState === 'dirty') save(true);
+    };
+    document.addEventListener('visibilitychange', state.flowFlushHandler);
+
+    function changed() {
+      renderCanvas();
+      renderPanel();
+      scheduleSave();
+    }
+
+    // ---------- Zeichnen ----------
+    function applyView() {
+      viewport.setAttribute('transform', 'translate(' + ui.view.x + ',' + ui.view.y + ') scale(' + ui.view.k + ')');
+    }
+    function edgePath(from, to) {
+      var fx = from.x + FLOW_NODE_W / 2, tx = to.x + FLOW_NODE_W / 2;
+      var down = to.y >= from.y;
+      var fy = down ? from.y + FLOW_NODE_H : from.y;
+      var ty = down ? to.y : to.y + FLOW_NODE_H;
+      if (Math.abs(to.y - from.y) < FLOW_NODE_H) {
+        // gleiche Ebene: seitlich verbinden
+        var right = to.x > from.x;
+        fx = right ? from.x + FLOW_NODE_W : from.x;
+        tx = right ? to.x : to.x + FLOW_NODE_W;
+        fy = from.y + FLOW_NODE_H / 2;
+        ty = to.y + FLOW_NODE_H / 2;
+        var mx = (fx + tx) / 2;
+        return 'M' + fx + ',' + fy + ' C' + mx + ',' + fy + ' ' + mx + ',' + ty + ' ' + tx + ',' + ty;
+      }
+      var dy = Math.max(30, Math.abs(ty - fy) / 2);
+      var sign = down ? 1 : -1;
+      return 'M' + fx + ',' + fy + ' C' + fx + ',' + (fy + sign * dy) + ' ' + tx + ',' + (ty - sign * dy) + ' ' + tx + ',' + ty;
+    }
+    function renderCanvas() {
+      clear(edgeLayer);
+      clear(nodeLayer);
+      diagram.edges.forEach(function (e) {
+        if (e.type === 'link' && !ui.showLinks) return;
+        var a = nodeById(e.from), b = nodeById(e.to);
+        if (!a || !b) return;
+        var d = edgePath(a, b);
+        var isSel = ui.selected && ui.selected.type === 'edge' && ui.selected.id === e.id;
+        var g = svgEl('g', { 'data-edge-id': e.id, class: 'cvz-flow-edge' + (isSel ? ' is-selected' : '') });
+        g.appendChild(svgEl('path', { d: d, class: 'cvz-flow-edge-hit', fill: 'none' }));
+        g.appendChild(svgEl('path', {
+          d: d, fill: 'none',
+          class: 'cvz-flow-edge-line ' + (e.type === 'link' ? 'is-link' : 'is-hierarchy'),
+          'marker-end': e.type === 'link' ? 'url(#cvz-flow-arrow-link)' : 'url(#cvz-flow-arrow)',
+        }));
+        edgeLayer.appendChild(g);
+      });
+      diagram.nodes.forEach(function (n) {
+        var color = n.kind === 'conversion' ? '#4fd1c5' : (FLOW_PHASE_COLORS[n.phase] || '#6e7681');
+        var isSel = ui.selected && ui.selected.type === 'node' && ui.selected.id === n.id;
+        var g = svgEl('g', {
+          'data-node-id': n.id,
+          class: 'cvz-flow-node' + (isSel ? ' is-selected' : '') + (n.kind === 'custom' ? ' is-custom' : ''),
+          transform: 'translate(' + n.x + ',' + n.y + ')',
+        });
+        g.appendChild(svgEl('rect', { class: 'cvz-flow-node-box', width: FLOW_NODE_W, height: FLOW_NODE_H, style: 'stroke:' + (isSel ? '#f0f4f8' : 'rgba(255,255,255,.18)') }));
+        g.appendChild(svgEl('rect', { width: 5, height: FLOW_NODE_H, fill: color }));
+        var typeText = n.kind === 'conversion' ? 'Conversion-Seite' : (n.page_type ? pageTypeLabel(n.page_type) : 'Seite');
+        g.appendChild(svgEl('text', { class: 'cvz-flow-node-tag', x: 16, y: 17 }, [typeText]));
+        var lines = flowWrapText(n.label, 28, 2);
+        lines.forEach(function (line, i) {
+          g.appendChild(svgEl('text', { class: 'cvz-flow-node-label', x: 16, y: 38 + i * 16 }, [line]));
+        });
+        var phaseLabel = n.kind === 'conversion' ? '' : phaseName(n.phase);
+        if (phaseLabel) g.appendChild(svgEl('text', { class: 'cvz-flow-node-phase', x: 16, y: FLOW_NODE_H - 9, fill: color }, [phaseLabel]));
+        if (n.kind === 'page' && n.page_ref != null && pages[n.page_ref]) {
+          var st = pages[n.page_ref].status;
+          if (st) {
+            g.appendChild(svgEl('circle', { cx: FLOW_NODE_W - 12, cy: 12, r: 5, fill: FLOW_STATUS_COLORS[st] || '#6e7681' }, [svgEl('title', {}, ['Status: ' + st])]));
+          }
+        }
+        if (n.note) g.appendChild(svgEl('text', { class: 'cvz-flow-node-note', x: FLOW_NODE_W - 14, y: FLOW_NODE_H - 9, 'text-anchor': 'end' }, ['✎']));
+        nodeLayer.appendChild(g);
+      });
+      applyView();
+    }
+    function phaseName(phase) {
+      for (var i = 0; i < MESSY_MIDDLE_PHASES.length; i++) if (MESSY_MIDDLE_PHASES[i].value === phase) return MESSY_MIDDLE_PHASES[i].label;
+      return '';
+    }
+
+    // ---------- Toolbar ----------
+    function tbButton(label, title, onClick, extraClass) {
+      var b = el('button', { type: 'button', class: 'cvz-flow-btn' + (extraClass ? ' ' + extraClass : ''), title: title || label }, [label]);
+      b.addEventListener('click', onClick);
+      return b;
+    }
+    function renderToolbar() {
+      clear(toolbar);
+      toolbar.appendChild(tbButton('+ Seite', 'Neue Seite im Diagramm anlegen', function () { addNode(null); }));
+      toolbar.appendChild(tbButton('Rückgängig', 'Letzte Änderung zurücknehmen (Strg/Cmd+Z)', undo, ui.undo.length ? '' : 'is-disabled'));
+      toolbar.appendChild(tbButton('Interne Links: ' + (ui.showLinks ? 'an' : 'aus'), 'Gestrichelte Verlinkungen ein- oder ausblenden', function () { ui.showLinks = !ui.showLinks; renderCanvas(); renderToolbar(); }));
+      toolbar.appendChild(tbButton('Automatisch ordnen', 'Alle Knoten neu als Baum anordnen', function () { pushUndo(); flowAutoLayout(diagram); changed(); fitView(); }));
+      toolbar.appendChild(tbButton('Aus Bericht neu aufbauen', 'Verwirft alle Änderungen am Diagramm', function () {
+        if (!window.confirm('Alle Änderungen am Diagramm verwerfen und neu aus dem Bericht aufbauen?')) return;
+        pushUndo();
+        diagram = flowBuildFromResult(result);
+        ui.selected = null;
+        changed();
+        fitView();
+      }));
+      var spacer = el('span', { class: 'cvz-flow-spacer' });
+      toolbar.appendChild(spacer);
+      toolbar.appendChild(tbButton('−', 'Verkleinern', function () { zoomBy(0.8); }, 'cvz-flow-btn-icon'));
+      toolbar.appendChild(tbButton('+', 'Vergrößern', function () { zoomBy(1.25); }, 'cvz-flow-btn-icon'));
+      toolbar.appendChild(tbButton('Einpassen', 'Ganzes Diagramm anzeigen', fitView));
+      toolbar.appendChild(tbButton(ui.fullscreen ? 'Vollbild beenden' : 'Vollbild', 'Vollbild umschalten', toggleFullscreen));
+      var labels = {
+        idle: '', dirty: 'Ungespeicherte Änderungen …', saving: 'Speichert …', saved: 'Gespeichert',
+        error: 'Speichern fehlgeschlagen: ' + (ui.saveError || ''), unsaved: 'Wird nicht gespeichert (keine Session)',
+      };
+      var status = el('span', { class: 'cvz-flow-save cvz-flow-save-' + ui.saveState }, [labels[ui.saveState] || '']);
+      if (ui.saveState === 'error') {
+        status.appendChild(document.createTextNode(' '));
+        status.appendChild(tbButton('Erneut versuchen', '', function () { save(); }));
+      }
+      toolbar.appendChild(status);
+    }
+
+    // ---------- Seitenleiste ----------
+    function field(labelText, control) {
+      return el('label', { class: 'cvz-flow-field' }, [el('span', { class: 'cvz-flow-field-label' }, [labelText]), control]);
+    }
+    function renderPanel() {
+      clear(panel);
+      var sel = ui.selected;
+      if (!sel) {
+        panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, ['Content-Flow']));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Klicke eine Seite oder Verbindung an, um sie zu bearbeiten. Ziehe Seiten mit der Maus, um sie zu verschieben; ziehe den Hintergrund, um den Ausschnitt zu bewegen. Strg/Cmd + Mausrad zoomt.']));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Durchgezogene Pfeile zeigen den Themen-Baum (Oberseite → Unterseite), gestrichelte sind interne Links. Die Farbe zeigt die Phase, der Punkt oben rechts den Status aus dem Bericht.']));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Änderungen am Diagramm werden gespeichert, verändern aber den Bericht nicht.']));
+        var legend = el('div', { class: 'cvz-flow-legend' });
+        MESSY_MIDDLE_PHASES.forEach(function (ph) {
+          if (ph.value === 'legacy') return;
+          legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [
+            el('i', { style: 'background:' + FLOW_PHASE_COLORS[ph.value] }), ph.label,
+          ]));
+        });
+        panel.appendChild(legend);
+        return;
+      }
+      if (sel.type === 'edge') {
+        var edge = edgeById(sel.id);
+        if (!edge) return;
+        var a = nodeById(edge.from), b = nodeById(edge.to);
+        panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [edge.type === 'hierarchy' ? 'Themen-Baum-Verbindung' : 'Interner Link']));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [(a ? a.label : '?') + ' → ' + (b ? b.label : '?')]));
+        var toggle = tbButton(edge.type === 'hierarchy' ? 'In internen Link umwandeln' : 'In Baum-Verbindung umwandeln', '', function () {
+          if (edge.type === 'link') {
+            if (edge.to === 'conv' || isDescendant(edge.from, edge.to)) { notice('Das würde einen Kreis im Themen-Baum erzeugen.'); return; }
+            pushUndo();
+            var old = parentEdgeOf(edge.to);
+            if (old) diagram.edges = diagram.edges.filter(function (x) { return x.id !== old.id; });
+            edge.type = 'hierarchy';
+          } else {
+            pushUndo();
+            edge.type = 'link';
+          }
+          changed();
+        });
+        panel.appendChild(toggle);
+        panel.appendChild(tbButton('Umkehren', 'Richtung der Verbindung tauschen', function () {
+          if (edge.type === 'hierarchy') {
+            notice('Bei Baum-Verbindungen bitte die Oberseite in der Seitenauswahl ändern.');
+            return;
+          }
+          pushUndo();
+          var t = edge.from; edge.from = edge.to; edge.to = t;
+          changed();
+        }));
+        panel.appendChild(tbButton('Verbindung löschen', '', function () {
+          pushUndo();
+          diagram.edges = diagram.edges.filter(function (x) { return x.id !== edge.id; });
+          ui.selected = null;
+          changed();
+        }, 'cvz-flow-btn-danger'));
+        return;
+      }
+      var node = nodeById(sel.id);
+      if (!node) return;
+      panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [node.kind === 'conversion' ? 'Conversion-Seite' : (node.kind === 'custom' ? 'Eigene Seite' : 'Seite aus dem Bericht')]));
+      var labelInput = el('input', { type: 'text', class: 'cvz-flow-input', maxlength: String(FLOW_LIMITS.label), value: node.label });
+      labelInput.addEventListener('focus', pushUndoOnce(node.id + ':label'));
+      labelInput.addEventListener('input', function () {
+        var v = labelInput.value.trim();
+        if (!v) return;
+        node.label = v.slice(0, FLOW_LIMITS.label);
+        renderCanvas();
+        scheduleSave();
+      });
+      panel.appendChild(field('Titel', labelInput));
+
+      if (node.kind === 'custom') {
+        var typeSelect = el('select', { class: 'cvz-flow-input' });
+        FLOW_CUSTOM_TYPES.forEach(function (t) {
+          var o = el('option', { value: t }, [pageTypeLabel(t)]);
+          if (node.page_type === t) o.setAttribute('selected', 'selected');
+          typeSelect.appendChild(o);
+        });
+        if (!node.page_type) typeSelect.insertBefore(el('option', { value: '', selected: 'selected' }, ['Seitentyp wählen …']), typeSelect.firstChild);
+        typeSelect.addEventListener('change', function () { pushUndo(); node.page_type = typeSelect.value || undefined; changed(); });
+        panel.appendChild(field('Seitentyp', typeSelect));
+        var phaseSelect = el('select', { class: 'cvz-flow-input' });
+        phaseSelect.appendChild(el('option', { value: '' }, ['Keine Phase']));
+        MESSY_MIDDLE_PHASES.forEach(function (ph) {
+          if (ph.value === 'legacy') return;
+          var o = el('option', { value: ph.value }, [ph.label]);
+          if (node.phase === ph.value) o.setAttribute('selected', 'selected');
+          phaseSelect.appendChild(o);
+        });
+        phaseSelect.addEventListener('change', function () { pushUndo(); node.phase = phaseSelect.value || undefined; changed(); });
+        panel.appendChild(field('Phase', phaseSelect));
+      } else if (node.kind === 'page' && node.page_ref != null && pages[node.page_ref]) {
+        var page = pages[node.page_ref];
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + page.keyword + ' · ' + (page.estimated_volume != null ? 'ca. ' + page.estimated_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt')]));
+        if (page.reasoning) panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, [String(page.reasoning).slice(0, 260) + (String(page.reasoning).length > 260 ? '…' : '')]));
+      } else if (node.kind === 'conversion') {
+        var cp = result.conversion_page;
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + cp.keyword + ' · ' + (cp.estimated_volume != null ? 'ca. ' + cp.estimated_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt')]));
+      }
+
+      if (node.kind !== 'conversion') {
+        var parentSelect = el('select', { class: 'cvz-flow-input' });
+        parentSelect.appendChild(el('option', { value: '' }, ['Keine (oberste Ebene)']));
+        var currentParent = parentEdgeOf(node.id);
+        diagram.nodes.forEach(function (other) {
+          if (other.id === node.id || isDescendant(other.id, node.id)) return;
+          var o = el('option', { value: other.id }, [other.label]);
+          if (currentParent && currentParent.from === other.id) o.setAttribute('selected', 'selected');
+          parentSelect.appendChild(o);
+        });
+        parentSelect.addEventListener('change', function () {
+          pushUndo();
+          var old = parentEdgeOf(node.id);
+          if (old) diagram.edges = diagram.edges.filter(function (x) { return x.id !== old.id; });
+          if (parentSelect.value) {
+            diagram.edges.push({ id: flowNewId('e', takenIds()), from: parentSelect.value, to: node.id, type: 'hierarchy' });
+          }
+          changed();
+        });
+        panel.appendChild(field('Übergeordnete Seite', parentSelect));
+      }
+
+      var noteInput = el('textarea', { class: 'cvz-flow-input', rows: '3', maxlength: String(FLOW_LIMITS.note), placeholder: 'Eigene Notiz, z.B. Verantwortliche Person, Deadline, Idee' });
+      noteInput.value = node.note || '';
+      noteInput.addEventListener('focus', pushUndoOnce(node.id + ':note'));
+      noteInput.addEventListener('input', function () {
+        node.note = noteInput.value.slice(0, FLOW_LIMITS.note) || undefined;
+        renderCanvas();
+        scheduleSave();
+      });
+      panel.appendChild(field('Notiz', noteInput));
+
+      var actions = el('div', { class: 'cvz-flow-actions' });
+      actions.appendChild(tbButton('+ Unterseite', 'Neue Seite unter dieser anlegen', function () { addNode(node); }));
+      actions.appendChild(tbButton('Interner Link …', 'Von dieser Seite auf eine andere verlinken', function () { setMode('connect-link'); }));
+      actions.appendChild(tbButton('Unterseite zuweisen …', 'Eine bestehende Seite unter diese hängen', function () { setMode('connect-hierarchy'); }));
+      if (node.kind !== 'conversion') {
+        actions.appendChild(tbButton('Aus Diagramm entfernen', 'Entfernt nur den Knoten im Diagramm, nicht die Seite im Bericht', function () { removeNode(node.id); }, 'cvz-flow-btn-danger'));
+      }
+      panel.appendChild(actions);
+    }
+    // Ein Undo-Schritt pro Feld-Fokus statt pro Tastendruck
+    function pushUndoOnce(key) {
+      return function () { if (ui._lastUndoKey !== key) { pushUndo(); ui._lastUndoKey = key; } };
+    }
+
+    // ---------- Aktionen ----------
+    function addNode(parentNode) {
+      if (diagram.nodes.length >= FLOW_LIMITS.nodes) { notice('Maximal ' + FLOW_LIMITS.nodes + ' Seiten im Diagramm.'); return; }
+      if (parentNode && diagram.edges.length >= FLOW_LIMITS.edges) { notice('Maximal ' + FLOW_LIMITS.edges + ' Verbindungen im Diagramm.'); return; }
+      pushUndo();
+      var id = flowNewId('n', takenIds());
+      var x, y;
+      if (parentNode) {
+        var siblings = diagram.edges.filter(function (e) { return e.type === 'hierarchy' && e.from === parentNode.id; }).length;
+        x = parentNode.x + siblings * (FLOW_NODE_W + FLOW_GAP_X);
+        y = parentNode.y + FLOW_NODE_H + FLOW_GAP_Y;
+      } else {
+        var rect = svg.getBoundingClientRect();
+        x = (rect.width / 2 - ui.view.x) / ui.view.k - FLOW_NODE_W / 2;
+        y = (rect.height / 2 - ui.view.y) / ui.view.k - FLOW_NODE_H / 2;
+      }
+      var node = { id: id, kind: 'custom', label: 'Neue Seite', page_type: parentNode ? 'topic_coverage' : undefined, x: flowClamp(Math.round(x)), y: flowClamp(Math.round(y)) };
+      if (!node.page_type) delete node.page_type;
+      diagram.nodes.push(node);
+      if (parentNode) diagram.edges.push({ id: flowNewId('e', takenIds()), from: parentNode.id, to: id, type: 'hierarchy' });
+      ui.selected = { type: 'node', id: id };
+      changed();
+      var input = panel.querySelector('input[type=text]');
+      if (input) { input.focus(); input.select(); }
+    }
+    function removeNode(id) {
+      pushUndo();
+      diagram.nodes = diagram.nodes.filter(function (n) { return n.id !== id; });
+      diagram.edges = diagram.edges.filter(function (e) { return e.from !== id && e.to !== id; });
+      ui.selected = null;
+      changed();
+    }
+    function connect(fromId, toId, type) {
+      if (fromId === toId) { notice('Eine Seite kann nicht auf sich selbst zeigen.'); return; }
+      if (diagram.edges.length >= FLOW_LIMITS.edges && type === 'link') { notice('Maximal ' + FLOW_LIMITS.edges + ' Verbindungen im Diagramm.'); return; }
+      if (type === 'hierarchy') {
+        if (toId === 'conv') { notice('Die Conversion-Seite steht immer oben und kann keiner Seite untergeordnet werden.'); return; }
+        if (isDescendant(fromId, toId)) { notice('Das würde einen Kreis im Themen-Baum erzeugen.'); return; }
+        pushUndo();
+        var old = parentEdgeOf(toId);
+        if (old) diagram.edges = diagram.edges.filter(function (x) { return x.id !== old.id; });
+        diagram.edges.push({ id: flowNewId('e', takenIds()), from: fromId, to: toId, type: 'hierarchy' });
+      } else {
+        var exists = diagram.edges.some(function (e) { return e.type === 'link' && e.from === fromId && e.to === toId; });
+        if (exists) { notice('Diese Verlinkung gibt es schon.'); return; }
+        pushUndo();
+        diagram.edges.push({ id: flowNewId('e', takenIds()), from: fromId, to: toId, type: 'link' });
+        ui.showLinks = true;
+      }
+      changed();
+      renderToolbar();
+    }
+
+    // ---------- Ansicht ----------
+    function zoomBy(factor, cx, cy) {
+      var rect = svg.getBoundingClientRect();
+      var px = cx != null ? cx : rect.width / 2;
+      var py = cy != null ? cy : rect.height / 2;
+      var nk = Math.max(0.25, Math.min(2.5, ui.view.k * factor));
+      var real = nk / ui.view.k;
+      ui.view.x = px - (px - ui.view.x) * real;
+      ui.view.y = py - (py - ui.view.y) * real;
+      ui.view.k = nk;
+      applyView();
+    }
+    function fitView() {
+      var rect = svg.getBoundingClientRect();
+      if (!rect.width || !rect.height || diagram.nodes.length === 0) return;
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      diagram.nodes.forEach(function (n) {
+        minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x + FLOW_NODE_W); maxY = Math.max(maxY, n.y + FLOW_NODE_H);
+      });
+      var pad = 32;
+      var k = Math.min((rect.width - pad * 2) / (maxX - minX), (rect.height - pad * 2) / (maxY - minY), 1.2);
+      k = Math.max(0.25, k);
+      ui.view.k = k;
+      ui.view.x = pad + (rect.width - pad * 2 - (maxX - minX) * k) / 2 - minX * k;
+      ui.view.y = pad + (rect.height - pad * 2 - (maxY - minY) * k) / 2 - minY * k;
+      applyView();
+    }
+    function toggleFullscreen() {
+      ui.fullscreen = !ui.fullscreen;
+      root.className = 'cvz-flow' + (ui.fullscreen ? ' is-fullscreen' : '');
+      renderToolbar();
+      setTimeout(fitView, 30);
+    }
+
+    // ---------- Maus / Touch ----------
+    function toLocal(evt) {
+      var rect = svg.getBoundingClientRect();
+      return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+    }
+    svg.addEventListener('pointerdown', function (evt) {
+      if (evt.button !== undefined && evt.button !== 0) return;
+      var nodeG = evt.target.closest ? evt.target.closest('[data-node-id]') : null;
+      var edgeG = evt.target.closest ? evt.target.closest('[data-edge-id]') : null;
+      svg.focus({ preventScroll: true });
+      var pt = toLocal(evt);
+      if (ui.mode && nodeG) {
+        var from = ui.selected && ui.selected.type === 'node' ? ui.selected.id : null;
+        var type = ui.mode === 'connect-hierarchy' ? 'hierarchy' : 'link';
+        setMode(null);
+        if (from) connect(from, nodeG.getAttribute('data-node-id'), type);
+        evt.preventDefault();
+        return;
+      }
+      if (nodeG) {
+        var id = nodeG.getAttribute('data-node-id');
+        var n = nodeById(id);
+        ui.selected = { type: 'node', id: id };
+        ui.drag = { kind: 'node', id: id, startX: pt.x, startY: pt.y, origX: n.x, origY: n.y, moved: false };
+        renderCanvas();
+        renderPanel();
+      } else if (edgeG) {
+        ui.selected = { type: 'edge', id: edgeG.getAttribute('data-edge-id') };
+        renderCanvas();
+        renderPanel();
+        return;
+      } else {
+        if (ui.mode) setMode(null);
+        ui.selected = null;
+        ui.drag = { kind: 'pan', startX: pt.x, startY: pt.y, origX: ui.view.x, origY: ui.view.y, moved: false };
+        renderCanvas();
+        renderPanel();
+      }
+      try { svg.setPointerCapture(evt.pointerId); } catch (e) { /* ältere Browser */ }
+      evt.preventDefault();
+    });
+    svg.addEventListener('pointermove', function (evt) {
+      if (!ui.drag) return;
+      var pt = toLocal(evt);
+      var dx = pt.x - ui.drag.startX, dy = pt.y - ui.drag.startY;
+      if (!ui.drag.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+      if (ui.drag.kind === 'node') {
+        if (!ui.drag.moved) pushUndo();
+        ui.drag.moved = true;
+        var n = nodeById(ui.drag.id);
+        if (!n) return;
+        n.x = flowClamp(Math.round(ui.drag.origX + dx / ui.view.k));
+        n.y = flowClamp(Math.round(ui.drag.origY + dy / ui.view.k));
+        renderCanvas();
+      } else {
+        ui.drag.moved = true;
+        ui.view.x = ui.drag.origX + dx;
+        ui.view.y = ui.drag.origY + dy;
+        applyView();
+      }
+    });
+    function endDrag(evt) {
+      if (!ui.drag) return;
+      var wasNodeMove = ui.drag.kind === 'node' && ui.drag.moved;
+      ui.drag = null;
+      try { svg.releasePointerCapture(evt.pointerId); } catch (e) { /* egal */ }
+      if (wasNodeMove) { renderToolbar(); scheduleSave(); }
+    }
+    svg.addEventListener('pointerup', endDrag);
+    svg.addEventListener('pointercancel', endDrag);
+    svg.addEventListener('wheel', function (evt) {
+      if (!(evt.ctrlKey || evt.metaKey) && !ui.fullscreen) return;
+      evt.preventDefault();
+      var pt = toLocal(evt);
+      zoomBy(evt.deltaY < 0 ? 1.12 : 1 / 1.12, pt.x, pt.y);
+    }, { passive: false });
+    svg.addEventListener('keydown', function (evt) {
+      if ((evt.ctrlKey || evt.metaKey) && (evt.key === 'z' || evt.key === 'Z')) { evt.preventDefault(); undo(); return; }
+      if (evt.key === 'Escape') {
+        if (ui.mode) setMode(null);
+        else if (ui.fullscreen) toggleFullscreen();
+        return;
+      }
+      if ((evt.key === 'Delete' || evt.key === 'Backspace') && ui.selected) {
+        evt.preventDefault();
+        if (ui.selected.type === 'node') {
+          var n = nodeById(ui.selected.id);
+          if (n && n.kind !== 'conversion') removeNode(n.id);
+        } else {
+          var eid = ui.selected.id;
+          pushUndo();
+          diagram.edges = diagram.edges.filter(function (x) { return x.id !== eid; });
+          ui.selected = null;
+          changed();
+        }
+      }
+    });
+
+    renderToolbar();
+    renderCanvas();
+    renderPanel();
+    // Einpassen, sobald der Container im DOM sitzt und eine Größe hat
+    var fitTries = 0;
+    (function tryFit() {
+      var rect = svg.getBoundingClientRect();
+      if ((rect.width > 0 && rect.height > 0) || fitTries++ > 20) { if (rect.width > 0) fitView(); return; }
+      setTimeout(tryFit, 100);
+    })();
+    return root;
+  }
+
   function renderResult(sessionId, result, fundedBy, session) {
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
@@ -1034,8 +1859,9 @@
     wrap.appendChild(renderReportSection(3, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])]));
     wrap.appendChild(renderReportSection(4, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
     wrap.appendChild(renderReportSection(5, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
-    wrap.appendChild(renderReportSection(6, 'GEO-Strategie', [renderGeoSection(result.geo_strategy)]));
-    wrap.appendChild(renderReportSection(7, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]));
+    wrap.appendChild(renderReportSection(6, 'Content-Flow: Themen-Baum bearbeiten', [renderFlowSection(sessionId, result, session)]));
+    wrap.appendChild(renderReportSection(7, 'GEO-Strategie', [renderGeoSection(result.geo_strategy)]));
+    wrap.appendChild(renderReportSection(8, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]));
     var fundingText = fundedBy
       ? 'Finanziert aus: ' + (fundedBy === 'ppu_strategy' ? 'Pay-per-Use-Credit' : 'Plan-Kontingent')
       : 'Gespeicherte Strategie';
