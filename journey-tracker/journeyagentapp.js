@@ -318,8 +318,76 @@
     window.history.replaceState({}, '', url);
   }
 
+  // NEU (30.09.2026): Einheitliche Tooltips im Convertlyze-Stil. Der Browser
+  // zeigt f\u00fcr title="..." seinen eigenen, unformatierten Tooltip. Diese
+  // Funktion f\u00e4ngt alle title-Attribute innerhalb der App ab (auch die von
+  // sp\u00e4ter neu gezeichneten Elementen, weil sie per Event-Delegation auf
+  // document lauscht), verschiebt den Text nach data-cvz-title und zeigt ihn in
+  // einem eigenen Popup (gleicher Stil wie das [?]-Tooltip, siehe .cvz-tip).
+  // Ein Popup f\u00fcr alle Elemente, position:fixed, deshalb wird es nie von
+  // overflow-Containern (z. B. horizontal scrollbaren Tabellen) abgeschnitten.
+  function initCvzTooltips() {
+    if (window.__cvzTooltipsReady) return;
+    window.__cvzTooltipsReady = true;
+
+    var tip = document.createElement('div');
+    tip.className = 'cvz-float-tip';
+    tip.setAttribute('role', 'tooltip');
+    document.body.appendChild(tip);
+    var current = null;
+
+    function hide() {
+      tip.style.opacity = '0';
+      current = null;
+    }
+
+    function place(el) {
+      var rect = el.getBoundingClientRect();
+      var vw = document.documentElement.clientWidth;
+      var tw = tip.offsetWidth;
+      var th = tip.offsetHeight;
+      var left = rect.left + rect.width / 2 - tw / 2;
+      left = Math.max(8, Math.min(left, vw - tw - 8));
+      var top = rect.top - th - 8;
+      if (top < 8) top = rect.bottom + 8;
+      tip.style.left = left + 'px';
+      tip.style.top = top + 'px';
+    }
+
+    document.addEventListener('mouseover', function (e) {
+      var el = e.target && e.target.closest ? e.target.closest('[title],[data-cvz-title]') : null;
+      if (!el || !el.closest('#cvz-visibility-app, .cvz-modal-overlay')) {
+        if (current) hide();
+        return;
+      }
+      if (el.hasAttribute('title')) {
+        var native = el.getAttribute('title');
+        el.removeAttribute('title');
+        if (native) {
+          el.setAttribute('data-cvz-title', native);
+          if (!el.getAttribute('aria-label') && !el.textContent.trim()) el.setAttribute('aria-label', native);
+        }
+      }
+      var text = el.getAttribute('data-cvz-title');
+      if (!text) { hide(); return; }
+      if (el === current) return;
+      current = el;
+      tip.textContent = text;
+      tip.style.opacity = '0';
+      place(el);
+      tip.style.opacity = '1';
+    });
+
+    document.addEventListener('mouseout', function (e) {
+      if (current && !current.contains(e.relatedTarget)) hide();
+    });
+    document.addEventListener('mousedown', hide);
+    window.addEventListener('scroll', hide, true);
+  }
+
   async function init() {
     injectStyles();
+    initCvzTooltips();
     renderInitialLoadingState();
 
     var memberstackId = null;
@@ -6715,6 +6783,7 @@
       '<thead><tr>' +
         '<th style="width:26px;"></th>' +
         '<th>Prompt</th>' +
+        '<th style="width:150px;">Zitierte Quellen</th>' +
         '<th style="width:150px;">Zitiert</th>' +
         '<th style="width:170px;">Typ / Rolle</th>' +
         '<th style="width:50px;"></th>' +
@@ -6767,13 +6836,20 @@
       var _favDomains = (prompt.cited_domains && prompt.cited_domains.length > 0)
         ? prompt.cited_domains.slice(0, 6)
         : (prompt.top_cited_domain ? [prompt.top_cited_domain] : []);
+      // GEÄNDERT (30.09.2026, Kundenwunsch): Favicons stehen in einer eigenen
+      // Spalte "Zitierte Quellen" statt direkt hinter dem Prompt-Text. Bei mehr
+      // als 6 zitierten Domains zeigt ein "+N" die Restmenge.
+      var _favTotal = (prompt.cited_domains && prompt.cited_domains.length > 0) ? prompt.cited_domains.length : _favDomains.length;
       var faviconHtml = _favDomains.length > 0
-        ? '<span style="display:inline-flex;align-items:center;gap:2px;margin-left:6px;">' +
+        ? '<span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;">' +
             _favDomains.map(function (d) {
-              return '<img src="https://www.google.com/s2/favicons?sz=14&domain=' + encodeURIComponent(d) + '" style="width:14px;height:14px;border-radius:2px;" onerror="this.style.display=\'none\'" title="' + escapeHtml(d) + '">';
+              return '<img src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(d) + '" style="width:16px;height:16px;border-radius:2px;object-fit:contain;" onerror="this.style.display=\'none\'" title="' + escapeHtml(d) + '" alt="">';
             }).join('') +
+            (_favTotal > _favDomains.length
+              ? '<span style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);">+' + (_favTotal - _favDomains.length) + '</span>'
+              : '') +
           '</span>'
-        : '';
+        : '<span style="color:var(--cvz-text-muted,#8b98a5);">\u2013</span>';
 
       var tr = document.createElement('tr');
       if (enableCitations) tr.setAttribute('data-cvz-prompt-toggle', prompt.id);
@@ -6781,8 +6857,9 @@
         '<td class="cvz-prompt-expand-chevron">' + (enableCitations ? (state.expandedPromptId === prompt.id ? '\u25be' : '\u25b8') : '') + '</td>' +
         '<td>' +
           '<span class="cvz-dot ' + dotClass + '" title="' + escapeHtml(statusLabel) + '"></span> ' +
-          escapeHtml(prompt.prompt_text) + changelogBadgeHtml + faviconHtml +
+          escapeHtml(prompt.prompt_text) + changelogBadgeHtml +
         '</td>' +
+        '<td>' + faviconHtml + '</td>' +
         '<td style="white-space:nowrap;">' + citationBadge + unlinkedBadge + '</td>' +
         '<td style="white-space:nowrap;">' + contentTypeBadge + personaBadge + aiSearchVolumeBadge + '</td>' +
         '<td style="white-space:nowrap;text-align:right;">' +
@@ -6793,7 +6870,7 @@
       if (enableCitations && state.expandedPromptId === prompt.id) {
         var expTr = document.createElement('tr');
         var expTd = document.createElement('td');
-        expTd.colSpan = 5;
+        expTd.colSpan = 6;
         expTd.appendChild(renderPromptExpansion(prompt, changelogEntries));
         expTr.appendChild(expTd);
         tbody.appendChild(expTr);
@@ -8806,6 +8883,18 @@
       '.cvz-competitor-url-row { overflow: hidden; white-space: nowrap; max-width: 100%; }' +
       '.cvz-competitor-url {display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cvz-teal); font-size: 12px; text-decoration: none; max-width: 100%; }' +
       '.cvz-competitor-url:hover { text-decoration: underline; }' +
+
+      /* Tooltip-Popup f\u00fcr alle title-Attribute (siehe initCvzTooltips) */
+      '.cvz-float-tip {' +
+        'position:fixed;left:0;top:0;z-index:100000;' +
+        'min-width:0;max-width:280px;box-sizing:border-box;' +
+        'padding:8px 10px;' +
+        'background:#1e2a36;border:1px solid #232b36;border-radius:0;' +
+        'font-family:inherit;font-size:12px;font-weight:400;line-height:1.5;' +
+        'color:#e6edf3;text-align:left;white-space:normal;' +
+        'box-shadow:0 4px 16px rgba(0,0,0,.4);' +
+        'pointer-events:none;opacity:0;transition:opacity .15s ease;' +
+      '}' +
 
       /* Tooltip-Komponente: [?] Icon mit Hover-Popup */
       '.cvz-tip {' +
