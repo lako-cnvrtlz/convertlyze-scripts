@@ -151,6 +151,13 @@
         'cursor:pointer;transition:background .15s,border-color .15s;text-decoration:none;line-height:1;',
       '}',
       '.cvz-cs-build-btn:hover{background:var(--cvz-teal-hover);border-color:var(--cvz-teal-hover);text-decoration:none;}',
+      // BUGFIX: Die Regel "#cvz-content-strategy-agent a{color:teal}" weiter oben
+      // ist durch die ID spezifischer als ".cvz-cs-build-btn" und hat die dunkle
+      // Schrift überschrieben (türkis auf türkis). Mit derselben ID davor gewinnt
+      // wieder die Button-Farbe, auch für :visited und :hover.
+      '#cvz-content-strategy-agent a.cvz-cs-build-btn,',
+      '#cvz-content-strategy-agent a.cvz-cs-build-btn:visited,',
+      '#cvz-content-strategy-agent a.cvz-cs-build-btn:hover{color:#0d1117;text-decoration:none;}',
 
       /* ---- Spinner ---- */
       '@keyframes cvz-cs-spin{to{transform:rotate(360deg);}}',
@@ -832,6 +839,8 @@
       .then(function (res) {
         var url = new URL(window.location.href);
         url.searchParams.set('session_id', res.session_id);
+        // Vorbelegung aus dem Tracker-Link wird nach dem Start nicht mehr gebraucht.
+        ['tracker_topic_id', 'topic', 'domain'].forEach(function (key) { url.searchParams.delete(key); });
         window.history.replaceState(null, '', url.toString());
         pollSession(res.session_id);
       })
@@ -1525,6 +1534,23 @@
     return new URLSearchParams(window.location.search).get(key);
   }
 
+  // NEU (Tracker-Verbindung): Der Button "Content-Strategie erstellen" im Customer
+  // Journey Tracker verlinkt mit ?tracker_topic_id=...&topic=...&domain=... hierher.
+  // Die Tracker-ID wird nur übernommen, wenn der User das Thema auch in seiner
+  // Liste hat. Der Server prüft den Zugriff beim Start ohnehin noch einmal.
+  function getPrefillFromUrl() {
+    var prefill = {};
+    var topic = getParam('topic');
+    var domain = getParam('domain');
+    var trackerTopicId = getParam('tracker_topic_id');
+    if (topic) prefill.topic = topic;
+    if (domain) prefill.domain = domain;
+    if (trackerTopicId && state.trackerTopics.some(function (t) { return t.id === trackerTopicId; })) {
+      prefill.trackerTopicId = trackerTopicId;
+    }
+    return prefill;
+  }
+
   function renderApp() {
     clear(state.root);
     var loading = el('p', { class: 'cvz-cs-hint' }, ['Lade Kontingent ...']);
@@ -1533,7 +1559,7 @@
       .then(function () {
         clear(state.root);
         state.root.appendChild(renderQuotaBanner());
-        state.root.appendChild(renderForm());
+        state.root.appendChild(renderForm(getPrefillFromUrl()));
       })
       .catch(function (err) {
         renderError('Konnte nicht geladen werden: ' + err.message);
