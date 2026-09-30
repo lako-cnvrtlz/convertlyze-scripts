@@ -3958,7 +3958,7 @@
     }
 
     var table = document.createElement('table');
-    table.className = 'cvz-table cvz-table-clickable';
+    table.className = 'cvz-table cvz-table-clickable cvz-topic-status-table';
     // GEAENDERT (30.09.2026): eigene Spalte "Content-Strategie" statt den Link
     // zusammen mit Deaktivieren/Aktivieren unter "Aktion" zu stapeln.
     table.innerHTML = '<thead><tr><th>Thema</th><th>Status</th><th>Gestartet</th><th>Content-Strategie</th><th>Aktion</th></tr></thead>';
@@ -4026,8 +4026,8 @@
       var tr = document.createElement('tr');
       tr.setAttribute('data-cvz-topic-id', topic.id);
       tr.innerHTML =
-        '<td>' + escapeHtml(topic.name) + '</td>' +
-        '<td><span class="cvz-status-badge ' + status.className + '">' +
+        '<td class="cvz-ts-name">' + escapeHtml(topic.name) + '</td>' +
+        '<td class="cvz-ts-status"><span class="cvz-status-badge ' + status.className + '">' +
           ((topic.status === 'collecting' || topic.status === 'analyzing') ? '<span class="cvz-spinner"></span>' : '') +
           status.label + '</span>' +
           (topic.status === 'collecting' && !isStuckCollecting ? '<span class="cvz-status-hint">Das wird mehrere Minuten dauern. Sobald der Lauf fertig ist, aktualisiert sich die Seite automatisch.</span>' : '') +
@@ -4041,9 +4041,9 @@
             '</button>'
           ) : '') +
         '</td>' +
-        '<td>' + formatRelativeTime(topic.created_at) + '</td>' +
-        '<td>' + strategyCell + '</td>' +
-        '<td>' + actionCell + '</td>';
+        '<td class="cvz-ts-started">' + formatRelativeTime(topic.created_at) + '</td>' +
+        '<td class="cvz-ts-strategy">' + strategyCell + '</td>' +
+        '<td class="cvz-ts-action">' + actionCell + '</td>';
         tbody.appendChild(tr);
     });
     table.appendChild(tbody);
@@ -8613,6 +8613,25 @@
       '.cvz-stack-badges > span { display: inline-flex; align-items: center; gap: 6px; }' +
       '.cvz-stack-text { margin: 0; font-size: 14px; line-height: 1.55; color: var(--cvz-text-muted); overflow-wrap: anywhere; }' +
       '.cvz-stack-text + .cvz-stack-text, .cvz-ks-chips + .cvz-stack-text { margin-top: 6px; }' +
+      // NEU (30.09.2026): Themen-Tabelle der Startseite auf dem Handy als Karten.
+      // Jede Zeile wird eine Karte: Zeile 1 Thema + Startzeit, Zeile 2 Status,
+      // danach alle weiteren Zellen untereinander (Buttons umbrechen statt
+      // sich zu überlagern). Bewusst über Klassen (.cvz-ts-*) statt nth-child:
+      // Weitere Spalten (z. B. "Content-Strategie") verschieben sonst die
+      // Zuordnung. Die Strategie-Zelle und unbekannte Zellen laufen als volle
+      // Zeile mit, vor der Aktion-Zelle.
+      '@media (max-width: 720px) {' +
+        '.cvz-topic-status-table, .cvz-topic-status-table > tbody { display: block; width: 100% !important; min-width: 0 !important; table-layout: auto; }' +
+        '.cvz-topic-status-table > thead { display: none; }' +
+        '.cvz-topic-status-table > tbody > tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: start; padding: 14px; margin: 0 0 12px; border: 1px solid var(--cvz-border); background: var(--cvz-navy-raised); }' +
+        '.cvz-topic-status-table > tbody > tr > td { display: block; grid-column: 1 / -1; order: 1; padding: 0 !important; border: 0 !important; min-width: 0; width: auto !important; box-sizing: border-box; }' +
+        '.cvz-topic-status-table > tbody > tr > td.cvz-ts-name { grid-column: 1; grid-row: 1; order: 0; font-size: 16px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }' +
+        '.cvz-topic-status-table > tbody > tr > td.cvz-ts-started { grid-column: 2; grid-row: 1; order: 0; font-size: 12px; color: var(--cvz-text-muted); white-space: nowrap; text-align: right; padding-top: 3px !important; }' +
+        '.cvz-topic-status-table > tbody > tr > td.cvz-ts-status { grid-column: 1 / -1; grid-row: 2; order: 0; }' +
+        '.cvz-topic-status-table > tbody > tr > td.cvz-ts-action { order: 2; display: flex; flex-wrap: wrap; gap: 8px; }' +
+        '.cvz-topic-status-table > tbody > tr > td button, .cvz-topic-status-table > tbody > tr > td a { max-width: 100%; white-space: normal; text-align: center; margin: 0 !important; }' +
+        '.cvz-topic-status-table .cvz-status-hint { display: block; margin-top: 6px; }' +
+      '}' +
       // NEU (29.09.2026): "Wichtigste Handlungsfelder" auf dem Handy untereinander statt nebeneinander.
       // Zeile 1: Pfeil + Typ-Chip, Zeile 2: Beschreibung über die volle Breite.
       '@media (max-width: 600px) {' +
