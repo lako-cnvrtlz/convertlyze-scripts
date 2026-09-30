@@ -124,6 +124,7 @@
     expandedPromptId: null,
     expandedPromptEngine: {},
     expandedPromptRunIndex: {},
+    expandedPromptRound: {},
     keywordRankHistoryCache: {},
     loadingKeywordRankHistory: {},
     expandedKeywordId: null,
@@ -1035,6 +1036,7 @@
           (data.chat_gpt && data.chat_gpt.length) ? 'chat_gpt' :
           (data.gemini && data.gemini.length) ? 'gemini' : 'chat_gpt';
         state.expandedPromptRunIndex[promptId] = 0;
+        state.expandedPromptRound[promptId] = 0;
       } catch (e) {
         console.error('[CVZ Visibility] Prompt-Zitationen konnten nicht geladen werden:', e);
         state.promptCitationsCache[promptId] = null;
@@ -1552,6 +1554,14 @@
     if (runSelect) {
       var runOwner = runSelect.getAttribute('data-cvz-run-owner');
       state.expandedPromptRunIndex[runOwner] = parseInt(runSelect.getAttribute('data-cvz-run-select'), 10);
+      render();
+      return;
+    }
+    var roundSelect = event.target.closest('[data-cvz-round-select]');
+    if (roundSelect) {
+      var roundOwner = roundSelect.getAttribute('data-cvz-round-owner');
+      state.expandedPromptRound[roundOwner] = parseInt(roundSelect.getAttribute('data-cvz-round-select'), 10);
+      state.expandedPromptRunIndex[roundOwner] = 0;
       render();
       return;
     }
@@ -4480,10 +4490,16 @@
     if (detail.prompts && detail.prompts.length) {
       html += '<p class="cvz-section-label" style="margin-top:12px;">Prompts</p>';
       detail.prompts.forEach(function (p) {
-        var statusLabel = p.cited ? 'zitiert' : (p.mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden');
+        // GEÄNDERT: Ein Prompt wird pro Woche und Modell mehrfach abgefragt,
+        // das Backend liefert je (Prompt, Modell) EINE Zeile mit Anzahl der Läufe.
+        var statusLabel = (p.runs > 1)
+          ? (p.cited_runs === 0 ? (p.mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden') : 'in ' + p.cited_runs + ' von ' + p.runs + ' L\u00e4ufen zitiert')
+          : (p.cited ? 'zitiert' : (p.mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden'));
         var change;
         if (p.previous_collected_at) {
-          var previousLabel = p.previous_cited ? 'zitiert' : (p.previous_mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden');
+          var previousLabel = (p.previous_runs > 1)
+            ? (p.previous_cited_runs === 0 ? (p.previous_mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden') : 'in ' + p.previous_cited_runs + ' von ' + p.previous_runs + ' L\u00e4ufen zitiert')
+            : (p.previous_cited ? 'zitiert' : (p.previous_mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden'));
           change = ', davor am ' + formatShortDate(p.previous_collected_at) + ': ' + previousLabel;
         } else {
           change = ', erster erfasster Lauf';
@@ -4591,7 +4607,7 @@
             '<strong style="min-width:150px;color:var(--cvz-text,#e6edf3);">' + escapeHtml(q.domain) + '</strong>' +
             '<span class="cvz-persona-chip" style="cursor:default;' + (isComp ? 'color:var(--cvz-red,#de5b50);border-color:var(--cvz-red,#de5b50);' : '') + '">' +
               escapeHtml(q.typ_label) + '</span>' +
-            '<span style="flex:1;min-width:120px;height:6px;background:var(--cvz-border,#232b36);border-radius:3px;overflow:hidden;">' +
+            '<span style="flex:1;min-width:120px;height:6px;background:var(--cvz-border,#232b36);border-radius:0;overflow:hidden;">' +
               '<span style="display:block;height:100%;width:' + pct + '%;background:' + (isComp ? 'var(--cvz-red,#de5b50)' : 'var(--cvz-text-muted,#8b98a5)') + ';"></span>' +
             '</span>' +
             '<span style="color:var(--cvz-text-muted,#8b98a5);white-space:nowrap;">bei ' + q.anzahl_fragen + ' von ' + q.von_fragen + ' Fragen</span>' +
@@ -4720,7 +4736,7 @@
       chip.style.cssText =
         'display:inline-flex;align-items:center;align-self:flex-start;' +
         'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
-        'padding:2px 8px;border-radius:9999px;' +
+        'padding:2px 8px;border-radius:0;' +
         'color:' + cfg.color + ';background:' + cfg.bg + ';border:1px solid ' + cfg.border + ';';
       chip.textContent = cfg.label;
       inner.appendChild(chip);
@@ -4751,9 +4767,9 @@
         var barCol = document.createElement('div');
         barCol.style.cssText = 'flex:1 1 0;';
         var barTrack = document.createElement('div');
-        barTrack.style.cssText = 'height:6px;background:var(--cvz-border,#232b36);border-radius:3px;overflow:hidden;margin-bottom:3px;';
+        barTrack.style.cssText = 'height:6px;background:var(--cvz-border,#232b36);border-radius:0;overflow:hidden;margin-bottom:3px;';
         var barFill = document.createElement('div');
-        barFill.style.cssText = 'height:100%;width:' + pct + '%;background:' + cfg.color + ';border-radius:3px;';
+        barFill.style.cssText = 'height:100%;width:' + pct + '%;background:' + cfg.color + ';border-radius:0;';
         barTrack.appendChild(barFill);
         barCol.appendChild(barTrack);
         var rateLbl = document.createElement('p');
@@ -5175,7 +5191,7 @@
       var tdPhase = document.createElement('td');
       tdPhase.style.cssText = 'padding:10px 10px;vertical-align:top;border-bottom:' + borderBottom + ';';
       var sel = document.createElement('select');
-      sel.style.cssText = 'font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid ' + phaseColor + ';background:var(--cvz-card,#161b22);color:var(--cvz-text,#e6edf3);cursor:pointer;width:100%;';
+      sel.style.cssText = 'font-size:11px;padding:3px 6px;border-radius:0;border:1px solid ' + phaseColor + ';background:var(--cvz-card,#161b22);color:var(--cvz-text,#e6edf3);cursor:pointer;width:100%;';
       var phaseOpts = [{ value: '', label: 'Keine Phase' }];
       PHASE_ORDER.forEach(function (p) { phaseOpts.push({ value: p, label: PHASE_LABELS[p] || p }); });
       phaseOpts.forEach(function (opt) {
@@ -5879,7 +5895,7 @@
             // langes Badge nie mehr in die Nachbarspalte ragt. Der volle
             // Text steht dann im Tooltip (title).
             ? '<span title="' + escapeHtml(kw.keyword_status_label) + '" style="display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;font-size:10px;font-weight:700;text-transform:uppercase;' +
-              'letter-spacing:.04em;padding:3px 8px;border-radius:9999px;white-space:nowrap;box-sizing:border-box;' +
+              'letter-spacing:.04em;padding:3px 8px;border-radius:0;white-space:nowrap;box-sizing:border-box;' +
               'color:' + (KEYWORD_STATUS_COLORS[kw.keyword_status] || '#8b98a5') + ';' +
               'background:' + (KEYWORD_STATUS_COLORS[kw.keyword_status] || '#8b98a5') + '1a;">' +
               escapeHtml(kw.keyword_status_label) + '</span>'
@@ -6051,6 +6067,116 @@
     return html;
   }
 
+  // NEU: Läufe (ChatGPT + Gemini zusammen) zu Zeiträumen gruppieren. Alle
+  // Läufe, die höchstens 6,5 Tage vor dem neuesten Lauf des Zeitraums liegen,
+  // gehören zusammen, dieselbe Regel wie im Backend (CURRENT_ROUND_WINDOW_HOURS).
+  // Innerhalb eines Durchlaufs sind die Läufe nach Zeit aufsteigend sortiert
+  // (Lauf 1, 2, 3), die Durchläufe selbst nach Datum absteigend.
+  var ROUND_WINDOW_MS = 156 * 60 * 60 * 1000; // 6,5 Tage, gleich wie CURRENT_ROUND_WINDOW_HOURS in run_rounds.py
+
+  function groupRunsIntoRounds(chatRuns, gemRuns) {
+    var all = [];
+    (chatRuns || []).forEach(function (r) { all.push({ engine: 'chat_gpt', run: r, ts: new Date(r.collected_at).getTime() }); });
+    (gemRuns || []).forEach(function (r) { all.push({ engine: 'gemini', run: r, ts: new Date(r.collected_at).getTime() }); });
+    all = all.filter(function (x) { return !isNaN(x.ts); });
+    all.sort(function (a, b) { return b.ts - a.ts; });
+
+    var groups = [];
+    all.forEach(function (item) {
+      var last = groups[groups.length - 1];
+      if (last && last.newestTs - item.ts <= ROUND_WINDOW_MS) {
+        last.items.push(item);
+      } else {
+        groups.push({ newestTs: item.ts, newestIso: item.run.collected_at, items: [item] });
+      }
+    });
+
+    return groups.map(function (g) {
+      function forEngine(engineId) {
+        return g.items
+          .filter(function (x) { return x.engine === engineId; })
+          .sort(function (a, b) { return a.ts - b.ts; })
+          .map(function (x) { return x.run; });
+      }
+      return { newestIso: g.newestIso, chat_gpt: forEngine('chat_gpt'), gemini: forEngine('gemini') };
+    });
+  }
+
+  function formatTimeOfDay(isoString) {
+    if (!isoString) return null;
+    var d = new Date(isoString);
+    if (isNaN(d.getTime())) return null;
+    return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr';
+  }
+
+  // NEU: Berechnete Zusammenfassung über alle Läufe eines Modells in einem
+  // Durchlauf. Bewusst KEIN von Claude geschriebener "Durchschnitts-Text":
+  // nur gezählt, was die Modelle tatsächlich geantwortet haben.
+  function renderRoundSummary(engineLabel, runs) {
+    var box = document.createElement('div');
+    box.className = 'cvz-prompt-round-summary';
+    var total = runs.length;
+    var cited = runs.filter(function (r) { return r.own_domain_cited; }).length;
+    var mentionedOnly = runs.filter(function (r) { return !r.own_domain_cited && r.own_domain_mentioned; }).length;
+
+    var headText = engineLabel + ': ' + (total === 1 ? '1 Lauf' : total + ' L\u00e4ufe') + ' \u00b7 eure Domain ' +
+      (cited === 0 ? 'nicht zitiert' : 'in ' + cited + ' von ' + total + ' zitiert');
+    if (mentionedOnly > 0) headText += ', in ' + mentionedOnly + ' nur erw\u00e4hnt';
+    var head = document.createElement('p');
+    head.className = 'cvz-prompt-round-head';
+    head.textContent = headText;
+    box.appendChild(head);
+
+    if (total < 2) return box;
+
+    // Quellen über alle Läufe zählen: in wie vielen Läufen kam jede Domain vor?
+    var byDomain = {};
+    runs.forEach(function (r) {
+      var seen = {};
+      (r.sources || []).forEach(function (s) {
+        var key = (s.domain || s.url || '').toLowerCase();
+        if (!key || seen[key]) return;
+        seen[key] = true;
+        if (!byDomain[key]) byDomain[key] = { name: s.domain || s.url, count: 0, competitor: false };
+        byDomain[key].count += 1;
+        if (s.is_competitor) byDomain[key].competitor = true;
+      });
+    });
+    var entries = Object.keys(byDomain).map(function (k) { return byDomain[k]; });
+    entries.sort(function (a, b) { return b.count - a.count || a.name.localeCompare(b.name); });
+    var stable = entries.filter(function (e) { return e.count === total; });
+    var changing = entries.filter(function (e) { return e.count < total; });
+
+    function chipsHtml(list, limit) {
+      var shown = list.slice(0, limit).map(function (e) {
+        return '<span class="cvz-round-chip' + (e.competitor ? ' cvz-round-chip-competitor' : '') + '">' +
+          escapeHtml(e.name) + ' <b>' + e.count + '/' + total + '</b></span>';
+      }).join('');
+      if (list.length > limit) shown += '<span class="cvz-round-chip-more">+ ' + (list.length - limit) + ' weitere</span>';
+      return shown;
+    }
+
+    if (stable.length > 0) {
+      var stableP = document.createElement('div');
+      stableP.className = 'cvz-round-sources';
+      stableP.innerHTML = '<span class="cvz-round-sources-label">In jedem Lauf zitiert</span>' + chipsHtml(stable, 10);
+      box.appendChild(stableP);
+    }
+    if (changing.length > 0) {
+      var changingP = document.createElement('div');
+      changingP.className = 'cvz-round-sources';
+      changingP.innerHTML = '<span class="cvz-round-sources-label">Nur in einzelnen L\u00e4ufen</span>' + chipsHtml(changing, 8);
+      box.appendChild(changingP);
+    }
+
+    var note = document.createElement('p');
+    note.className = 'cvz-card-placeholder-text';
+    note.textContent = 'Jeder Lauf ist eine unabh\u00e4ngige Abfrage derselben Frage. Unterschiede zwischen den L\u00e4ufen sind normal. ' +
+      'Belastbar sind Quellen, die immer wieder auftauchen.';
+    box.appendChild(note);
+    return box;
+  }
+
   function renderPromptExpansion(prompt, changelogEntries) {
     var wrap = document.createElement('div');
     wrap.className = 'cvz-prompt-expansion';
@@ -6082,25 +6208,35 @@
     }
     if (linkedHtml) wrap.innerHTML = linkedHtml;
 
-    // Quellen-Zusammenfassung: wie viele Quellen wurden pro Engine zitiert?
-    // Hilft dem User einzuschätzen, welche Prompts priorisiert werden sollten.
-    var cptRuns = data.chat_gpt || [];
-    var gemRuns = data.gemini || [];
-    var cptSources = cptRuns.length > 0 && cptRuns[0].sources ? cptRuns[0].sources.length : null;
-    var gemSources = gemRuns.length > 0 && gemRuns[0].sources ? gemRuns[0].sources.length : null;
-    if (cptSources !== null || gemSources !== null) {
-      var sourceSummary = document.createElement('p');
-      sourceSummary.className = 'cvz-prompt-source-summary';
-      var parts = [];
-      if (cptSources !== null) parts.push(MODEL_LABELS.chat_gpt + ': ' + cptSources + ' Quellen');
-      if (gemSources !== null) parts.push(MODEL_LABELS.gemini + ': ' + gemSources + ' Quellen');
-      sourceSummary.textContent = parts.join(' · ');
-      wrap.appendChild(sourceSummary);
+    // GEÄNDERT: Läufe werden nach Durchlauf (Datum) und Lauf (1, 2, 3) gegliedert.
+    // Ein Durchlauf ist ein Weekly-Lauf; darin fragt der Tracker jeden Prompt
+    // pro Modell mehrfach ab (siehe RUNS_PER_PROMPT im Backend).
+    var rounds = groupRunsIntoRounds(data.chat_gpt || [], data.gemini || []);
+    var roundIndex = Math.min(state.expandedPromptRound[prompt.id] || 0, Math.max(rounds.length - 1, 0));
+    var round = rounds[roundIndex] || { chat_gpt: [], gemini: [] };
+
+    if (rounds.length > 1) {
+      var roundNav = document.createElement('div');
+      roundNav.className = 'cvz-prompt-run-nav';
+      var roundLabel = document.createElement('span');
+      roundLabel.className = 'cvz-prompt-nav-label';
+      roundLabel.textContent = 'Zeitraum bis';
+      roundNav.appendChild(roundLabel);
+      rounds.forEach(function (r, i) {
+        var roundBtn = document.createElement('button');
+        roundBtn.type = 'button';
+        roundBtn.className = 'cvz-prompt-run-btn' + (i === roundIndex ? ' cvz-prompt-run-btn-active' : '');
+        roundBtn.setAttribute('data-cvz-round-select', i);
+        roundBtn.setAttribute('data-cvz-round-owner', prompt.id);
+        roundBtn.textContent = formatShortDate(r.newestIso) || 'unbekannt';
+        roundNav.appendChild(roundBtn);
+      });
+      wrap.appendChild(roundNav);
     }
 
     var engines = [
-      { id: 'chat_gpt', label: MODEL_LABELS.chat_gpt, runs: data.chat_gpt || [] },
-      { id: 'gemini', label: MODEL_LABELS.gemini, runs: data.gemini || [] },
+      { id: 'chat_gpt', label: MODEL_LABELS.chat_gpt, runs: round.chat_gpt },
+      { id: 'gemini', label: MODEL_LABELS.gemini, runs: round.gemini },
     ];
 
     var engineNav = document.createElement('div');
@@ -6117,27 +6253,37 @@
     wrap.appendChild(engineNav);
 
     var activeEngine = engines.filter(function (e) { return e.id === state.expandedPromptEngine[prompt.id]; })[0] || engines[0];
-    var runIndex = state.expandedPromptRunIndex[prompt.id] || 0;
+    var runIndex = Math.min(state.expandedPromptRunIndex[prompt.id] || 0, Math.max(activeEngine.runs.length - 1, 0));
     var run = activeEngine.runs[runIndex];
 
     if (!run) {
       var empty = document.createElement('p');
       empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Für ' + activeEngine.label + ' liegt noch kein Lauf vor.';
+      empty.textContent = 'Für ' + activeEngine.label + ' liegt in diesem Durchlauf noch kein Lauf vor.';
       wrap.appendChild(empty);
       return wrap;
     }
 
+    // Zusammenfassung über alle Läufe dieses Durchlaufs (berechnet, kein KI-Text).
+    wrap.appendChild(renderRoundSummary(activeEngine.label, activeEngine.runs));
+
     if (activeEngine.runs.length > 1) {
       var runNav = document.createElement('div');
       runNav.className = 'cvz-prompt-run-nav';
+      var runLabel = document.createElement('span');
+      runLabel.className = 'cvz-prompt-nav-label';
+      runLabel.textContent = 'Einzelne Antworten';
+      runNav.appendChild(runLabel);
       activeEngine.runs.forEach(function (r, i) {
         var runBtn = document.createElement('button');
         runBtn.type = 'button';
         runBtn.className = 'cvz-prompt-run-btn' + (i === runIndex ? ' cvz-prompt-run-btn-active' : '');
         runBtn.setAttribute('data-cvz-run-select', i);
         runBtn.setAttribute('data-cvz-run-owner', prompt.id);
-        runBtn.textContent = formatRelativeTime(r.collected_at);
+        runBtn.title = formatTimeOfDay(r.collected_at) || '';
+        var runDate = new Date(r.collected_at);
+        var runDateLabel = isNaN(runDate.getTime()) ? '' : ' \u00b7 ' + runDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+        runBtn.textContent = 'Lauf ' + (i + 1) + runDateLabel + (r.own_domain_cited ? ' \u2713' : '');
         runNav.appendChild(runBtn);
       });
       wrap.appendChild(runNav);
@@ -6202,9 +6348,14 @@
       var inPhase = prompts.filter(function (p) { return (p.messymiddle_phase || p.phase) === phase; });
       var counts = { green: 0, yellow: 0, red: 0, unknown: 0 };
       inPhase.forEach(function (p) {
+        // GEÄNDERT: nutzt die Ampel des Backends (neueste Runde, alle Wiederholungen)
+        // statt "jemals in einem Lauf zitiert". Letzteres wird mit mehreren Läufen
+        // pro Prompt immer leichter erfüllt und überzeichnet die Sichtbarkeit.
         var key = (p.total_runs == null || p.total_runs === 0)
           ? 'unknown'
-          : (p.cited_count > 0 ? 'green' : 'red');
+          : (p.visibility_status === 'green' || p.visibility_status === 'yellow' || p.visibility_status === 'red'
+              ? p.visibility_status
+              : (p.cited_count > 0 ? 'green' : 'red'));
         counts[key] = (counts[key] || 0) + 1;
       });
       return { phase: phase, total: inPhase.length, counts: counts };
@@ -6554,7 +6705,7 @@
       // eigene Domain zwar als Quelle genannt wird, aber ohne echten Link
       // (siehe main.py: _compute_unlinked_citation_by_prompt).
       var unlinkedBadge = prompt.cited_without_link
-        ? '<br><span class="cvz-prompt-citation-count" style="color:var(--cvz-orange,#e0a030);border:1px solid var(--cvz-orange,#e0a030);border-radius:4px;padding:1px 6px;" title="Wird als Quelle genannt, aber die KI setzt keinen echten Link. Priorisiert beheben (z.B. Struktur/Schema.org/Crawlability pruefen)">\u26a0 ohne Link zitiert</span>'
+        ? '<br><span class="cvz-prompt-citation-count" style="color:var(--cvz-orange,#e0a030);border:1px solid var(--cvz-orange,#e0a030);border-radius:0;padding:1px 6px;" title="Wird als Quelle genannt, aber die KI setzt keinen echten Link. Priorisiert beheben (z.B. Struktur/Schema.org/Crawlability pruefen)">\u26a0 ohne Link zitiert</span>'
         : '';
 
       var contentTypeBadge = prompt.top_cited_content_type
@@ -7115,7 +7266,7 @@
       // (Button erschien weiß auf weiß). Inline-Styles statt fehlender Klasse.
       errEl.innerHTML = '<p class="cvz-card-placeholder-text">Noch keine Journey-Map-Daten vorhanden. Diese entstehen nach dem ersten vollstaendigen Analyse-Lauf.</p>' +
         '<p style="margin-top:8px;"><button type="button" ' +
-        'style="padding:6px 14px;font-size:13px;border-radius:6px;border:1px solid var(--cvz-border,#e5e7eb);' +
+        'style="padding:6px 14px;font-size:13px;border-radius:0;border:1px solid var(--cvz-border,#e5e7eb);' +
         'background:transparent;color:var(--cvz-text,#374151);cursor:pointer;" ' +
         'data-cvz-journey-retry="' + topicId + '">Erneut laden</button></p>';
       wrap.appendChild(errEl);
@@ -7543,7 +7694,7 @@
 
   function knowledgeBadge(level) {
     var cfg = KNOWLEDGE_LEVELS[level] || KNOWLEDGE_LEVELS.unbekannt;
-    return '<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;' +
+    return '<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:0;' +
       'white-space:nowrap;color:' + cfg.color + ';border:1px solid ' + cfg.color + ';">' + cfg.label + '</span>';
   }
 
@@ -7629,7 +7780,7 @@
     style.textContent =
       '.cvz-ks-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}' +
       '.cvz-ks-chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;font-size:11px;line-height:1.3;' +
-        'padding:2px 8px;border-radius:9999px;border:1px solid var(--cvz-border,#232b36);' +
+        'padding:2px 8px;border-radius:0;border:1px solid var(--cvz-border,#232b36);' +
         'color:var(--cvz-text-muted,#8b98a5);background:transparent;text-decoration:none;white-space:nowrap;' +
         'overflow:hidden;text-overflow:ellipsis;}' +
       'a.cvz-ks-chip:hover{border-color:var(--cvz-teal,#4fd1c5);color:var(--cvz-teal,#4fd1c5);}' +
@@ -8102,7 +8253,7 @@
           escapeHtml(formatShortDate(it.date) || '') + ' (' + weeks + ') \u00b7 ' + escapeHtml(it.type_label) + '</p>' +
         '<p style="margin:0 0 6px;font-size:14px;">' + escapeHtml(it.description) +
           (it.url ? ' <a class="cvz-content-change-url" href="' + escapeHtml(it.url) + '" target="_blank" rel="noopener">Link \u2197</a>' : '') + '</p>' +
-        '<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;color:' + color +
+        '<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:0;color:' + color +
           ';border:1px solid ' + color + ';">' + escapeHtml(it.verdict_label) + '</span>' +
         (it.evidence || []).map(function (e) {
           return '<p style="margin:6px 0 0;font-size:12px;color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(e) + '</p>';
@@ -8227,7 +8378,7 @@
       '.cvz-tab-btn-active { color: var(--cvz-teal); border-bottom-color: var(--cvz-teal); }' +
       // NEU (25.09.2026, Kundenwunsch): Zeitraum-Preset-Picker (4/12/26 Wochen).
       '.cvz-weeks-preset-picker { display: flex; gap: 6px; flex-shrink: 0; }' +
-      '.cvz-weeks-preset-btn { padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius: 9999px; ' +
+      '.cvz-weeks-preset-btn { padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius:0; ' +
         'border: 1px solid var(--cvz-border,#30363d); background: transparent; color: var(--cvz-text-muted,#8b98a5); cursor: pointer; }' +
       '.cvz-weeks-preset-btn:hover { border-color: var(--cvz-teal); color: var(--cvz-teal); }' +
       '.cvz-weeks-preset-btn-active { border-color: var(--cvz-teal); color: var(--cvz-teal); background: rgba(13,148,136,.14); }' +
@@ -8271,7 +8422,7 @@
       '.cvz-status-queued { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
       '.cvz-create-info { width: 100%; font-size: 13px; color: var(--cvz-text-muted); margin: 6px 0 0; }' +
       '.cvz-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 16px; }' +
-      '.cvz-modal-box { background: #141b24; border: 1px solid #232b36; border-radius: 4px; padding: 20px; max-width: 380px; width: 100%; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }' +
+      '.cvz-modal-box { background: #141b24; border: 1px solid #232b36; border-radius:0; padding: 20px; max-width: 380px; width: 100%; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }' +
       // GEFIXT (21.09.2026): var(--cvz-text-muted) ohne Fallback zeigte hier
       // hell/weiss statt grau. Grund: die --cvz-*-Variablen sind auf
       // #cvz-visibility-app gescoped (siehe weiter oben), der Modal-Overlay
@@ -8407,6 +8558,15 @@
         'background: none; color: var(--cvz-text-muted); border: 1px solid var(--cvz-border); border-radius: 0; cursor: pointer;' +
       '}' +
       '.cvz-prompt-engine-btn-active, .cvz-prompt-run-btn-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
+      '.cvz-prompt-nav-label { font-size: 11px; color: var(--cvz-text-muted); align-self: center; margin-right: 4px; text-transform: uppercase; letter-spacing: 0.04em; }' +
+      '.cvz-prompt-round-summary { margin: 0 0 12px; padding: 10px 12px; background: rgba(255,255,255,0.03); border: 1px solid var(--cvz-border); border-radius: 0; }' +
+      '.cvz-prompt-round-head { font-size: 13px; margin: 0 0 8px; }' +
+      '.cvz-round-sources { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 6px; }' +
+      '.cvz-round-sources-label { font-size: 11px; color: var(--cvz-text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-right: 4px; }' +
+      '.cvz-round-chip { font-size: 12px; padding: 2px 8px; background: rgba(79, 209, 197, 0.10); border-radius: 0; }' +
+      '.cvz-round-chip b { font-weight: 600; color: var(--cvz-teal); }' +
+      '.cvz-round-chip-competitor { background: rgba(245, 158, 11, 0.12); }' +
+      '.cvz-round-chip-more { font-size: 12px; color: var(--cvz-text-muted); }' +
       '.cvz-prompt-run-status { font-size: 13px; margin: 0 0 10px; color: var(--cvz-text-muted); }' +
       '.cvz-prompt-answer { font-size: 13px; line-height: 1.5; margin-bottom: 14px; }' +
       '.cvz-prompt-answer h4, .cvz-prompt-answer h5 { font-size: 13px; margin: 10px 0 4px; color: var(--cvz-text-muted); }' +
@@ -8549,10 +8709,10 @@
         'flex: 0 0 120px; color: var(--cvz-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' +
       '}' +
       '.cvz-journey-bar-wrap {' +
-        'flex: 1; height: 6px; background: var(--cvz-border); border-radius: 3px; overflow: hidden;' +
+        'flex: 1; height: 6px; background: var(--cvz-border); border-radius:0; overflow: hidden;' +
       '}' +
       '.cvz-journey-bar-fill {' +
-        'height: 100%; border-radius: 3px; transition: width 0.3s ease;' +
+        'height: 100%; border-radius:0; transition: width 0.3s ease;' +
       '}' +
       '.cvz-journey-channel-num {' +
         'flex: 0 0 32px; text-align: right; font-size: 11px; color: var(--cvz-text-muted); font-variant-numeric: tabular-nums;' +
@@ -8561,7 +8721,7 @@
       // NEU (18.09.2026): Delta-Badge im Phasen-Score-Grid, siehe Chat-Verlauf
       // 18.09.2026 ("prozentuale Entwicklung pro Journey-Phase").
       '.cvz-journey-channel-delta {' +
-        'flex: 0 0 auto; font-size: 10px; font-weight: 600; margin-left: 4px; padding: 1px 5px; border-radius: 3px; white-space: nowrap;' +
+        'flex: 0 0 auto; font-size: 10px; font-weight: 600; margin-left: 4px; padding: 1px 5px; border-radius:0; white-space: nowrap;' +
       '}' +
       '.cvz-delta-up { color: var(--cvz-teal); background: rgba(13,148,136,0.12); }' +
       '.cvz-delta-down { color: var(--cvz-red); background: rgba(222,91,80,0.12); }' +
@@ -8612,7 +8772,7 @@
       '}' +
       '.cvz-content-change-url:hover { text-decoration: underline; }' +
       '.cvz-prompt-phase-heading {font-family: "Syne", sans-serif; font-size: 13px; margin: 16px 0 6px; padding-left: 8px; border-left: 3px solid var(--cvz-teal); color: var(--cvz-text-muted); hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
-      '.cvz-prompt-source-summary {font-size: 12px; color: var(--cvz-text-muted); margin-bottom: 8px; padding: 5px 8px; background: var(--cvz-navy-raised); border-radius: 4px; font-variant-numeric: tabular-nums; }' +
+      '.cvz-prompt-source-summary {font-size: 12px; color: var(--cvz-text-muted); margin-bottom: 8px; padding: 5px 8px; background: var(--cvz-navy-raised); border-radius:0; font-variant-numeric: tabular-nums; }' +
       '.cvz-competitor-url-row { overflow: hidden; white-space: nowrap; max-width: 100%; }' +
       '.cvz-competitor-url {display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cvz-teal); font-size: 12px; text-decoration: none; max-width: 100%; }' +
       '.cvz-competitor-url:hover { text-decoration: underline; }' +
@@ -8633,7 +8793,7 @@
         'position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);' +
         'min-width:200px;max-width:280px;' +
         'padding:8px 10px;' +
-        'background:#1e2a36;border:1px solid var(--cvz-border,#232b36);border-radius:4px;' +
+        'background:#1e2a36;border:1px solid var(--cvz-border,#232b36);border-radius:0;' +
         'font-size:12px;font-weight:400;line-height:1.5;' +
         'color:var(--cvz-text,#e6edf3);text-align:left;white-space:normal;' +
         'box-shadow:0 4px 16px rgba(0,0,0,.4);' +
@@ -8949,7 +9109,7 @@
         var chip = document.createElement('span');
         chip.style.cssText =
           'display:inline-flex;align-items:center;gap:4px;padding:2px 6px 2px 5px;' +
-          'border-radius:20px;border:1px dashed var(--cvz-border,#30363d);' +
+          'border-radius:0;border:1px dashed var(--cvz-border,#30363d);' +
           'font-size:11px;color:var(--cvz-text-muted,#8b98a5);background:var(--cvz-card-bg,#161b22);';
         chip.appendChild(_faviconImg(domain));
         chip.appendChild(document.createTextNode(domain));
@@ -8977,7 +9137,7 @@
         addBtn.type = 'button';
         addBtn.style.cssText =
           'display:inline-flex;align-items:center;gap:3px;padding:2px 8px;' +
-          'border-radius:20px;border:1px dashed var(--cvz-border,#30363d);' +
+          'border-radius:0;border:1px dashed var(--cvz-border,#30363d);' +
           'font-size:11px;color:var(--cvz-text-muted,#8b98a5);background:none;cursor:pointer;';
         addBtn.textContent = '+ Wettbewerber hinzufügen';
         addBtn.onclick = function () {
@@ -9000,7 +9160,7 @@
           inp.placeholder = 'domain.com';
           inp.setAttribute('list', datalistId);
           inp.style.cssText =
-            'font-size:11px;padding:2px 8px;border-radius:20px;' +
+            'font-size:11px;padding:2px 8px;border-radius:0;' +
             'border:1px solid var(--cvz-border,#30363d);background:var(--cvz-card-bg,#161b22);' +
             'color:var(--cvz-text,#e6edf3);outline:none;width:145px;';
 
@@ -9008,7 +9168,7 @@
           okBtn.type = 'button';
           okBtn.textContent = '✓';
           okBtn.style.cssText =
-            'padding:2px 7px;border-radius:4px;border:none;background:var(--cvz-accent,#4fd1c5);' +
+            'padding:2px 7px;border-radius:0;border:none;background:var(--cvz-accent,#4fd1c5);' +
             'color:#000;font-size:11px;cursor:pointer;';
 
           function _commit() {
@@ -9219,7 +9379,7 @@
         chip.style.cssText =
           'display:inline-block;' +
           'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
-          'padding:3px 8px;border-radius:9999px;white-space:nowrap;' +
+          'padding:3px 8px;border-radius:0;white-space:nowrap;' +
           'color:' + tcfg.color + ';background:' + tcfg.bg + ';border:1px solid ' + tcfg.border + ';';
         chipWrap.appendChild(chip);
         var tipText = OPP_TYPE_TOOLTIPS[opp.opportunity_type];
@@ -9332,7 +9492,7 @@
             domains.forEach(function (d) {
               var pill = document.createElement('span');
               pill.textContent = d;
-              pill.style.cssText = 'display:inline-block;padding:3px 10px;border-radius:9999px;font-size:11px;background:rgba(139,152,165,.1);border:1px solid rgba(139,152,165,.25);color:var(--cvz-text-muted,#8b98a5);';
+              pill.style.cssText = 'display:inline-block;padding:3px 10px;border-radius:0;font-size:11px;background:rgba(139,152,165,.1);border:1px solid rgba(139,152,165,.25);color:var(--cvz-text-muted,#8b98a5);';
               domList.appendChild(pill);
             });
             expContent.appendChild(domList);
@@ -9393,7 +9553,7 @@
         : 'Noch keine Journey-Map-Daten vorhanden. Diese entstehen nach dem ersten vollstaendigen Analyse-Lauf.';
       errEl.innerHTML = '<p class="cvz-card-placeholder-text">' + escapeHtml(errMsg) + '</p>' +
         '<p style="margin-top:8px;"><button type="button" ' +
-        'style="padding:6px 14px;font-size:13px;border-radius:6px;border:1px solid var(--cvz-border,#e5e7eb);' +
+        'style="padding:6px 14px;font-size:13px;border-radius:0;border:1px solid var(--cvz-border,#e5e7eb);' +
         'background:transparent;color:var(--cvz-text,#374151);cursor:pointer;" ' +
         'data-cvz-journey-retry="' + topicId + '">Erneut laden</button></p>';
       wrap.appendChild(errEl);
@@ -9671,7 +9831,7 @@
     tbl.appendChild(tbody);
 
     var scrollWrap = document.createElement('div');
-    scrollWrap.style.cssText = 'overflow-x:auto;border:1px solid var(--cvz-border,#232b36);border-radius:6px;';
+    scrollWrap.style.cssText = 'overflow-x:auto;border:1px solid var(--cvz-border,#232b36);border-radius:0;';
     scrollWrap.appendChild(tbl);
     wrapper.appendChild(scrollWrap);
     return wrapper;
@@ -9738,7 +9898,7 @@
         // Manueller Trigger-Button: ruft POST /topics/{id}/generate-action-plan auf.
         // Der Endpunkt startet die KI-Generierung im Hintergrund (202) und dauert etwa 30 bis 60 s.
         var genBtn = document.createElement('button');
-        genBtn.style.cssText = 'display:inline-block;margin-top:16px;padding:10px 22px;background:var(--cvz-accent,#5aacd2);color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;';
+        genBtn.style.cssText = 'display:inline-block;margin-top:16px;padding:10px 22px;background:var(--cvz-accent,#5aacd2);color:#fff;border:none;border-radius:0;font-size:14px;cursor:pointer;';
         genBtn.textContent = 'Aktionsplan jetzt generieren';
         (function(btn, statusEl, topicId) {
           btn.addEventListener('click', function() {
@@ -9858,7 +10018,7 @@
           hdr.appendChild(numSp);
 
           var impBadge = document.createElement('span');
-          impBadge.style.cssText = 'display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;color:#fff;background:' + impColor + ';flex-shrink:0;';
+          impBadge.style.cssText = 'display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:2px 8px;border-radius:0;color:#fff;background:' + impColor + ';flex-shrink:0;';
           impBadge.textContent = impLabel;
           hdr.appendChild(impBadge);
 
@@ -9873,7 +10033,7 @@
           hdr.appendChild(spacer);
 
           var doneBtn = document.createElement('button');
-          doneBtn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:9999px;cursor:pointer;transition:all .15s;border:1px solid;flex-shrink:0;' +
+          doneBtn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:0;cursor:pointer;transition:all .15s;border:1px solid;flex-shrink:0;' +
             (isCompleted
               ? 'background:rgba(78,198,138,.12);border-color:rgba(78,198,138,.45);color:#4ec68a;'
               : 'background:transparent;border-color:var(--cvz-border,#232b36);color:var(--cvz-text-muted,#8b98a5);');
@@ -9981,20 +10141,20 @@
               rateRow.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;';
               if (ev.own_citation_rate_pct != null) {
                 var ownBox = document.createElement('div');
-                ownBox.style.cssText = 'background:rgba(79,209,197,.1);border:1px solid rgba(79,209,197,.35);border-radius:6px;padding:6px 12px;min-width:90px;';
+                ownBox.style.cssText = 'background:rgba(79,209,197,.1);border:1px solid rgba(79,209,197,.35);border-radius:0;padding:6px 12px;min-width:90px;';
                 ownBox.innerHTML = '<div style="font-size:10px;font-weight:700;color:#4fd1c5;text-transform:uppercase;margin-bottom:2px;">Eure Rate</div><div style="font-size:22px;font-weight:800;color:#4fd1c5;">' + ev.own_citation_rate_pct + '%</div>';
                 rateRow.appendChild(ownBox);
               }
               if (ev.top_competitor && ev.competitor_citation_rate_pct != null) {
                 var compBox = document.createElement('div');
-                compBox.style.cssText = 'background:rgba(229,72,77,.1);border:1px solid rgba(229,72,77,.35);border-radius:6px;padding:6px 12px;min-width:90px;';
+                compBox.style.cssText = 'background:rgba(229,72,77,.1);border:1px solid rgba(229,72,77,.35);border-radius:0;padding:6px 12px;min-width:90px;';
                 compBox.innerHTML = '<div style="font-size:10px;font-weight:700;color:#de5b50;text-transform:uppercase;margin-bottom:2px;">' + escapeHtml(ev.top_competitor) + '</div><div style="font-size:22px;font-weight:800;color:#de5b50;">' + ev.competitor_citation_rate_pct + '%</div>';
                 rateRow.appendChild(compBox);
               }
               evDiv.appendChild(rateRow);
               if (ev.example_prompt) {
                 var epBox = document.createElement('div');
-                epBox.style.cssText = 'background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--cvz-text-muted,#8b98a5);font-style:italic;line-height:1.5;';
+                epBox.style.cssText = 'background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:0;padding:8px 10px;font-size:12px;color:var(--cvz-text-muted,#8b98a5);font-style:italic;line-height:1.5;';
                 epBox.textContent = '"' + ev.example_prompt + '"';
                 evDiv.appendChild(epBox);
               }
@@ -10004,13 +10164,13 @@
               statsRow.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;';
               if (ev.position != null) {
                 var posStat = document.createElement('div');
-                posStat.style.cssText = 'background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.35);border-radius:6px;padding:6px 12px;';
+                posStat.style.cssText = 'background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.35);border-radius:0;padding:6px 12px;';
                 posStat.innerHTML = '<div style="font-size:10px;font-weight:700;color:#5aacd2;text-transform:uppercase;margin-bottom:2px;">Position</div><div style="font-size:22px;font-weight:800;color:#5aacd2;">' + (Math.round(ev.position * 10) / 10) + '</div>';
                 statsRow.appendChild(posStat);
               }
               if (ev.impressions != null) {
                 var impStat = document.createElement('div');
-                impStat.style.cssText = 'background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:6px;padding:6px 12px;';
+                impStat.style.cssText = 'background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:0;padding:6px 12px;';
                 impStat.innerHTML = '<div style="font-size:10px;font-weight:700;color:var(--cvz-text-muted,#8b98a5);text-transform:uppercase;margin-bottom:2px;">Impressionen</div><div style="font-size:22px;font-weight:800;color:var(--cvz-text,#e6edf3);">' + Number(ev.impressions).toLocaleString('de-DE') + '</div>';
                 statsRow.appendChild(impStat);
               }
@@ -10037,7 +10197,7 @@
                 serpChips.style.cssText = 'display:flex;flex-wrap:wrap;gap:5px;';
                 ev.serp_top3.forEach(function (dom) {
                   var chip = document.createElement('span');
-                  chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:6px;color:var(--cvz-text-muted,#8b98a5);';
+                  chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:0;color:var(--cvz-text-muted,#8b98a5);';
                   chip.innerHTML = '<img src="https://www.google.com/s2/favicons?sz=12&domain=' + encodeURIComponent(dom) + '" style="width:12px;height:12px;flex-shrink:0;" onerror="this.style.display=\'none\'">' + escapeHtml(dom);
                   serpChips.appendChild(chip);
                 });
@@ -10046,7 +10206,7 @@
             } else if (catKey === 'content_luecke') {
               if (ev.example_prompt) {
                 var gapQ = document.createElement('div');
-                gapQ.style.cssText = 'background:rgba(136,120,202,.12);border:1px solid rgba(136,120,202,.35);border-radius:6px;padding:10px 12px;font-size:13px;color:#8878ca;font-style:italic;line-height:1.55;';
+                gapQ.style.cssText = 'background:rgba(136,120,202,.12);border:1px solid rgba(136,120,202,.35);border-radius:0;padding:10px 12px;font-size:13px;color:#8878ca;font-style:italic;line-height:1.55;';
                 gapQ.textContent = '"' + ev.example_prompt + '"';
                 evDiv.appendChild(gapQ);
               }
@@ -10061,7 +10221,7 @@
           // ---- EMPFEHLUNG. NEU (17.09.2026): durchgestrichen wenn erledigt ----
           if (item.recommendation) {
             var recDiv = document.createElement('div');
-            recDiv.style.cssText = 'background:rgba(79,209,197,.1);border-left:3px solid #4fd1c5;border-radius:0 4px 4px 0;padding:10px 12px;';
+            recDiv.style.cssText = 'background:rgba(79,209,197,.1);border-left:3px solid #4fd1c5;border-radius:0;padding:10px 12px;';
             var recLbl = document.createElement('p');
             recLbl.style.cssText = 'margin:0 0 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4fd1c5;';
             recLbl.textContent = isCompleted ? 'Empfehlung (erledigt)' : 'Empfehlung';
