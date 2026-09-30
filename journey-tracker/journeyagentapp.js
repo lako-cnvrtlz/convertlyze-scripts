@@ -19,6 +19,11 @@
     // Einstellungsseite, direkt mit Sprungmarke auf die Section "integrationen".
     // Steht hier null, erscheint kein Button.
     gscSetupUrl: 'https://www.convertlyze.com/member/einstellungen#integrationen',
+    // NEU (30.09.2026): Ziel des Buttons "Content-Strategie erstellen" in der
+    // Themen-Tabelle. Das Strategie-Tool liest tracker_topic_id, topic und domain
+    // aus der URL und füllt das Formular damit vor. Steht hier null, erscheint
+    // kein Button.
+    contentStrategyUrl: 'https://www.convertlyze.com/member/content-strategie',
   };
 
   var CHANGELOG_DELETED_RETENTION_DAYS = 90;
@@ -1502,6 +1507,11 @@
   }
 
   function handleContainerClick(event) {
+    // NEU (30.09.2026): Link zum Strategie-Tool liegt in einer klickbaren
+    // Tabellenzeile. Ohne dieses frühe return würde der Zeilen-Klick darunter
+    // zusätzlich die Themen-Detailansicht öffnen. Die Navigation selbst macht
+    // der Browser (normaler Link), deshalb kein preventDefault.
+    if (event.target.closest('[data-cvz-strategy-link]')) return;
     var createToggle = event.target.closest('[data-cvz-create-toggle]');
     if (createToggle) {
       state.showCreateForm = !state.showCreateForm;
@@ -3913,6 +3923,23 @@
     return section;
   }
 
+  // NEU (30.09.2026): Link ins Content-Strategie-Tool mit vorausgefülltem
+  // Formular. Nur für Themen, die schon Messdaten haben: ohne Daten gibt es
+  // nichts, was die Strategie verbessern könnte.
+  function buildContentStrategyLink(topic) {
+    if (!CONFIG.contentStrategyUrl) return '';
+    var hasData = !!(topic.last_monthly_collection_at || topic.last_weekly_collection_at) || topic.status === 'active';
+    if (!hasData) return '';
+    var project = getProjectById(topic.project_id);
+    var params = new URLSearchParams();
+    params.set('tracker_topic_id', topic.id);
+    params.set('topic', topic.seed_keyword || topic.name || '');
+    if (project && project.domain) params.set('domain', project.domain);
+    var href = CONFIG.contentStrategyUrl + (CONFIG.contentStrategyUrl.indexOf('?') === -1 ? '?' : '&') + params.toString();
+    return '<a class="cvz-strategy-link-btn" data-cvz-strategy-link href="' + escapeHtml(href) + '"' +
+      ' title="Content-Strategie mit den Messdaten dieses Themas erstellen">Content-Strategie erstellen</a>';
+  }
+
   function renderTopicStatusTable(topics) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -3968,6 +3995,7 @@
               : (topic.status === 'queued' ? 'Aus Warteschlange entfernen' : 'Deaktivieren')) +
           '</button>';
       }
+      actionCell = buildContentStrategyLink(topic) + actionCell;
       if (neverRan) {
         actionCell += '<button type="button" class="cvz-delete-topic-btn" data-cvz-delete-topic="' + topic.id + '"' +
           (isBusy ? ' disabled' : '') + '>' +
@@ -8512,6 +8540,11 @@
       '}' +
       '.cvz-archive-btn:hover { color: var(--cvz-text); border-color: var(--cvz-text-muted); }' +
       '.cvz-archive-btn:disabled { opacity: 0.6; cursor: default; }' +
+      '.cvz-strategy-link-btn {' +
+        'display: inline-block; margin: 0 8px 6px 0; font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 10px;' +
+        'color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; text-decoration: none; white-space: nowrap;' +
+      '}' +
+      '.cvz-strategy-link-btn:hover { background: rgba(79, 209, 197, 0.1); }' +
       '.cvz-delete-topic-btn {' +
         'font-family: "Geist", sans-serif; font-size: 11px; padding: 4px 0 4px 10px;' +
         'background: none; color: var(--cvz-text-muted); border: none; text-decoration: underline; cursor: pointer;' +
