@@ -422,7 +422,10 @@
 
   var MESSY_MIDDLE_PHASES = [
     { value: 'exploration', label: 'Exploration', description: 'Schafft Bewusstsein und deckt offene Grundlagenfragen ab.' },
-    { value: 'evaluation', label: 'Evaluation', description: 'Hilft beim Vergleichen und Eingrenzen der Optionen.' },
+    { value: 'evaluation', label: 'Evaluation', description: 'Prüft Eignung und Nutzen anhand von Kriterien.' },
+    // BUGFIX: "comparison" ist seit der Vier-Phasen-Umstellung eine Pflicht-Phase im Backend,
+    // fehlte hier aber. Vergleichsseiten landeten dadurch unter "Weitere Seiten".
+    { value: 'comparison', label: 'Vergleich', description: 'Stellt mehrere Anbieter oder Optionen direkt gegenüber.' },
     { value: 'decision', label: 'Entscheidung', description: 'Unmittelbar vor der Kaufentscheidung.' },
     { value: 'legacy', label: 'Weitere Seiten', description: 'Aus einer älteren Strategie-Version ohne Phasen-Zuordnung.' },
   ];
@@ -452,6 +455,7 @@
     memberstackToken: null,
     quota: null,
     gscStatus: null,
+    trackerTopics: [],
     pollHandle: null,
     pollStartedAt: null,
     currentSessionId: null,
@@ -547,6 +551,21 @@
       });
   }
 
+  // NEU (Tracker-Verbindung): Tracker-Themen, die der User sehen darf. Fehler sind bewusst
+  // nicht fatal: ohne Liste wird die Auswahl einfach nicht angezeigt, der Rest funktioniert.
+  function loadTrackerTopics() {
+    return apiFetch('/api/content-strategy/tracker-topics')
+      .then(function (data) {
+        state.trackerTopics = (data && data.topics) || [];
+        return state.trackerTopics;
+      })
+      .catch(function (err) {
+        console.warn('Tracker-Themen konnten nicht geladen werden:', err.message);
+        state.trackerTopics = [];
+        return state.trackerTopics;
+      });
+  }
+
   // ==================== RENDERING ====================
   function el(tag, attrs, children) {
     var node = document.createElement(tag);
@@ -630,6 +649,25 @@
     );
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Thema / Ziel-Keyword', topicInput]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Eigene Domain', domainInput]));
+    // NEU (Tracker-Verbindung): nur sichtbar, wenn der User Tracker-Themen hat.
+    var trackerSelect = null;
+    if (state.trackerTopics.length > 0) {
+      trackerSelect = el('select', { name: 'tracker_topic_id' }, [el('option', { value: '' }, ['Keine Tracker-Daten einbeziehen'])]);
+      state.trackerTopics.forEach(function (t) {
+        var label = t.name + (t.own_domain ? ' (' + t.own_domain + ')' : '');
+        trackerSelect.appendChild(el('option', { value: t.id }, [label]));
+      });
+      if (prefill.trackerTopicId) trackerSelect.value = prefill.trackerTopicId;
+      form.appendChild(
+        el('label', { class: 'cvz-cs-label' }, [
+          'Daten aus dem Customer Journey Tracker einbeziehen?',
+          trackerSelect,
+          el('span', { class: 'cvz-cs-hint' }, [
+            'Die Strategie berücksichtigt dann deine gemessene KI-Sichtbarkeit je Journey-Phase, zitierte Quellen und die Wirkung bereits umgesetzter Maßnahmen. Wähle ein Tracker-Thema, das zum Strategie-Thema passt.',
+          ]),
+        ])
+      );
+    }
     form.appendChild(
       el('label', { class: 'cvz-cs-label' }, [
         'Welchen KI-Assistenten möchtest du für die Prompt-Tests nutzen?',
@@ -648,7 +686,8 @@
       var topic = topicInput.value.trim();
       var domain = domainInput.value.trim();
       if (!topic) return;
-      startTopicValidation(topic, domain || undefined, llmTypeSelect.value);
+      var trackerTopicId = trackerSelect && trackerSelect.value ? trackerSelect.value : null;
+      startTopicValidation(topic, domain || undefined, llmTypeSelect.value, trackerTopicId);
     });
     return form;
   }
@@ -677,7 +716,7 @@
     state.root.appendChild(box);
   }
 
-  function startTopicValidation(topic, domain, geoTestLlmType) {
+  function startTopicValidation(topic, domain, geoTestLlmType, trackerTopicId) {
     renderValidating(topic);
     var controller = new AbortController();
     var timeoutId = setTimeout(function () {
@@ -690,7 +729,7 @@
     })
       .then(function (result) {
         clearTimeout(timeoutId);
-        renderTopicValidationResult(result, domain, geoTestLlmType, topic);
+        renderTopicValidationResult(result, domain, geoTestLlmType, topic, trackerTopicId);
       })
       .catch(function (err) {
         clearTimeout(timeoutId);
@@ -702,7 +741,7 @@
       });
   }
 
-  function renderTopicValidationResult(result, domain, geoTestLlmType, originalTopic) {
+  function renderTopicValidationResult(result, domain, geoTestLlmType, originalTopic, trackerTopicId) {
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
     wrap.appendChild(el('h3', {}, ['Bevor wir loslegen: ist "' + result.seed_topic + '" das richtige Thema?']));
@@ -762,13 +801,13 @@
     var confirmBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Content-Cluster erstellen']);
     confirmBtn.addEventListener('click', function () {
       var finalTopic = freeTextInput.value.trim() || chosenInput.value;
-      startGeneration(finalTopic, domain, geoTestLlmType, result.validation_id);
+      startGeneration(finalTopic, domain, geoTestLlmType, result.validation_id, trackerTopicId);
     });
     var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Zurück, Thema/Domain ändern']);
     backBtn.addEventListener('click', function () {
       clear(state.root);
       state.root.appendChild(renderQuotaBanner());
-      state.root.appendChild(renderForm({ topic: originalTopic, domain: domain }));
+      state.root.appendChild(renderForm({ topic: originalTopic, domain: domain, trackerTopicId: trackerTopicId }));
     });
     wrap.appendChild(el('div', { class: 'cvz-cs-topic-check-actions' }, [backBtn, confirmBtn]));
 
@@ -776,7 +815,7 @@
     state.root.appendChild(wrap);
   }
 
-  function startGeneration(topic, domain, geoTestLlmType, validationId) {
+  function startGeneration(topic, domain, geoTestLlmType, validationId, trackerTopicId) {
     renderProcessing(topic);
     apiFetch('/api/content-strategy/generate', {
       method: 'POST',
@@ -787,6 +826,7 @@
         run_prompt_test: true,
         geo_test_llm_type: geoTestLlmType,
         validation_id: validationId,
+        tracker_topic_id: trackerTopicId || undefined,
       }),
     })
       .then(function (res) {
@@ -839,7 +879,7 @@
     { at: 150, text: 'Google AI Overview und Zitations-Chancen werden gecheckt' },
     { at: 220, text: 'Prompt-Tests laufen gegen ein KI-Modell, das braucht ein paar Sekunden pro Anfrage' },
     { at: 300, text: 'Content-Cluster wird gebaut: Conversion-Seite plus unterstützende Seiten' },
-    { at: 380, text: 'Themen werden auf die Journey-Phasen Exploration, Evaluation und Decision verteilt' },
+    { at: 380, text: 'Themen werden auf die Journey-Phasen Exploration, Evaluation, Vergleich und Entscheidung verteilt' },
     { at: 460, text: 'Stärken, Schwächen, Wettbewerb und Chancen werden zur Executive Summary zusammengefasst' },
     { at: 560, text: 'Kaffee schon leer? Wir sind noch beim Feinschliff am Bericht' },
     { at: 680, text: 'Läuft noch, bei 15 bis 20 Minuten Gesamtdauer sind wir genau im Soll' },
@@ -958,12 +998,28 @@
     return box;
   }
 
+  // NEU (Tracker-Verbindung): zeigt, ob und welche Tracker-Daten in diesen Bericht eingeflossen
+  // sind. Gibt null zurück, wenn keine (renderReportSection überspringt null-Kinder).
+  function renderTrackerSourceNote(session) {
+    var snap = session && session.tracker_snapshot;
+    if (!snap) return null;
+    var dateStr = snap.generated_at ? new Date(snap.generated_at).toLocaleDateString('de-DE') : '';
+    var text =
+      'Einbezogen: Daten aus dem Customer Journey Tracker, Thema "' + snap.topic_name + '" (Stand ' + dateStr + ', ' +
+      snap.runs_in_window + ' KI-Abfragen in den letzten ' + snap.window_days + ' Tagen).';
+    var children = [el('p', {}, [text])];
+    if (snap.is_preliminary) {
+      children.push(el('p', { class: 'cvz-cs-hint' }, ['Die Tracker-Daten umfassen weniger als vier Wochen. Die Befunde daraus sind ein erster Hinweis, noch kein belastbarer Trend.']));
+    }
+    return el('div', { class: 'cvz-cs-topic-recommendation-box' }, children);
+  }
+
   function renderResult(sessionId, result, fundedBy, session) {
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
     wrap.appendChild(renderReportHeader(result, session, sessionId));
     wrap.appendChild(renderReportSection(1, 'Themen-Check', [renderTopicValidationSection(result.topic_validation, result.seed_topic)]));
-    wrap.appendChild(renderReportSection(2, 'Ausgangslage', [renderProse(result.ausgangslage)]));
+    wrap.appendChild(renderReportSection(2, 'Ausgangslage', [renderTrackerSourceNote(session), renderProse(result.ausgangslage)]));
     wrap.appendChild(renderReportSection(3, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])]));
     wrap.appendChild(renderReportSection(4, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
     wrap.appendChild(renderReportSection(5, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
@@ -1473,7 +1529,7 @@
     clear(state.root);
     var loading = el('p', { class: 'cvz-cs-hint' }, ['Lade Kontingent ...']);
     state.root.appendChild(loading);
-    Promise.all([loadQuota(), loadGscStatus()])
+    Promise.all([loadQuota(), loadGscStatus(), loadTrackerTopics()])
       .then(function () {
         clear(state.root);
         state.root.appendChild(renderQuotaBanner());
