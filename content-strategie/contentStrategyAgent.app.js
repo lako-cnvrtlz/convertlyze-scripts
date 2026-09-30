@@ -227,6 +227,12 @@
       '#cvz-content-strategy-agent .cvz-flow-btn.is-disabled{opacity:.45;}',
       '#cvz-content-strategy-agent .cvz-flow-btn-icon{min-width:32px;text-align:center;}',
       '#cvz-content-strategy-agent .cvz-flow-btn-danger{border-color:rgba(239,68,68,.5);color:#fca5a5;}',
+      '#cvz-content-strategy-agent .cvz-flow-menu-wrap{position:relative;display:inline-block;}',
+      '#cvz-content-strategy-agent .cvz-flow-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:5;min-width:250px;background:#161b22;border:1px solid var(--cvz-border-strong);box-shadow:0 8px 24px rgba(0,0,0,.5);}',
+      '#cvz-content-strategy-agent .cvz-flow-menu-item{display:block;width:100%;text-align:left;background:transparent;color:var(--cvz-text);border:0;border-bottom:1px solid var(--cvz-border);padding:9px 12px;font:inherit;font-size:13px;cursor:pointer;}',
+      '#cvz-content-strategy-agent .cvz-flow-menu-item:last-child{border-bottom:0;}',
+      '#cvz-content-strategy-agent .cvz-flow-menu-item:hover{background:var(--cvz-surface-hover);}',
+      '#cvz-content-strategy-agent .cvz-flow-menu-item small{display:block;color:var(--cvz-muted);font-size:11.5px;}',
       '#cvz-content-strategy-agent .cvz-flow-save{font-size:12px;color:var(--cvz-muted);margin-left:8px;}',
       '#cvz-content-strategy-agent .cvz-flow-save-saved{color:var(--cvz-teal);}',
       '#cvz-content-strategy-agent .cvz-flow-save-error{color:#fca5a5;}',
@@ -246,6 +252,10 @@
       '#cvz-content-strategy-agent .cvz-flow-node-label{font-size:12.5px;font-weight:500;fill:#f0f4f8;font-family:inherit;}',
       '#cvz-content-strategy-agent .cvz-flow-node-phase{font-size:10px;font-family:inherit;}',
       '#cvz-content-strategy-agent .cvz-flow-node-note{font-size:12px;fill:#f59e0b;font-family:inherit;}',
+      '#cvz-content-strategy-agent .cvz-flow-add{cursor:pointer;}',
+      '#cvz-content-strategy-agent .cvz-flow-add circle{fill:#4fd1c5;stroke:#0d1117;stroke-width:2;}',
+      '#cvz-content-strategy-agent .cvz-flow-add:hover circle{fill:#f0f4f8;}',
+      '#cvz-content-strategy-agent .cvz-flow-add-icon{stroke:#0d1117;stroke-width:2;stroke-linecap:round;}',
       '#cvz-content-strategy-agent .cvz-flow-edge-hit{stroke:transparent;stroke-width:14;pointer-events:stroke;cursor:pointer;}',
       '#cvz-content-strategy-agent .cvz-flow-edge-line{pointer-events:none;stroke-width:1.6;}',
       '#cvz-content-strategy-agent .cvz-flow-edge-line.is-hierarchy{stroke:rgba(226,232,240,.6);}',
@@ -253,6 +263,7 @@
       '#cvz-content-strategy-agent .cvz-flow-edge.is-selected .cvz-flow-edge-line{stroke:#f0f4f8;stroke-width:2.6;}',
       '#cvz-content-strategy-agent .cvz-flow-panel{flex:0 0 280px;max-width:100%;padding:14px;border-left:1px solid var(--cvz-border);overflow:auto;}',
       '@media (max-width:820px){#cvz-content-strategy-agent .cvz-flow-panel{flex:1 1 100%;border-left:0;border-top:1px solid var(--cvz-border);}#cvz-content-strategy-agent .cvz-flow-canvas-wrap{flex-basis:100%;height:420px;}}',
+      '@media (max-width:820px){#cvz-content-strategy-agent .cvz-flow.is-fullscreen .cvz-flow-stage{flex-direction:column;flex-wrap:nowrap;}#cvz-content-strategy-agent .cvz-flow.is-fullscreen .cvz-flow-canvas-wrap{flex:1 1 55%;min-height:0;height:auto;}#cvz-content-strategy-agent .cvz-flow.is-fullscreen .cvz-flow-panel{flex:0 0 auto;max-height:45%;overflow:auto;border-left:0;border-top:1px solid var(--cvz-border);}}',
       '#cvz-content-strategy-agent .cvz-flow-panel-title{font-family:"Syne",sans-serif;font-weight:600;color:var(--cvz-heading);margin:0 0 8px;}',
       '#cvz-content-strategy-agent .cvz-flow-field{display:block;margin:0 0 10px;}',
       '#cvz-content-strategy-agent .cvz-flow-field-label{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--cvz-muted);margin-bottom:3px;}',
@@ -1242,6 +1253,161 @@
     return lines;
   }
 
+  function phaseName(phase) {
+    for (var i = 0; i < MESSY_MIDDLE_PHASES.length; i++) if (MESSY_MIDDLE_PHASES[i].value === phase) return MESSY_MIDDLE_PHASES[i].label;
+    return '';
+  }
+
+  // ---------- Export (CSV für Tabellen, ClickUp, Asana) ----------
+  // Läuft komplett im Browser: keine Zugangsdaten, keine API-Anbindung. Der Nutzer lädt eine
+  // Datei herunter und importiert sie im jeweiligen Tool.
+  function flowSafeCell(value) {
+    var text = value == null ? '' : String(value);
+    // Schutz vor Formel-Einschleusung in Excel/Sheets: Zellen, die mit = + - @ oder Tab beginnen
+    if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
+    return text;
+  }
+
+  function flowToCsv(headers, rows, delimiter, withBom) {
+    var quote = function (cell) {
+      var text = flowSafeCell(cell);
+      if (text.indexOf(delimiter) !== -1 || /["\r\n]/.test(text)) text = '"' + text.replace(/"/g, '""') + '"';
+      return text;
+    };
+    var lines = [headers.map(quote).join(delimiter)];
+    rows.forEach(function (row) { lines.push(row.map(quote).join(delimiter)); });
+    return (withBom ? '﻿' : '') + lines.join('\r\n') + '\r\n';
+  }
+
+  function flowDownload(filename, text) {
+    var blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  function flowSlug(text) {
+    return String(text || 'strategie').toLowerCase().replace(/[äöüß]/g, function (c) { return { 'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss' }[c]; })
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'strategie';
+  }
+
+  // Ergebnis: Zeilen in Baum-Reihenfolge (Oberseiten immer VOR ihren Unterseiten).
+  function flowExportRows(diagram, result) {
+    var pages = result.supporting_pages || [];
+    var byId = {};
+    diagram.nodes.forEach(function (n) { byId[n.id] = n; });
+    var childrenOf = {};
+    var hasParent = {};
+    diagram.edges.forEach(function (e) {
+      if (e.type !== 'hierarchy' || !byId[e.from] || !byId[e.to]) return;
+      (childrenOf[e.from] = childrenOf[e.from] || []).push(e.to);
+      hasParent[e.to] = true;
+    });
+    var byPosition = function (a, b) { return (byId[a].x - byId[b].x) || (byId[a].y - byId[b].y); };
+    Object.keys(childrenOf).forEach(function (k) { childrenOf[k].sort(byPosition); });
+    var roots = diagram.nodes.filter(function (n) { return !hasParent[n.id]; }).map(function (n) { return n.id; });
+    roots.sort(function (a, b) {
+      if (byId[a].kind === 'conversion') return -1;
+      if (byId[b].kind === 'conversion') return 1;
+      return byPosition(a, b);
+    });
+    var ordered = [];
+    var seen = {};
+    function visit(id, level, parentId) {
+      if (seen[id]) return;
+      seen[id] = true;
+      ordered.push({ id: id, level: level, parentId: parentId });
+      (childrenOf[id] || []).forEach(function (kid) { visit(kid, level + 1, id); });
+    }
+    roots.forEach(function (id) { visit(id, 1, null); });
+    diagram.nodes.forEach(function (n) { if (!seen[n.id]) visit(n.id, 1, null); }); // Sicherheitsnetz bei beschädigten Daten
+
+    // Eindeutige Titel: Asana ordnet Unterseiten über den NAMEN der Oberseite zu
+    var used = {};
+    var titleOf = {};
+    ordered.forEach(function (item) {
+      var base = String(byId[item.id].label || 'Seite').trim() || 'Seite';
+      var candidate = base;
+      var n = 2;
+      while (used[candidate.toLowerCase()]) candidate = base + ' (' + n++ + ')';
+      used[candidate.toLowerCase()] = true;
+      titleOf[item.id] = candidate;
+    });
+    var linkTargets = {};
+    diagram.edges.forEach(function (e) {
+      if (e.type === 'link' && byId[e.from] && byId[e.to]) (linkTargets[e.from] = linkTargets[e.from] || []).push(titleOf[e.to]);
+    });
+
+    return ordered.map(function (item, index) {
+      var n = byId[item.id];
+      var page = n.kind === 'conversion' ? result.conversion_page : (n.kind === 'page' && n.page_ref != null ? pages[n.page_ref] : null);
+      var phaseText = n.kind === 'conversion' ? 'Conversion' : (phaseName(n.phase) || '');
+      var typeText = n.kind === 'conversion' ? 'Conversion-Seite' : (n.page_type ? pageTypeLabel(n.page_type) : '');
+      var brief = page && page.content_brief ? page.content_brief : [];
+      var volume = page && page.estimated_volume != null ? page.estimated_volume : '';
+      var source = n.kind === 'custom' ? 'Nur im Diagramm' : 'Bericht';
+      var description = [];
+      if (page && page.keyword) description.push('Keyword: ' + page.keyword + (volume !== '' ? ' (ca. ' + volume + ' Suchanfragen/Monat)' : ''));
+      if (typeText) description.push('Seitentyp: ' + typeText);
+      if (phaseText) description.push('Phase: ' + phaseText);
+      if (page && page.primary_audience) description.push('Zielgruppe: ' + page.primary_audience);
+      if (page && page.reasoning) description.push('Begründung: ' + page.reasoning);
+      if (brief.length) description.push('Content-Brief:\n' + brief.map(function (b) { return '- ' + b; }).join('\n'));
+      if (n.note) description.push('Notiz: ' + n.note);
+      if ((linkTargets[n.id] || []).length) description.push('Interne Links zu: ' + linkTargets[n.id].join(', '));
+      return {
+        index: index + 1,
+        id: item.id,
+        level: item.level,
+        parentId: item.parentId,
+        parentTitle: item.parentId ? titleOf[item.parentId] : '',
+        title: titleOf[item.id],
+        typeText: typeText,
+        phaseText: phaseText,
+        keyword: page && page.keyword ? page.keyword : '',
+        volume: volume,
+        status: page && page.status ? page.status : '',
+        source: source,
+        note: n.note || '',
+        brief: brief.join('\n'),
+        description: description.join('\n'),
+        linkTargets: (linkTargets[n.id] || []).join(', '),
+        taskId: 'CF' + (index + 1),
+      };
+    });
+  }
+
+  function flowBuildExport(kind, diagram, result) {
+    var rows = flowExportRows(diagram, result);
+    var idOf = {};
+    rows.forEach(function (r) { idOf[r.id] = r.taskId; });
+    var base = 'content-flow-' + flowSlug(result.seed_topic);
+    if (kind === 'clickup') {
+      var subtasks = {};
+      rows.forEach(function (r) { if (r.parentId) (subtasks[r.parentId] = subtasks[r.parentId] || []).push(r.taskId); });
+      // Trenner in Zellen: "|" statt Komma (Doku: Trennzeichen ohne Leerzeichen)
+      var cu = rows.map(function (r) {
+        var tags = [r.phaseText, r.typeText].filter(Boolean).map(function (t) { return t.replace(/[|,]/g, ' '); }).join('|');
+        return [r.taskId, r.title, r.description, tags, (subtasks[r.id] || []).join('|')];
+      });
+      return { filename: base + '-clickup.csv', text: flowToCsv(['Task ID', 'Task Name', 'Description', 'Tags', 'Subtask IDs'], cu, ',', false), rows: rows.length };
+    }
+    if (kind === 'asana') {
+      var as = rows.map(function (r) { return [r.title, r.description, r.parentTitle]; });
+      return { filename: base + '-asana.csv', text: flowToCsv(['Name', 'Description', 'Parent Task'], as, ',', false), rows: rows.length };
+    }
+    var headers = ['ID', 'Ebene', 'Titel', 'Oberseite (ID)', 'Oberseite (Titel)', 'Seitentyp', 'Phase', 'Keyword', 'Suchvolumen pro Monat', 'Status im Bericht', 'Quelle', 'Notiz', 'Content-Brief', 'Interne Links zu'];
+    var uni = rows.map(function (r) {
+      return [r.taskId, r.level, r.title, r.parentId ? idOf[r.parentId] : '', r.parentTitle, r.typeText, r.phaseText, r.keyword, r.volume, r.status, r.source, r.note, r.brief, r.linkTargets];
+    });
+    return { filename: base + '-tabelle.csv', text: flowToCsv(headers, uni, ';', true), rows: rows.length };
+  }
+
   function renderFlowSection(sessionId, result, session) {
     var diagram = flowSanitizeStored(session && session.flow_diagram) || flowBuildFromResult(result);
     var ui = {
@@ -1455,14 +1621,16 @@
             g.appendChild(svgEl('circle', { cx: FLOW_NODE_W - 12, cy: 12, r: 5, fill: FLOW_STATUS_COLORS[st] || '#6e7681' }, [svgEl('title', {}, ['Status: ' + st])]));
           }
         }
+        var plus = svgEl('g', { class: 'cvz-flow-add', 'data-add-node': n.id, transform: 'translate(' + (FLOW_NODE_W / 2) + ',' + FLOW_NODE_H + ')' }, [
+          svgEl('title', {}, ['Neue Seite direkt darunter einfügen']),
+          svgEl('circle', { r: 11 }),
+          svgEl('path', { d: 'M-5,0 H5 M0,-5 V5', class: 'cvz-flow-add-icon', fill: 'none' }),
+        ]);
+        g.appendChild(plus);
         if (n.note) g.appendChild(svgEl('text', { class: 'cvz-flow-node-note', x: FLOW_NODE_W - 14, y: FLOW_NODE_H - 9, 'text-anchor': 'end' }, ['✎']));
         nodeLayer.appendChild(g);
       });
       applyView();
-    }
-    function phaseName(phase) {
-      for (var i = 0; i < MESSY_MIDDLE_PHASES.length; i++) if (MESSY_MIDDLE_PHASES[i].value === phase) return MESSY_MIDDLE_PHASES[i].label;
-      return '';
     }
 
     // ---------- Toolbar ----------
@@ -1489,6 +1657,7 @@
       toolbar.appendChild(spacer);
       toolbar.appendChild(tbButton('−', 'Verkleinern', function () { zoomBy(0.8); }, 'cvz-flow-btn-icon'));
       toolbar.appendChild(tbButton('+', 'Vergrößern', function () { zoomBy(1.25); }, 'cvz-flow-btn-icon'));
+      toolbar.appendChild(renderExportMenu());
       toolbar.appendChild(tbButton('Einpassen', 'Ganzes Diagramm anzeigen', fitView));
       toolbar.appendChild(tbButton(ui.fullscreen ? 'Vollbild beenden' : 'Vollbild', 'Vollbild umschalten', toggleFullscreen));
       var labels = {
@@ -1502,6 +1671,46 @@
       }
       toolbar.appendChild(status);
     }
+
+    // ---------- Export-Menü ----------
+    function renderExportMenu() {
+      var wrap = el('span', { class: 'cvz-flow-menu-wrap' });
+      var button = tbButton('Exportieren ▾', 'Diagramm als Datei für andere Tools herunterladen', function (evt) {
+        evt.stopPropagation();
+        ui.exportOpen = !ui.exportOpen;
+        renderToolbar();
+      });
+      button.setAttribute('aria-haspopup', 'true');
+      button.setAttribute('aria-expanded', ui.exportOpen ? 'true' : 'false');
+      wrap.appendChild(button);
+      if (ui.exportOpen) {
+        var menu = el('div', { class: 'cvz-flow-menu', role: 'menu' });
+        [
+          { kind: 'table', label: 'Tabelle (CSV)', hint: 'Excel, Google Sheets, Airtable, Notion' },
+          { kind: 'clickup', label: 'ClickUp (CSV)', hint: 'Aufgaben mit Unteraufgaben' },
+          { kind: 'asana', label: 'Asana (CSV)', hint: 'Aufgaben mit Unteraufgaben' },
+        ].forEach(function (item) {
+          var entry = el('button', { type: 'button', class: 'cvz-flow-menu-item', role: 'menuitem' }, [
+            el('span', {}, [item.label]),
+            el('small', {}, [item.hint]),
+          ]);
+          entry.addEventListener('click', function (evt) {
+            evt.stopPropagation();
+            var out = flowBuildExport(item.kind, diagram, result);
+            flowDownload(out.filename, out.text);
+            ui.exportOpen = false;
+            renderToolbar();
+            notice(out.rows + ' Seiten exportiert: ' + out.filename);
+          });
+          menu.appendChild(entry);
+        });
+        wrap.appendChild(menu);
+      }
+      return wrap;
+    }
+    if (state.flowMenuCloser) document.removeEventListener('click', state.flowMenuCloser);
+    state.flowMenuCloser = function () { if (ui.exportOpen) { ui.exportOpen = false; renderToolbar(); } };
+    document.addEventListener('click', state.flowMenuCloser);
 
     // ---------- Seitenleiste ----------
     function field(labelText, control) {
@@ -1746,6 +1955,13 @@
     }
     svg.addEventListener('pointerdown', function (evt) {
       if (evt.button !== undefined && evt.button !== 0) return;
+      var addG = evt.target.closest ? evt.target.closest('[data-add-node]') : null;
+      if (addG && !ui.mode) {
+        evt.preventDefault();
+        var parent = nodeById(addG.getAttribute('data-add-node'));
+        if (parent) addNode(parent);
+        return;
+      }
       var nodeG = evt.target.closest ? evt.target.closest('[data-node-id]') : null;
       var edgeG = evt.target.closest ? evt.target.closest('[data-edge-id]') : null;
       svg.focus({ preventScroll: true });
@@ -1818,6 +2034,7 @@
     svg.addEventListener('keydown', function (evt) {
       if ((evt.ctrlKey || evt.metaKey) && (evt.key === 'z' || evt.key === 'Z')) { evt.preventDefault(); undo(); return; }
       if (evt.key === 'Escape') {
+        if (ui.exportOpen) { ui.exportOpen = false; renderToolbar(); return; }
         if (ui.mode) setMode(null);
         else if (ui.fullscreen) toggleFullscreen();
         return;
