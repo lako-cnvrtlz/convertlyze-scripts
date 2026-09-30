@@ -3959,7 +3959,9 @@
 
     var table = document.createElement('table');
     table.className = 'cvz-table cvz-table-clickable';
-    table.innerHTML = '<thead><tr><th>Thema</th><th>Status</th><th>Gestartet</th><th>Aktion</th></tr></thead>';
+    // GEAENDERT (30.09.2026): eigene Spalte "Content-Strategie" statt den Link
+    // zusammen mit Deaktivieren/Aktivieren unter "Aktion" zu stapeln.
+    table.innerHTML = '<thead><tr><th>Thema</th><th>Status</th><th>Gestartet</th><th>Content-Strategie</th><th>Aktion</th></tr></thead>';
     var tbody = document.createElement('tbody');
     topics.forEach(function (topic) {
       var status = STATUS_LABELS[topic.status] || { label: topic.status, className: '' };
@@ -3995,7 +3997,8 @@
               : (topic.status === 'queued' ? 'Aus Warteschlange entfernen' : 'Deaktivieren')) +
           '</button>';
       }
-      actionCell = buildContentStrategyLink(topic) + actionCell;
+      var strategyCell = buildContentStrategyLink(topic) ||
+        '<span class="cvz-status-hint">Verf\u00fcgbar, sobald Messdaten vorliegen</span>';
       if (neverRan) {
         actionCell += '<button type="button" class="cvz-delete-topic-btn" data-cvz-delete-topic="' + topic.id + '"' +
           (isBusy ? ' disabled' : '') + '>' +
@@ -4039,6 +4042,7 @@
           ) : '') +
         '</td>' +
         '<td>' + formatRelativeTime(topic.created_at) + '</td>' +
+        '<td>' + strategyCell + '</td>' +
         '<td>' + actionCell + '</td>';
         tbody.appendChild(tr);
     });
@@ -8541,7 +8545,7 @@
       '.cvz-archive-btn:hover { color: var(--cvz-text); border-color: var(--cvz-text-muted); }' +
       '.cvz-archive-btn:disabled { opacity: 0.6; cursor: default; }' +
       '.cvz-strategy-link-btn {' +
-        'display: inline-block; margin: 0 8px 6px 0; font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 10px;' +
+        'display: inline-block; margin: 0; font-family: "Geist", sans-serif; font-size: 12px; padding: 4px 10px;' +
         'color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; text-decoration: none; white-space: nowrap;' +
       '}' +
       '.cvz-strategy-link-btn:hover { background: rgba(79, 209, 197, 0.1); }' +
