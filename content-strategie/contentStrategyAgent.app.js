@@ -485,8 +485,8 @@
   };
 
   var MESSY_MIDDLE_PHASES = [
-    { value: 'exploration', label: 'Exploration', description: 'Schafft Bewusstsein und deckt offene Grundlagenfragen ab.' },
-    { value: 'evaluation', label: 'Evaluation', description: 'Prüft Eignung und Nutzen anhand von Kriterien.' },
+    { value: 'exploration', label: 'Erforschung', description: 'Schafft Bewusstsein und deckt offene Grundlagenfragen ab.' },
+    { value: 'evaluation', label: 'Bewertung', description: 'Prüft Eignung und Nutzen anhand von Kriterien.' },
     // BUGFIX: "comparison" ist seit der Vier-Phasen-Umstellung eine Pflicht-Phase im Backend,
     // fehlte hier aber. Vergleichsseiten landeten dadurch unter "Weitere Seiten".
     { value: 'comparison', label: 'Vergleich', description: 'Stellt mehrere Anbieter oder Optionen direkt gegenüber.' },
@@ -945,7 +945,7 @@
     { at: 150, text: 'Google AI Overview und Zitations-Chancen werden gecheckt' },
     { at: 220, text: 'Prompt-Tests laufen gegen ein KI-Modell, das braucht ein paar Sekunden pro Anfrage' },
     { at: 300, text: 'Content-Cluster wird gebaut: Conversion-Seite plus unterstützende Seiten' },
-    { at: 380, text: 'Themen werden auf die Journey-Phasen Exploration, Evaluation, Vergleich und Entscheidung verteilt' },
+    { at: 380, text: 'Themen werden auf die Journey-Phasen Erforschung, Bewertung, Vergleich und Entscheidung verteilt' },
     { at: 460, text: 'Stärken, Schwächen, Wettbewerb und Chancen werden zur Executive Summary zusammengefasst' },
     { at: 560, text: 'Kaffee schon leer? Wir sind noch beim Feinschliff am Bericht' },
     { at: 680, text: 'Läuft noch, bei 15 bis 20 Minuten Gesamtdauer sind wir genau im Soll' },
