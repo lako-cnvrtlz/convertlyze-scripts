@@ -37,8 +37,10 @@
       /* ---- Reset & Tokens (DARK THEME) ---- */
       /* Webflow-Wrapper-Reset: Elternelement des Embeds bekommt keine runden Ecken */
       '#cvz-content-strategy-agent,#cvz-content-strategy-agent *{border-radius:0 !important;}',
-      /* Ausnahme: Spinner bleibt rund */
-      '.cvz-cs-spinner,.cvz-cs-chat-spinner-inline{border-radius:50% !important;}',
+      /* Ausnahme: Spinner bleibt rund. BUGFIX: braucht dieselbe ID davor wie die
+         Reset-Regel direkt darüber. Sonst gewinnt bei zwei !important-Regeln die
+         spezifischere (die mit ID), und der Spinner war eckig. */
+      '#cvz-content-strategy-agent .cvz-cs-spinner,#cvz-content-strategy-agent .cvz-cs-chat-spinner-inline{border-radius:50% !important;}',
 
       '#cvz-content-strategy-agent{',
         '--cvz-bg:#0d1117;--cvz-surface:rgba(255,255,255,.04);',
