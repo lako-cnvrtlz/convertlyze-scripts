@@ -7826,6 +7826,7 @@
     bekannt:          { label: 'Bekannt',         color: '#4ec68a' },
     teilweise:        { label: 'Teilweise',       color: '#c98e2a' },
     unbekannt:        { label: 'Unbekannt',       color: '#de5b50' },
+    'widersprüchlich': { label: 'Widersprüchlich', color: '#8878ca' },
     widerspruechlich: { label: 'Widersprüchlich', color: '#8878ca' },
     nicht_geprueft:   { label: 'Nicht geprüft',   color: '#8b98a5' },
   };
@@ -8016,7 +8017,9 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '12px';
-    sub.textContent = 'Geprüft am ' + (formatShortDate(k.checked_at) || '') + '. Abdeckung: Wie vollständig kennen die Modelle die acht wichtigsten Wissensbereiche.';
+    var dimCount = (k.dimensions || []).length;
+    sub.textContent = 'Geprüft am ' + (formatShortDate(k.checked_at) || '') + '. Abdeckung: Wie vollständig kennen die Modelle die ' +
+      (dimCount || 'wichtigsten') + ' Wissensbereiche.';
     section.appendChild(sub);
 
     var card = document.createElement('div');
@@ -8041,6 +8044,13 @@
       card.appendChild(row);
     });
 
+    if (k.previous_not_comparable) {
+      var cmpNote = document.createElement('p');
+      cmpNote.className = 'cvz-thin-data-note';
+      cmpNote.textContent = 'Diese Prüfung deckt mehr Wissensbereiche ab als die vorherige. Ein Vergleich der Abdeckung ist deshalb nicht möglich.';
+      card.appendChild(cmpNote);
+    }
+
     if (k.overall) {
       var overall = document.createElement('p');
       overall.className = 'cvz-summary-text';
@@ -8051,7 +8061,7 @@
     if (k.engines_failed && k.engines_failed.length) {
       var failedNote = document.createElement('p');
       failedNote.className = 'cvz-thin-data-note';
-      failedNote.textContent = 'Nicht alle Modelle konnten abgefragt werden: ' +
+      failedNote.textContent = 'Nicht alle Modelle konnten vollständig abgefragt werden: ' +
         k.engines_failed.map(function (e) { return e === 'chatgpt' ? 'ChatGPT' : 'Gemini'; }).join(', ') + '.';
       card.appendChild(failedNote);
     }
