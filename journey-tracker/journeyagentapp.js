@@ -24,6 +24,12 @@
     // aus der URL und füllt das Formular damit vor. Steht hier null, erscheint
     // kein Button.
     contentStrategyUrl: 'https://www.convertlyze.com/member/content-strategie',
+    // NEU (02.10.2026): PDF-Export (White-Label) im Node-Backend, Route
+    // POST /api/content-strategy/tracker-topics/{id}/export (siehe
+    // routes/contentStrategyAgent.ts und services/trackerExportBuilder.ts).
+    // Wert = Domain des Node-Backends + "/api/content-strategy".
+    // Steht hier null, erscheint kein Export-Button.
+    exportApiUrl: 'https://DEIN-NODE-BACKEND.up.railway.app/api/content-strategy',
   };
 
   var CHANGELOG_DELETED_RETENTION_DAYS = 90;
@@ -124,6 +130,8 @@
     pollTimer:      null,
     retryingTopicId: null,
     archivingTopicId: null,
+    // NEU (02.10.2026): Topic, dessen PDF gerade erstellt wird (Button-Status).
+    exportingTopicId: null,
     promptCitationsCache: {},
     loadingPromptCitations: {},
     expandedPromptId: null,
@@ -4134,6 +4142,64 @@
     return section;
   }
 
+  // NEU (02.10.2026): PDF-Export eines Themas (White-Label bei Pro/Enterprise).
+  // Kurzer Hinweis unten am Bildschirmrand (die Tracker-App hat bisher keinen Toast).
+  // Gleicher Stil wie im White-Label-Widget der Einstellungsseite.
+  function showExportToast(message, type) {
+    var t = document.createElement('div');
+    t.style.cssText =
+      'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a2133;color:#e8edf5;' +
+      'padding:12px 20px;border-radius:0;font-size:14px;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,0.4);' +
+      'max-width:420px;text-align:center;line-height:1.5;border:1px solid ' +
+      (type === 'error' ? '#4a1f1f' : 'rgba(79,209,197,0.3)') +
+      ';border-left:3px solid ' + (type === 'error' ? '#f87171' : '#4fd1c5');
+    t.textContent = message;
+    document.body.appendChild(t);
+    setTimeout(function () { t.remove(); }, 5000);
+  }
+
+  // Ruft den PDF-Export im Node-Backend auf (POST /tracker-topics/:id/export).
+  // Antwort: { url, filename, theme }. Die URL ist eine signierte Download-URL,
+  // 60 Sekunden gültig, deshalb wird der Download sofort gestartet.
+  async function exportTopicPdf(topicId) {
+    if (!CONFIG.exportApiUrl || state.exportingTopicId) return;
+    state.exportingTopicId = topicId;
+    render();
+    try {
+      var response = await fetch(CONFIG.exportApiUrl + '/tracker-topics/' + encodeURIComponent(topicId) + '/export', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + state.memberToken,
+        },
+      });
+      var body = {};
+      try { body = await response.json(); } catch (e) {}
+      if (!response.ok || !body.url) {
+        throw new Error(body.error || ('Export fehlgeschlagen (' + response.status + ')'));
+      }
+      var link = document.createElement('a');
+      link.href = body.url;
+      link.download = body.filename || 'ki-sichtbarkeit.pdf';
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      showExportToast(
+        body.theme === 'white_label'
+          ? 'PDF erstellt, mit deinem Logo und deiner Akzentfarbe.'
+          : 'PDF erstellt.',
+        'success'
+      );
+    } catch (err) {
+      console.error('[CVZ] PDF-Export Fehler:', err);
+      showExportToast(err.message || 'PDF konnte nicht erstellt werden. Bitte erneut versuchen.', 'error');
+    } finally {
+      state.exportingTopicId = null;
+      render();
+    }
+  }
+
   function renderTopicDetailView() {
     var wrap = document.createElement('div');
 
@@ -4149,7 +4215,35 @@
     var topActionRow = document.createElement('div');
     topActionRow.className = 'cvz-top-action-row';
     topActionRow.appendChild(backBtn);
+
+    // NEU: rechte Button-Gruppe (PDF-Export + Aktivieren/Deaktivieren), damit
+    // der Zurück-Button links bleibt und beide Aktionen rechts nebeneinander stehen.
+    var rightActions = document.createElement('div');
+    rightActions.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+
     if (currentTopicListEntry) {
+      // NEU: PDF-Export. Nur sinnvoll, wenn bereits Daten vorliegen (aktiv oder
+      // archiviert) und die Detaildaten geladen sind.
+      var canExportNow = CONFIG.exportApiUrl &&
+        (currentTopicListEntry.status === 'active' || currentTopicListEntry.status === 'archived') &&
+        !!state.topicDetailCache[currentTopicListEntry.id];
+      if (canExportNow) {
+        var isExportingNow = state.exportingTopicId === currentTopicListEntry.id;
+        var exportBtn = document.createElement('button');
+        exportBtn.type = 'button';
+        exportBtn.className = 'cvz-archive-btn';
+        exportBtn.disabled = isExportingNow;
+        exportBtn.textContent = isExportingNow ? 'PDF wird erstellt …' : 'Als PDF exportieren';
+        exportBtn.title = 'Bericht mit Journey Map, Prompts, Wettbewerb und Aktionsplan. ' +
+          'Mit Pro oder Enterprise mit eigenem Logo und eigener Farbe (Einstellungen > PDF-Export-Branding).';
+        (function (topicId) {
+          exportBtn.addEventListener('click', function () {
+            exportTopicPdf(topicId);
+          });
+        })(currentTopicListEntry.id);
+        rightActions.appendChild(exportBtn);
+      }
+
       var isArchivedNow = currentTopicListEntry.status === 'archived';
       var isQueuedNow = currentTopicListEntry.status === 'queued';
       var isBusyNow = state.archivingTopicId === currentTopicListEntry.id;
@@ -4181,8 +4275,9 @@
           ? (isQueuedNow ? 'Wird entfernt …' : 'Wird deaktiviert …')
           : (isQueuedNow ? 'Aus Warteschlange entfernen' : 'Thema deaktivieren');
       }
-      topActionRow.appendChild(archiveToggleBtn);
+      rightActions.appendChild(archiveToggleBtn);
     }
+    topActionRow.appendChild(rightActions);
     wrap.appendChild(topActionRow);
 
     if (state.isLoadingDetail) {
