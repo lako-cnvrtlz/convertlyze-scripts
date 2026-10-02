@@ -248,6 +248,7 @@
       '#cvz-content-strategy-agent .cvz-flow-node-box{fill:#161b22;stroke-width:1.5;}',
       '#cvz-content-strategy-agent .cvz-flow-node.is-selected .cvz-flow-node-box{stroke-width:2.5;}',
       '#cvz-content-strategy-agent .cvz-flow-node.is-custom .cvz-flow-node-box{stroke-dasharray:5 4;}',
+      '#cvz-content-strategy-agent .cvz-flow-node.is-topic .cvz-flow-node-box{fill:#132a2a;}',
       '#cvz-content-strategy-agent .cvz-flow-node-tag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;fill:#8b949e;font-family:inherit;}',
       '#cvz-content-strategy-agent .cvz-flow-node-label{font-size:12.5px;font-weight:500;fill:#f0f4f8;font-family:inherit;}',
       '#cvz-content-strategy-agent .cvz-flow-node-phase{font-size:10px;font-family:inherit;}',
@@ -1081,8 +1082,9 @@
   }
 
   // ==================== CONTENT-FLOW-DIAGRAMM (bearbeitbar) ====================
-  // Bearbeitbare Ansicht auf den Bericht: Conversion-Seite oben, darunter Pillar Pages und
-  // Spezial-Seiten als Themen-Baum. Knoten verschieben, Seiten anlegen und entfernen, Hierarchie
+  // Bearbeitbare Ansicht auf den Bericht als Content-Cluster: Ganz oben das Cluster-Thema (keine
+  // eigene Seite, keine URL), darunter Conversion-Seite und Pillar Pages als Geschwister, darunter
+  // die Spezial-Seiten. Der Weg zur Conversion steckt in den gestrichelten internen Links. Knoten verschieben, Seiten anlegen und entfernen, Hierarchie
   // ändern, interne Links setzen. Der Editor-Zustand wird pro Strategie im Backend gespeichert
   // (PUT /api/content-strategy/:id/flow). Der Bericht selbst wird dadurch nie verändert.
   var SVG_NS = 'http://www.w3.org/2000/svg';
@@ -1091,6 +1093,8 @@
   var FLOW_GAP_X = 36;
   var FLOW_GAP_Y = 86;
   var FLOW_LIMITS = { nodes: 60, edges: 150, label: 120, note: 600, coord: 5000 };
+  var FLOW_VERSION = 2;
+  var FLOW_TOPIC_COLOR = '#e2e8f0';
   var FLOW_PHASE_COLORS = {
     exploration: '#3b82f6',
     evaluation: '#f59e0b',
@@ -1124,19 +1128,22 @@
 
   function flowClamp(v) { return Math.max(-FLOW_LIMITS.coord, Math.min(FLOW_LIMITS.coord, v)); }
 
-  // Gültigen parent_index aus dem Bericht lesen. Ungültige Werte (eigener Index, außerhalb,
-  // Kreis) führen dazu, dass die Seite direkt unter der Conversion-Seite hängt.
+  // Gültigen parent_index aus dem Bericht lesen: -2 = Cluster-Thema, -1 = Conversion-Seite,
+  // 0..n = Pillar Page. Ungültige Werte (eigener Index, außerhalb, Kreis) führen dazu, dass die
+  // Seite direkt unter der Conversion-Seite hängt. Ältere Berichte hatten Pillar Pages unter der
+  // Conversion-Seite (-1); die stehen jetzt daneben, direkt unter dem Cluster-Thema.
   function flowResolveParents(pages) {
     var parents = pages.map(function (page, i) {
       var p = page.parent_index;
-      if (typeof p !== 'number' || Math.floor(p) !== p || p < -1 || p >= pages.length || p === i) return -1;
+      if (typeof p !== 'number' || Math.floor(p) !== p || p < -2 || p >= pages.length || p === i) p = -1;
+      if (page.page_type === 'pillar_page' && p === -1) p = -2;
       return p;
     });
     for (var i = 0; i < parents.length; i++) {
       var seen = {};
       seen[i] = true;
       var cur = parents[i];
-      while (cur !== -1) {
+      while (cur >= 0) {
         if (seen[cur]) { parents[i] = -1; break; }
         seen[cur] = true;
         cur = parents[cur];
@@ -1149,6 +1156,12 @@
     var pages = result.supporting_pages || [];
     var nodes = [];
     var edges = [];
+    nodes.push({
+      id: 'topic', kind: 'topic', page_ref: null,
+      label: String(result.seed_topic || result.conversion_page.topic).slice(0, FLOW_LIMITS.label),
+      x: 0, y: 0,
+    });
+    edges.push({ id: 'ht', from: 'topic', to: 'conv', type: 'hierarchy' });
     nodes.push({
       id: 'conv', kind: 'conversion', page_ref: -1,
       label: result.conversion_page.topic, page_type: 'conversion_landingpage',
@@ -1164,7 +1177,8 @@
     });
     var parents = flowResolveParents(pages);
     pages.forEach(function (page, i) {
-      edges.push({ id: 'h' + i, from: parents[i] === -1 ? 'conv' : 'p' + parents[i], to: 'p' + i, type: 'hierarchy' });
+      var from = parents[i] === -2 ? 'topic' : (parents[i] === -1 ? 'conv' : 'p' + parents[i]);
+      edges.push({ id: 'h' + i, from: from, to: 'p' + i, type: 'hierarchy' });
     });
     var seenPairs = {};
     edges.forEach(function (e) { seenPairs[e.from + '>' + e.to] = true; seenPairs[e.to + '>' + e.from] = true; });
@@ -1176,7 +1190,7 @@
       seenPairs[from + '>' + to] = true;
       edges.push({ id: 'l' + k, from: from, to: to, type: 'link' });
     });
-    var diagram = { version: 1, nodes: nodes, edges: edges };
+    var diagram = { version: FLOW_VERSION, nodes: nodes, edges: edges };
     flowAutoLayout(diagram);
     return diagram;
   }
@@ -1193,8 +1207,10 @@
       (children[e.from] = children[e.from] || []).push(e.to);
       hasParent[e.to] = true;
     });
+    var rank = function (n) { return n.kind === 'topic' ? 0 : (n.kind === 'conversion' ? 1 : 2); };
     var order = function (a, b) {
       var na = byId[a], nb = byId[b];
+      if (rank(na) !== rank(nb)) return rank(na) - rank(nb);
       var pa = FLOW_PHASE_ORDER[na.phase] != null ? FLOW_PHASE_ORDER[na.phase] : 5;
       var pb = FLOW_PHASE_ORDER[nb.phase] != null ? FLOW_PHASE_ORDER[nb.phase] : 5;
       if (pa !== pb) return pa - pb;
@@ -1202,11 +1218,7 @@
     };
     Object.keys(children).forEach(function (k) { children[k].sort(order); });
     var roots = diagram.nodes.filter(function (n) { return !hasParent[n.id]; }).map(function (n) { return n.id; });
-    roots.sort(function (a, b) {
-      if (byId[a].kind === 'conversion') return -1;
-      if (byId[b].kind === 'conversion') return 1;
-      return order(a, b);
-    });
+    roots.sort(order);
     var cursor = 0;
     var unit = FLOW_NODE_W + FLOW_GAP_X;
     function place(id, depth) {
@@ -1226,9 +1238,40 @@
     roots.forEach(function (id) { place(id, 0); });
   }
 
-  function flowSanitizeStored(stored) {
-    if (!stored || stored.version !== 1 || !Array.isArray(stored.nodes) || !Array.isArray(stored.edges)) return null;
-    return { version: 1, nodes: flowClone(stored.nodes), edges: flowClone(stored.edges) };
+  function flowSanitizeStored(stored, result) {
+    if (!stored || (stored.version !== 1 && stored.version !== 2) || !Array.isArray(stored.nodes) || !Array.isArray(stored.edges)) return null;
+    var diagram = { version: FLOW_VERSION, nodes: flowClone(stored.nodes), edges: flowClone(stored.edges) };
+    var hasTopic = diagram.nodes.some(function (n) { return n.kind === 'topic'; });
+    if (!hasTopic) flowAddTopic(diagram, result);
+    return diagram;
+  }
+
+  // Migration von Version 1 (Conversion-Seite war die Wurzel): Cluster-Thema darüber setzen und
+  // Pillar Pages, die unter der Conversion-Seite hingen, eine Ebene hoch neben sie hängen.
+  // Bereits verschobene Knoten behalten ihre Position, nur das Cluster-Thema kommt neu dazu.
+  function flowAddTopic(diagram, result) {
+    if (diagram.nodes.length >= FLOW_LIMITS.nodes || diagram.edges.length >= FLOW_LIMITS.edges) return;
+    var conv = null;
+    diagram.nodes.forEach(function (n) { if (n.kind === 'conversion') conv = n; });
+    if (!conv) return;
+    var taken = {};
+    diagram.nodes.forEach(function (n) { taken[n.id] = true; });
+    diagram.edges.forEach(function (e) { taken[e.id] = true; });
+    var topicId = taken.topic ? flowNewId('t', taken) : 'topic';
+    taken[topicId] = true;
+    var byId = {};
+    diagram.nodes.forEach(function (n) { byId[n.id] = n; });
+    diagram.edges.forEach(function (e) {
+      var child = byId[e.to];
+      if (e.type === 'hierarchy' && e.from === conv.id && child && child.page_type === 'pillar_page') e.from = topicId;
+    });
+    diagram.nodes.unshift({
+      id: topicId, kind: 'topic', page_ref: null,
+      label: String((result && (result.seed_topic || result.conversion_page.topic)) || conv.label).slice(0, FLOW_LIMITS.label),
+      x: conv.x, y: flowClamp(conv.y - (FLOW_NODE_H + FLOW_GAP_Y)),
+    });
+    var edgeId = taken.ht ? flowNewId('e', taken) : 'ht';
+    diagram.edges.unshift({ id: edgeId, from: topicId, to: conv.id, type: 'hierarchy' });
   }
 
   function flowWrapText(text, maxChars, maxLines) {
@@ -1311,16 +1354,19 @@
     var byPosition = function (a, b) { return (byId[a].x - byId[b].x) || (byId[a].y - byId[b].y); };
     Object.keys(childrenOf).forEach(function (k) { childrenOf[k].sort(byPosition); });
     var roots = diagram.nodes.filter(function (n) { return !hasParent[n.id]; }).map(function (n) { return n.id; });
-    roots.sort(function (a, b) {
-      if (byId[a].kind === 'conversion') return -1;
-      if (byId[b].kind === 'conversion') return 1;
-      return byPosition(a, b);
-    });
+    var rank = function (id) { return byId[id].kind === 'topic' ? 0 : (byId[id].kind === 'conversion' ? 1 : 2); };
+    roots.sort(function (a, b) { return (rank(a) - rank(b)) || byPosition(a, b); });
+    Object.keys(childrenOf).forEach(function (k) { childrenOf[k].sort(function (a, b) { return (rank(a) - rank(b)) || byPosition(a, b); }); });
     var ordered = [];
     var seen = {};
     function visit(id, level, parentId) {
       if (seen[id]) return;
       seen[id] = true;
+      // Cluster-Thema ist keine Seite: keine eigene Zeile, seine Kinder sind die oberste Ebene
+      if (byId[id].kind === 'topic') {
+        (childrenOf[id] || []).forEach(function (kid) { visit(kid, level, null); });
+        return;
+      }
       ordered.push({ id: id, level: level, parentId: parentId });
       (childrenOf[id] || []).forEach(function (kid) { visit(kid, level + 1, id); });
     }
@@ -1409,7 +1455,7 @@
   }
 
   function renderFlowSection(sessionId, result, session) {
-    var diagram = flowSanitizeStored(session && session.flow_diagram) || flowBuildFromResult(result);
+    var diagram = flowSanitizeStored(session && session.flow_diagram, result) || flowBuildFromResult(result);
     var ui = {
       selected: null,          // { type: 'node' | 'edge', id }
       mode: null,              // null | 'connect-hierarchy' | 'connect-link'
@@ -1457,6 +1503,12 @@
     function nodeById(id) {
       for (var i = 0; i < diagram.nodes.length; i++) if (diagram.nodes[i].id === id) return diagram.nodes[i];
       return null;
+    }
+    function isTopic(id) { var n = nodeById(id); return !!(n && n.kind === 'topic'); }
+    function isFixedEdge(edge) {
+      // Cluster-Thema -> Conversion-Seite ist fest: die verkaufende Seite hängt immer direkt am Thema
+      var a = nodeById(edge.from), b = nodeById(edge.to);
+      return edge.type === 'hierarchy' && a && b && a.kind === 'topic' && b.kind === 'conversion';
     }
     function edgeById(id) {
       for (var i = 0; i < diagram.edges.length; i++) if (diagram.edges[i].id === id) return diagram.edges[i];
@@ -1533,7 +1585,7 @@
       clearTimeout(ui.saveTimer);
       ui.saveState = 'saving';
       renderToolbar();
-      var body = JSON.stringify({ version: 1, nodes: diagram.nodes, edges: diagram.edges });
+      var body = JSON.stringify({ version: FLOW_VERSION, nodes: diagram.nodes, edges: diagram.edges });
       var options = { method: 'PUT', body: body };
       if (keepalive === true) options.keepalive = true;
       return apiFetch('/api/content-strategy/' + sessionId + '/flow', options)
@@ -1598,22 +1650,23 @@
         edgeLayer.appendChild(g);
       });
       diagram.nodes.forEach(function (n) {
-        var color = n.kind === 'conversion' ? '#4fd1c5' : (FLOW_PHASE_COLORS[n.phase] || '#6e7681');
+        var color = n.kind === 'topic' ? FLOW_TOPIC_COLOR : (n.kind === 'conversion' ? '#4fd1c5' : (FLOW_PHASE_COLORS[n.phase] || '#6e7681'));
         var isSel = ui.selected && ui.selected.type === 'node' && ui.selected.id === n.id;
         var g = svgEl('g', {
           'data-node-id': n.id,
-          class: 'cvz-flow-node' + (isSel ? ' is-selected' : '') + (n.kind === 'custom' ? ' is-custom' : ''),
+          class: 'cvz-flow-node' + (isSel ? ' is-selected' : '') + (n.kind === 'custom' ? ' is-custom' : '') + (n.kind === 'topic' ? ' is-topic' : ''),
           transform: 'translate(' + n.x + ',' + n.y + ')',
         });
         g.appendChild(svgEl('rect', { class: 'cvz-flow-node-box', width: FLOW_NODE_W, height: FLOW_NODE_H, style: 'stroke:' + (isSel ? '#f0f4f8' : 'rgba(255,255,255,.18)') }));
         g.appendChild(svgEl('rect', { width: 5, height: FLOW_NODE_H, fill: color }));
-        var typeText = n.kind === 'conversion' ? 'Conversion-Seite' : (n.page_type ? pageTypeLabel(n.page_type) : 'Seite');
+        var typeText = n.kind === 'topic' ? 'Cluster-Thema' : (n.kind === 'conversion' ? 'Conversion-Seite' : (n.page_type ? pageTypeLabel(n.page_type) : 'Seite'));
         g.appendChild(svgEl('text', { class: 'cvz-flow-node-tag', x: 16, y: 17 }, [typeText]));
         var lines = flowWrapText(n.label, 28, 2);
         lines.forEach(function (line, i) {
           g.appendChild(svgEl('text', { class: 'cvz-flow-node-label', x: 16, y: 38 + i * 16 }, [line]));
         });
-        var phaseLabel = n.kind === 'conversion' ? '' : phaseName(n.phase);
+        var phaseLabel = (n.kind === 'conversion' || n.kind === 'topic') ? '' : phaseName(n.phase);
+        if (n.kind === 'topic') g.appendChild(svgEl('text', { class: 'cvz-flow-node-phase', x: 16, y: FLOW_NODE_H - 9, fill: '#8b949e' }, ['Keine eigene Seite']));
         if (phaseLabel) g.appendChild(svgEl('text', { class: 'cvz-flow-node-phase', x: 16, y: FLOW_NODE_H - 9, fill: color }, [phaseLabel]));
         if (n.kind === 'page' && n.page_ref != null && pages[n.page_ref]) {
           var st = pages[n.page_ref].status;
@@ -1722,7 +1775,8 @@
       if (!sel) {
         panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, ['Content-Flow']));
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Klicke eine Seite oder Verbindung an, um sie zu bearbeiten. Ziehe Seiten mit der Maus, um sie zu verschieben; ziehe den Hintergrund, um den Ausschnitt zu bewegen. Strg/Cmd + Mausrad zoomt.']));
-        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Durchgezogene Pfeile zeigen den Themen-Baum (Oberseite → Unterseite), gestrichelte sind interne Links. Die Farbe zeigt die Phase, der Punkt oben rechts den Status aus dem Bericht.']));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Ganz oben steht das Cluster-Thema. Es ist keine eigene Seite, sondern fasst den Cluster zusammen. Darunter stehen nebeneinander die Conversion-Seite (verkauft) und Pillar Pages (bündeln Teilthemen).']));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Durchgezogene Pfeile zeigen den Themen-Baum (Oberseite → Unterseite), gestrichelte sind interne Links, also der Weg zur Conversion-Seite. Die Farbe zeigt die Phase, der Punkt oben rechts den Status aus dem Bericht. Der Baum beschreibt Themen und Verlinkung, nicht die URL-Struktur.']));
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Änderungen am Diagramm werden gespeichert, verändern aber den Bericht nicht.']));
         var legend = el('div', { class: 'cvz-flow-legend' });
         MESSY_MIDDLE_PHASES.forEach(function (ph) {
@@ -1740,9 +1794,14 @@
         var a = nodeById(edge.from), b = nodeById(edge.to);
         panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [edge.type === 'hierarchy' ? 'Themen-Baum-Verbindung' : 'Interner Link']));
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [(a ? a.label : '?') + ' → ' + (b ? b.label : '?')]));
+        if (isFixedEdge(edge)) {
+          panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Feste Verbindung: Die Conversion-Seite hängt immer direkt am Cluster-Thema.']));
+          return;
+        }
         var toggle = tbButton(edge.type === 'hierarchy' ? 'In internen Link umwandeln' : 'In Baum-Verbindung umwandeln', '', function () {
           if (edge.type === 'link') {
-            if (edge.to === 'conv' || isDescendant(edge.from, edge.to)) { notice('Das würde einen Kreis im Themen-Baum erzeugen.'); return; }
+            var target = nodeById(edge.to);
+            if ((target && (target.kind === 'conversion' || target.kind === 'topic')) || isDescendant(edge.from, edge.to)) { notice('Das ist im Themen-Baum nicht möglich: Conversion-Seite und Cluster-Thema sind fest platziert.'); return; }
             pushUndo();
             var old = parentEdgeOf(edge.to);
             if (old) diagram.edges = diagram.edges.filter(function (x) { return x.id !== old.id; });
@@ -1773,7 +1832,10 @@
       }
       var node = nodeById(sel.id);
       if (!node) return;
-      panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [node.kind === 'conversion' ? 'Conversion-Seite' : (node.kind === 'custom' ? 'Eigene Seite' : 'Seite aus dem Bericht')]));
+      panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [node.kind === 'topic' ? 'Cluster-Thema' : (node.kind === 'conversion' ? 'Conversion-Seite' : (node.kind === 'custom' ? 'Eigene Seite' : 'Seite aus dem Bericht'))]));
+      if (node.kind === 'topic') {
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine eigene Seite und keine URL. Das Thema hält Conversion-Seite, Pillar Pages und informationelle Seiten ohne passende Pillar Page zusammen. Es kann nicht verlinkt werden.']));
+      }
       var labelInput = el('input', { type: 'text', class: 'cvz-flow-input', maxlength: String(FLOW_LIMITS.label), value: node.label });
       labelInput.addEventListener('focus', pushUndoOnce(node.id + ':label'));
       labelInput.addEventListener('input', function () {
@@ -1814,7 +1876,7 @@
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + cp.keyword + ' · ' + (cp.estimated_volume != null ? 'ca. ' + cp.estimated_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt')]));
       }
 
-      if (node.kind !== 'conversion') {
+      if (node.kind !== 'conversion' && node.kind !== 'topic') {
         var parentSelect = el('select', { class: 'cvz-flow-input' });
         parentSelect.appendChild(el('option', { value: '' }, ['Keine (oberste Ebene)']));
         var currentParent = parentEdgeOf(node.id);
@@ -1848,9 +1910,11 @@
 
       var actions = el('div', { class: 'cvz-flow-actions' });
       actions.appendChild(tbButton('+ Unterseite', 'Neue Seite unter dieser anlegen', function () { addNode(node); }));
-      actions.appendChild(tbButton('Interner Link …', 'Von dieser Seite auf eine andere verlinken', function () { setMode('connect-link'); }));
+      if (node.kind !== 'topic') {
+        actions.appendChild(tbButton('Interner Link …', 'Von dieser Seite auf eine andere verlinken', function () { setMode('connect-link'); }));
+      }
       actions.appendChild(tbButton('Unterseite zuweisen …', 'Eine bestehende Seite unter diese hängen', function () { setMode('connect-hierarchy'); }));
-      if (node.kind !== 'conversion') {
+      if (node.kind !== 'conversion' && node.kind !== 'topic') {
         actions.appendChild(tbButton('Aus Diagramm entfernen', 'Entfernt nur den Knoten im Diagramm, nicht die Seite im Bericht', function () { removeNode(node.id); }, 'cvz-flow-btn-danger'));
       }
       panel.appendChild(actions);
@@ -1895,8 +1959,11 @@
     function connect(fromId, toId, type) {
       if (fromId === toId) { notice('Eine Seite kann nicht auf sich selbst zeigen.'); return; }
       if (diagram.edges.length >= FLOW_LIMITS.edges && type === 'link') { notice('Maximal ' + FLOW_LIMITS.edges + ' Verbindungen im Diagramm.'); return; }
+      var toNode = nodeById(toId);
+      if (type === 'link' && (isTopic(fromId) || isTopic(toId))) { notice('Das Cluster-Thema ist keine Seite und kann nicht verlinkt werden.'); return; }
       if (type === 'hierarchy') {
-        if (toId === 'conv') { notice('Die Conversion-Seite steht immer oben und kann keiner Seite untergeordnet werden.'); return; }
+        if (toNode && toNode.kind === 'topic') { notice('Das Cluster-Thema steht immer ganz oben.'); return; }
+        if (toNode && toNode.kind === 'conversion') { notice('Die Conversion-Seite hängt immer direkt am Cluster-Thema.'); return; }
         if (isDescendant(fromId, toId)) { notice('Das würde einen Kreis im Themen-Baum erzeugen.'); return; }
         pushUndo();
         var old = parentEdgeOf(toId);
@@ -2043,9 +2110,11 @@
         evt.preventDefault();
         if (ui.selected.type === 'node') {
           var n = nodeById(ui.selected.id);
-          if (n && n.kind !== 'conversion') removeNode(n.id);
+          if (n && n.kind !== 'conversion' && n.kind !== 'topic') removeNode(n.id);
         } else {
           var eid = ui.selected.id;
+          var selEdge = edgeById(eid);
+          if (selEdge && isFixedEdge(selEdge)) { notice('Feste Verbindung: Die Conversion-Seite hängt immer direkt am Cluster-Thema.'); return; }
           pushUndo();
           diagram.edges = diagram.edges.filter(function (x) { return x.id !== eid; });
           ui.selected = null;
