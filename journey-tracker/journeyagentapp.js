@@ -359,7 +359,9 @@
       tip.style.top = top + 'px';
     }
 
-    document.addEventListener('mouseover', function (e) {
+    // GEÄNDERT (02.10.2026): gleiche Logik für mouseover UND focusin, damit
+    // Tooltips auch per Tastatur und Antippen (fokussierbare Elemente) aufgehen.
+    function onEnter(e) {
       var el = e.target && e.target.closest ? e.target.closest('[title],[data-cvz-title]') : null;
       if (!el || !el.closest('#cvz-visibility-app, .cvz-modal-overlay')) {
         if (current) hide();
@@ -381,7 +383,10 @@
       tip.style.opacity = '0';
       place(el);
       tip.style.opacity = '1';
-    });
+    }
+    document.addEventListener('mouseover', onEnter);
+    document.addEventListener('focusin', onEnter);
+    document.addEventListener('focusout', function () { if (current) hide(); });
 
     document.addEventListener('mouseout', function (e) {
       if (current && !current.contains(e.relatedTarget)) hide();
@@ -6887,7 +6892,7 @@
         : '';
 
       var aiSearchVolumeBadge = prompt.ai_search_volume != null
-        ? '<br><span class="cvz-prompt-persona" title="Echte AI-Overview-Frage, laut DataForSEO ca. ' +
+        ? '<br><span class="cvz-prompt-persona" title="Echte AI-Overview-Frage, wird ca. ' +
             escapeHtml(prompt.ai_search_volume) + 'x/Monat gestellt">\u2713 ' +
             escapeHtml(prompt.ai_search_volume) + '/Monat</span>'
         : '';
@@ -7426,6 +7431,9 @@
     var span = document.createElement('span');
     span.className = 'cvz-tip' + (dir === 'right' ? ' cvz-tip-right' : '');
     span.textContent = '?';
+    // NEU (02.10.2026): fokussierbar, damit der Tooltip auch per Tastatur
+    // und per Antippen auf Touch-Geräten erscheint (CSS :focus, siehe unten).
+    span.tabIndex = 0;
     span.setAttribute('data-cvz-tip', text);
     span.setAttribute('aria-label', text);
     return span;
@@ -8952,6 +8960,35 @@
       '.cvz-delta-up { color: var(--cvz-teal); background: rgba(13,148,136,0.12); }' +
       '.cvz-delta-down { color: var(--cvz-red); background: rgba(222,91,80,0.12); }' +
       '.cvz-delta-flat { color: var(--cvz-text-muted); background: rgba(139,152,165,0.12); }' +
+      // NEU (02.10.2026): Journey-Karten (renderJourneyPhaseSection)
+      '.cvz-journey-phase-card .cvz-journey-channel-delta { flex: 0 0 48px; box-sizing: border-box; margin-left: 2px; text-align: center; cursor: default; }' +
+      '.cvz-journey-delta-spacer { background: none; }' +
+      '.cvz-delta-quiet { background: none; opacity: .7; }' +
+      '.cvz-delta-neutral { color: var(--cvz-text); background: rgba(139,152,165,0.18); }' +
+      '.cvz-journey-nodata { color: var(--cvz-text-muted); opacity: .6; cursor: default; }' +
+      '.cvz-journey-channel-num[tabindex] { cursor: default; }' +
+      '.cvz-journey-aio { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; font-size: 12px; }' +
+      '.cvz-journey-aio-value { flex: 1; font-size: 11px; color: var(--cvz-text); cursor: default; white-space: nowrap; }' +
+      '.cvz-journey-aio-hit { color: var(--cvz-teal); font-weight: 600; }' +
+      '.cvz-journey-aio-chip {' +
+        'flex: 0 0 auto; font-size: 9px; text-transform: uppercase; letter-spacing: .04em;' +
+        'padding: 1px 5px; color: var(--cvz-text-muted); border: 1px solid var(--cvz-border);' +
+      '}' +
+      '.cvz-journey-comp-badge {' +
+        'font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;' +
+        'padding: 1px 5px; color: var(--cvz-red); background: rgba(222,91,80,0.12);' +
+      '}' +
+      '.cvz-journey-hint {' +
+        'margin-top: 10px; padding: 8px 10px; font-size: 11px; line-height: 1.45; color: var(--cvz-text);' +
+        'background: rgba(139,152,165,0.08); border-left: 2px solid var(--cvz-text-muted);' +
+      '}' +
+      '.cvz-journey-hint-gap, .cvz-journey-hint-down { border-left-color: var(--cvz-red); }' +
+      '.cvz-journey-hint-up { border-left-color: var(--cvz-teal); }' +
+      '.cvz-journey-hint-link {' +
+        'display: block; margin-top: 6px; padding: 0; border: none; background: none; cursor: pointer;' +
+        'font-size: 11px; font-weight: 600; color: var(--cvz-teal); text-align: left;' +
+      '}' +
+      '.cvz-journey-hint-link:hover { text-decoration: underline; }' +
 
       '.cvz-sov-phase-block { margin-bottom: 8px; border: 1px solid var(--cvz-border); }' +
       '.cvz-sov-phase-header {' +
@@ -9038,7 +9075,8 @@
         'pointer-events:none;opacity:0;transition:opacity .15s ease;' +
         'z-index:1000;' +
       '}' +
-      '.cvz-tip:hover::after { opacity:1; }' +
+      '.cvz-tip:hover::after, .cvz-tip:focus::after { opacity:1; }' +
+      '.cvz-tip:focus { outline:1px solid var(--cvz-teal,#4fd1c5); outline-offset:1px; }' +
       /* Pfeil nach unten zeigend */
       '.cvz-tip::before {' +
         'content:"";' +
@@ -9046,7 +9084,7 @@
         'border:5px solid transparent;border-top:5px solid var(--cvz-border,#232b36);' +
         'pointer-events:none;opacity:0;transition:opacity .15s ease;z-index:1001;' +
       '}' +
-      '.cvz-tip:hover::before { opacity:1; }' +
+      '.cvz-tip:hover::before, .cvz-tip:focus::before { opacity:1; }' +
       /* Variante: Tooltip öffnet sich nach rechts (für Elemente am linken Rand) */
       '.cvz-tip-right::after {' +
         'left:calc(100% + 8px);bottom:auto;top:50%;transform:translateY(-50%);' +
@@ -9765,6 +9803,366 @@
   // ─── JOURNEY MAP ──────────────────────────────────────────────────────────
   // Detaillierte Phasenanalyse: Eigene Sichtbarkeit + welche Wettbewerber-
   // Inhalte dominieren pro Phase + Wettbewerber-Detailtabellen.
+  // =========================================================================
+  // NEU (02.10.2026): Journey-Map-Phasenkarten mit 28-Tage-Vergleich
+  // Datenbasis: data.journey_comparison (dashboard.py: _compute_journey_comparison).
+  // Fehlt der Block (ältere API), fällt die Darstellung auf phase_scores /
+  // share_of_voice (12 Wochen, ohne Vergleich) zurück.
+  // Trend-Pfeile kommen fertig klassifiziert vom Backend (up/down/stable/
+  // insufficient/no_data), das Frontend rechnet bewusst NICHTS selbst, damit
+  // die Rausch-Schwelle an genau einer Stelle definiert ist.
+  // =========================================================================
+
+  var JOURNEY_SECTION_TIP =
+    'Zeigt, wie oft KI-Antworten eure Domain als Quelle nennen, getrennt nach Kaufphase und KI-Kanal. ' +
+    'Hohe Werte in Vergleich und Entscheidung sind am wertvollsten, weil Käufer dort ihre Shortlist bilden. ' +
+    'Niedrige Werte zeigen, in welcher Phase Käufer andere Quellen lesen als eure: Dort setzt der Aktionsplan an. ' +
+    'Google AI Overviews werden seltener (monatlich) geprüft und deshalb als Anzahl statt in Prozent gezeigt.';
+
+  var JOURNEY_SOURCES_TIP =
+    'Domains, die KI-Antworten in dieser Phase am häufigsten als Quelle nennen, in % der Antworten. ' +
+    'Bestätigte Wettbewerber sind markiert. Andere Quellen wie Hersteller-Doku, Verbände oder Fachportale ' +
+    'sind Kandidaten für Gastbeiträge, Erwähnungen oder Verlinkungen (Digital PR).';
+
+  function _jcRound(v) { return v == null ? null : Math.round(v); }
+
+  // NEU (02.10.2026): Google AI Overview ist KEIN Prozent-Kanal mehr in den
+  // Journey-Karten (zu wenige, nur monatliche Datenpunkte). Er erscheint als
+  // eigene Monatszeile unter den Kanälen, siehe _renderAiOverviewLine.
+  var JOURNEY_PERCENT_CHANNELS = ['chat_gpt', 'gemini'];
+
+  function _renderAiOverviewLine(aio) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-journey-aio';
+
+    var lbl = document.createElement('span');
+    lbl.className = 'cvz-journey-channel-label';
+    lbl.textContent = 'Google AI Overview';
+    wrap.appendChild(lbl);
+
+    var val = document.createElement('span');
+    val.className = 'cvz-journey-aio-value';
+    val.tabIndex = 0;
+
+    var chip = document.createElement('span');
+    chip.className = 'cvz-journey-aio-chip';
+    chip.textContent = 'monatlich';
+
+    var tip;
+    if (!aio || !aio.checked) {
+      val.textContent = 'nicht geprüft';
+      val.classList.add('cvz-journey-nodata');
+      tip = 'AI Overviews werden einmal im Monat für die 2 Suchbegriffe mit dem meisten Suchvolumen in dieser Phase geprüft. ' +
+        'Für diese Phase liegt noch keine Prüfung vor, sie kommt mit dem nächsten Monatslauf.';
+    } else {
+      if (aio.with_overview === 0) {
+        val.textContent = 'kein Overview';
+        val.classList.add('cvz-journey-nodata');
+      } else {
+        val.textContent = aio.cited + ' von ' + aio.with_overview + ' zitiert';
+        if (aio.cited > 0) val.classList.add('cvz-journey-aio-hit');
+      }
+      var lines = (aio.keywords || []).map(function (k) {
+        var status = !k.has_overview ? 'kein Overview gefunden'
+          : (k.cited ? 'Overview zitiert euch' : 'Overview zitiert andere Quellen');
+        return '„' + k.keyword + '“: ' + status;
+      });
+      var when = aio.last_checked_at ? ' (zuletzt ' + formatShortDate(aio.last_checked_at) + ')' : '';
+      tip = 'Monatlich geprüft' + when + ': ' + lines.join('. ') + '. ';
+      if (aio.with_overview > aio.cited) {
+        tip += 'Wo ein Overview andere Quellen nutzt, haben Seiten die besten Chancen, die genau diese Suchanfrage kurz und direkt beantworten.';
+      } else if (aio.with_overview === 0) {
+        tip += 'In unseren Daten wurde für diese Suchbegriffe kein AI Overview gefunden. Das heißt nicht sicher, dass Google nie eins zeigt, aber hier zählen vor allem die klassischen Rankings.';
+      } else {
+        tip += 'Ihr werdet in allen gefundenen Overviews zitiert. Haltet die zitierten Seiten aktuell.';
+      }
+    }
+    val.title = tip;
+    wrap.appendChild(val);
+    wrap.appendChild(chip);
+    return wrap;
+  }
+
+  // Badge für eigene Werte (kind 'own') oder für Quellen (kind 'source').
+  function renderJourneyTrendBadge(entry, kind, cfg, label) {
+    var trend = entry && entry.trend;
+    if (!trend || trend === 'no_data') return null;
+    var isOwn = kind === 'own';
+    var prev = _jcRound(isOwn ? entry.previous_score : entry.previous_rate);
+    var curN = isOwn ? entry.total : entry.total_runs;
+    var prevN = isOwn ? entry.previous_total : entry.previous_total_runs;
+    var days = cfg.windowDays;
+    var delta = entry.delta_pp == null ? null : Math.abs(Math.round(entry.delta_pp));
+
+    var el = document.createElement('span');
+    el.className = 'cvz-journey-channel-delta';
+    el.tabIndex = 0;
+    var tip;
+
+    if (trend === 'up' || trend === 'down') {
+      var up = trend === 'up';
+      // Eigene Werte: grün/rot. Quellen: neutral, weil ein Rückgang bei
+      // einem Wettbewerber für euch eher gut ist und rot dort verwirren würde.
+      el.className += !isOwn ? ' cvz-delta-neutral' : (up ? ' cvz-delta-up' : ' cvz-delta-down');
+      el.textContent = (up ? '▲ ' : '▼ ') + delta + ' Pp';
+      if (isOwn) {
+        tip = (up ? 'Plus ' : 'Minus ') + delta + ' Prozentpunkte gegenüber den ' + days + ' Tagen davor ' +
+          '(jetzt ' + entry.cited + ' von ' + curN + ' Antworten, davor ' + entry.previous_cited + ' von ' + prevN + '). ' +
+          'Die Veränderung ist größer als die normale Schwankung von KI-Antworten. ' +
+          (up
+            ? 'Prüft unter „Verlauf & Änderungen“, welche Inhaltsänderung dazu passt, und baut darauf auf.'
+            : 'Schaut bei den meistzitierten Quellen darunter, wer stattdessen genannt wird, und prüft, ob sich eure zitierte Seite geändert hat.');
+      } else {
+        tip = label + ' wird ' + (up ? 'häufiger' : 'seltener') + ' zitiert: ' + (up ? 'plus ' : 'minus ') + delta +
+          ' Prozentpunkte gegenüber den ' + days + ' Tagen davor (davor ' + prev + ' %). ' +
+          (up
+            ? 'Lohnt ein Blick auf die zitierte Seite: Welche Frage beantwortet sie, die eure Seiten nicht beantworten?'
+            : 'Hier wird gerade Platz frei, den eine passende Seite von euch füllen kann.');
+      }
+    } else if (trend === 'stable') {
+      el.className += ' cvz-delta-flat cvz-delta-quiet';
+      el.textContent = '→';
+      tip = 'Kein klarer Trend gegenüber den ' + days + ' Tagen davor' + (prev != null ? ' (davor ' + prev + ' %)' : '') + '. ' +
+        'KI-Antworten schwanken von Lauf zu Lauf. Ein Pfeil erscheint erst, wenn sich der Wert um mindestens ' +
+        Math.round(cfg.minDeltaPp) + ' Prozentpunkte ändert und das nicht mehr durch Zufall erklärbar ist.';
+    } else {
+      // insufficient
+      el.className += ' cvz-delta-flat';
+      el.textContent = 'offen';
+      tip = 'Noch kein Vergleich möglich: Dafür braucht es mindestens ' + cfg.minAnswers +
+        ' Antworten in beiden Zeiträumen (jetzt ' + (curN || 0) + ', davor ' + (prevN || 0) + '). ' +
+        'Bei neuen Themen oder Phasen mit wenigen Prompts dauert das ein paar Wochen.';
+    }
+    el.title = tip;
+    return el;
+  }
+
+  function _journeyBadgeSpacer() {
+    var sp = document.createElement('span');
+    sp.className = 'cvz-journey-channel-delta cvz-journey-delta-spacer';
+    sp.setAttribute('aria-hidden', 'true');
+    return sp;
+  }
+
+  // Sichtbarer Hinweis pro Karte (max. einer), damit die wichtigste
+  // Handlungsempfehlung nicht nur im Hover-Tooltip steht.
+  function _journeyCardHint(scores, sources, cfg) {
+    var down = null, up = null, maxOwn = null, measured = 0;
+    JOURNEY_PERCENT_CHANNELS.forEach(function (ch) {
+      var e = scores[ch];
+      if (!e || !e.total) return;
+      measured += e.total;
+      maxOwn = Math.max(maxOwn == null ? 0 : maxOwn, e.score || 0);
+      if (e.trend === 'down' && !down) down = ch;
+      if (e.trend === 'up' && !up) up = ch;
+    });
+    if (down) {
+      return { kind: 'down', text: 'Rückgang bei ' + (CHANNEL_LABELS[down] || down) + '. Prüft, wer stattdessen zitiert wird.', action: false };
+    }
+    var top = sources[0];
+    if (maxOwn === 0 && measured >= cfg.minAnswers && top && (top.citation_rate || 0) >= 30) {
+      return {
+        kind: 'gap',
+        text: top.domain + ' wird in ' + Math.round(top.citation_rate) + ' % der Antworten zitiert, eure Domain in keiner.',
+        action: true,
+      };
+    }
+    if (up) {
+      return { kind: 'up', text: 'Zuwachs bei ' + (CHANNEL_LABELS[up] || up) + '. Prüft unter „Verlauf & Änderungen“, was dazu beigetragen hat.', action: false };
+    }
+    return null;
+  }
+
+  function renderJourneyPhaseSection(data, detail) {
+    var jc = data.journey_comparison || null;
+    var cfg = {
+      windowDays: jc ? jc.window_days : null,
+      minAnswers: jc ? jc.min_answers : 15,
+      minDeltaPp: jc ? jc.min_delta_pp : 10,
+    };
+    var phaseScores = jc ? jc.phase_scores : (data.phase_scores || {});
+    var sourcesByPhase = jc ? jc.sources : (data.share_of_voice || {});
+    var intervalDays = (detail && detail.topic && detail.topic.prompt_interval_days) || 2;
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var headRow = document.createElement('p');
+    headRow.className = 'cvz-section-label';
+    headRow.style.display = 'flex';
+    headRow.style.alignItems = 'center';
+    headRow.appendChild(document.createTextNode('KI-Sichtbarkeit nach Journey-Phase'));
+    headRow.appendChild(makeTip(JOURNEY_SECTION_TIP));
+    section.appendChild(headRow);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = jc
+      ? 'Wie oft eure Domain in KI-Antworten als Quelle genannt wird: letzte ' + cfg.windowDays +
+        ' Tage, verglichen mit den ' + cfg.windowDays + ' Tagen davor. Pfeile zeigen nur Veränderungen, die über normale Schwankungen hinausgehen.'
+      : 'Wie oft eure Domain in KI-Antworten als Quelle genannt wird (letzte 12 Wochen).';
+    section.appendChild(sub);
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-journey-phase-grid';
+
+    PHASE_ORDER.forEach(function (phase) {
+      var scores = phaseScores[phase] || {};
+      var color = PHASE_COLORS[phase] || '#8b98a5';
+      var promptCount = (data.prompt_count_by_phase || {})[phase] || 0;
+      var sources = (sourcesByPhase[phase] || []).filter(function (s) { return (s.cited_count || 0) > 0; });
+
+      var card = document.createElement('div');
+      card.className = 'cvz-journey-phase-card';
+      card.style.borderTopColor = color;
+
+      var nameEl = document.createElement('p');
+      nameEl.className = 'cvz-journey-phase-name';
+      nameEl.style.color = color;
+      nameEl.textContent = (PHASE_LABELS[phase] || phase) + (promptCount > 0 ? ' (' + promptCount + ')' : '');
+      nameEl.title = promptCount + ' aktive Prompts in dieser Phase. Jeder wird alle ' + intervalDays +
+        ' Tage in ChatGPT und Gemini abgefragt.';
+      card.appendChild(nameEl);
+
+      JOURNEY_PERCENT_CHANNELS.forEach(function (channel) {
+        var ch = scores[channel] || { score: null, cited: 0, total: 0 };
+        var hasData = (ch.total || 0) > 0 && ch.score != null;
+        var pct = hasData ? Math.round(ch.score) : 0;
+
+        var row = document.createElement('div');
+        row.className = 'cvz-journey-channel-row';
+
+        var lbl = document.createElement('span');
+        lbl.className = 'cvz-journey-channel-label';
+        lbl.textContent = CHANNEL_LABELS[channel] || channel;
+        row.appendChild(lbl);
+
+        var barWrap = document.createElement('div');
+        barWrap.className = 'cvz-journey-bar-wrap';
+        var bar = document.createElement('div');
+        bar.className = 'cvz-journey-bar-fill';
+        bar.style.width = pct + '%';
+        bar.style.backgroundColor = color;
+        barWrap.appendChild(bar);
+        row.appendChild(barWrap);
+
+        var num = document.createElement('span');
+        num.className = 'cvz-journey-channel-num' + (hasData ? '' : ' cvz-journey-nodata');
+        num.tabIndex = 0;
+        if (hasData) {
+          num.textContent = pct + '%';
+          num.title = ch.cited + ' von ' + ch.total + ' KI-Antworten' +
+            (cfg.windowDays ? ' der letzten ' + cfg.windowDays + ' Tage' : '') +
+            ' nennen eure Domain als Quelle' +
+            (ch.cited_with_url != null ? ', ' + ch.cited_with_url + ' davon mit Link' : '') + '.';
+        } else {
+          num.textContent = 'k. A.';
+          num.title = channel === 'google_ai'
+            ? 'Für Google AI Overviews gibt es noch keine Werte pro Phase. Sie werden bisher nur einmal pro Analyse-Lauf für das Haupt-Keyword abgefragt, nicht pro Prompt, und lassen sich deshalb keiner Phase zuordnen.'
+            : 'In diesem Zeitraum gab es für diese Phase keine Messung in ' + (CHANNEL_LABELS[channel] || channel) + '.';
+        }
+        row.appendChild(num);
+
+        if (jc) {
+          row.appendChild(renderJourneyTrendBadge(ch, 'own', cfg) || _journeyBadgeSpacer());
+        }
+        card.appendChild(row);
+      });
+
+      // NEU (02.10.2026): AI Overview als eigene Monatszeile (nur wenn das
+      // Backend den Block liefert, sonst wäre "noch nicht geprüft" falsch).
+      if (data.ai_overview_by_phase) {
+        card.appendChild(_renderAiOverviewLine(data.ai_overview_by_phase[phase]));
+      }
+
+      // Meistzitierte Quellen
+      if (sources.length > 0) {
+        var divider = document.createElement('div');
+        divider.style.cssText = 'margin:8px 0 6px;border-top:1px solid var(--cvz-border,#e5e7eb);';
+        card.appendChild(divider);
+
+        var srcLabel = document.createElement('p');
+        srcLabel.style.cssText = 'display:flex;align-items:center;margin:0 0 4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--cvz-text-muted,#6b7280);';
+        srcLabel.appendChild(document.createTextNode('Meistzitierte Quellen'));
+        srcLabel.appendChild(makeTip(JOURNEY_SOURCES_TIP));
+        card.appendChild(srcLabel);
+
+        sources.slice(0, 2).forEach(function (src) {
+          var srcPct = Math.round(src.citation_rate || 0);
+          var srcRow = document.createElement('div');
+          srcRow.className = 'cvz-journey-channel-row';
+
+          var dEl = document.createElement('span');
+          dEl.className = 'cvz-journey-channel-label';
+          dEl.style.cssText = 'color:var(--cvz-text-muted,#6b7280);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+          dEl.textContent = src.domain;
+          dEl.title = src.domain + ': in ' + src.cited_count + ' von ' + src.total_runs + ' Antworten als Quelle genannt.' +
+            (src.summary ? ' ' + src.summary : '');
+          srcRow.appendChild(dEl);
+
+          var sWrap = document.createElement('div');
+          sWrap.className = 'cvz-journey-bar-wrap';
+          var sFill = document.createElement('div');
+          sFill.className = 'cvz-journey-bar-fill';
+          sFill.style.width = srcPct + '%';
+          sFill.style.background = '#d1d5db';
+          sWrap.appendChild(sFill);
+          srcRow.appendChild(sWrap);
+
+          var sNum = document.createElement('span');
+          sNum.className = 'cvz-journey-channel-num';
+          sNum.style.color = 'var(--cvz-text-muted,#6b7280)';
+          sNum.textContent = srcPct + '%';
+          srcRow.appendChild(sNum);
+
+          if (jc) {
+            srcRow.appendChild(renderJourneyTrendBadge(src, 'source', cfg, src.domain) || _journeyBadgeSpacer());
+          }
+          card.appendChild(srcRow);
+
+          var meta = document.createElement('p');
+          meta.style.cssText = 'margin:1px 0 3px;font-size:10px;color:var(--cvz-text-muted,#9ca3af);padding-left:4px;display:flex;gap:6px;align-items:center;';
+          if (src.is_marked_competitor) {
+            var compBadge = document.createElement('span');
+            compBadge.className = 'cvz-journey-comp-badge';
+            compBadge.textContent = 'Wettbewerber';
+            compBadge.title = 'Steht in eurer Liste beobachteter Wettbewerber (unten in diesem Tab).';
+            meta.appendChild(compBadge);
+          }
+          if (src.content_type) {
+            meta.appendChild(document.createTextNode(CONTENT_TYPE_LABELS[src.content_type] || src.content_type));
+          }
+          if (meta.childNodes.length) card.appendChild(meta);
+        });
+      }
+
+      // Sichtbarer Hinweis mit Handlung
+      var hint = jc ? _journeyCardHint(scores, sources, cfg) : null;
+      if (hint) {
+        var hintEl = document.createElement('div');
+        hintEl.className = 'cvz-journey-hint cvz-journey-hint-' + hint.kind;
+        var hintText = document.createElement('span');
+        hintText.textContent = hint.text;
+        hintEl.appendChild(hintText);
+        if (hint.action) {
+          var link = document.createElement('button');
+          link.type = 'button';
+          link.className = 'cvz-journey-hint-link';
+          link.setAttribute('data-cvz-tab', 'aktionsplan');
+          link.textContent = 'Zum Aktionsplan →';
+          hintEl.appendChild(link);
+        }
+        card.appendChild(hintEl);
+      }
+
+      grid.appendChild(card);
+    });
+
+    section.appendChild(grid);
+    return section;
+  }
+
   function renderJourneyMapTab(topicId, detail) {
     var wrap = document.createElement('div');
 
@@ -9798,107 +10196,18 @@
       return wrap;
     }
 
-    wrap.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at, 'Datenstand dieses Tabs'));
-    // GEÄNDERT (25.09.2026, Kundenwunsch): Phasen-Zitierraten in diesem Tab
-    // speisen sich aus BEIDEN Kadenzen -- Content-Lücken/Quellen-Profile
-    // (monatlich) UND Prompt-Zitationen (wöchentlich, _weekly_background).
-    // Zwei getrennte Hinweise, sonst wäre einer davon falsch.
-    wrap.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Content-Lücken, Quellen)'));
+    // GEÄNDERT (02.10.2026): "Datenstand dieses Tabs" zeigte das Datum des
+    // MONATLICHEN Laufs, obwohl die Phasen-Karten alle 2 Tage neu berechnet
+    // werden. Jetzt zwei getrennte, ehrliche Angaben.
+    var _jc = data.journey_comparison || null;
+    wrap.appendChild(renderDataFreshnessNote(_jc && _jc.last_run_at, 'Zitationen zuletzt gemessen'));
     wrap.appendChild(renderNextRunNote(detail.topic, 'prompts', 'Nächster Durchlauf (Zitationen)'));
+    wrap.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at, 'Content-Lücken und Quellen zuletzt analysiert'));
+    wrap.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Content-Lücken, Quellen)'));
 
-    // Phasen-Detail-Grid: Pro Phase eigene Zitierrate + Kanal-Aufschluss + Top-Wettbewerber-Inhalt
-    var phaseSection = document.createElement('div');
-    phaseSection.className = 'cvz-section';
-    var phaseHeading = document.createElement('p');
-    phaseHeading.className = 'cvz-section-label';
-    phaseHeading.textContent = 'KI-Sichtbarkeit nach Journey-Phase';
-    phaseSection.appendChild(phaseHeading);
-    var phaseSub = document.createElement('p');
-    phaseSub.className = 'cvz-card-placeholder-text';
-    phaseSub.style.marginBottom = '12px';
-    phaseSub.textContent = 'Wie oft wird eure Domain pro Phase und KI-Kanal zitiert (0-100 %). Darunter: dominierender Wettbewerber-Content.';
-    phaseSection.appendChild(phaseSub);
-
-    var phaseGrid = document.createElement('div');
-    phaseGrid.className = 'cvz-journey-phase-grid';
-
-    PHASE_ORDER.forEach(function (phase) {
-      var scores = (data.phase_scores || {})[phase] || {};
-      var color = PHASE_COLORS[phase] || '#8b98a5';
-      var competitors = ((data.share_of_voice || {})[phase] || []);
-      var promptCount = (data.prompt_count_by_phase || {})[phase] || 0;
-
-      var card = document.createElement('div');
-      card.className = 'cvz-journey-phase-card';
-      card.style.borderTopColor = color;
-
-      var nameEl = document.createElement('p');
-      nameEl.className = 'cvz-journey-phase-name';
-      nameEl.style.color = color;
-      nameEl.textContent = PHASE_LABELS[phase] || phase;
-      if (promptCount > 0) {
-        nameEl.textContent += ' (' + promptCount + ')';
-      }
-      card.appendChild(nameEl);
-
-      // Per-channel rows
-      CHANNEL_ORDER.forEach(function (channel) {
-        var ch = scores[channel] || { score: 0, cited: 0, total: 0 };
-        var pct = Math.round(ch.score || 0);
-        var row = document.createElement('div');
-        row.className = 'cvz-journey-channel-row';
-        var lbl = document.createElement('span');
-        lbl.className = 'cvz-journey-channel-label';
-        lbl.textContent = CHANNEL_LABELS[channel] || channel;
-        row.appendChild(lbl);
-        var barWrap = document.createElement('div');
-        barWrap.className = 'cvz-journey-bar-wrap';
-        var bar = document.createElement('div');
-        bar.className = 'cvz-journey-bar-fill';
-        bar.style.width = pct + '%';
-        bar.style.backgroundColor = color;
-        barWrap.appendChild(bar);
-        row.appendChild(barWrap);
-        var num = document.createElement('span');
-        num.className = 'cvz-journey-channel-num';
-        num.textContent = pct + '%';
-        if (ch.total > 0) num.title = ch.cited + ' von ' + ch.total + ' Prompts zitiert';
-        row.appendChild(num);
-        card.appendChild(row);
-      });
-
-      // Top competitor for this phase
-      if (competitors.length > 0) {
-        var divider = document.createElement('div');
-        divider.style.cssText = 'margin:8px 0 6px;border-top:1px solid var(--cvz-border,#e5e7eb);';
-        card.appendChild(divider);
-        var compLabel = document.createElement('p');
-        compLabel.style.cssText = 'margin:0 0 4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--cvz-text-muted,#6b7280);';
-        compLabel.textContent = 'Top-Wettbewerber';
-        card.appendChild(compLabel);
-        competitors.slice(0, 2).forEach(function (comp) {
-          var compPct = Math.round(comp.citation_rate || 0);
-          var compRow = document.createElement('div');
-          compRow.className = 'cvz-journey-channel-row';
-          compRow.innerHTML =
-            '<span class="cvz-journey-channel-label" style="color:var(--cvz-text-muted,#6b7280);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(comp.domain) + '">' + escapeHtml(comp.domain) + '</span>' +
-            '<div class="cvz-journey-bar-wrap"><div class="cvz-journey-bar-fill" style="width:' + compPct + '%;background:#d1d5db"></div></div>' +
-            '<span class="cvz-journey-channel-num" style="color:var(--cvz-text-muted,#6b7280);">' + compPct + '%</span>';
-          card.appendChild(compRow);
-          if (comp.content_type) {
-            var typeEl = document.createElement('p');
-            typeEl.style.cssText = 'margin:1px 0 3px;font-size:10px;color:var(--cvz-text-muted,#9ca3af);padding-left:4px;';
-            typeEl.textContent = CONTENT_TYPE_LABELS[comp.content_type] || comp.content_type;
-            card.appendChild(typeEl);
-          }
-        });
-      }
-
-      phaseGrid.appendChild(card);
-    });
-
-    phaseSection.appendChild(phaseGrid);
-    wrap.appendChild(phaseSection);
+    // GEÄNDERT (02.10.2026): Phasen-Karten mit 28-Tage-Vergleich, Tooltips
+    // und Handlungshinweis, siehe renderJourneyPhaseSection.
+    wrap.appendChild(renderJourneyPhaseSection(data, detail));
 
     // VERSCHOBEN (20.09.2026): Die detaillierte Wettbewerber-Tabelle pro
     // Phase (mit Differenzierungs-Tipps) steht jetzt im Situation-Tab, gleich
