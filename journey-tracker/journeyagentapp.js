@@ -29,7 +29,7 @@
     // routes/contentStrategyAgent.ts und services/trackerExportBuilder.ts).
     // Wert = Domain des Node-Backends + "/api/content-strategy".
     // Steht hier null, erscheint kein Export-Button.
-    exportApiUrl: 'https://DEIN-NODE-BACKEND.up.railway.app/api/content-strategy',
+    exportApiUrl: 'https://convertlyze-agent-api-production.up.railway.app/api/content-strategy',
   };
 
   var CHANGELOG_DELETED_RETENTION_DAYS = 90;
