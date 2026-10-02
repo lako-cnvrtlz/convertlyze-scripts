@@ -241,6 +241,10 @@
     if (state.activeSubTab === 'verlauf') {
       maybeLoadVisibilityTrend(topicId);
     }
+    // NEU (02.10.2026): Änderungen und Events werden jetzt im Aktionsplan eingetragen.
+    if (state.activeSubTab === 'aktionsplan') {
+      maybeLoadContentChanges(topicId);
+    }
   }
 
   // Banner für Themen, deren Report noch nicht geöffnet werden darf.
@@ -1226,8 +1230,16 @@
     queued:     { label: 'Wartet',        className: 'cvz-status-queued' },
   };
 
+  // NEU (02.10.2026): Der Aktionsplan ist die einzige Stelle für Maßnahmen.
+  // Die früheren Empfehlungslisten (Wichtigste Handlungsfelder, Beste
+  // Content-Chancen, fehlende Infos für den Wettbewerbsvergleich,
+  // Content-Lücken) fließen als Signale in den Aktionsplan ein
+  // (action_plan.py: _load_plan_signals) und werden nicht mehr separat
+  // angezeigt. Auf true setzen, um die alten Listen wieder einzublenden.
+  var SHOW_LEGACY_RECOMMENDATIONS = false;
+
   var OPPORTUNITY_TYPE_LABELS = {
-    high_demand_low_visibility:      'Hohe Nachfrage, wenig Sichtbarkeit',
+    high_demand_low_visibility:      'Suchnachfrage da, KI zitiert euch kaum',
     competitor_citation:             'Wettbewerber wird zitiert',
     google_visible_ai_invisible:     'Google sichtbar, KI unsichtbar',
     ai_visible_competitor_dominates: 'KI-sichtbar, Wettbewerber dominiert',
@@ -1843,6 +1855,10 @@
       }
       if (newTab === 'verlauf' && state.activeView === 'topic-detail') {
         maybeLoadVisibilityTrend(state.activeTopicId);
+      }
+      // NEU (02.10.2026): Änderungen und Events stehen jetzt im Aktionsplan.
+      if (newTab === 'aktionsplan' && state.activeView === 'topic-detail') {
+        maybeLoadContentChanges(state.activeTopicId);
       }
       // NEU (17.09.2026): Aktionsplan-Tab: Cache-Busting.
       // Re-fetch NUR wenn action_plan komplett fehlt ODER wenn noch keine Items vorhanden
@@ -7673,13 +7689,16 @@
 
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
-    heading.textContent = 'Content-Änderungen & Events';
+    // GEÄNDERT (02.10.2026): steht jetzt im Aktionsplan-Tab (zentrale Stelle
+    // für alles, was ihr tut). Erledigte Plan-Maßnahmen landen automatisch hier.
+    heading.textContent = 'Umgesetzte Maßnahmen und Ereignisse';
     section.appendChild(heading);
 
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '12px';
-    sub.textContent = 'Halte fest, wann ihr was geändert habt, so könnt ihr später sehen, ob sich die Sichtbarkeit danach verändert hat.';
+    sub.textContent = 'Tragt ein, was ihr umgesetzt habt oder was passiert ist, auch Maßnahmen außerhalb des Plans (z. B. Relaunch, Kampagne, Pressebericht). ' +
+      'Als erledigt markierte Maßnahmen aus dem Plan erscheinen hier automatisch. Im Tab „Verlauf & Änderungen“ seht ihr, wie sich die Sichtbarkeit danach entwickelt hat.';
     section.appendChild(sub);
 
     // Form
@@ -8178,7 +8197,26 @@
 
     // Fehlende Informationen für einen vollständigen Vergleich
     var blockers = k.comparison_blockers || [];
-    if (blockers.length) {
+    // GEÄNDERT (02.10.2026): fehlende Infos stehen als Maßnahme (KI-Wissen)
+    // im Aktionsplan, hier nur noch ein Verweis.
+    if (!SHOW_LEGACY_RECOMMENDATIONS && blockers.length) {
+      var blockNote = document.createElement('p');
+      blockNote.className = 'cvz-card-placeholder-text';
+      blockNote.style.marginTop = '12px';
+      blockNote.appendChild(document.createTextNode(
+        blockers.length + (blockers.length === 1 ? ' Information fehlt' : ' Informationen fehlen') +
+        ' noch, damit ChatGPT und Gemini euch vollständig mit Wettbewerbern vergleichen können. Was wo veröffentlicht werden sollte, steht im Aktionsplan. '
+      ));
+      var blockLink = document.createElement('button');
+      blockLink.type = 'button';
+      blockLink.className = 'cvz-journey-hint-link';
+      blockLink.style.display = 'inline';
+      blockLink.setAttribute('data-cvz-tab', 'aktionsplan');
+      blockLink.textContent = 'Zum Aktionsplan \u2192';
+      blockNote.appendChild(blockLink);
+      section.appendChild(blockNote);
+    }
+    if (SHOW_LEGACY_RECOMMENDATIONS && blockers.length) {
       var blockLabel = document.createElement('p');
       blockLabel.className = 'cvz-changelog-guided-label';
       blockLabel.style.marginTop = '16px';
@@ -9483,6 +9521,76 @@
     return section;
   }
 
+  // NEU (02.10.2026): Die 3 wichtigsten offenen Maßnahmen aus dem Aktionsplan.
+  function renderTopActionsTeaser(detail) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Die wichtigsten Maßnahmen';
+    head.appendChild(heading);
+    head.appendChild(makeTip(
+      'Die drei offenen Maßnahmen mit der höchsten Priorität aus eurem Aktionsplan. ' +
+      'Dort seht ihr alle Maßnahmen mit Begründung und Daten, könnt sie abhaken und eigene Maßnahmen eintragen.'
+    ));
+    section.appendChild(head);
+
+    var ap = detail.action_plan || {};
+    var done = ap.completed_item_indices || [];
+    var open = (ap.items || []).map(function (it, i) { return { it: it, i: i }; })
+      .filter(function (x) { return done.indexOf(x.i) === -1; })
+      .sort(function (a, b) { return (a.it.priority || 99) - (b.it.priority || 99); })
+      .slice(0, 3);
+
+    var card = document.createElement('div');
+    card.className = 'cvz-card';
+    card.style.cssText = 'padding:4px 16px 12px;';
+    if (!open.length) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.style.margin = '12px 0 4px';
+      empty.textContent = (ap.items && ap.items.length)
+        ? 'Alle Maßnahmen im Aktionsplan sind erledigt. Neue Maßnahmen kommen mit dem nächsten Analyse-Lauf.'
+        : 'Noch kein Aktionsplan vorhanden.';
+      card.appendChild(empty);
+    }
+    var PH = { exploration: 'Erforschung', evaluation: 'Bewertung', comparison: 'Vergleich', decision: 'Entscheidung', alle_phasen: 'Alle Phasen' };
+    var IMP = { hoch: '#de5b50', mittel: '#c98e2a', niedrig: '#4a5568' };
+    open.forEach(function (x, n) {
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:10px;align-items:baseline;padding:10px 0;' + (n ? 'border-top:1px solid var(--cvz-border,#232b36);' : '');
+      var num = document.createElement('span');
+      num.style.cssText = 'flex:0 0 auto;font-size:12px;font-weight:700;color:' + (IMP[(x.it.impact || '').toLowerCase()] || '#8b98a5') + ';';
+      num.textContent = (n + 1) + '.';
+      var txt = document.createElement('div');
+      txt.style.cssText = 'flex:1;min-width:0;';
+      var title = document.createElement('p');
+      title.style.cssText = 'margin:0;font-size:14px;font-weight:600;color:var(--cvz-text,#e6edf3);';
+      title.textContent = x.it.title || '';
+      var meta = document.createElement('p');
+      meta.style.cssText = 'margin:2px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+      meta.textContent = (PH[x.it.phase] || 'Alle Phasen') + (x.it.impact ? ', Impact ' + x.it.impact : '');
+      txt.appendChild(title);
+      txt.appendChild(meta);
+      row.appendChild(num);
+      row.appendChild(txt);
+      card.appendChild(row);
+    });
+    var link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'cvz-journey-hint-link';
+    link.setAttribute('data-cvz-tab', 'aktionsplan');
+    link.textContent = (ap.items && ap.items.length > open.length)
+      ? 'Alle ' + ap.items.length + ' Maßnahmen im Aktionsplan \u2192'
+      : 'Zum Aktionsplan \u2192';
+    card.appendChild(link);
+    section.appendChild(card);
+    return section;
+  }
+
   function renderSituationTab(topicId, detail) {
     var wrap = document.createElement('div');
 
@@ -9539,14 +9647,14 @@
     wrap.appendChild(renderJourneyShareOfVoice(dashData && dashData.share_of_voice));
 
     // Beste Content-Chancen
-    var bestChances = renderBestContentChancesSection(detail.best_content_chances, detail.topic);
+    var bestChances = SHOW_LEGACY_RECOMMENDATIONS ? renderBestContentChancesSection(detail.best_content_chances, detail.topic) : null;
     if (bestChances) wrap.appendChild(bestChances);
 
     // Top Opportunities (max 3, kompakt)
     var openOpps = (detail.opportunities || []).filter(function (o) {
       return o.status === 'new' || o.status === 'reviewed';
     });
-    if (openOpps.length > 0) {
+    if (SHOW_LEGACY_RECOMMENDATIONS && openOpps.length > 0) {
       var oppSection = document.createElement('div');
       oppSection.className = 'cvz-section';
 
@@ -9585,7 +9693,7 @@
       // Fallback-Empfehlungen pro Opportunity-Typ (wenn content_recommendation noch leer)
       var OPP_FALLBACK_RECOMMENDATION = {
         'near_miss_ranking': 'Content gezielt auf diese Keywords optimieren: Meta-Title/H1 schärfen, Suchintention prüfen (informationell vs. transaktional), interne Verlinkung stärken. Ziel: von Position 15+ in die Top 10.',
-        'high_demand_low_visibility': 'Dedizierten Content für diese Keywords erstellen oder bestehende Seiten ausbauen. Format: FAQ, Ratgeber oder Vergleichsseite je nach Suchintention.',
+        'high_demand_low_visibility': 'Eine Seite erstellen oder ausbauen, die die Suchbegriffe und die KI-Fragen darunter direkt beantwortet. Format je nach Frage: FAQ, Ratgeber oder Vergleichsseite.',
         'google_visible_ai_invisible': 'Bestehende Seiten so ausbauen, dass KI-Systeme sie als zitierwürdige Quelle einordnen: klare Autorenschaft, konkrete Aussagen mit Zahlen, strukturierte Antworten auf die Fragen hinter dem Keyword.',
         'competitor_citation': 'Analysieren, welche Inhalte die häufig zitierten Domains zu diesem Thema haben, und ähnliche Inhalte mit klarer Differenzierung erstellen (eigene Daten, Expertise, Perspektive).',
         'ai_visible_competitor_dominates': 'Eigene Leitseite zum Thema erstellen: strukturierte Antwort auf die Top-Fragen, mit nachprüfbaren Fakten und klarer Autorenschaft, damit KI-Systeme sie als Alternative zitieren.',
@@ -9721,7 +9829,10 @@
             var kwHr = document.createElement('tr');
             var kwCols = [];
             var first = sd.keywords[0];
-            if (first.search_volume !== undefined) kwCols = [['Keyword', ''], ['Suchvolumen/Monat', 'width:140px;text-align:right;']];
+            // GEÄNDERT (02.10.2026): "Google-Suchbegriff" statt "Keyword", damit
+            // klar ist, dass diese Zahlen aus Google kommen und die Fragen
+            // darunter (sd.prompts) aus den KI-Antworten.
+            if (first.search_volume !== undefined) kwCols = [['Google-Suchbegriff', ''], ['Suchvolumen/Monat', 'width:140px;text-align:right;']];
             else if (first.organic_rank !== undefined) kwCols = [['Keyword', ''], ['Google-Position', 'width:130px;text-align:right;']];
             else kwCols = [['Keyword', ''], ['Impressionen', 'width:100px;text-align:right;'], ['Position', 'width:80px;text-align:right;']];
             kwCols.forEach(function (c) {
@@ -9758,6 +9869,30 @@
             });
             kwTable.appendChild(kwBody);
             expContent.appendChild(kwTable);
+
+            // NEU (02.10.2026): konkrete KI-Fragen ohne eigenes Zitat
+            // (opportunities.py, high_demand_low_visibility). Verbindet die
+            // Google-Nachfrage oben mit der KI-Sichtbarkeit.
+            if (sd.prompts && sd.prompts.length > 0) {
+              var pHead = document.createElement('p');
+              pHead.style.cssText = 'margin:14px 0 4px;padding:0 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#8b98a5);';
+              pHead.textContent = 'KI-Fragen zum Thema, bei denen ihr nicht zitiert werdet';
+              expContent.appendChild(pHead);
+              var pList = document.createElement('ul');
+              pList.style.cssText = 'margin:0;padding:0 8px 0 24px;font-size:12px;line-height:1.6;max-width:560px;';
+              sd.prompts.forEach(function (p) {
+                var li = document.createElement('li');
+                li.textContent = p.prompt || '';
+                pList.appendChild(li);
+              });
+              expContent.appendChild(pList);
+              if (sd.questions_total) {
+                var pNote = document.createElement('p');
+                pNote.style.cssText = 'margin:6px 0 0;padding:0 8px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+                pNote.textContent = 'Insgesamt zitiert bei ' + (sd.questions_cited || 0) + ' von ' + sd.questions_total + ' Fragen. Alle Fragen mit Ergebnis seht ihr im Tab „Daten“.';
+                expContent.appendChild(pNote);
+              }
+            }
 
           } else if ((sd.cited_domains || sd.competitor_domains_cited) && (sd.cited_domains || sd.competitor_domains_cited).length > 0) {
             // Domains-Liste (competitor_citation, ai_visible_competitor_dominates)
@@ -9799,6 +9934,10 @@
     // Tab tatsächlich angezeigt.
     var knowledgeSection = renderKnowledgeSection(detail);
     if (knowledgeSection) wrap.appendChild(knowledgeSection);
+
+    // NEU (02.10.2026): Statt eigener Empfehlungslisten ein kurzer Verweis
+    // auf die wichtigsten offenen Maßnahmen im Aktionsplan.
+    wrap.appendChild(renderTopActionsTeaser(detail));
 
     return wrap;
   }
@@ -10218,7 +10357,8 @@
     // statt hier hinter mehreren anderen Abschnitten versteckt.
 
     // Content-Lücken aus Gap-Analyse (GEAENDERT 17.09.2026: topicId + Phase-Filter)
-    wrap.appendChild(renderContentGapsSection(detail.content_gaps, topicId));
+    // GEÄNDERT (02.10.2026): Content-Lücken fließen in den Aktionsplan ein.
+    if (SHOW_LEGACY_RECOMMENDATIONS) wrap.appendChild(renderContentGapsSection(detail.content_gaps, topicId));
 
     // Quellen-Analyse (GEAENDERT 17.09.2026: phase-gruppiert via share_of_voice)
     var _sov = data.share_of_voice || {};
@@ -10421,6 +10561,9 @@
       google_ranking:  'Google-Ranking',
       wettbewerb:      'Wettbewerb',
       content_luecke:  'Content-Lücke',
+      // NEU (02.10.2026): fehlten bisher, wurden roh angezeigt.
+      ki_wissen:         'KI-Wissen',
+      wirkungskontrolle: 'Wirkungskontrolle',
     };
     var IMPACT_COLOR_MAP = { hoch: '#de5b50', mittel: '#c98e2a', niedrig: '#4a5568' };
     var IMPACT_LABEL_MAP = { hoch: 'Hoch', mittel: 'Mittel', niedrig: 'Niedrig' };
@@ -10493,6 +10636,8 @@
         emptyWrap.appendChild(emptyTxt);
         emptyWrap.appendChild(genBtn);
         wrap.appendChild(emptyWrap);
+        // NEU (02.10.2026): Änderungen auch ohne Plan eintragbar.
+        wrap.appendChild(_renderAktionsplanChangesBlock(detail));
         return wrap; // früher return, emptyTxt wurde bereits angehängt
       }
       emptyWrap.appendChild(emptyTxt);
@@ -10504,7 +10649,18 @@
         introEl.className = 'cvz-card-placeholder-text';
         introEl.style.cssText = 'margin-bottom:20px;font-size:12px;';
         var genDate = new Date(ap.generated_at);
-        introEl.textContent = 'Zuletzt generiert: ' + genDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ', ' + genDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr. ' + items.length + ' Massnahmen priorisiert nach Phase und Impact.';
+        introEl.textContent = 'Zuletzt generiert: ' + genDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ', ' + genDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr. ' + items.length + ' Maßnahmen priorisiert nach Phase und Impact. ';
+        // NEU (02.10.2026): Sprung zum Eintragen eigener Maßnahmen und Ereignisse.
+        var jumpBtn = document.createElement('button');
+        jumpBtn.type = 'button';
+        jumpBtn.className = 'cvz-journey-hint-link';
+        jumpBtn.style.display = 'inline';
+        jumpBtn.textContent = 'Eigene Maßnahme oder Ereignis eintragen \u2193';
+        jumpBtn.addEventListener('click', function () {
+          var target = document.getElementById('cvz-aktionsplan-changes');
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+        introEl.appendChild(jumpBtn);
         wrap.appendChild(introEl);
       }
 
@@ -10593,7 +10749,7 @@
           doneBtn.title = isCompleted ? 'Erledigt-Markierung aufheben' : 'Item als erledigt markieren';
 
           // Closure: Klick-Handler mit aktuellem Kontext
-          (function(btn, topicId, itemOrigIdx, itemTitle, itemPhase, itemIsCompleted, apObj) {
+          (function(btn, topicId, itemOrigIdx, itemTitle, itemPhase, itemIsCompleted, apObj, itemKey) {
             btn.addEventListener('click', function(e) {
               e.stopPropagation();
               btn.disabled = true;
@@ -10607,6 +10763,8 @@
                   item_title: itemTitle || ('Item #' + (itemOrigIdx + 1)),
                   item_phase: itemPhase || 'alle_phasen',
                   complete: newComplete,
+                  // NEU (02.10.2026): stabiler Schlüssel, siehe main.py ToggleActionPlanItemRequest
+                  item_key: itemKey || null,
                 },
               }).then(function(resp) {
                 // Cache aktualisieren
@@ -10643,7 +10801,7 @@
                 btn.style.opacity = '1';
               });
             });
-          })(doneBtn, state.activeTopicId, origIdx, item.title, item.phase, isCompleted, ap);
+          })(doneBtn, state.activeTopicId, origIdx, item.title, item.phase, isCompleted, ap, item.item_key);
 
           hdr.appendChild(doneBtn);
           card.appendChild(hdr);
@@ -10658,6 +10816,26 @@
             titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:700;line-height:1.4;color:var(--cvz-text-muted,#8b98a5);' + (isCompleted ? 'text-decoration:line-through;' : '');
             titleEl.textContent = item.title;
             body.appendChild(titleEl);
+          }
+
+          // NEU (02.10.2026): Worauf die Maßnahme beruht (Handlungsfeld,
+          // Content-Lücke). Diese Befunde standen früher als eigene Listen im
+          // Situation- und Journey-Tab, jetzt nur noch hier.
+          if (item.sources && item.sources.length) {
+            var srcWrap = document.createElement('div');
+            srcWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:-6px;';
+            var srcLbl = document.createElement('span');
+            srcLbl.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--cvz-text-muted,#8b98a5);';
+            srcLbl.textContent = 'Grundlage';
+            srcWrap.appendChild(srcLbl);
+            item.sources.forEach(function (src) {
+              var chip = document.createElement('span');
+              chip.style.cssText = 'font-size:11px;padding:2px 8px;border:1px solid var(--cvz-border,#232b36);color:var(--cvz-text,#e6edf3);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+              chip.textContent = (src.kind ? src.kind + ': ' : '') + (src.label || '');
+              chip.title = chip.textContent;
+              srcWrap.appendChild(chip);
+            });
+            body.appendChild(srcWrap);
           }
 
           // ---- SITUATION ----
@@ -10807,7 +10985,19 @@
     var outreachSection = renderOutreachTargetsSection(detail);
     if (outreachSection) wrap.appendChild(outreachSection);
 
+    // NEU (02.10.2026): Umgesetzte Maßnahmen und Ereignisse eintragen,
+    // vorher nur im Tab "Verlauf & Änderungen".
+    wrap.appendChild(_renderAktionsplanChangesBlock(detail));
+
     return wrap;
+  }
+
+  function _renderAktionsplanChangesBlock(detail) {
+    var block = document.createElement('div');
+    block.id = 'cvz-aktionsplan-changes';
+    block.style.cssText = 'margin-top:32px;padding-top:20px;border-top:1px solid var(--cvz-border,#232b36);';
+    block.appendChild(renderContentChangesSection(state.activeTopicId, detail.search_queries, detail.prompts));
+    return block;
   }
 
   // ─── VERLAUF ──────────────────────────────────────────────────────────────
@@ -10820,7 +11010,23 @@
     // jetzt ganz oben im Tab (vorher stand es hinter Wirkungs-Analyse, Chart
     // und Chronik, dadurch war es kaum auffindbar, obwohl es der einzige
     // Ort ist, an dem man aktiv etwas eintragen kann statt nur zu lesen).
-    wrap.appendChild(renderContentChangesSection(topicId, detail.search_queries, detail.prompts));
+    // GEÄNDERT (02.10.2026): Das Formular steht jetzt im Aktionsplan (eine
+    // Stelle für alles, was ihr tut). Hier nur noch ein Verweis dorthin.
+    var changesHint = document.createElement('div');
+    changesHint.className = 'cvz-card';
+    changesHint.style.cssText = 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;margin-bottom:20px;';
+    var changesHintTxt = document.createElement('span');
+    changesHintTxt.style.cssText = 'flex:1;min-width:220px;font-size:13px;color:var(--cvz-text-muted,#8b98a5);';
+    changesHintTxt.textContent = 'Umgesetzte Maßnahmen und Ereignisse tragt ihr im Aktionsplan ein. Hier seht ihr, wie sich die Sichtbarkeit danach entwickelt hat.';
+    var changesHintBtn = document.createElement('button');
+    changesHintBtn.type = 'button';
+    changesHintBtn.className = 'cvz-journey-hint-link';
+    changesHintBtn.style.marginTop = '0';
+    changesHintBtn.setAttribute('data-cvz-tab', 'aktionsplan');
+    changesHintBtn.textContent = 'Zum Aktionsplan →';
+    changesHint.appendChild(changesHintTxt);
+    changesHint.appendChild(changesHintBtn);
+    wrap.appendChild(changesHint);
 
     // NEU (20.09.2026): Bereits umgesetzte Änderungen und ihre gemessene
     // Wirkung (change_history.py), war bisher nur als Funktion vorhanden,
