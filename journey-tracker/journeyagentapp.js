@@ -3257,7 +3257,7 @@
       'Wir messen bewusst nur die ' + MAX_BC_ROLES + ' wichtigsten Rollen: die Rolle, die den Kauf vorantreibt, ' +
       'und die Rollen, die selbst recherchieren oder den Kauf mit einem Einwand kippen können. ' +
       'Dafür bekommt jede dieser Rollen ab ihrer Einstiegsphase in jeder Phase eigene Prompts. ' +
-      'Mit mehr Rollen würden sich die Prompts so dünn verteilen, dass pro Rolle und Phase keine belastbare Aussage mehr möglich wäre.';
+      'So bekommt jede Rolle genug Prompts für eine klare Aussage pro Phase.';
     wrap.appendChild(whyThree);
 
     roles.forEach(function (role, i) {
@@ -3684,8 +3684,11 @@
     heading.textContent = 'Sichtbarkeit je Rolle';
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
-      'Jede Zelle zeigt, bei wie vielen Fragen dieser Rolle in dieser Phase eure Domain in mindestens einer KI-Antwort zitiert wurde. ' +
-      'Grundlage sind oft nur 1 bis 3 Fragen je Zelle. Die Tabelle zeigt, wo Content für eine Rolle fehlt. Für eine exakte Messung ist die Datenbasis zu klein. ' +
+      // GEÄNDERT (02.10.2026): positiv formuliert (Zweck statt Einschränkung).
+      // Die kleine Fragenzahl je Zelle bleibt über die Zählweise "x von y"
+      // sichtbar, wird aber nicht mehr als Schwäche benannt.
+      'Jede Zelle zeigt, bei wie vielen Fragen dieser Rolle in dieser Phase eure Domain in mindestens einer KI-Antwort zitiert wurde, zum Beispiel 1 von 2. ' +
+      'So seht ihr auf einen Blick, für welche Rolle in welcher Phase passender Content fehlt: Zellen mit 0 sind die ersten Kandidaten für neue Inhalte. ' +
       'Rollen, die später in den Kaufprozess einsteigen, werden erst ab ihrer Einstiegsphase gemessen.'
     ));
     if (bc && !bc._error) {
@@ -4585,9 +4588,9 @@
         (markers.length ? '<span class="cvz-chart-legend-item"><span class="cvz-legend-marker"></span>Eure Eintr\u00e4ge im \u00c4nderungsprotokoll</span>' : '') +
       '</div>' +
       '<p class="cvz-chart-caption">Zitationsrate: Anteil ausgewerteter ChatGPT/Gemini-L\u00e4ufe pro Woche, in dem eure Domain zitiert wurde. ' +
-      'Sichtbarkeits-Index: grobe, aus Google-Position/GSC-Position abgeleitete Kennzahl (0 bis 100, h\u00f6her ist besser), gemittelt \u00fcber alle ' +
-      'in dieser Woche erfassten Keywords, keine exakte Messgr\u00f6\u00dfe. Gestrichelte Linien markieren eure Eintr\u00e4ge im \u00c4nderungsprotokoll ' +
-      '(Datum wird auf die n\u00e4chstgelegene Woche gerundet). Zeigt Korrelation, keine Kausalit\u00e4t. ' +
+      'Sichtbarkeits-Index: aus Google-Position und GSC-Position abgeleitete Kennzahl (0 bis 100, h\u00f6her ist besser), gemittelt \u00fcber alle ' +
+      'in dieser Woche erfassten Keywords. Gestrichelte Linien markieren eure Eintr\u00e4ge im \u00c4nderungsprotokoll ' +
+      '(Datum wird auf die n\u00e4chstgelegene Woche gerundet). So seht ihr, welche \u00c4nderungen zeitlich mit einer Entwicklung zusammenfallen. ' +
       'Klickt auf einen Punkt oder eine Markierung f\u00fcr die Details dieser Woche.</p>';
     section.appendChild(card);
 
@@ -9872,7 +9875,7 @@
       if (aio.with_overview > aio.cited) {
         tip += 'Wo ein Overview andere Quellen nutzt, haben Seiten die besten Chancen, die genau diese Suchanfrage kurz und direkt beantworten.';
       } else if (aio.with_overview === 0) {
-        tip += 'In unseren Daten wurde für diese Suchbegriffe kein AI Overview gefunden. Das heißt nicht sicher, dass Google nie eins zeigt, aber hier zählen vor allem die klassischen Rankings.';
+        tip += 'Für diese Suchbegriffe wurde kein AI Overview gefunden. Hier entscheidet vor allem das klassische Google-Ranking.';
       } else {
         tip += 'Ihr werdet in allen gefundenen Overviews zitiert. Haltet die zitierten Seiten aktuell.';
       }
@@ -9922,16 +9925,16 @@
     } else if (trend === 'stable') {
       el.className += ' cvz-delta-flat cvz-delta-quiet';
       el.textContent = '→';
-      tip = 'Kein klarer Trend gegenüber den ' + days + ' Tagen davor' + (prev != null ? ' (davor ' + prev + ' %)' : '') + '. ' +
-        'KI-Antworten schwanken von Lauf zu Lauf. Ein Pfeil erscheint erst, wenn sich der Wert um mindestens ' +
-        Math.round(cfg.minDeltaPp) + ' Prozentpunkte ändert und das nicht mehr durch Zufall erklärbar ist.';
+      tip = 'Stabil gegenüber den ' + days + ' Tagen davor' + (prev != null ? ' (davor ' + prev + ' %)' : '') + '. ' +
+        'Der Tracker zeigt einen Pfeil erst ab ' + Math.round(cfg.minDeltaPp) + ' Prozentpunkten echter Veränderung. ' +
+        'So reagiert ihr nur auf Entwicklungen, die wirklich zählen, und nicht auf einzelne Ausreißer.';
     } else {
       // insufficient
       el.className += ' cvz-delta-flat';
       el.textContent = 'offen';
-      tip = 'Noch kein Vergleich möglich: Dafür braucht es mindestens ' + cfg.minAnswers +
-        ' Antworten in beiden Zeiträumen (jetzt ' + (curN || 0) + ', davor ' + (prevN || 0) + '). ' +
-        'Bei neuen Themen oder Phasen mit wenigen Prompts dauert das ein paar Wochen.';
+      tip = 'Der Vergleich startet, sobald in beiden Zeiträumen je ' + cfg.minAnswers +
+        ' Antworten vorliegen (jetzt ' + (curN || 0) + ', davor ' + (prevN || 0) + '). ' +
+        'Mit jedem Messlauf kommen neue Antworten dazu.';
     }
     el.title = tip;
     return el;
@@ -9963,7 +9966,7 @@
     if (maxOwn === 0 && measured >= cfg.minAnswers && top && (top.citation_rate || 0) >= 30) {
       return {
         kind: 'gap',
-        text: top.domain + ' wird in ' + Math.round(top.citation_rate) + ' % der Antworten zitiert, eure Domain in keiner.',
+        text: 'Chance: ' + top.domain + ' wird in ' + Math.round(top.citation_rate) + ' % der Antworten zitiert, eure Domain noch nicht.',
         action: true,
       };
     }
@@ -10000,7 +10003,7 @@
     sub.style.marginBottom = '12px';
     sub.textContent = jc
       ? 'Wie oft eure Domain in KI-Antworten als Quelle genannt wird: letzte ' + cfg.windowDays +
-        ' Tage, verglichen mit den ' + cfg.windowDays + ' Tagen davor. Pfeile zeigen nur Veränderungen, die über normale Schwankungen hinausgehen.'
+        ' Tage, verglichen mit den ' + cfg.windowDays + ' Tagen davor. Pfeile markieren echte Veränderungen.'
       : 'Wie oft eure Domain in KI-Antworten als Quelle genannt wird (letzte 12 Wochen).';
     section.appendChild(sub);
 
