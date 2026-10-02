@@ -605,6 +605,9 @@
             top_serp_results: q.top_serp_results || null,
             serp_features: q.serp_features || null,
             serp_checked_at: q.serp_checked_at || null,
+            // NEU (01.10.2026): AI-Overview-Status durchreichen.
+            ai_overview_status: q.ai_overview_status || null,
+            ai_overview_label: q.ai_overview_label || null,
             // NEU (16.09.2026): URL der rankenden Seite durchreichen.
             // Verschiedene Backend-Feldnamen probieren (gsc_page, page_url, top_url).
             page_url: q.page_url || q.gsc_page || q.top_url || q.ranking_url || null,
@@ -1413,6 +1416,28 @@
   // Frage schon direkt, ohne Klick", nur zur Einordnung, keine
   // abschließende Liste aller möglichen DataForSEO-Typen.
   var SERP_ZERO_CLICK_FEATURE_TYPES = ['featured_snippet', 'answer_box', 'ai_overview', 'knowledge_graph'];
+
+  // NEU (01.10.2026): Wird für dieses Keyword ein Google AI Overview
+  // ausgespielt? Rein informativ. Das Backend liefert ai_overview_status
+  // ("yes"/"no"/"unchecked") und ai_overview_label mit (siehe main.py /
+  // run_topic.py: get_ai_overview_status). Fallback auf dieselbe Logik
+  // im Browser, falls das Backend die Felder (noch) nicht mitschickt.
+  function getAiOverviewStatus(row) {
+    if (row.ai_overview_status && row.ai_overview_label) {
+      return { status: row.ai_overview_status, label: row.ai_overview_label };
+    }
+    if (!row.serp_checked_at) return { status: 'unchecked', label: 'Noch nicht gepr\u00fcft' };
+    if ((row.serp_features || []).indexOf('ai_overview') !== -1) return { status: 'yes', label: 'Ja' };
+    return { status: 'no', label: 'Nein' };
+  }
+
+  function renderAiOverviewCell(row) {
+    var aio = getAiOverviewStatus(row);
+    var style = aio.status === 'yes'
+      ? 'font-weight:600;color:var(--cvz-text,inherit);'
+      : 'color:var(--cvz-text-muted,#8b98a5);';
+    return '<span style="' + style + 'white-space:nowrap;">' + escapeHtml(aio.label) + '</span>';
+  }
 
   // Gemeinsam genutzt von renderKeywordExpansion (Keywords-Tab) und
   // renderGscRowExpansion (GSC-Performance-Tab), dieselbe Datenquelle
@@ -2390,7 +2415,7 @@
     var confirmTitle = archive ? 'Thema deaktivieren?' : 'Thema wieder aktivieren?';
     var confirmBody = archive
       ? 'Es werden dann keine neuen Datenläufe mehr gestartet, alle bisherigen Daten bleiben aber sichtbar. Du kannst das Thema jederzeit wieder aktivieren.'
-      : 'Ab dem nächsten wöchentlichen Lauf werden wieder neue Daten gesammelt.';
+      : 'Ab dem nächsten Datenlauf werden wieder neue Daten gesammelt.';
     var confirmed = await showCvzConfirm(confirmBody, {
       title: confirmTitle,
       confirmLabel: archive ? 'Deaktivieren' : 'Aktivieren',
@@ -4201,9 +4226,14 @@
         // Freshness-Note bleibt trotzdem korrekt monatlich, weil sie sich
         // nur auf Keywords/GSC bezieht -- die separate Prompt-Kadenz zeigt
         // der zweite renderNextRunNote-Aufruf direkt darunter.
-        tabContent.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at));
+        // GEÄNDERT (02.10.2026): Prompts laufen seit 30.09.2026 alle
+        // WEEKLY_COLLECTION_INTERVAL_DAYS Tage (Standard 2), nicht mehr
+        // wöchentlich. Zwei getrennte "zuletzt"-Hinweise, weil "Datenstand"
+        // allein (monatlicher Lauf) die neueren Prompt-Läufe verschwiegen hat.
+        tabContent.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at, 'Keywords und GSC zuletzt aktualisiert'));
         tabContent.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Keywords, GSC)'));
-        tabContent.appendChild(renderNextRunNote(detail.topic, 7, 'Nächster Durchlauf (Prompts)'));
+        tabContent.appendChild(renderDataFreshnessNote(detail.topic.last_weekly_collection_at, 'KI-Antworten zuletzt gemessen'));
+        tabContent.appendChild(renderNextRunNote(detail.topic, 'prompts', 'Nächster Durchlauf (Prompts)'));
         // Content-Änderungen (mit verlinkten Keywords/Prompts) als Marker aufbereiten
         var _ccMarkers = (state.contentChangesCache[state.activeTopicId] || []).map(function (ch) {
           return {
@@ -4674,9 +4704,12 @@
       // Zusammenfassung (inkl. Meistzitierte Quellen, Stärkster Wettbewerber,
       // Je Phase, Keyword-Chancen) stammt.
       (topic.last_monthly_collection_at
-        ? '<p class="cvz-freshness-note">Datenstand: ' + escapeHtml(formatRelativeTime(topic.last_monthly_collection_at)) +
-          ' (' + escapeHtml(formatShortDate(topic.last_monthly_collection_at) || '') + ')</p>'
-        : '<p class="cvz-freshness-note">Datenstand: noch kein abgeschlossener Analyse-Lauf.</p>') +
+        // GEÄNDERT (02.10.2026): "Zusammenfassung vom" statt "Datenstand",
+        // weil die Zusammenfassung nur monatlich entsteht, die Prompt-Daten
+        // darunter aber alle 2 Tage aktualisiert werden.
+        ? '<p class="cvz-freshness-note">Zusammenfassung vom ' + escapeHtml(formatShortDate(topic.last_monthly_collection_at) || '') +
+          ' (' + escapeHtml(formatRelativeTime(topic.last_monthly_collection_at)) + ', wird monatlich aktualisiert)</p>'
+        : '<p class="cvz-freshness-note">Zusammenfassung: noch kein abgeschlossener Analyse-Lauf.</p>') +
       archivedNotice +
       '<p class="cvz-summary-text">' + escapeHtml(topic.latest_summary || 'Noch keine Zusammenfassung vorhanden.') + '</p>' +
       renderSummaryDetailSections(topic.summary_detail);
@@ -5978,13 +6011,16 @@
     // die alten 230px) lief in die Quelle-Spalte hinein. min-width sorgt
     // dafür, dass auf schmalen Bildschirmen horizontal gescrollt wird,
     // statt dass Spalten zusammengequetscht werden.
-    table.style.minWidth = '920px';
+    // GEÄNDERT (01.10.2026): 920px -> 1050px wegen neuer Spalte "AI Overview".
+    table.style.minWidth = '1050px';
     table.innerHTML =
       '<thead><tr>' +
         '<th style="width:26px;"></th>' +
         '<th style="width:340px;">Keyword</th>' +
         '<th style="width:140px;text-align:right;">Suchvolumen/Monat</th>' +
         '<th style="width:300px;padding-left:24px;">Einschätzung</th>' +
+        // NEU (01.10.2026): AI Overview ja/nein/noch nicht geprüft
+        '<th style="width:130px;">AI Overview</th>' +
         '<th>Quelle</th>' +
         '<th style="width:44px;"></th>' +
       '</tr></thead>';
@@ -6031,6 +6067,7 @@
               escapeHtml(kw.keyword_status_label) + '</span>'
             : '') +
         '</td>' +
+        '<td>' + renderAiOverviewCell(kw) + '</td>' +
         '<td style="color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(KEYWORD_SOURCE_LABELS[kw.source] || kw.source) + '</td>' +
         '<td style="white-space:nowrap;text-align:right;">' +
           (kw.id ? '<button type="button" class="cvz-prompt-delete-btn" data-cvz-keyword-deactivate="' + kw.id + '" aria-label="Keyword deaktivieren" title="Keyword deaktivieren">\u00d7</button>' : '') +
@@ -6040,7 +6077,7 @@
       if (canExpand && state.expandedKeywordId === rowId) {
         var expTr = document.createElement('tr');
         var expTd = document.createElement('td');
-        expTd.colSpan = 6;
+        expTd.colSpan = 7;
         expTd.appendChild(renderKeywordExpansion(kw, rowId, changelogEntries));
         expTr.appendChild(expTd);
         tbody.appendChild(expTr);
@@ -7044,7 +7081,7 @@
     // aus search_queries, gespeichert via save_gsc_near_miss in run_topic.py).
     var table = document.createElement('table');
     table.className = 'cvz-table';
-    table.innerHTML = '<thead><tr><th style="width:26px;"></th><th>Suchanfrage</th><th>Rankende URL</th><th>Klicks</th><th>Impressionen</th><th>CTR</th><th>Position</th><th>Verkn\u00fcpfte \u00c4nderungen</th><th></th></tr></thead>';
+    table.innerHTML = '<thead><tr><th style="width:26px;"></th><th>Suchanfrage</th><th>Rankende URL</th><th>Klicks</th><th>Impressionen</th><th>CTR</th><th>Position</th><th>AI Overview</th><th>Verkn\u00fcpfte \u00c4nderungen</th><th></th></tr></thead>';
     var tbody = document.createElement('tbody');
     gscRows.forEach(function (row) {
       var linkedEntries = (changelogEntries || []).filter(function (entry) {
@@ -7071,6 +7108,7 @@
         '<td>' + escapeHtml(row.impressions) + '</td>' +
         '<td>' + escapeHtml((row.ctr * 100).toFixed(1)) + '%</td>' +
         '<td>' + escapeHtml(row.position.toFixed(1)) + '</td>' +
+        '<td>' + renderAiOverviewCell(row) + '</td>' +
         '<td class="cvz-gsc-cell-linked">' + linkedCell + '</td>' +
         '<td><button type="button" class="cvz-prompt-delete-btn" data-cvz-keyword-deactivate="' + (row.id || '') + '" aria-label="Keyword deaktivieren" title="Keyword deaktivieren">\u00d7</button></td>';
       tbody.appendChild(tr);
@@ -7078,7 +7116,7 @@
       if (isExpanded) {
         var expansionTr = document.createElement('tr');
         var expansionTd = document.createElement('td');
-        expansionTd.colSpan = 9;
+        expansionTd.colSpan = 10;
         expansionTd.appendChild(renderGscRowExpansion(row, rowId));
         expansionTr.appendChild(expansionTd);
         tbody.appendChild(expansionTr);
@@ -7300,10 +7338,17 @@
   }
 
   // NEU (25.09.2026, Kundenwunsch): "Nächster Durchlauf"-Hinweis, Pendant
-  // zu renderDataFreshnessNote. cadenceDays: 7 für wöchentlich (Prompts/
-  // Zitationen) oder 30 für monatlich (Keywords, GSC, Content-Lücken,
+  // zu renderDataFreshnessNote. cadenceDays: 'prompts' für die Prompt-/
+  // Zitations-Läufe oder 30 für monatlich (Keywords, GSC, Content-Lücken,
   // Opportunities, Aktionsplan, Zusammenfassung, KI-Wissens-Check -- siehe
   // _monthly_background-Step-Liste in main.py).
+  // GEÄNDERT (02.10.2026): Für 'prompts' kommt das Datum fertig vom Backend
+  // (topic.next_prompt_run_at, berechnet mit WEEKLY_COLLECTION_INTERVAL_DAYS
+  // aus run_topic.py). Vorher stand hier fest 7 Tage, obwohl der Cron seit
+  // 30.09.2026 alle 2 Tage misst. Fallback, falls das Backend das Feld noch
+  // nicht liefert: letzter Lauf + topic.prompt_interval_days (sonst 2).
+  var DEFAULT_PROMPT_INTERVAL_DAYS = 2;
+
   function renderNextRunNote(topic, cadenceDays, label) {
     var p = document.createElement('p');
     p.className = 'cvz-freshness-note';
@@ -7322,8 +7367,16 @@
       return p;
     }
 
-    var lastRunIso = cadenceDays === 7 ? topic.last_weekly_collection_at : topic.last_monthly_collection_at;
-    var nextIso = computeNextRunIso(lastRunIso, topic.created_at, cadenceDays);
+    var nextIso;
+    if (cadenceDays === 'prompts') {
+      nextIso = topic.next_prompt_run_at || computeNextRunIso(
+        topic.last_weekly_collection_at,
+        topic.created_at,
+        topic.prompt_interval_days || DEFAULT_PROMPT_INTERVAL_DAYS
+      );
+    } else {
+      nextIso = computeNextRunIso(topic.last_monthly_collection_at, topic.created_at, cadenceDays);
+    }
     if (!nextIso) {
       p.textContent = baseLabel + ': unbekannt.';
       return p;
@@ -7334,7 +7387,7 @@
     // stattfindet (siehe archive_topic_endpoint in main.py).
     if (topic.archive_effective_at && new Date(topic.archive_effective_at).getTime() <= new Date(nextIso).getTime()) {
       var archDate = formatShortDate(topic.archive_effective_at);
-      p.textContent = baseLabel + ': entfällt \u2013 Thema wird' + (archDate ? ' am ' + archDate : '') + ' deaktiviert.';
+      p.textContent = baseLabel + ': entfällt, Thema wird' + (archDate ? ' am ' + archDate : '') + ' deaktiviert.';
       return p;
     }
 
@@ -9751,7 +9804,7 @@
     // (monatlich) UND Prompt-Zitationen (wöchentlich, _weekly_background).
     // Zwei getrennte Hinweise, sonst wäre einer davon falsch.
     wrap.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Content-Lücken, Quellen)'));
-    wrap.appendChild(renderNextRunNote(detail.topic, 7, 'Nächster Durchlauf (Zitationen)'));
+    wrap.appendChild(renderNextRunNote(detail.topic, 'prompts', 'Nächster Durchlauf (Zitationen)'));
 
     // Phasen-Detail-Grid: Pro Phase eigene Zitierrate + Kanal-Aufschluss + Top-Wettbewerber-Inhalt
     var phaseSection = document.createElement('div');
