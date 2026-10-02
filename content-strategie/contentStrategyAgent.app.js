@@ -280,6 +280,8 @@
       '}',
 
       /* ---- Conversion Card ---- */
+      '.cvz-cs-topic-market{margin:12px 0;padding:10px 14px;border:1px dashed var(--cvz-border-strong);color:var(--cvz-muted);font-size:13px;}',
+      '.cvz-cs-topic-market p{margin:0 0 6px;color:var(--cvz-text);}',
       '.cvz-cs-conversion-card{padding:18px 22px;background:rgba(79,209,197,.06);border:1px solid rgba(79,209,197,.2);border-radius:0;margin-bottom:20px;}',
       '.cvz-cs-conversion-card h4{font-family:"Syne",sans-serif;font-size:1.1rem;font-weight:700;color:var(--cvz-teal);margin:0 0 6px;}',
       '.cvz-cs-conversion-card .cvz-cs-hint{color:var(--cvz-muted);}',
@@ -767,8 +769,48 @@
   var TOPIC_RECOMMENDATION_LABELS = {
     thema_beibehalten: 'Empfehlung: ursprüngliches Thema beibehalten',
     thema_wechseln: 'Empfehlung: zu einer Alternative wechseln',
+    // Wird nicht mehr erzeugt, bleibt nur für ältere gespeicherte Prüfungen.
     thema_erweitern: 'Empfehlung: Thema erweitern statt wechseln',
   };
+
+  // Suchvolumen mit Status: "unter der Messgrenze" (Google Ads weist keinen Wert aus) und "Messung fehlgeschlagen"
+  // sind verschiedene Dinge. Ältere Prüfungen haben keinen Status, dort bleibt es neutral bei "kein Messwert".
+  function topicVolumeText(volume, status) {
+    if (status === 'messung_fehlgeschlagen') return 'Messung fehlgeschlagen';
+    if (volume != null && volume > 0) return 'ca. ' + volume + ' Suchanfragen/Monat';
+    if (!status && volume == null) return 'kein Messwert';
+    return 'unter der Messgrenze';
+  }
+
+  // Hinweise unter der Auswahl: was die Status bedeuten und wie groß der Markt ohne Zielgruppe ist.
+  function renderTopicVolumeNotes(result) {
+    var nodes = [];
+    var statuses = [result.seed_volume_status].concat((result.alternatives_checked || []).map(function (a) { return a.volume_status; }));
+    if (statuses.indexOf('unter_messgrenze') !== -1) {
+      nodes.push(el('p', { class: 'cvz-cs-hint' }, [
+        '„Unter der Messgrenze“ heißt: Google weist für den Begriff keinen Wert aus, er wird nur selten gesucht (praktisch unter ca. 10 Mal im Monat). ' +
+        'Für die Ausrichtung auf deine Zielgruppe kann er trotzdem der richtige sein.',
+      ]));
+    }
+    if (statuses.indexOf('messung_fehlgeschlagen') !== -1) {
+      nodes.push(el('p', { class: 'cvz-cs-hint' }, [
+        'Die Suchvolumen-Messung ist fehlgeschlagen. Über die Nachfrage lässt sich deshalb nichts sagen. Starte die Prüfung später erneut, wenn die Zahlen für deine Wahl wichtig sind.',
+      ]));
+    }
+    var hints = result.oberbegriffe_hinweis || [];
+    if (hints.length > 0) {
+      var list = el('ul', { class: 'cvz-cs-topic-alt-list' });
+      hints.forEach(function (h) {
+        var kind = h.art === 'marktbegriff' ? 'Markt ohne Zielgruppe' : 'Breiterer Begriff';
+        list.appendChild(el('li', {}, [kind + ': "' + h.topic + '" (' + topicVolumeText(h.search_volume, h.volume_status) + '). ' + (h.note || '')]));
+      });
+      nodes.push(el('div', { class: 'cvz-cs-topic-market' }, [
+        el('p', {}, ['Marktumfeld (nicht auswählbar, nur zur Einordnung):']),
+        list,
+      ]));
+    }
+    return nodes;
+  }
 
   function renderValidating(topic) {
     clear(state.root);
@@ -810,7 +852,7 @@
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
     wrap.appendChild(el('h3', {}, ['Bevor wir loslegen: ist "' + result.seed_topic + '" das richtige Thema?']));
-    var seedVolText = result.seed_search_volume != null ? 'ca. ' + result.seed_search_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
+    var seedVolText = topicVolumeText(result.seed_search_volume, result.seed_volume_status);
 
     var optionsList = el('div', { class: 'cvz-cs-topic-options' });
     var chosenInput = el('input', { type: 'hidden', name: 'chosen_topic' });
@@ -841,7 +883,7 @@
       makeOption(result.seed_topic, '"' + result.seed_topic + '" (Original, ' + seedVolText + ')', result.empfehlung === 'thema_beibehalten')
     );
     (result.alternatives_checked || []).forEach(function (alt) {
-      var volText = alt.search_volume != null ? 'ca. ' + alt.search_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
+      var volText = topicVolumeText(alt.search_volume, alt.volume_status);
       var badge = INTENT_FIT_LABELS[alt.intent_fit] || alt.intent_fit;
       optionsList.appendChild(
         makeOption(
@@ -853,6 +895,7 @@
       );
     });
     wrap.appendChild(optionsList);
+    renderTopicVolumeNotes(result).forEach(function (node) { wrap.appendChild(node); });
 
     wrap.appendChild(
       el('div', { class: 'cvz-cs-topic-recommendation-box' }, [
@@ -1041,12 +1084,12 @@
       box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine Themen-Prüfung für diese Strategie vorhanden (älterer Lauf, vor diesem Feature erstellt).']));
       return box;
     }
-    var seedVolText = topicValidation.seed_search_volume != null ? 'ca. ' + topicValidation.seed_search_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
+    var seedVolText = topicVolumeText(topicValidation.seed_search_volume, topicValidation.seed_volume_status);
     box.appendChild(el('p', {}, ['Geprüftes Ausgangsthema: "' + topicValidation.seed_topic + '" (' + seedVolText + ')']));
     if (topicValidation.alternatives_checked && topicValidation.alternatives_checked.length > 0) {
       var list = el('ul', { class: 'cvz-cs-topic-alt-list' });
       topicValidation.alternatives_checked.forEach(function (a) {
-        var volText = a.search_volume != null ? 'ca. ' + a.search_volume + ' Suchanfragen/Monat' : 'Suchvolumen unbekannt';
+        var volText = topicVolumeText(a.search_volume, a.volume_status);
         list.appendChild(
           el('li', {}, [
             el('span', { class: 'cvz-cs-badge cvz-cs-badge-intent-' + a.intent_fit }, [INTENT_FIT_LABELS[a.intent_fit] || a.intent_fit]),
@@ -1056,6 +1099,7 @@
       });
       box.appendChild(list);
     }
+    renderTopicVolumeNotes(topicValidation).forEach(function (node) { box.appendChild(node); });
     box.appendChild(el('p', { class: 'cvz-cs-topic-recommendation' }, [
       (TOPIC_RECOMMENDATION_LABELS[topicValidation.empfehlung] || topicValidation.empfehlung) + '. ' + topicValidation.reasoning,
     ]));
