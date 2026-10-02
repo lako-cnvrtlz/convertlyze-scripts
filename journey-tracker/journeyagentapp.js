@@ -1448,6 +1448,37 @@
     return { status: 'no', label: 'Nein' };
   }
 
+  // NEU (02.10.2026): Eigene Google-Position eines Keywords.
+  // Vorrang hat die Search Console (echte Durchschnittsposition eurer
+  // Domain), sonst die Position aus dem monatlichen SERP-Check.
+  function renderOwnPositionCell(kw) {
+    var detail = state.topicDetailCache && state.topicDetailCache[state.activeTopicId];
+    var depth = (detail && detail.serp_check_depth) || 10;
+    var text, tip, style = 'font-weight:600;color:var(--cvz-text,inherit);';
+    if (kw.gsc_position != null) {
+      var p = Number(kw.gsc_position);
+      text = '\u00d8 ' + p.toLocaleString('de-DE', { maximumFractionDigits: 1 });
+      tip = 'Durchschnittliche Position laut Google Search Console' +
+        (kw.gsc_impressions != null ? ' (' + Number(kw.gsc_impressions).toLocaleString('de-DE') + ' Impressionen)' : '') +
+        '. Das sind echte Daten eurer Domain.' +
+        (p > 10 && p <= 20 ? ' Seite 2: Mit gezielter Optimierung ist Seite 1 oft schnell erreichbar.' : '');
+    } else if (kw.organic_rank != null) {
+      text = String(kw.organic_rank);
+      tip = 'Position bei der letzten Google-Prüfung' +
+        (kw.serp_checked_at ? ' am ' + formatShortDate(kw.serp_checked_at) : '') + ' (Deutschland).';
+    } else if (kw.serp_checked_at) {
+      text = 'nicht in Top ' + depth;
+      style = 'color:var(--cvz-text-muted,#8b98a5);';
+      tip = 'Bei der letzten Google-Prüfung' + (kw.serp_checked_at ? ' am ' + formatShortDate(kw.serp_checked_at) : '') +
+        ' war eure Domain nicht unter den ersten ' + depth + ' Ergebnissen.';
+    } else {
+      text = 'nicht geprüft';
+      style = 'color:var(--cvz-text-muted,#8b98a5);';
+      tip = 'Die Position wird beim nächsten Monatslauf geprüft.';
+    }
+    return '<span title="' + escapeHtml(tip) + '" style="' + style + '">' + escapeHtml(text) + '</span>';
+  }
+
   function renderAiOverviewCell(row) {
     var aio = getAiOverviewStatus(row);
     var style = aio.status === 'yes'
@@ -6036,12 +6067,15 @@
     // dafür, dass auf schmalen Bildschirmen horizontal gescrollt wird,
     // statt dass Spalten zusammengequetscht werden.
     // GEÄNDERT (01.10.2026): 920px -> 1050px wegen neuer Spalte "AI Overview".
-    table.style.minWidth = '1050px';
+    // GEÄNDERT (02.10.2026): 1050px -> 1170px wegen neuer Spalte "Eure Position".
+    table.style.minWidth = '1170px';
     table.innerHTML =
       '<thead><tr>' +
         '<th style="width:26px;"></th>' +
         '<th style="width:340px;">Keyword</th>' +
         '<th style="width:140px;text-align:right;">Suchvolumen/Monat</th>' +
+        // NEU (02.10.2026): eigene Google-Position (GSC, sonst SERP-Check)
+        '<th style="width:120px;text-align:right;">Eure Position</th>' +
         '<th style="width:300px;padding-left:24px;">Einschätzung</th>' +
         // NEU (01.10.2026): AI Overview ja/nein/noch nicht geprüft
         '<th style="width:130px;">AI Overview</th>' +
@@ -6079,6 +6113,7 @@
         '<td style="text-align:right;color:var(--cvz-text-muted,#8b98a5);">' +
           (kw.search_volume == null ? '\u2013' : escapeHtml(kw.search_volume)) +
         '</td>' +
+        '<td style="text-align:right;white-space:nowrap;">' + renderOwnPositionCell(kw) + '</td>' +
         '<td style="padding-left:24px;">' +
           (showStatus
             // GEÄNDERT (25.09.2026): max-width + Ellipsis, damit ein zu
@@ -6101,7 +6136,7 @@
       if (canExpand && state.expandedKeywordId === rowId) {
         var expTr = document.createElement('tr');
         var expTd = document.createElement('td');
-        expTd.colSpan = 7;
+        expTd.colSpan = 8;
         expTd.appendChild(renderKeywordExpansion(kw, rowId, changelogEntries));
         expTr.appendChild(expTd);
         tbody.appendChild(expTr);
