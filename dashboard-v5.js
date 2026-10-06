@@ -27,6 +27,12 @@
  *     Zeile ist bei abgeschlossenen Analysen klickbar (öffnet das Ergebnis).
  *   - NEU: Die Kontingent-Karten aktualisieren sich, wenn der Browser-Tab wieder sichtbar wird.
  *
+ * NEU (06.10.2026): Gratis-Test fuer den Customer Journey Tracker im Free Plan (7 Tage).
+ *   Die Tracker-Karten zeigen den Test an ("noch X Tage, bis TT.MM.JJJJ") und der Button
+ *   "Tracker oeffnen" wird fuer Free-User nicht mehr gesperrt. Die Tage kommen aus
+ *   users.ai_visibility_trial_started_at des Owners (siehe getTrackerTrial). Nach Ablauf
+ *   bleibt der Button offen, damit das archivierte Test-Thema ansehbar bleibt.
+ *
  * In Webflow wird NUR EIN leerer Container gebraucht:
  *   <div id="cvz-dashboard-app"></div>
  * Alle bisherigen Custom-Attribute-Elemente ([data-dashboard="..."], .table-list,
@@ -114,6 +120,10 @@
     TRACKER_URL:         '/member/customer-journey-tracker',
     PPU_PRICING_URL:     '/preise#pay-per-use',
     TRACKER_PRICING_URL: '/preise#tracker',
+    // NEU (06.10.2026): Laenge des Gratis-Tests im Free Plan. MUSS mit TRIAL_DAYS in
+    // run_topic.py (Visibility-Tracker-Backend) uebereinstimmen, sonst zeigt das Dashboard
+    // andere Tage an, als das Backend tatsaechlich gewaehrt.
+    TRACKER_TRIAL_DAYS:  7,
     // WHY dreifach gepflegt: pageAgentApiBase steht identisch auch in
     // page-projects-embed.html (CONFIG.pageAgentApiBase) und als
     // DEFAULT_CONFIG.apiBaseUrl / window.CVZ_CONTENT_STRATEGY_CONFIG.apiBaseUrl
@@ -287,7 +297,7 @@
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       var result = await window.supabase
         .from('users')
-        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, ppu_aufbau_credits, reserved_ppu_aufbau_credits, ppu_strategy_credits, reserved_ppu_strategy_credits, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start, ai_visibility_topics_limit, ai_visibility_topics_plan_included, ai_visibility_topics_purchased')
+        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, ppu_aufbau_credits, reserved_ppu_aufbau_credits, ppu_strategy_credits, reserved_ppu_strategy_credits, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start, ai_visibility_topics_limit, ai_visibility_topics_plan_included, ai_visibility_topics_purchased, ai_visibility_trial_started_at')
         .eq('memberstack_id', memberstackId)
         .single();
       if (result.data) {
@@ -299,7 +309,7 @@
             // Pendant) schon immer mitgeholt wurde - ohne diese beiden Felder waeren die neuen
             // Karten 8/9 fuer Team-Members (billing laeuft ueber bu, siehe WHY-Kommentar oben)
             // immer leer geblieben.
-            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start, ai_visibility_topics_limit, ai_visibility_topics_plan_included, ai_visibility_topics_purchased')
+            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start, ai_visibility_topics_limit, ai_visibility_topics_plan_included, ai_visibility_topics_purchased, ai_visibility_trial_started_at')
             .eq('id', result.data.owner_user_id)
             .single();
           if (ownerResult.data) result.data._billingUser = ownerResult.data;
@@ -376,6 +386,32 @@
     if (result.data == null) return null;
     var n = Number(result.data);
     return isNaN(n) ? null : Math.max(0, Math.round(n));
+  }
+
+  // NEU (06.10.2026): Gratis-Test fuer den Tracker (Free Plan). Spiegel von get_trial_state()
+  // in run_topic.py, die Laenge steht in CONFIG.TRACKER_TRIAL_DAYS. bu = Owner-/Kaeufer-Zeile.
+  // Rueckgabe: { state: 'none' | 'available' | 'running' | 'expired', daysLeft, endsAt }
+  function getTrackerTrial(bu) {
+    var none = { state: 'none', daysLeft: 0, endsAt: null };
+    if (!bu) return none;
+    var isFree = String(bu.license_type || '').toLowerCase() === 'free' && bu.license_status === 'active';
+    if (!isFree) return none;
+    if (!bu.ai_visibility_trial_started_at) {
+      return { state: 'available', daysLeft: CONFIG.TRACKER_TRIAL_DAYS, endsAt: null };
+    }
+    var endsAt = new Date(new Date(bu.ai_visibility_trial_started_at).getTime() + CONFIG.TRACKER_TRIAL_DAYS * 86400000);
+    var msLeft = endsAt.getTime() - Date.now();
+    if (isNaN(msLeft) || msLeft <= 0) return { state: 'expired', daysLeft: 0, endsAt: endsAt };
+    return { state: 'running', daysLeft: Math.ceil(msLeft / 86400000), endsAt: endsAt };
+  }
+
+  // Ob die Tracker-Nutzung (belegte Topics) abgefragt werden soll: es gibt Topics im Plan
+  // oder gekauft, oder ein Gratis-Test steht zur Verfuegung bzw. laeuft.
+  function trackerNeedsUsage(bu) {
+    if (!bu) return false;
+    if (Math.round(Number(bu.ai_visibility_topics_limit || 0)) > 0) return true;
+    var t = getTrackerTrial(bu).state;
+    return t === 'available' || t === 'running';
   }
 
   // Letzte Aufbau-Projekte fuer "Zuletzt aktiv". Laeuft ueber eine SECURITY
@@ -1035,7 +1071,10 @@
     // Karte 11+12: Customer Journey Tracker (nur wenn Topics vorhanden sind, inklusive oder
     // gebucht). Das Limit liegt auf der Owner-/Kaeufer-Zeile (bu), nicht auf der Zeile eines
     // Team-Mitglieds. activeTopics ist null, solange die RPC fehlt: dann nur das Limit zeigen.
-    var topicsLimit    = Math.round(Number(bu.ai_visibility_topics_limit || 0));
+    // NEU (06.10.2026): Gratis-Test zaehlt als 1 Zusatz-Topic, solange er verfuegbar ist oder laeuft.
+    var trial          = getTrackerTrial(bu);
+    var trialSlot      = (trial.state === 'available' || trial.state === 'running') ? 1 : 0;
+    var topicsLimit    = Math.round(Number(bu.ai_visibility_topics_limit || 0)) + trialSlot;
     var topicsIncluded = Math.round(Number(bu.ai_visibility_topics_plan_included || 0));
     var topicsBought   = Math.round(Number(bu.ai_visibility_topics_purchased || 0));
     var topicsKnown    = activeTopics != null;
@@ -1044,13 +1083,24 @@
     var topicsPercent  = topicsLimit ? (topicsUsed / topicsLimit) * 100 : 0;
     var showTrackerCards = topicsLimit > 0;
     setText('cvz-d-c11-value', topicsKnown ? (topicsUsed + '/' + topicsLimit + ' Topics') : (topicsLimit + ' Topics'));
-    setText('cvz-d-c11-sub', topicsKnown ? (Math.round(topicsPercent) + '% der Topics belegt') : 'Limit deines Plans');
+    var trialText = '';
+    if (trial.state === 'available') {
+      trialText = 'Gratis-Test: ' + CONFIG.TRACKER_TRIAL_DAYS + ' Tage kostenlos testen';
+    } else if (trial.state === 'running') {
+      trialText = trial.daysLeft <= 1
+        ? 'Gratis-Test endet in weniger als 24 Stunden'
+        : 'Gratis-Test: noch ' + trial.daysLeft + ' Tage (bis ' + trial.endsAt.toLocaleDateString('de-DE') + ')';
+    }
+    var c11Sub = topicsKnown ? (Math.round(topicsPercent) + '% der Topics belegt') : 'Limit deines Plans';
+    if (trialText) c11Sub = (topicsLimit - trialSlot > 0 ? c11Sub + ' \u00b7 ' : '') + trialText;
+    setText('cvz-d-c11-sub', c11Sub);
     var bar11 = document.getElementById('cvz-d-c11-bar');
     if (bar11) bar11.style.width = (topicsKnown ? Math.min(topicsPercent, 100) : 0) + '%';
     showEl(document.getElementById('cvz-d-c11'), showTrackerCards, 'flex');
     var topicsSplit = [];
     if (topicsIncluded > 0) topicsSplit.push(topicsIncluded + ' im Plan enthalten');
     if (topicsBought > 0)   topicsSplit.push(topicsBought + ' gebucht');
+    if (trialSlot > 0)      topicsSplit.push('1 im Gratis-Test');
     setText('cvz-d-c12-value', topicsKnown ? topicsFree : '-');
     setText('cvz-d-c12-sub', topicsSplit.length ? topicsSplit.join(', ') : '-');
     showEl(document.getElementById('cvz-d-c12'), showTrackerCards, 'flex');
@@ -1063,6 +1113,7 @@
       aufbau:      sessionsLeft + ppuAufbauAvailable,
       strategie:   strategyLeft + ppuStrategyAvailable,
       topicsLimit: topicsLimit,
+      trialState:  trial.state,
     };
     state.creditCtx = {
       isMember:  !!user.owner_user_id,
@@ -1113,7 +1164,9 @@
     // Tracker: nur sperren, wenn ueberhaupt keine Topics vorhanden sind. Sind alle Topics
     // belegt, muss der Tracker trotzdem erreichbar bleiben (Ansehen der bestehenden Topics).
     if (tool === 'tracker') {
-      if (c.topicsLimit > 0) return null;
+      // NEU (06.10.2026): nach einem beendeten Gratis-Test bleibt der Tracker erreichbar, damit
+      // das archivierte Test-Thema ansehbar bleibt (der Tracker zeigt dort selbst den Kauf-Hinweis).
+      if (c.topicsLimit > 0 || c.trialState === 'expired') return null;
       return {
         title:    'Noch keine Tracker-Topics',
         text:     ctx.isMember
@@ -1228,7 +1281,7 @@
       var u = await fetchUser(state.memberstackId, 1);
       if (!u) return;
       var ubu = u._billingUser || u;
-      var topics = (Math.round(Number(ubu.ai_visibility_topics_limit || 0)) > 0)
+      var topics = trackerNeedsUsage(ubu)
         ? await fetchTrackerUsage(u.id)
         : null;
       renderStatCards(u, state.sessionsLimit, state.contentStrategyLimit, topics);
@@ -2233,7 +2286,7 @@
       applyTabVisibility();
       // NEU (v10): Tracker-Nutzung nur abfragen, wenn ueberhaupt Topics vorhanden sind.
       var trackerBu    = currentUser._billingUser || currentUser;
-      var activeTopics = (Math.round(Number(trackerBu.ai_visibility_topics_limit || 0)) > 0)
+      var activeTopics = trackerNeedsUsage(trackerBu)
         ? await fetchTrackerUsage(currentUser.id)
         : null;
       state.sessionsLimit        = sessionsLimit;
