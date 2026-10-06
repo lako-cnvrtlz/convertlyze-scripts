@@ -138,6 +138,15 @@
     expandedPromptEngine: {},
     expandedPromptRunIndex: {},
     expandedPromptRound: {},
+    // NEU (06.10.2026): Unterbereiche im Tab "Daten" (keywords | fragen | prompts | fanout | gsc)
+    // und Fan-out-Queries (Daten kommen lazy von GET /topics/{id}/fan-out-queries).
+    activeDataView: 'keywords',
+    fanOutCache: {},          // Schlüssel: topicId + '|' + weeks
+    loadingFanOut: {},
+    fanOutErrors: {},
+    fanOutWeeksByTopic: {},
+    fanOutShowSingles: {},    // { [topicId]: true } = auch Queries zeigen, die nur in 1 Lauf vorkamen
+    openFanOutPrompts: {},    // { [promptId]: true } = aufgeklappt
     keywordRankHistoryCache: {},
     loadingKeywordRankHistory: {},
     expandedKeywordId: null,
@@ -223,6 +232,10 @@
     delete state.topicRankHistoryCache[topicId];
     delete state.citationTrendCache[topicId];
     delete state.buyingCenterCache[topicId];
+    // NEU (06.10.2026): Fan-out-Cache (Schlüssel topicId|weeks) und Fehler des Themas verwerfen.
+    Object.keys(state.fanOutCache).concat(Object.keys(state.fanOutErrors)).forEach(function (k) {
+      if (k.indexOf(topicId + '|') === 0) { delete state.fanOutCache[k]; delete state.fanOutErrors[k]; }
+    });
 
     // Auch die Domain-Übersicht (Opportunities über alle Themen) ist dann veraltet.
     var topic = getTopicById(topicId);
@@ -248,6 +261,10 @@
     }
     if (state.activeSubTab === 'verlauf') {
       maybeLoadVisibilityTrend(topicId);
+    }
+    // NEU (06.10.2026): Fan-out-Queries nur laden, wenn der Unterbereich offen ist.
+    if (state.activeSubTab === 'daten' && state.activeDataView === 'fanout') {
+      maybeLoadFanOut(topicId);
     }
     // NEU (02.10.2026): Änderungen und Events werden jetzt im Aktionsplan eingetragen.
     if (state.activeSubTab === 'aktionsplan') {
@@ -443,6 +460,9 @@
 
     var paramTab = new URLSearchParams(window.location.search).get('cvz_tab');
     if (paramTab) state.activeSubTab = paramTab;
+    // NEU (06.10.2026): Unterbereich im Tab "Daten" aus der URL (cvz_view).
+    var paramView = new URLSearchParams(window.location.search).get('cvz_view');
+    if (paramView && isValidDataView(paramView)) state.activeDataView = paramView;
 
     var paramTopicId = new URLSearchParams(window.location.search).get('cvz_topic');
     if (paramTopicId && getTopicById(paramTopicId)) {
@@ -1155,6 +1175,8 @@
     }
     state.activeView = 'topic-detail';
     if (state.activeTopicId !== topicId) {
+      // NEU (06.10.2026): Unterbereich nur zurücksetzen, wenn nicht per URL (resetTab === false) geöffnet.
+      if (resetTab !== false) state.activeDataView = 'keywords';
       state.activePersonaFilter = null;
       state.changelogDraftLinkedIds = { keywords: [], prompts: [] };
       state.changelogLinkSectionOpen = { keywords: false, prompts: false };
@@ -1540,6 +1562,20 @@
     { id: 'daten', label: 'Daten' },
   ];
 
+  // NEU (06.10.2026): Unterbereiche des Tabs "Daten". Vorher standen Keywords,
+  // PAA-Fragen, Prompts und GSC untereinander auf einer Seite.
+  var DATA_VIEWS = [
+    { id: 'keywords', label: 'Keywords' },
+    { id: 'fragen', label: 'Fragen' },
+    { id: 'prompts', label: 'Prompts' },
+    { id: 'fanout', label: 'Fan-out' },
+    { id: 'gsc', label: 'Search Console' },
+  ];
+
+  function isValidDataView(view) {
+    return DATA_VIEWS.some(function (v) { return v.id === view; });
+  }
+
   var DOMAIN_TABS = [
     { id: 'themen', label: 'Themen' },
     { id: 'uebersicht', label: 'Übersicht' },
@@ -1685,7 +1721,8 @@
       state.manualPromptDraftRoleId = roleCellAdd.getAttribute('data-cvz-role-cell-add');
       state.manualPromptDraftPhase = roleCellAdd.getAttribute('data-cvz-role-cell-phase');
       state.activeSubTab = 'daten';
-      updateUrlParams({ cvz_tab: 'daten' });
+      state.activeDataView = 'prompts';  // NEU (06.10.2026): das Prompt-Formular liegt im Unterbereich "Prompts"
+      updateUrlParams({ cvz_tab: 'daten', cvz_view: 'prompts' });
       loadTabData(state.activeTopicId);
       render();
       var manualInput = document.getElementById('cvz-manual-prompt-input');
@@ -1873,11 +1910,37 @@
       render();
       return;
     }
+    // NEU (06.10.2026): Unterbereich im Tab "Daten" wechseln.
+    var dataViewBtn = event.target.closest('[data-cvz-data-view]');
+    if (dataViewBtn) {
+      setDataView(dataViewBtn.getAttribute('data-cvz-data-view'));
+      return;
+    }
+    // NEU (06.10.2026): Zeitraum der Fan-out-Auswertung (4/12/26 Wochen).
+    var fanOutWeeksBtn = event.target.closest('[data-cvz-fanout-weeks]');
+    if (fanOutWeeksBtn) {
+      var foTopicId = fanOutWeeksBtn.getAttribute('data-cvz-fanout-topic');
+      state.fanOutWeeksByTopic[foTopicId] = parseInt(fanOutWeeksBtn.getAttribute('data-cvz-fanout-weeks'), 10);
+      maybeLoadFanOut(foTopicId);
+      render();
+      return;
+    }
+    // NEU (06.10.2026): Queries einblenden, die nur in einem einzigen Lauf auftauchten.
+    var fanOutSinglesBtn = event.target.closest('[data-cvz-fanout-singles]');
+    if (fanOutSinglesBtn) {
+      var foSinglesTopic = fanOutSinglesBtn.getAttribute('data-cvz-fanout-singles');
+      state.fanOutShowSingles[foSinglesTopic] = !state.fanOutShowSingles[foSinglesTopic];
+      render();
+      return;
+    }
     var tabBtn = event.target.closest('[data-cvz-tab]');
     if (tabBtn) {
       var newTab = tabBtn.getAttribute('data-cvz-tab');
       state.activeSubTab = newTab;
-      updateUrlParams({ cvz_tab: newTab });
+      updateUrlParams({ cvz_tab: newTab, cvz_view: newTab === 'daten' ? state.activeDataView : null });
+      if (newTab === 'daten' && state.activeDataView === 'fanout' && state.activeView === 'topic-detail') {
+        maybeLoadFanOut(state.activeTopicId);
+      }
       if ((newTab === 'situation' || newTab === 'daten') && state.activeView === 'topic-detail') {
         maybeLoadBuyingCenter(state.activeTopicId);
       }
@@ -4378,51 +4441,11 @@
       case 'verlauf':
         tabContent.appendChild(renderVerlaufTab(state.activeTopicId, detail));
         break;
-      case 'daten': {
-        // NEU (20.09.2026): Retry-Hinweis, falls die GSC-Daten fehlen oder
-        // der letzte Nachzieh-Versuch fehlgeschlagen ist.
-        var datenStepNotice = renderStepNotice(detail, ['gsc']);
-        if (datenStepNotice) tabContent.appendChild(datenStepNotice);
-        // GEÄNDERT (25.09.2026): Kommentar korrigiert -- ursprünglich stand
-        // hier "gilt für Keywords, Prompts und GSC gemeinsam, da sie im
-        // selben Monatslauf erhoben werden". Das war zum Zeitpunkt des
-        // Cron-Debuggings (25.09.2026, siehe Chat-Verlauf) nicht mehr
-        // korrekt: Prompts laufen WÖCHENTLICH (_weekly_background), nur
-        // Keywords/GSC laufen monatlich (_monthly_background). Diese
-        // Freshness-Note bleibt trotzdem korrekt monatlich, weil sie sich
-        // nur auf Keywords/GSC bezieht -- die separate Prompt-Kadenz zeigt
-        // der zweite renderNextRunNote-Aufruf direkt darunter.
-        // GEÄNDERT (02.10.2026): Prompts laufen seit 30.09.2026 alle
-        // WEEKLY_COLLECTION_INTERVAL_DAYS Tage (Standard 2), nicht mehr
-        // wöchentlich. Zwei getrennte "zuletzt"-Hinweise, weil "Datenstand"
-        // allein (monatlicher Lauf) die neueren Prompt-Läufe verschwiegen hat.
-        tabContent.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at, 'Keywords und GSC zuletzt aktualisiert'));
-        tabContent.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Keywords, GSC)'));
-        tabContent.appendChild(renderDataFreshnessNote(detail.topic.last_weekly_collection_at, 'KI-Antworten zuletzt gemessen'));
-        tabContent.appendChild(renderNextRunNote(detail.topic, 'prompts', 'Nächster Durchlauf (Prompts)'));
-        // Content-Änderungen (mit verlinkten Keywords/Prompts) als Marker aufbereiten
-        var _ccMarkers = (state.contentChangesCache[state.activeTopicId] || []).map(function (ch) {
-          return {
-            linked_search_query_ids: ch.linked_search_query_ids || [],
-            linked_prompt_ids: ch.linked_prompt_ids || [],
-            entry_text: ch.description,
-            created_at: ch.changed_at,
-            keyword_deltas: {},
-          };
-        });
-        var _allEntries = (detail.changelog || []).concat(_ccMarkers);
-        // Keywords (thematische, ohne GSC near-miss)
-        var thematicKws = (detail.search_queries || []).filter(function (q) { return q.source !== 'gsc_near_miss'; });
-        tabContent.appendChild(renderKeywordsTable(thematicKws, true, _allEntries));
-        var posInsight = renderPositioningInsight(detail.positioning_insight);
-        if (posInsight) tabContent.appendChild(posInsight);
-        // Prompts nach Phase
-        tabContent.appendChild(renderPromptsByPhase(detail.prompts, true, _allEntries));
-        // GSC-Performance (mit Relevanzfilter)
-        var _gscFiltered = filterGscByTopicRelevance(detail.gsc_rows, detail);
-        tabContent.appendChild(renderGscBlock(_gscFiltered, state.activeTopicId, _allEntries));
+      case 'daten':
+        // GEÄNDERT (06.10.2026): Keywords, Fragen (PAA), Prompts, Fan-out und GSC
+        // liegen jetzt in Unterbereichen, siehe renderDatenTab.
+        tabContent.appendChild(renderDatenTab(detail));
         break;
-      }
       case 'situation':
       default:
         tabContent.appendChild(renderSituationTab(state.activeTopicId, detail));
@@ -4431,6 +4454,348 @@
 
     wrap.appendChild(tabContent);
     return wrap;
+  }
+
+  // =========================================================================
+  // NEU (06.10.2026): Tab "Daten" mit Unterbereichen + Fan-out-Queries
+  // =========================================================================
+
+  function setDataView(view) {
+    if (!isValidDataView(view)) return;
+    state.activeDataView = view;
+    updateUrlParams({ cvz_tab: 'daten', cvz_view: view });
+    if (view === 'fanout' && state.activeView === 'topic-detail') {
+      maybeLoadFanOut(state.activeTopicId);
+    }
+    render();
+  }
+
+  function renderDataSubNav(counts) {
+    var nav = document.createElement('div');
+    nav.className = 'cvz-data-subnav';
+    DATA_VIEWS.forEach(function (view) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cvz-data-subnav-btn' + (view.id === state.activeDataView ? ' cvz-data-subnav-btn-active' : '');
+      btn.setAttribute('data-cvz-data-view', view.id);
+      btn.textContent = view.label;
+      var count = counts[view.id];
+      if (count !== null && count !== undefined) {
+        var badge = document.createElement('span');
+        badge.className = 'cvz-data-subnav-count';
+        badge.textContent = '(' + count + ')';
+        btn.appendChild(badge);
+      }
+      nav.appendChild(btn);
+    });
+    return nav;
+  }
+
+  function getFanOutWeeks(topicId) {
+    return state.fanOutWeeksByTopic[topicId] || 12;
+  }
+
+  function fanOutKey(topicId) {
+    return topicId + '|' + getFanOutWeeks(topicId);
+  }
+
+  async function maybeLoadFanOut(topicId) {
+    if (!topicId) return;
+    var key = fanOutKey(topicId);
+    if (state.fanOutCache[key] || state.loadingFanOut[key]) return;
+
+    if (CONFIG.useMockData) {
+      state.fanOutCache[key] = { runs_total: 0, runs_with_fan_out: 0, coverage_rate: null, queries: [], by_prompt: [] };
+      return;
+    }
+
+    state.loadingFanOut[key] = true;
+    delete state.fanOutErrors[key];
+    render();
+    try {
+      state.fanOutCache[key] = await apiFetch('/topics/' + topicId + '/fan-out-queries?weeks=' + getFanOutWeeks(topicId));
+    } catch (e) {
+      console.error('[CVZ Visibility] Fan-out-Queries konnten nicht geladen werden:', e);
+      state.fanOutErrors[key] = e.message || 'Unbekannter Fehler';
+    }
+    state.loadingFanOut[key] = false;
+    render();
+  }
+
+  function renderDatenTab(detail) {
+    var wrap = document.createElement('div');
+
+    // Retry-Hinweis bei fehlenden GSC-Daten bleibt in allen Unterbereichen sichtbar,
+    // damit ein Fehler nicht nur in einem versteckten Unterbereich auffällt.
+    var stepNotice = renderStepNotice(detail, ['gsc']);
+    if (stepNotice) wrap.appendChild(stepNotice);
+
+    // Content-Änderungen (mit verlinkten Keywords/Prompts) als Marker aufbereiten
+    var ccMarkers = (state.contentChangesCache[state.activeTopicId] || []).map(function (ch) {
+      return {
+        linked_search_query_ids: ch.linked_search_query_ids || [],
+        linked_prompt_ids: ch.linked_prompt_ids || [],
+        entry_text: ch.description,
+        created_at: ch.changed_at,
+        keyword_deltas: {},
+      };
+    });
+    var allEntries = (detail.changelog || []).concat(ccMarkers);
+
+    // Keywords und Fragen trennen. Fragen = PAA (von Google) + KI-Problemfragen.
+    var allQueries = detail.search_queries || [];
+    var thematicKws = allQueries.filter(function (q) {
+      return q.source !== 'gsc_near_miss' && q.source !== 'paa' && q.source !== 'problem_question';
+    });
+    var questionRows = allQueries.filter(function (q) {
+      return q.source === 'paa' || q.source === 'problem_question';
+    });
+    var gscFiltered = filterGscByTopicRelevance(detail.gsc_rows, detail);
+
+    if (!isValidDataView(state.activeDataView)) state.activeDataView = 'keywords';
+    var view = state.activeDataView;
+
+    var fanOutData = state.fanOutCache[fanOutKey(state.activeTopicId)];
+    var counts = {
+      keywords: dedupeKeywords(thematicKws).length,
+      fragen: dedupeKeywords(questionRows).length,
+      prompts: (detail.prompts || []).length,
+      fanout: fanOutData ? (fanOutData.queries.length >= 200 ? '200+' : fanOutData.queries.length) : null,
+      gsc: Array.isArray(gscFiltered) ? gscFiltered.length : null,
+    };
+    wrap.appendChild(renderDataSubNav(counts));
+
+    // Keywords, Fragen und GSC laufen im Monatslauf, Prompts und Fan-out im Prompt-Lauf.
+    // Deshalb steht pro Unterbereich nur der passende Aktualisierungshinweis.
+    function monthlyNotes(label) {
+      wrap.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at, label));
+      wrap.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Keywords, Fragen, GSC)'));
+    }
+    function promptNotes() {
+      wrap.appendChild(renderDataFreshnessNote(detail.topic.last_weekly_collection_at, 'KI-Antworten zuletzt gemessen'));
+      wrap.appendChild(renderNextRunNote(detail.topic, 'prompts', 'Nächster Durchlauf (Prompts)'));
+    }
+
+    if (view === 'fragen') {
+      monthlyNotes('Fragen zuletzt aktualisiert');
+      wrap.appendChild(renderKeywordsTable(questionRows, true, allEntries, {
+        heading: 'Fragen aus Google (People Also Ask) und KI-Vorschläge',
+        showManualForm: false,
+        emptyText: 'Noch keine Fragen verfügbar.',
+      }));
+    } else if (view === 'prompts') {
+      promptNotes();
+      wrap.appendChild(renderPromptsByPhase(detail.prompts, true, allEntries));
+    } else if (view === 'fanout') {
+      promptNotes();
+      wrap.appendChild(renderFanOutView(state.activeTopicId, detail));
+    } else if (view === 'gsc') {
+      monthlyNotes('GSC zuletzt aktualisiert');
+      wrap.appendChild(renderGscBlock(gscFiltered, state.activeTopicId, allEntries));
+    } else {
+      monthlyNotes('Keywords zuletzt aktualisiert');
+      wrap.appendChild(renderKeywordsTable(thematicKws, true, allEntries));
+      var posInsight = renderPositioningInsight(detail.positioning_insight);
+      if (posInsight) wrap.appendChild(posInsight);
+    }
+
+    return wrap;
+  }
+
+  function renderFanOutView(topicId, detail) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Fan-out-Queries (ChatGPT)';
+    section.appendChild(heading);
+
+    var intro = document.createElement('p');
+    intro.className = 'cvz-card-placeholder-text';
+    intro.style.marginBottom = '10px';
+    intro.textContent =
+      'Wenn ChatGPT im Web recherchiert, zerlegt es den Prompt in mehrere Suchanfragen. ' +
+      'Das sind die Themen, zu denen ChatGPT Quellen sucht. Die Liste gilt nur für ChatGPT, ' +
+      'für Gemini liefert der Datenanbieter diese Information nicht.';
+    section.appendChild(intro);
+
+    var key = fanOutKey(topicId);
+
+    // Zeitraum-Auswahl
+    var weeksWrap = document.createElement('div');
+    weeksWrap.className = 'cvz-weeks-preset-picker';
+    weeksWrap.style.marginBottom = '12px';
+    [4, 12, 26].forEach(function (w) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cvz-weeks-preset-btn' + (w === getFanOutWeeks(topicId) ? ' cvz-weeks-preset-btn-active' : '');
+      btn.textContent = w + ' Wochen';
+      btn.setAttribute('data-cvz-fanout-weeks', String(w));
+      btn.setAttribute('data-cvz-fanout-topic', topicId);
+      weeksWrap.appendChild(btn);
+    });
+    section.appendChild(weeksWrap);
+
+    if (state.loadingFanOut[key]) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.textContent = 'Lädt...';
+      section.appendChild(loading);
+      return section;
+    }
+    if (state.fanOutErrors[key]) {
+      var err = document.createElement('p');
+      err.className = 'cvz-card-placeholder-text';
+      err.textContent = 'Fan-out-Queries konnten nicht geladen werden: ' + state.fanOutErrors[key];
+      section.appendChild(err);
+      return section;
+    }
+    var data = state.fanOutCache[key];
+    if (!data) {
+      var wait = document.createElement('p');
+      wait.className = 'cvz-card-placeholder-text';
+      wait.textContent = 'Noch keine Daten geladen.';
+      section.appendChild(wait);
+      return section;
+    }
+
+    // Abdeckung: ohne diese Zahl wirkt eine kurze Liste wie ein Fehler.
+    var total = data.runs_total || 0;
+    var withFo = data.runs_with_fan_out || 0;
+    var coverage = document.createElement('p');
+    coverage.className = 'cvz-fanout-coverage';
+    if (total === 0) {
+      coverage.textContent = 'In diesem Zeitraum liegen keine ChatGPT-Läufe vor.';
+      section.appendChild(coverage);
+      return section;
+    }
+    var pct = Math.round((withFo / total) * 100);
+    coverage.textContent = 'Bei ' + withFo + ' von ' + total + ' ChatGPT-Läufen (' + pct + ' %) hat ChatGPT Suchanfragen geliefert. Nur diese Läufe sind in der Auswertung.';
+    section.appendChild(coverage);
+    if (withFo < 10) {
+      var warn = document.createElement('p');
+      warn.className = 'cvz-fanout-warn';
+      warn.textContent = 'Wenige Läufe mit Fan-out-Daten: Die Liste ist eine Stichprobe und kann sich mit weiteren Läufen noch deutlich ändern.';
+      section.appendChild(warn);
+    }
+    if (withFo === 0) return section;
+
+    // --- Themenweit
+    var showSingles = !!state.fanOutShowSingles[topicId];
+    var minRuns = showSingles ? 1 : 2;
+    var allQueries = data.queries || [];
+    var visible = allQueries.filter(function (q) { return q.run_count >= minRuns; });
+    var hiddenSingles = allQueries.length - allQueries.filter(function (q) { return q.run_count >= 2; }).length;
+    var MAX_ROWS = 50;
+
+    var topLabel = document.createElement('p');
+    topLabel.className = 'cvz-changelog-guided-label';
+    topLabel.textContent = 'Häufigste Queries über alle Prompts';
+    section.appendChild(topLabel);
+
+    var toolbar = document.createElement('div');
+    toolbar.className = 'cvz-fanout-toolbar';
+    var singlesBtn = document.createElement('button');
+    singlesBtn.type = 'button';
+    singlesBtn.className = 'cvz-weeks-preset-btn' + (showSingles ? ' cvz-weeks-preset-btn-active' : '');
+    singlesBtn.setAttribute('data-cvz-fanout-singles', topicId);
+    singlesBtn.textContent = showSingles ? 'Auch einmalige Queries: an' : 'Auch einmalige Queries zeigen (' + hiddenSingles + ')';
+    toolbar.appendChild(singlesBtn);
+    section.appendChild(toolbar);
+
+    if (visible.length === 0) {
+      var noStable = document.createElement('p');
+      noStable.className = 'cvz-card-placeholder-text';
+      noStable.textContent = 'Keine Query kam in mindestens zwei Läufen vor. Mit weiteren Läufen wird die Auswertung aussagekräftiger.';
+      section.appendChild(noStable);
+    } else {
+      var table = document.createElement('table');
+      table.className = 'cvz-table';
+      table.style.minWidth = '640px';
+      table.innerHTML =
+        '<thead><tr>' +
+          '<th>Query</th>' +
+          '<th style="width:110px;text-align:right;">Läufe</th>' +
+          '<th style="width:110px;text-align:right;">Prompts</th>' +
+          '<th style="width:150px;">Zuletzt gesehen</th>' +
+        '</tr></thead>';
+      var tbody = document.createElement('tbody');
+      visible.slice(0, MAX_ROWS).forEach(function (q) {
+        var promptTitles = (q.prompts || []).slice(0, 5).map(function (p) { return p.prompt_text || ''; }).join('\n');
+        var share = q.share_of_fan_out_runs != null ? ' (' + Math.round(q.share_of_fan_out_runs * 100) + ' %)' : '';
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + escapeHtml(q.query) + '</td>' +
+          '<td style="text-align:right;">' + escapeHtml(q.run_count) + '<span class="cvz-fanout-chip-count">' + escapeHtml(share) + '</span></td>' +
+          '<td style="text-align:right;" title="' + escapeHtml(promptTitles) + '">' + escapeHtml(q.prompt_count) + '</td>' +
+          '<td style="color:var(--cvz-text-muted,#8b98a5);">' + (q.last_seen ? escapeHtml(formatRelativeTime(q.last_seen)) : '\u2013') + '</td>';
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      var tableWrap = document.createElement('div');
+      tableWrap.style.overflowX = 'auto';
+      tableWrap.appendChild(table);
+      section.appendChild(tableWrap);
+      if (visible.length > MAX_ROWS) {
+        var more = document.createElement('p');
+        more.className = 'cvz-card-placeholder-text';
+        more.style.marginTop = '6px';
+        more.textContent = 'Gezeigt: die ' + MAX_ROWS + ' häufigsten von ' + visible.length + ' Queries.';
+        section.appendChild(more);
+      }
+    }
+
+    // --- Pro Prompt
+    var byPrompt = data.by_prompt || [];
+    var promptLabel = document.createElement('p');
+    promptLabel.className = 'cvz-changelog-guided-label';
+    promptLabel.style.marginTop = '20px';
+    promptLabel.textContent = 'Pro Prompt: in welche Suchanfragen ChatGPT ihn zerlegt';
+    section.appendChild(promptLabel);
+
+    byPrompt.forEach(function (p) {
+      var details = document.createElement('details');
+      details.className = 'cvz-fanout-prompt';
+      if (state.openFanOutPrompts[p.prompt_id]) details.open = true;
+
+      var summary = document.createElement('summary');
+      summary.appendChild(document.createTextNode(p.prompt_text || '(Prompt nicht mehr vorhanden)'));
+      var meta = document.createElement('span');
+      meta.className = 'cvz-fanout-prompt-meta';
+      meta.textContent = p.runs_with_fan_out + ' von ' + p.runs_total + ' Läufen mit Fan-out';
+      summary.appendChild(meta);
+      details.appendChild(summary);
+
+      if (!p.queries || p.queries.length === 0) {
+        var none = document.createElement('p');
+        none.className = 'cvz-card-placeholder-text';
+        none.style.margin = '8px 0 0';
+        none.textContent = 'Für diesen Prompt hat ChatGPT in diesem Zeitraum keine Suchanfragen geliefert.';
+        details.appendChild(none);
+      } else {
+        var chips = document.createElement('div');
+        chips.className = 'cvz-fanout-chips';
+        p.queries.forEach(function (q) {
+          var chip = document.createElement('span');
+          chip.className = 'cvz-fanout-chip';
+          chip.textContent = q.query;
+          var count = document.createElement('span');
+          count.className = 'cvz-fanout-chip-count';
+          count.textContent = q.run_count + '\u00d7';
+          chip.appendChild(count);
+          chips.appendChild(chip);
+        });
+        details.appendChild(chips);
+      }
+
+      details.addEventListener('toggle', function () {
+        state.openFanOutPrompts[p.prompt_id] = details.open;
+      });
+      section.appendChild(details);
+    });
+
+    return section;
   }
 
   function renderTrendChart(trendData) {
@@ -6063,25 +6428,28 @@
   // renderGscBlock/renderContentGapsSection). PAA-Fragen zeigen keine
   // "Einschätzung" mehr: Sie kommen direkt aus Google, die Nachfrage gilt
   // damit als bestätigt, eine zusätzliche Einschätzung wäre irreführend.
-  function renderKeywordsTable(keywords, enableExpansion, changelogEntries) {
+  // GEÄNDERT (06.10.2026): optionaler 4. Parameter opts = { heading, showManualForm, emptyText },
+  // damit dieselbe Tabelle auch für den Unterbereich "Fragen" genutzt werden kann.
+  function renderKeywordsTable(keywords, enableExpansion, changelogEntries, opts) {
+    opts = opts || {};
     keywords = dedupeKeywords(keywords);
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
-    heading.textContent = 'Thematisch passende Keywords';
+    heading.textContent = opts.heading || 'Thematisch passende Keywords';
     section.appendChild(heading);
 
     // NEU (16.09.2026): manuelles Keyword-Formular, analog zu renderManualPromptForm
-    if (state.activeTopicId) {
+    if (state.activeTopicId && opts.showManualForm !== false) {
       section.appendChild(renderManualKeywordForm(keywords, state.activeTopicId));
     }
 
     if (!keywords || keywords.length === 0) {
       var empty = document.createElement('p');
       empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Noch keine Keyword-Daten verfügbar.';
+      empty.textContent = opts.emptyText || 'Noch keine Keyword-Daten verfügbar.';
       section.appendChild(empty);
       return section;
     }
@@ -6635,6 +7003,35 @@
       statusLine.className = 'cvz-prompt-run-status';
       statusLine.textContent = _statusText;
       wrap.appendChild(statusLine);
+    }
+
+    // NEU (06.10.2026): Fan-out-Queries dieses Laufs. Nur bei ChatGPT und nur, wenn das
+    // Backend das Feld mitliefert (Array). Ein leeres Array heißt: ChatGPT hat in
+    // diesem Lauf keine Suchanfragen geliefert (vermutlich nicht im Web gesucht).
+    if (activeEngine.id === 'chat_gpt' && Array.isArray(run.fan_out_queries)) {
+      var fanOutBlock = document.createElement('div');
+      fanOutBlock.className = 'cvz-fanout-run-block';
+      var fanOutLabel = document.createElement('p');
+      fanOutLabel.className = 'cvz-changelog-guided-label';
+      fanOutLabel.textContent = 'Fan-out-Queries dieses Laufs';
+      fanOutBlock.appendChild(fanOutLabel);
+      if (run.fan_out_queries.length === 0) {
+        var fanOutNone = document.createElement('p');
+        fanOutNone.className = 'cvz-card-placeholder-text';
+        fanOutNone.textContent = 'Keine Fan-out-Queries in diesem Lauf (ChatGPT hat vermutlich nicht im Web gesucht).';
+        fanOutBlock.appendChild(fanOutNone);
+      } else {
+        var fanOutChips = document.createElement('div');
+        fanOutChips.className = 'cvz-fanout-chips';
+        run.fan_out_queries.forEach(function (q) {
+          var chip = document.createElement('span');
+          chip.className = 'cvz-fanout-chip';
+          chip.textContent = q;
+          fanOutChips.appendChild(chip);
+        });
+        fanOutBlock.appendChild(fanOutChips);
+      }
+      wrap.appendChild(fanOutBlock);
     }
 
     var answerBlock = document.createElement('div');
@@ -8773,6 +9170,24 @@
       '}' +
       '.cvz-tab-btn:hover { color: var(--cvz-text); }' +
       '.cvz-tab-btn-active { color: var(--cvz-teal); border-bottom-color: var(--cvz-teal); }' +
+      // NEU (06.10.2026): Unterbereiche im Tab "Daten" (bewusst leichter als die Haupt-Tabs)
+      '.cvz-data-subnav { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 16px; }' +
+      '.cvz-data-subnav-btn { font-family: "Geist", sans-serif; font-size: 13px; padding: 6px 12px; border-radius: 0; cursor: pointer;' +
+        'border: 1px solid var(--cvz-border); background: transparent; color: var(--cvz-text-muted); }' +
+      '.cvz-data-subnav-btn:hover { border-color: var(--cvz-teal); color: var(--cvz-teal); }' +
+      '.cvz-data-subnav-btn-active { border-color: var(--cvz-teal); color: var(--cvz-teal); background: rgba(13,148,136,.14); }' +
+      '.cvz-data-subnav-count { margin-left: 6px; font-size: 11px; opacity: .75; }' +
+      // NEU (06.10.2026): Fan-out-Queries
+      '.cvz-fanout-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 12px; }' +
+      '.cvz-fanout-chip { font-size: 12px; padding: 3px 8px; border: 1px solid var(--cvz-border); color: var(--cvz-text); background: rgba(79,209,197,.06); }' +
+      '.cvz-fanout-chip-count { margin-left: 6px; color: var(--cvz-text-muted); font-size: 11px; }' +
+      '.cvz-fanout-run-block { margin: 8px 0 4px; }' +
+      '.cvz-fanout-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 8px 0 12px; }' +
+      '.cvz-fanout-coverage { font-size: 13px; color: var(--cvz-text); margin: 0 0 6px; }' +
+      '.cvz-fanout-warn { font-size: 12px; color: var(--cvz-amber); margin: 0 0 10px; }' +
+      '.cvz-fanout-prompt { border-bottom: 1px solid var(--cvz-border); padding: 8px 0; }' +
+      '.cvz-fanout-prompt > summary { cursor: pointer; font-size: 13px; color: var(--cvz-text); }' +
+      '.cvz-fanout-prompt-meta { margin-left: 8px; font-size: 12px; color: var(--cvz-text-muted); }' +
       // NEU (25.09.2026, Kundenwunsch): Zeitraum-Preset-Picker (4/12/26 Wochen).
       '.cvz-weeks-preset-picker { display: flex; gap: 6px; flex-shrink: 0; }' +
       '.cvz-weeks-preset-btn { padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius:0; ' +
