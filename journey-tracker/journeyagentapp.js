@@ -2213,7 +2213,8 @@
     topicsForActiveDomain.forEach(function (topic) {
       var option = document.createElement('option');
       option.value = topic.id;
-      option.textContent = topic.name;
+      var pickerTrial = getTrialInfoForTopic(topic.id);
+      option.textContent = topic.name + (pickerTrial ? ' \u00b7 ' + pickerTrial.text : '');
       if (topic.id === state.activeTopicId) option.selected = true;
       topicSelect.appendChild(option);
     });
@@ -3988,7 +3989,15 @@
   // /account/topic-status trial.topic_id (welches Thema zum Test gehört) und trial.ends_at.
   function getTrialInfoForTopic(topicId) {
     var trial = state.topicUsage && state.topicUsage.trial;
-    if (!trial || trial.state !== 'running' || !trial.ends_at || !topicId || trial.topic_id !== topicId) return null;
+    if (!trial || trial.state !== 'running' || !trial.ends_at || !topicId) return null;
+    var isTrialTopic = trial.topic_id === topicId;
+    // Fallback fuer aeltere Backend-Versionen, die trial.topic_id noch nicht mitschicken:
+    // Ist nur der Test-Slot belegbar (Limit 1), kann nur das eine nicht archivierte Thema das Test-Thema sein.
+    if (trial.topic_id === undefined && state.topicUsage.limit === 1) {
+      var openTopics = (state.allTopics || []).filter(function (t) { return t.status !== 'archived' && t.status !== 'queued'; });
+      isTrialTopic = openTopics.length === 1 && openTopics[0].id === topicId;
+    }
+    if (!isTrialTopic) return null;
     var msLeft = new Date(trial.ends_at).getTime() - Date.now();
     if (isNaN(msLeft) || msLeft <= 0) return null;
     var daysLeft = Math.ceil(msLeft / 86400000);
@@ -4177,11 +4186,8 @@
       } else if (topic.status === 'queued') {
         extraStatusHint = '<span class="cvz-status-hint">Wartet auf einen freien Themen-Slot. Startet automatisch, kann nach Freiwerden eines Slots aber bis zu 30 Minuten dauern.</span>';
       }
-      // NEU (06.10.2026): Restlaufzeit, falls dies das Gratis-Test-Thema ist
+      // NEU (06.10.2026): Restlaufzeit, falls dies das Gratis-Test-Thema ist (Badge unter dem Namen)
       var trialInfo = getTrialInfoForTopic(topic.id);
-      if (trialInfo) {
-        extraStatusHint += '<span class="cvz-status-hint cvz-trial-hint">' + escapeHtml(trialInfo.text) + '</span>';
-      }
       var STUCK_COLLECTING_THRESHOLD_MINUTES = 45;
       var isStuckCollecting = false;
       // GEAENDERT (21.09.2026): gilt jetzt auch fuer 'analyzing'.
@@ -4195,7 +4201,8 @@
       var tr = document.createElement('tr');
       tr.setAttribute('data-cvz-topic-id', topic.id);
       tr.innerHTML =
-        '<td class="cvz-ts-name">' + escapeHtml(topic.name) + '</td>' +
+        '<td class="cvz-ts-name">' + escapeHtml(topic.name) +
+          (trialInfo ? '<span class="cvz-trial-badge">' + escapeHtml(trialInfo.text) + '</span>' : '') + '</td>' +
         '<td class="cvz-ts-status"><span class="cvz-status-badge ' + status.className + '">' +
           ((topic.status === 'collecting' || topic.status === 'analyzing') ? '<span class="cvz-spinner"></span>' : '') +
           status.label + '</span>' +
@@ -9318,7 +9325,7 @@
       '.cvz-chart-legend-group-label { font-size: 11px; color: var(--cvz-text-muted,#8b98a5); flex-shrink: 0; }' +
       '.cvz-comp-savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding: 10px 14px; border: 1px solid rgba(79,209,197,.35); background: rgba(79,209,197,.08); font-size: 12px; color: var(--cvz-text,#e6edf3); }' +
       '.cvz-trial-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0; padding: 10px 14px; border: 1px solid rgba(79,209,197,.35); background: rgba(79,209,197,.08); font-size: 13px; color: var(--cvz-text,#e6edf3); }' +
-      '.cvz-trial-hint { color: var(--cvz-teal); }' +
+      '.cvz-trial-badge { display: block; width: fit-content; margin-top: 4px; padding: 1px 8px; font-size: 11px; font-weight: 400; color: var(--cvz-teal); border: 1px solid rgba(79,209,197,.45); background: rgba(79,209,197,.08); }' +
 
       /* Tooltip-Popup f\u00fcr alle title-Attribute (siehe initCvzTooltips) */
       '.cvz-float-tip {' +
