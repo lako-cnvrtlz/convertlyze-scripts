@@ -1,6 +1,11 @@
 (function () {
   'use strict';
 
+  // NEU (06.10.2026): Build-Kennung zur Kontrolle, welche Version im Browser wirklich laeuft.
+  // Pruefen in der Browser-Konsole:  document.getElementById('cvz-visibility-app').dataset.cvzBuild
+  // Ergebnis undefined = ein aelteres Script laeuft (nicht veroeffentlicht, gecacht oder zweite Kopie).
+  var CVZ_BUILD = '2026-10-06-wettbewerber-chart-v2';
+
   // =========================================================================
   // KONFIGURATION
   // =========================================================================
@@ -1552,6 +1557,7 @@
       console.error('[CVZ Visibility] Container #cvz-visibility-app nicht gefunden.');
       return;
     }
+    container.setAttribute('data-cvz-build', CVZ_BUILD);
 
     var focusedId = null, selectionStart = null, selectionEnd = null;
     var activeEl = document.activeElement;
@@ -3037,7 +3043,7 @@
       upfrontMsg.className = 'cvz-create-error';
       upfrontMsg.textContent =
         (state.topicUsage.trial && state.topicUsage.trial.state === 'expired'
-          ? 'Euer 7-Tage-Test ist beendet. '
+          ? 'Euer Free Trial ist beendet. '
           : 'Euer Plan-Limit ist erreicht (' + state.topicUsage.current_count + '/' + state.topicUsage.limit + '). ') +
         'Weiteres Topic-Slot nötig, um ein neues Thema anzulegen.';
       form.appendChild(upfrontMsg);
@@ -3975,7 +3981,7 @@
     // NEU (06.10.2026): Free Trial im Free Plan (state: none | available | running | expired)
     var trial = state.topicUsage.trial;
     if (trial && trial.state === 'available') {
-      badge.textContent += ' \u00b7 Inklusive: 1 Gratis-Thema f\u00fcr 7 Tage';
+      badge.textContent += ' \u00b7 Inklusive: 1 Thema im Free Trial (7 Tage)';
     } else if (trial && trial.state === 'running') {
       var trialEnd = formatShortDate(trial.ends_at);
       badge.textContent += ' \u00b7 Free Trial l\u00e4uft' + (trialEnd ? ' bis ' + trialEnd : '');
@@ -3985,7 +3991,7 @@
     return badge;
   }
 
-  // NEU (06.10.2026): Restlaufzeit des Free Trial-Themas. Das Backend liefert in
+  // NEU (06.10.2026): Restlaufzeit des Free-Trial-Themas. Das Backend liefert in
   // /account/topic-status trial.topic_id (welches Thema zum Test gehört) und trial.ends_at.
   function getTrialInfoForTopic(topicId) {
     var trial = state.topicUsage && state.topicUsage.trial;
@@ -4142,7 +4148,7 @@
       var trialExpired = !!(state.topicUsage && state.topicUsage.trial && state.topicUsage.trial.state === 'expired');
       var reactivateTitle = (!isBusy && noSlotAvailable)
         ? (trialExpired
-            ? ' title="Euer 7-Tage-Test ist beendet. Mit einem Topic-Slot oder einem Upgrade l\u00e4sst sich dieses Thema wieder aktivieren, alle Daten bleiben erhalten."'
+            ? ' title="Euer Free Trial ist beendet. Mit einem Topic-Slot oder einem Upgrade l\u00e4sst sich dieses Thema wieder aktivieren, alle Daten bleiben erhalten."'
             : ' title="Alle ' + state.topicUsage.limit + ' Topic-Slots sind aktuell belegt (' +
               state.topicUsage.current_count + '/' + state.topicUsage.limit +
               '). Erst ein anderes Thema deaktivieren oder ein weiteres Slot kaufen."')
@@ -4187,7 +4193,7 @@
       } else if (topic.status === 'queued') {
         extraStatusHint = '<span class="cvz-status-hint">Wartet auf einen freien Themen-Slot. Startet automatisch, kann nach Freiwerden eines Slots aber bis zu 30 Minuten dauern.</span>';
       }
-      // NEU (06.10.2026): Restlaufzeit, falls dies das Free Trial-Thema ist (Badge unter dem Namen)
+      // NEU (06.10.2026): Restlaufzeit, falls dies das Free-Trial-Thema ist (Badge unter dem Namen)
       var trialInfo = getTrialInfoForTopic(topic.id);
       var STUCK_COLLECTING_THRESHOLD_MINUTES = 45;
       var isStuckCollecting = false;
@@ -4369,7 +4375,7 @@
     topActionRow.appendChild(rightActions);
     wrap.appendChild(topActionRow);
 
-    // NEU (06.10.2026): Hinweis mit Restlaufzeit, wenn dies das Free Trial-Thema ist
+    // NEU (06.10.2026): Hinweis mit Restlaufzeit, wenn dies das Free-Trial-Thema ist
     var trialDetail = getTrialInfoForTopic(state.activeTopicId);
     if (trialDetail) {
       var trialBanner = document.createElement('div');
