@@ -2465,7 +2465,7 @@
         state.topicUsage.current_count += 1;
         state.topicUsage.can_create = state.topicUsage.current_count < state.topicUsage.limit;
       }
-      // NEU (06.10.2026): Der Gratis-Test startet serverseitig mit dem ersten Thema, das den
+      // NEU (06.10.2026): Der Free Trial startet serverseitig mit dem ersten Thema, das den
       // Test-Slot braucht. Nutzung neu laden, damit Restlaufzeit und Hinweis sofort erscheinen.
       try { await loadTopicUsage(); } catch (e) { /* nicht kritisch */ }
 
@@ -2676,12 +2676,12 @@
         delete state.competitorDraftDomains[topicId];
         delete state.competitorSuggestionsCache[topicId];
         await openTopicDetail(topicId, false);
-        // NEU (06.10.2026): Neuberechnung ist begrenzt (1x pro Tag und Thema, im Gratis-Test 1x).
+        // NEU (06.10.2026): Neuberechnung ist begrenzt (1x pro Tag und Thema, im Free Trial 1x).
         // Wird sie aufgeschoben, sagen wir das ehrlich, sonst wirkt die Seite veraltet.
         if (saveResult && saveResult.reanalysis === 'deferred') {
           var deferredText = 'Gespeichert. Der Vergleichs-Chart zeigt die \u00c4nderung sofort. ';
           if (saveResult.reason === 'trial') {
-            deferredText += 'Im Gratis-Test werden Alerts, L\u00fccken-Analyse und Aktionsplan nur einmal neu berechnet, ' +
+            deferredText += 'Im Free Trial werden Alerts, L\u00fccken-Analyse und Aktionsplan nur einmal neu berechnet, ' +
               'das ist bereits passiert. Weitere \u00c4nderungen flie\u00dfen beim n\u00e4chsten regul\u00e4ren Lauf ein.';
           } else {
             var nextAtDate = saveResult.next_reanalysis_at ? new Date(saveResult.next_reanalysis_at) : null;
@@ -3972,20 +3972,20 @@
       'Team-weit: ' + state.topicUsage.current_count + ' von ' + state.topicUsage.limit +
       ' Themen genutzt \u00b7 ' + available + ' verf\u00fcgbar';
 
-    // NEU (06.10.2026): Gratis-Test im Free Plan (state: none | available | running | expired)
+    // NEU (06.10.2026): Free Trial im Free Plan (state: none | available | running | expired)
     var trial = state.topicUsage.trial;
     if (trial && trial.state === 'available') {
       badge.textContent += ' \u00b7 Inklusive: 1 Gratis-Thema f\u00fcr 7 Tage';
     } else if (trial && trial.state === 'running') {
       var trialEnd = formatShortDate(trial.ends_at);
-      badge.textContent += ' \u00b7 Gratis-Test l\u00e4uft' + (trialEnd ? ' bis ' + trialEnd : '');
+      badge.textContent += ' \u00b7 Free Trial l\u00e4uft' + (trialEnd ? ' bis ' + trialEnd : '');
     } else if (trial && trial.state === 'expired') {
-      badge.textContent += ' \u00b7 Gratis-Test beendet';
+      badge.textContent += ' \u00b7 Free Trial beendet';
     }
     return badge;
   }
 
-  // NEU (06.10.2026): Restlaufzeit des Gratis-Test-Themas. Das Backend liefert in
+  // NEU (06.10.2026): Restlaufzeit des Free Trial-Themas. Das Backend liefert in
   // /account/topic-status trial.topic_id (welches Thema zum Test gehört) und trial.ends_at.
   function getTrialInfoForTopic(topicId) {
     var trial = state.topicUsage && state.topicUsage.trial;
@@ -4007,8 +4007,8 @@
       daysLeft: daysLeft,
       endsLabel: endsLabel,
       text: daysLeft <= 1
-        ? 'Gratis-Test endet in weniger als 24 Stunden'
-        : 'Gratis-Test: noch ' + daysLeft + ' Tage' + (endsLabel ? ' (bis ' + endsLabel + ')' : ''),
+        ? 'Free Trial endet in weniger als 24 Stunden'
+        : 'Free Trial: noch ' + daysLeft + ' Tage' + (endsLabel ? ' (bis ' + endsLabel + ')' : ''),
     };
   }
 
@@ -4187,7 +4187,7 @@
       } else if (topic.status === 'queued') {
         extraStatusHint = '<span class="cvz-status-hint">Wartet auf einen freien Themen-Slot. Startet automatisch, kann nach Freiwerden eines Slots aber bis zu 30 Minuten dauern.</span>';
       }
-      // NEU (06.10.2026): Restlaufzeit, falls dies das Gratis-Test-Thema ist (Badge unter dem Namen)
+      // NEU (06.10.2026): Restlaufzeit, falls dies das Free Trial-Thema ist (Badge unter dem Namen)
       var trialInfo = getTrialInfoForTopic(topic.id);
       var STUCK_COLLECTING_THRESHOLD_MINUTES = 45;
       var isStuckCollecting = false;
@@ -4369,7 +4369,7 @@
     topActionRow.appendChild(rightActions);
     wrap.appendChild(topActionRow);
 
-    // NEU (06.10.2026): Hinweis mit Restlaufzeit, wenn dies das Gratis-Test-Thema ist
+    // NEU (06.10.2026): Hinweis mit Restlaufzeit, wenn dies das Free Trial-Thema ist
     var trialDetail = getTrialInfoForTopic(state.activeTopicId);
     if (trialDetail) {
       var trialBanner = document.createElement('div');
@@ -9758,7 +9758,7 @@
       msgNote.className = 'cvz-card-placeholder-text';
       msgNote.style.margin = '4px 0 0';
       msgNote.textContent = 'Der Chart ist nach dem Speichern sofort aktuell. Alerts, L\u00fccken-Analyse und Aktionsplan werden ' +
-        'pro Thema h\u00f6chstens einmal am Tag neu berechnet (im Gratis-Test einmal), weitere \u00c4nderungen folgen dann automatisch. ' +
+        'pro Thema h\u00f6chstens einmal am Tag neu berechnet (im Free Trial einmal), weitere \u00c4nderungen folgen dann automatisch. ' +
         'Gesammelte Zitierdaten bleiben erhalten, auch von entfernten Domains.';
       msg.appendChild(msgNote);
       bar.appendChild(msg);
