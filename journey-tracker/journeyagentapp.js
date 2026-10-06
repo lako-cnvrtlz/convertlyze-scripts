@@ -3991,9 +3991,10 @@
     var trial = state.topicUsage && state.topicUsage.trial;
     if (!trial || trial.state !== 'running' || !trial.ends_at || !topicId) return null;
     var isTrialTopic = trial.topic_id === topicId;
-    // Fallback fuer aeltere Backend-Versionen, die trial.topic_id noch nicht mitschicken:
-    // Ist nur der Test-Slot belegbar (Limit 1), kann nur das eine nicht archivierte Thema das Test-Thema sein.
-    if (trial.topic_id === undefined && state.topicUsage.limit === 1) {
+    // Fallback, wenn das Backend keine trial.topic_id liefert (Schluessel fehlt ODER ist null, z. B. wenn
+    // main.py aktuell ist, run_topic.py aber noch nicht): Ist nur der Test-Slot belegbar (Limit 1), kann nur
+    // das eine nicht archivierte Thema das Test-Thema sein.
+    if (!trial.topic_id && state.topicUsage.limit === 1) {
       var openTopics = (state.allTopics || []).filter(function (t) { return t.status !== 'archived' && t.status !== 'queued'; });
       isTrialTopic = openTopics.length === 1 && openTopics[0].id === topicId;
     }
