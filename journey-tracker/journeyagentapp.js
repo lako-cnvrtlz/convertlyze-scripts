@@ -7844,6 +7844,61 @@
     return section;
   }
 
+  // NEU (06.10.2026): Zitierte URLs je Wettbewerber und Phase als Links. Das Backend liefert pro
+  // Eintrag cited_urls ([{url, count}], meistzitierte zuerst; auf diese bezieht sich der Typ).
+  function formatCitedUrlLabel(url) {
+    try {
+      var u = new URL(url);
+      var label = (u.pathname === '/' ? '' : u.pathname) + u.search;
+      return label || '/ (Startseite)';
+    } catch (e) {
+      return url;
+    }
+  }
+
+  // escapeHtml() (textContent -> innerHTML) maskiert KEINE Anführungszeichen und ist deshalb für
+  // Attributwerte ungeeignet. Die zitierten URLs stammen aus KI-Antworten, also von außen.
+  function escapeAttr(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+      .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function renderCitedUrlLinks(comp) {
+    // Nur echte http(s)-Links zulassen (nie javascript: o. Ä.) und über URL() normalisieren, dabei
+    // werden Anführungszeichen und Spitzklammern prozentkodiert.
+    var urls = [];
+    (comp.cited_urls || []).forEach(function (item) {
+      if (!item || typeof item.url !== 'string') return;
+      try {
+        var parsed = new URL(item.url);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+        urls.push({ url: parsed.href, count: item.count });
+      } catch (e) { /* ungueltige URL ueberspringen */ }
+    });
+    if (urls.length === 0) return '';
+    function row(item) {
+      var count = item.count > 1 ? '<span class="cvz-sov-url-count">(' + item.count + '\u00d7)</span>' : '';
+      return '<div class="cvz-sov-url-row">' +
+        '<a class="cvz-sov-url" href="' + escapeAttr(item.url) + '" target="_blank" rel="noopener noreferrer" title="' +
+          escapeAttr(item.url) + '">' + escapeHtml(formatCitedUrlLabel(item.url)) + '</a>' + count +
+        '</div>';
+    }
+    var html = '<div class="cvz-sov-urls">' + row(urls[0]);
+    if (urls.length > 1) {
+      html += '<details class="cvz-sov-url-more"><summary>+' + (urls.length - 1) + ' weitere URL' +
+        (urls.length > 2 ? 's' : '') + '</summary>' + urls.slice(1).map(row).join('') + '</details>';
+    }
+    return html + '</div>';
+  }
+
+  // Sicherheitsnetz, falls das Backend noch keinen Typ liefert: YouTube ist eindeutig ein Video.
+  function resolveSovContentType(comp) {
+    if (comp.content_type) return comp.content_type;
+    if (/(^|\.)(youtube\.com|youtu\.be)$/i.test(comp.domain || '')) return 'video';
+    return null;
+  }
+
   function renderJourneyShareOfVoice(shareOfVoice) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -7881,7 +7936,7 @@
         table.innerHTML =
           '<thead><tr>' +
             '<th>Domain</th>' +
-            '<th>Typ</th>' +
+            '<th title="Bezieht sich auf die am h\u00e4ufigsten zitierte URL">Typ</th>' +
             '<th>Zitierrate</th>' +
             '<th>Differenzierungstipp</th>' +
           '</tr></thead>';
@@ -7891,8 +7946,8 @@
           var pct = Math.round(comp.citation_rate || 0);
           var tr = document.createElement('tr');
           tr.innerHTML =
-            '<td class="cvz-sov-domain">' + escapeHtml(comp.domain || '') + '</td>' +
-            '<td><span class="cvz-opportunity-type">' + escapeHtml(CONTENT_TYPE_LABELS[comp.content_type] || comp.content_type || '-') + '</span></td>' +
+            '<td class="cvz-sov-domain">' + escapeHtml(comp.domain || '') + renderCitedUrlLinks(comp) + '</td>' +
+            '<td><span class="cvz-opportunity-type">' + escapeHtml(CONTENT_TYPE_LABELS[resolveSovContentType(comp)] || resolveSovContentType(comp) || '-') + '</span></td>' +
             '<td class="cvz-sov-rate">' +
               '<div class="cvz-journey-bar-wrap cvz-sov-bar-wrap">' +
                 '<div class="cvz-journey-bar-fill" style="width:' + pct + '%;background:' + phaseColor + '"></div>' +
@@ -9332,6 +9387,13 @@
       '.cvz-chart-legend-group-label { font-size: 11px; color: var(--cvz-text-muted,#8b98a5); flex-shrink: 0; }' +
       '.cvz-comp-savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding: 10px 14px; border: 1px solid rgba(79,209,197,.35); background: rgba(79,209,197,.08); font-size: 12px; color: var(--cvz-text,#e6edf3); }' +
       '.cvz-trial-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0; padding: 10px 14px; border: 1px solid rgba(79,209,197,.35); background: rgba(79,209,197,.08); font-size: 13px; color: var(--cvz-text,#e6edf3); }' +
+      '.cvz-sov-urls { margin-top: 4px; font-weight: 400; }' +
+      '.cvz-sov-url-row { display: flex; align-items: baseline; gap: 6px; }' +
+      '.cvz-sov-url { display: block; max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--cvz-teal); text-decoration: none; }' +
+      '.cvz-sov-url:hover { text-decoration: underline; }' +
+      '.cvz-sov-url-count { font-size: 11px; color: var(--cvz-text-muted); flex-shrink: 0; }' +
+      '.cvz-sov-url-more { margin-top: 4px; font-size: 11px; color: var(--cvz-text-muted); }' +
+      '.cvz-sov-url-more summary { cursor: pointer; }' +
       '.cvz-trial-badge { display: block; width: fit-content; margin-top: 4px; padding: 1px 8px; font-size: 11px; font-weight: 400; color: var(--cvz-teal); border: 1px solid rgba(79,209,197,.45); background: rgba(79,209,197,.08); }' +
 
       /* Tooltip-Popup f\u00fcr alle title-Attribute (siehe initCvzTooltips) */
