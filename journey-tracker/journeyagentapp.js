@@ -2975,7 +2975,9 @@
       var upfrontMsg = document.createElement('p');
       upfrontMsg.className = 'cvz-create-error';
       upfrontMsg.textContent =
-        'Euer Plan-Limit ist erreicht (' + state.topicUsage.current_count + '/' + state.topicUsage.limit + '). ' +
+        (state.topicUsage.trial && state.topicUsage.trial.state === 'expired'
+          ? 'Euer 7-Tage-Test ist beendet. '
+          : 'Euer Plan-Limit ist erreicht (' + state.topicUsage.current_count + '/' + state.topicUsage.limit + '). ') +
         'Weiteres Topic-Slot nötig, um ein neues Thema anzulegen.';
       form.appendChild(upfrontMsg);
 
@@ -3908,6 +3910,17 @@
     badge.textContent =
       'Team-weit: ' + state.topicUsage.current_count + ' von ' + state.topicUsage.limit +
       ' Themen genutzt \u00b7 ' + available + ' verf\u00fcgbar';
+
+    // NEU (06.10.2026): Gratis-Test im Free Plan (state: none | available | running | expired)
+    var trial = state.topicUsage.trial;
+    if (trial && trial.state === 'available') {
+      badge.textContent += ' \u00b7 Inklusive: 1 Gratis-Thema f\u00fcr 7 Tage';
+    } else if (trial && trial.state === 'running') {
+      var trialEnd = formatShortDate(trial.ends_at);
+      badge.textContent += ' \u00b7 Gratis-Test l\u00e4uft' + (trialEnd ? ' bis ' + trialEnd : '');
+    } else if (trial && trial.state === 'expired') {
+      badge.textContent += ' \u00b7 Gratis-Test beendet';
+    }
     return badge;
   }
 
@@ -4056,10 +4069,13 @@
       var isBusy = state.archivingTopicId === topic.id;
       var noSlotAvailable = !!(state.topicUsage && !state.topicUsage.can_create);
       var reactivateDisabled = isBusy || noSlotAvailable;
+      var trialExpired = !!(state.topicUsage && state.topicUsage.trial && state.topicUsage.trial.state === 'expired');
       var reactivateTitle = (!isBusy && noSlotAvailable)
-        ? ' title="Alle ' + state.topicUsage.limit + ' Topic-Slots sind aktuell belegt (' +
-          state.topicUsage.current_count + '/' + state.topicUsage.limit +
-          '). Erst ein anderes Thema deaktivieren oder ein weiteres Slot kaufen."'
+        ? (trialExpired
+            ? ' title="Euer 7-Tage-Test ist beendet. Mit einem Topic-Slot oder einem Upgrade l\u00e4sst sich dieses Thema wieder aktivieren, alle Daten bleiben erhalten."'
+            : ' title="Alle ' + state.topicUsage.limit + ' Topic-Slots sind aktuell belegt (' +
+              state.topicUsage.current_count + '/' + state.topicUsage.limit +
+              '). Erst ein anderes Thema deaktivieren oder ein weiteres Slot kaufen."')
         : '';
       var pendingArchival = topic.status === 'active' && !!topic.archive_effective_at;
       var neverRan = topic.status === 'queued' || (topic.status === 'archived' && !topic.last_monthly_collection_at);
