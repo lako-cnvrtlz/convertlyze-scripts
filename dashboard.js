@@ -27,7 +27,7 @@
  *     Zeile ist bei abgeschlossenen Analysen klickbar (öffnet das Ergebnis).
  *   - NEU: Die Kontingent-Karten aktualisieren sich, wenn der Browser-Tab wieder sichtbar wird.
  *
- * NEU (06.10.2026): Gratis-Test fuer den Customer Journey Tracker im Free Plan (7 Tage).
+ * NEU (06.10.2026): Free Trial fuer den Customer Journey Tracker im Free Plan (7 Tage).
  *   Die Tracker-Karten zeigen den Test an ("noch X Tage, bis TT.MM.JJJJ") und der Button
  *   "Tracker oeffnen" wird fuer Free-User nicht mehr gesperrt. Die Tage kommen aus
  *   users.ai_visibility_trial_started_at des Owners (siehe getTrackerTrial). Nach Ablauf
@@ -120,7 +120,7 @@
     TRACKER_URL:         '/member/customer-journey-tracker',
     PPU_PRICING_URL:     '/preise#pay-per-use',
     TRACKER_PRICING_URL: '/preise#tracker',
-    // NEU (06.10.2026): Laenge des Gratis-Tests im Free Plan. MUSS mit TRIAL_DAYS in
+    // NEU (06.10.2026): Laenge des Free Trials im Free Plan. MUSS mit TRIAL_DAYS in
     // run_topic.py (Visibility-Tracker-Backend) uebereinstimmen, sonst zeigt das Dashboard
     // andere Tage an, als das Backend tatsaechlich gewaehrt.
     TRACKER_TRIAL_DAYS:  7,
@@ -388,7 +388,7 @@
     return isNaN(n) ? null : Math.max(0, Math.round(n));
   }
 
-  // NEU (06.10.2026): Gratis-Test fuer den Tracker (Free Plan). Spiegel von get_trial_state()
+  // NEU (06.10.2026): Free Trial fuer den Tracker (Free Plan). Spiegel von get_trial_state()
   // in run_topic.py, die Laenge steht in CONFIG.TRACKER_TRIAL_DAYS. bu = Owner-/Kaeufer-Zeile.
   // Rueckgabe: { state: 'none' | 'available' | 'running' | 'expired', daysLeft, endsAt }
   function getTrackerTrial(bu) {
@@ -406,7 +406,7 @@
   }
 
   // Ob die Tracker-Nutzung (belegte Topics) abgefragt werden soll: es gibt Topics im Plan
-  // oder gekauft, oder ein Gratis-Test steht zur Verfuegung bzw. laeuft.
+  // oder gekauft, oder ein Free Trial steht zur Verfuegung bzw. laeuft.
   function trackerNeedsUsage(bu) {
     if (!bu) return false;
     if (Math.round(Number(bu.ai_visibility_topics_limit || 0)) > 0) return true;
@@ -1071,7 +1071,7 @@
     // Karte 11+12: Customer Journey Tracker (nur wenn Topics vorhanden sind, inklusive oder
     // gebucht). Das Limit liegt auf der Owner-/Kaeufer-Zeile (bu), nicht auf der Zeile eines
     // Team-Mitglieds. activeTopics ist null, solange die RPC fehlt: dann nur das Limit zeigen.
-    // NEU (06.10.2026): Gratis-Test zaehlt als 1 Zusatz-Topic, solange er verfuegbar ist oder laeuft.
+    // NEU (06.10.2026): Free Trial zaehlt als 1 Zusatz-Topic, solange er verfuegbar ist oder laeuft.
     var trial          = getTrackerTrial(bu);
     var trialSlot      = (trial.state === 'available' || trial.state === 'running') ? 1 : 0;
     var topicsLimit    = Math.round(Number(bu.ai_visibility_topics_limit || 0)) + trialSlot;
@@ -1085,11 +1085,11 @@
     setText('cvz-d-c11-value', topicsKnown ? (topicsUsed + '/' + topicsLimit + ' Topics') : (topicsLimit + ' Topics'));
     var trialText = '';
     if (trial.state === 'available') {
-      trialText = 'Gratis-Test: ' + CONFIG.TRACKER_TRIAL_DAYS + ' Tage kostenlos testen';
+      trialText = 'Free Trial: ' + CONFIG.TRACKER_TRIAL_DAYS + ' Tage kostenlos testen';
     } else if (trial.state === 'running') {
       trialText = trial.daysLeft <= 1
-        ? 'Gratis-Test endet in weniger als 24 Stunden'
-        : 'Gratis-Test: noch ' + trial.daysLeft + ' Tage (bis ' + trial.endsAt.toLocaleDateString('de-DE') + ')';
+        ? 'Free Trial endet in weniger als 24 Stunden'
+        : 'Free Trial: noch ' + trial.daysLeft + ' Tage (bis ' + trial.endsAt.toLocaleDateString('de-DE') + ')';
     }
     var c11Sub = topicsKnown ? (Math.round(topicsPercent) + '% der Topics belegt') : 'Limit deines Plans';
     if (trialText) c11Sub = (topicsLimit - trialSlot > 0 ? c11Sub + ' \u00b7 ' : '') + trialText;
@@ -1100,7 +1100,7 @@
     var topicsSplit = [];
     if (topicsIncluded > 0) topicsSplit.push(topicsIncluded + ' im Plan enthalten');
     if (topicsBought > 0)   topicsSplit.push(topicsBought + ' gebucht');
-    if (trialSlot > 0)      topicsSplit.push('1 im Gratis-Test');
+    if (trialSlot > 0)      topicsSplit.push('1 im Free Trial');
     setText('cvz-d-c12-value', topicsKnown ? topicsFree : '-');
     setText('cvz-d-c12-sub', topicsSplit.length ? topicsSplit.join(', ') : '-');
     showEl(document.getElementById('cvz-d-c12'), showTrackerCards, 'flex');
@@ -1164,7 +1164,7 @@
     // Tracker: nur sperren, wenn ueberhaupt keine Topics vorhanden sind. Sind alle Topics
     // belegt, muss der Tracker trotzdem erreichbar bleiben (Ansehen der bestehenden Topics).
     if (tool === 'tracker') {
-      // NEU (06.10.2026): nach einem beendeten Gratis-Test bleibt der Tracker erreichbar, damit
+      // NEU (06.10.2026): nach einem beendeten Free Trial bleibt der Tracker erreichbar, damit
       // das archivierte Test-Thema ansehbar bleibt (der Tracker zeigt dort selbst den Kauf-Hinweis).
       if (c.topicsLimit > 0 || c.trialState === 'expired') return null;
       return {
