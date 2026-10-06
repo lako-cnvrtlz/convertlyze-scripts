@@ -496,7 +496,15 @@
     if (!response.ok) {
       var errBody = {};
       try { errBody = await response.json(); } catch (e) {}
-      var err = new Error(errBody.detail || errBody.error || ('Request fehlgeschlagen (' + response.status + ')'));
+      // NEU (06.10.2026): FastAPI liefert bei Validierungsfehlern (422) eine Liste von
+      // Objekten als detail. Vorher erschien dann "[object Object]".
+      var errDetail = errBody.detail;
+      if (Array.isArray(errDetail)) {
+        errDetail = errDetail.map(function (d) { return (d && d.msg) ? d.msg : JSON.stringify(d); }).join('; ');
+      } else if (errDetail && typeof errDetail === 'object') {
+        errDetail = errDetail.message || errDetail.msg || JSON.stringify(errDetail);
+      }
+      var err = new Error(errDetail || errBody.error || ('Request fehlgeschlagen (' + response.status + ')'));
       err.status = response.status;
       err.code = errBody.code;
       throw err;
