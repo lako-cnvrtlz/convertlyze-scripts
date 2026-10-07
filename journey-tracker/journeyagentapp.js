@@ -633,6 +633,7 @@
       outreach_targets: data.outreach_targets || null,
       // NEU (23.09.2026): freie Prompt-Plätze (gemeinsamer Topf von 20)
       prompt_budget: data.prompt_budget || null,
+      serp_check_depth: data.serp_check_depth || null,
       competitors: [],
       gsc_rows: (data.search_queries || [])
         .filter(function (q) { return q.source === 'gsc_near_miss'; })
