@@ -69,6 +69,7 @@
     activeView:       'overview',
     activeTopicId:    null,
     activeSubTab:     'themen',
+    summaryDetailsOpen: false,
     topicDetailCache: {},
     isLoadingDetail:  false,
     activePersonaFilter: null,
@@ -4975,9 +4976,27 @@
           ' (' + escapeHtml(formatRelativeTime(topic.last_monthly_collection_at)) + ', wird monatlich aktualisiert)</p>'
         : '<p class="cvz-freshness-note">Zusammenfassung: noch kein abgeschlossener Analyse-Lauf.</p>') +
       archivedNotice +
-      '<p class="cvz-summary-text">' + escapeHtml(topic.latest_summary || 'Noch keine Zusammenfassung vorhanden.') + '</p>' +
-      renderSummaryDetailSections(topic.summary_detail);
+      '<p class="cvz-summary-text">' + escapeHtml(topic.latest_summary || 'Noch keine Zusammenfassung vorhanden.') + '</p>';
     card.appendChild(renderNextRunNote(topic, 30));
+    // GEÄNDERT (07.10.2026): Die Detail-Abschnitte (Quellen, Wettbewerber, Je Phase, Keyword-Chancen,
+    // KI-Wissen) liegen in einem aufklappbaren Bereich. Der Kurztext bleibt sichtbar, die Tabs
+    // darunter sind dadurch ohne langes Scrollen erreichbar. Der Auf-/Zu-Zustand bleibt beim
+    // Tab-Wechsel erhalten (state.summaryDetailsOpen).
+    var detailSectionsHtml = renderSummaryDetailSections(topic.summary_detail);
+    if (detailSectionsHtml) {
+      var detailsEl = document.createElement('details');
+      detailsEl.className = 'cvz-summary-details';
+      if (state.summaryDetailsOpen) detailsEl.open = true;
+      var detailsToggle = document.createElement('summary');
+      detailsToggle.className = 'cvz-summary-details-toggle';
+      detailsToggle.textContent = 'Details zur Zusammenfassung';
+      detailsEl.appendChild(detailsToggle);
+      var detailsBody = document.createElement('div');
+      detailsBody.innerHTML = detailSectionsHtml;
+      detailsEl.appendChild(detailsBody);
+      detailsEl.addEventListener('toggle', function () { state.summaryDetailsOpen = detailsEl.open; });
+      card.appendChild(detailsEl);
+    }
     return card;
   }
 
@@ -7108,7 +7127,7 @@
   // inkl. aufklappbarer Antwort-Zeile (gleiches Prinzip wie _buildKeywordTable).
   function _buildPromptTable(promptsInPhase, enableCitations, changelogEntries) {
     var table = document.createElement('table');
-    table.className = 'cvz-table' + (enableCitations ? ' cvz-table-clickable' : '');
+    table.className = 'cvz-table cvz-prompt-table' + (enableCitations ? ' cvz-table-clickable' : '');
     // GEÄNDERT (25.09.2026): feste Breiten auf den Nicht-Prompt-Spalten,
     // gleicher Grund wie bei _buildKeywordTable: jede Phase hat ihre eigene
     // <table>, ohne feste Breiten fluchten die Spalten nicht über die
@@ -7191,15 +7210,15 @@
       var tr = document.createElement('tr');
       if (enableCitations) tr.setAttribute('data-cvz-prompt-toggle', prompt.id);
       tr.innerHTML =
-        '<td class="cvz-prompt-expand-chevron">' + (enableCitations ? (state.expandedPromptId === prompt.id ? '\u25be' : '\u25b8') : '') + '</td>' +
-        '<td>' +
+        '<td class="cvz-prompt-expand-chevron cvz-pt-chev">' + (enableCitations ? (state.expandedPromptId === prompt.id ? '\u25be' : '\u25b8') : '') + '</td>' +
+        '<td class="cvz-pt-text">' +
           '<span class="cvz-dot ' + dotClass + '" title="' + escapeHtml(statusLabel) + '"></span> ' +
           escapeHtml(prompt.prompt_text) + changelogBadgeHtml +
         '</td>' +
-        '<td>' + faviconHtml + '</td>' +
-        '<td style="white-space:nowrap;">' + citationBadge + unlinkedBadge + '</td>' +
-        '<td style="white-space:nowrap;">' + contentTypeBadge + personaBadge + aiSearchVolumeBadge + '</td>' +
-        '<td style="white-space:nowrap;text-align:right;">' +
+        '<td class="cvz-pt-src" data-label="Zitierte Quellen">' + faviconHtml + '</td>' +
+        '<td class="cvz-pt-cite" style="white-space:nowrap;">' + citationBadge + unlinkedBadge + '</td>' +
+        '<td class="cvz-pt-meta" style="white-space:nowrap;">' + contentTypeBadge + personaBadge + aiSearchVolumeBadge + '</td>' +
+        '<td class="cvz-pt-del" style="white-space:nowrap;text-align:right;">' +
           '<button type="button" class="cvz-prompt-delete-btn" data-cvz-prompt-delete="' + prompt.id + '" aria-label="Prompt deaktivieren" title="Prompt deaktivieren">\u00d7</button>' +
         '</td>';
       tbody.appendChild(tr);
@@ -7207,6 +7226,7 @@
       if (enableCitations && state.expandedPromptId === prompt.id) {
         var expTr = document.createElement('tr');
         var expTd = document.createElement('td');
+        expTr.className = 'cvz-pt-exp-row';
         expTd.colSpan = 6;
         expTd.appendChild(renderPromptExpansion(prompt, changelogEntries));
         expTr.appendChild(expTd);
@@ -9010,6 +9030,11 @@
       '.cvz-section-title { margin: 0 0 4px; font-size: 22px; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
 
       '.cvz-summary-card { margin-bottom: 24px; }' +
+      '.cvz-summary-details { margin-top: 12px; border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-summary-details-toggle { cursor: pointer; padding: 12px 0 6px; font-size: 13px; font-weight: 600; color: var(--cvz-teal); list-style: none; }' +
+      '.cvz-summary-details-toggle::-webkit-details-marker { display: none; }' +
+      '.cvz-summary-details-toggle::before { content: "▸  "; }' +
+      '.cvz-summary-details[open] > .cvz-summary-details-toggle::before { content: "▾  "; }' +
       '.cvz-ai-attribution { margin: 20px 0 0; padding-top: 12px; border-top: 1px solid var(--cvz-border); font-size: 11px; color: var(--cvz-text-muted); opacity: 0.6; }' +
       '.cvz-summary-text { font-size: 15px; line-height: 1.5; margin: 12px 0 0; color: var(--cvz-text-muted); }' +
       '.cvz-summary-subsection { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--cvz-border); }' +
@@ -9056,6 +9081,25 @@
         '.cvz-opp-table .cvz-opp-type-chip { white-space: normal !important; line-height: 1.35; }' +
         '.cvz-opp-table > tbody > tr.cvz-opp-exp-row, .cvz-opp-table > tbody > tr.cvz-opp-exp-row > td { display: block; width: 100%; }' +
         '.cvz-opp-table > tbody > tr.cvz-opp-exp-row > td { padding: 0 4px 14px 26px !important; box-sizing: border-box; }' +
+      '}' +
+      // NEU (07.10.2026): Prompt-Tabelle auf dem Handy als Karten. Vorher blieb dem Prompt-Text durch die
+      // festen Spaltenbreiten (table-layout: fixed) fast keine Breite, der Text lief unter die Favicons.
+      '@media (max-width: 720px) {' +
+        '.cvz-prompt-table, .cvz-prompt-table > tbody { display: block; width: 100% !important; min-width: 0 !important; table-layout: auto; }' +
+        '.cvz-prompt-table > thead { display: none; }' +
+        '.cvz-prompt-table > tbody > tr { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 6px 8px; align-items: start; padding: 12px 4px; border-bottom: 1px solid var(--cvz-border); }' +
+        '.cvz-prompt-table > tbody > tr > td { display: block; padding: 0 !important; border: 0 !important; min-width: 0; width: auto !important; box-sizing: border-box; white-space: normal !important; }' +
+        '.cvz-prompt-table .cvz-pt-chev { grid-column: 1; grid-row: 1; }' +
+        '.cvz-prompt-table .cvz-pt-text { grid-column: 2; grid-row: 1; overflow-wrap: anywhere; line-height: 1.4; }' +
+        '.cvz-prompt-table .cvz-pt-del { grid-column: 3; grid-row: 1; text-align: right; }' +
+        '.cvz-prompt-table .cvz-pt-src, .cvz-prompt-table .cvz-pt-cite, .cvz-prompt-table .cvz-pt-meta { grid-column: 2 / -1; }' +
+        '.cvz-prompt-table .cvz-pt-src:empty, .cvz-prompt-table .cvz-pt-cite:empty, .cvz-prompt-table .cvz-pt-meta:empty { display: none; }' +
+        '.cvz-prompt-table .cvz-pt-src::before { content: attr(data-label) ": "; font-size: 11px; color: var(--cvz-text-muted); margin-right: 6px; }' +
+        '.cvz-prompt-table .cvz-pt-meta br { display: none; }' +
+        '.cvz-prompt-table .cvz-pt-meta > * { margin-right: 8px; }' +
+        '.cvz-prompt-table > tbody > tr.cvz-pt-exp-row, .cvz-prompt-table > tbody > tr.cvz-pt-exp-row > td { display: block; width: 100%; }' +
+        '.cvz-prompt-table > tbody > tr.cvz-pt-exp-row { padding: 0; }' +
+        '.cvz-prompt-table > tbody > tr.cvz-pt-exp-row > td { padding: 0 4px 12px !important; }' +
       '}' +
       '.cvz-summary-phase-block { margin-top: 12px; }' +
       '.cvz-thin-data-note { font-size: 12px; color: var(--cvz-text-muted); font-style: italic; margin: 6px 0 0; }' +
