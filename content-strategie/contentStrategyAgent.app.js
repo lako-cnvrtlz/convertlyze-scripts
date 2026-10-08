@@ -713,6 +713,12 @@
   }
 
   // ==================== RENDERING ====================
+  // Anbieter-Namen (DataForSEO) gehören nicht in die Oberfläche: Kunden kennen sie nicht. Das Backend
+  // filtert neue Berichte; dieser Filter deckt auch bereits gespeicherte Berichte ab.
+  function scrubProviderNames(text) {
+    return String(text).replace(/\bdata\s?for\s?seo\b/gi, 'Suchdaten');
+  }
+
   function el(tag, attrs, children) {
     var node = document.createElement(tag);
     attrs = attrs || {};
@@ -723,7 +729,7 @@
       else node.setAttribute(key, attrs[key]);
     });
     (children || []).forEach(function (child) {
-      if (child) node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+      if (child) node.appendChild(typeof child === 'string' ? document.createTextNode(scrubProviderNames(child)) : child);
     });
     return node;
   }
@@ -3174,7 +3180,7 @@
   }
 
   function renderMarkdownInto(container, text) {
-    var str = String(text || '');
+    var str = scrubProviderNames(String(text || ''));
     if (typeof marked !== 'undefined') {
       container.innerHTML = marked.parse(str);
       cvzCsLabelTablesForCards(container);
