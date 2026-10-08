@@ -660,8 +660,17 @@
             page_url: q.page_url || q.gsc_page || q.top_url || q.ranking_url || null,
           };
         }),
-      prompts: (data.prompts || []).map(function (p) {
+      // GEÄNDERT (08.10.2026): Discovery-Prompts sind nur Vorschläge. Sie werden
+      // nicht gemessen und fließen deshalb nirgends in Zahlen ein (Rollup,
+      // Buying Center, Budget). Sie stehen getrennt in prompt_suggestions und
+      // erscheinen nur im Prompts-Tab als Liste zum Hinzufügen.
+      prompts: (data.prompts || []).filter(function (p) {
+        return p.prompt_type !== 'discovery';
+      }).map(function (p) {
         return Object.assign({ visibility_status: null }, p, { phase: p.messymiddle_phase || null });
+      }),
+      prompt_suggestions: (data.prompts || []).filter(function (p) {
+        return p.prompt_type === 'discovery' && p.is_active !== false;
       }),
     };
   }
@@ -1621,6 +1630,7 @@
     }
 
     container.onclick = handleContainerClick;
+    makeTablesScrollable(container);
 
     if (focusedId) {
       var toRefocus = document.getElementById(focusedId);
@@ -1631,6 +1641,28 @@
         }
       }
     }
+  }
+
+  // NEU (08.10.2026): Jede <table> bekommt einen seitlich scrollbaren Wrapper, sofern sie
+  // nicht schon in einem steckt. Läuft nach jedem render(), deshalb müssen neue Tabellen
+  // im Code nicht einzeln daran denken. Vorhandene Wrapper (Klasse cvz-table-scroll,
+  // cvz-changelog-table-wrap oder inline overflow-x:auto) bleiben unverändert.
+  function makeTablesScrollable(root) {
+    var tables = Array.prototype.slice.call(root.querySelectorAll('table'));
+    tables.forEach(function (table) {
+      var parent = table.parentNode;
+      if (!parent) return;
+      if (parent.classList && (parent.classList.contains('cvz-table-scroll') ||
+          parent.classList.contains('cvz-changelog-table-wrap'))) return;
+      if (parent.style && (parent.style.overflowX === 'auto' || parent.style.overflowX === 'scroll')) {
+        parent.classList.add('cvz-table-scroll');
+        return;
+      }
+      var wrap = document.createElement('div');
+      wrap.className = 'cvz-table-scroll';
+      parent.insertBefore(wrap, table);
+      wrap.appendChild(table);
+    });
   }
 
   function handleContainerClick(event) {
@@ -1777,6 +1809,19 @@
       state.expandedPromptEngine[engineOwner] = engineTab.getAttribute('data-cvz-prompt-engine');
       state.expandedPromptRunIndex[engineOwner] = 0;
       render();
+      return;
+    }
+    var suggestionAdd = event.target.closest('[data-cvz-suggestion-add]');
+    if (suggestionAdd) {
+      var sugId = suggestionAdd.getAttribute('data-cvz-suggestion-add');
+      var sugRow = suggestionAdd.closest('.cvz-prompt-suggestion');
+      var sugSelect = sugRow ? sugRow.querySelector('[data-cvz-suggestion-phase]') : null;
+      addPromptSuggestion(state.activeTopicId, sugId, sugSelect ? sugSelect.value : '');
+      return;
+    }
+    var suggestionDismiss = event.target.closest('[data-cvz-suggestion-dismiss]');
+    if (suggestionDismiss) {
+      deactivatePrompt(state.activeTopicId, suggestionDismiss.getAttribute('data-cvz-suggestion-dismiss'));
       return;
     }
     var promptDelete = event.target.closest('[data-cvz-prompt-delete]');
@@ -2744,6 +2789,32 @@
 
     state.isSubmittingManualPrompt = false;
     render();
+  }
+
+  // NEU (08.10.2026): Vorschlag ins feste Prompt-Set \u00fcbernehmen. Die Phase ist
+  // Pflicht, weil Vorschl\u00e4ge keine haben (das Backend lehnt sonst mit 422 ab).
+  // Gemessen wird der Prompt ab dem n\u00e4chsten regul\u00e4ren Durchlauf.
+  async function addPromptSuggestion(topicId, promptId, phase) {
+    if (!phase) {
+      await showCvzAlert('Bitte zuerst eine Phase w\u00e4hlen.');
+      return;
+    }
+    if (CONFIG.useMockData) {
+      await showCvzAlert('Im Mock-Modus nicht verf\u00fcgbar.');
+      return;
+    }
+    try {
+      await apiFetch('/topics/' + topicId + '/prompts/' + promptId + '/set-type', {
+        method: 'POST',
+        body: { prompt_type: 'stable_core', messymiddle_phase: phase },
+      });
+      delete state.topicDetailCache[topicId];
+      delete state.buyingCenterCache[topicId];
+      await openTopicDetail(topicId, false);
+    } catch (e) {
+      console.error('[CVZ Visibility] Vorschlag konnte nicht hinzugef\u00fcgt werden:', e);
+      await showCvzAlert('Vorschlag konnte nicht hinzugef\u00fcgt werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
   }
 
   async function deactivatePrompt(topicId, promptId) {
@@ -4595,7 +4666,7 @@
       }));
     } else if (view === 'prompts') {
       promptNotes();
-      wrap.appendChild(renderPromptsByPhase(detail.prompts, true, allEntries));
+      wrap.appendChild(renderPromptsByPhase(detail.prompts, true, allEntries, detail.prompt_suggestions));
     } else if (view === 'fanout') {
       promptNotes();
       wrap.appendChild(renderFanOutView(state.activeTopicId, detail));
@@ -7395,7 +7466,7 @@
   // GEÄNDERT (25.09.2026, Kundenwunsch): Prompt-Liste jetzt als echte
   // <table> mit Kopfzeile statt Flex-Divs ohne Header, gleiches Muster wie
   // renderKeywordsTable/_buildKeywordTable.
-  function renderPromptsByPhase(prompts, enableCitations, changelogEntries) {
+  function renderPromptsByPhase(prompts, enableCitations, changelogEntries, suggestions) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
@@ -7428,7 +7499,123 @@
       section.appendChild(_buildPromptTable(promptsInPhase, enableCitations, changelogEntries));
     });
 
+    // NEU (08.10.2026): Vorschläge unter den gemessenen Prompts.
+    var suggestionBlock = renderPromptSuggestions(suggestions, getPromptBudget(prompts, state.activeTopicId));
+    if (suggestionBlock) section.appendChild(suggestionBlock);
+
     return section;
+  }
+
+  // NEU (08.10.2026): Prompt-Vorschläge (Backend-Typ "discovery"). Claude schlägt
+  // sie zusätzlich zum festen Prompt-Set vor. Sie werden NICHT gemessen, haben
+  // keine Phase und tauchen in keiner Auswertung oder Zusammenfassung auf, bis
+  // der Nutzer einen Vorschlag mit einer gewählten Phase zum Set hinzufügt.
+  var SUGGESTION_SOURCE_LABELS = {
+    ai_search_real: 'Angelehnt an eine echte AI-Overview-Frage',
+    paa: 'Angelehnt an eine People-Also-Ask-Frage',
+    keyword: 'Angelehnt an ein Keyword',
+    context: 'Aus dem Themenkontext abgeleitet, nicht aus Suchdaten',
+  };
+
+  function renderPromptSuggestions(suggestions, budget) {
+    if (!suggestions || suggestions.length === 0) return null;
+
+    // Freie Pl\u00e4tze wie im Backend (set_prompt_type_endpoint pr\u00fcft frei_system):
+    // hinzugef\u00fcgte Vorschl\u00e4ge z\u00e4hlen dort als vom System erzeugte Prompts.
+    budget = budget || {};
+    var freeSlots = budget.frei_system != null ? budget.frei_system
+      : (budget.frei_gesamt != null ? budget.frei_gesamt
+      : (budget.frei_eigene != null ? budget.frei_eigene : null));
+    var noSlots = freeSlots !== null && freeSlots <= 0;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-section';
+    wrap.style.marginTop = '28px';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Vorschl\u00e4ge f\u00fcr weitere Prompts';
+    wrap.appendChild(heading);
+
+    var note = document.createElement('p');
+    note.className = 'cvz-card-placeholder-text';
+    note.textContent =
+      'Das sind KI-Vorschl\u00e4ge, noch keine gemessenen Prompts. Sie flie\u00dfen in keine Auswertung ein, ' +
+      'bis ihr sie zum festen Set hinzuf\u00fcgt. Wählt dazu die passende Phase.';
+    wrap.appendChild(note);
+
+    // NEU (08.10.2026): Platz-Anzeige, bevor jemand einen Vorschlag w\u00e4hlt.
+    if (freeSlots !== null) {
+      var slotInfo = document.createElement('p');
+      slotInfo.className = 'cvz-prompt-slot-info' + (noSlots ? ' cvz-prompt-slot-info-full' : '');
+      slotInfo.setAttribute('role', 'status');
+      if (noSlots) {
+        var usedSys = budget.aktiv_system != null && budget.max_system != null
+          ? ' (' + budget.aktiv_system + '/' + budget.max_system + ' Pl\u00e4tze f\u00fcr vorgeschlagene Prompts' +
+            (budget.aktiv_gesamt != null && budget.max_gesamt != null ? ', ' + budget.aktiv_gesamt + '/' + budget.max_gesamt + ' insgesamt' : '') + ' belegt)'
+          : '';
+        slotInfo.textContent =
+          'Keine freien Pl\u00e4tze mehr' + usedSys + '. Deaktiviert zuerst einen Prompt, den ihr nicht braucht, ' +
+          'dann k\u00f6nnt ihr hier einen Vorschlag hinzuf\u00fcgen.';
+      } else {
+        slotInfo.textContent = 'Noch ' + freeSlots + (freeSlots === 1 ? ' freier Platz' : ' freie Pl\u00e4tze') +
+          (suggestions.length > freeSlots ? ' \u2013 es lassen sich nicht alle ' + suggestions.length + ' Vorschl\u00e4ge hinzuf\u00fcgen.' : '.');
+      }
+      wrap.appendChild(slotInfo);
+    }
+
+    suggestions.forEach(function (sug) {
+      var row = document.createElement('div');
+      row.className = 'cvz-prompt-suggestion';
+      row.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--cvz-border,rgba(139,152,165,0.25));';
+
+      var textCol = document.createElement('div');
+      textCol.style.cssText = 'flex:1;min-width:220px;';
+      var sourceLabel = SUGGESTION_SOURCE_LABELS[sug.source] || 'KI-Vorschlag';
+      textCol.innerHTML =
+        '<div>' + escapeHtml(sug.prompt_text) + '</div>' +
+        '<div style="margin-top:4px;">' +
+          '<span class="cvz-prompt-citation-count" style="border:1px solid var(--cvz-text-muted,#8b98a5);padding:1px 6px;">KI-Vorschlag \u00b7 nicht gemessen</span> ' +
+          '<span class="cvz-prompt-citation-count">' + escapeHtml(sourceLabel) + '</span>' +
+          (sug.persona ? ' <span class="cvz-prompt-persona">' + escapeHtml(sug.persona) + '</span>' : '') +
+        '</div>';
+      row.appendChild(textCol);
+
+      var phaseSelect = document.createElement('select');
+      phaseSelect.setAttribute('data-cvz-suggestion-phase', sug.id);
+      phaseSelect.className = 'cvz-changelog-custom-input';
+      phaseSelect.style.maxWidth = '180px';
+      phaseSelect.setAttribute('aria-label', 'Phase w\u00e4hlen');
+      phaseSelect.innerHTML =
+        '<option value="">Phase w\u00e4hlen \u2026</option>' +
+        PHASE_ORDER.map(function (ph) {
+          return '<option value="' + ph + '">' + escapeHtml(PHASE_LABELS[ph] || ph) + '</option>';
+        }).join('');
+      phaseSelect.disabled = noSlots;
+      row.appendChild(phaseSelect);
+
+      var addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'cvz-changelog-submit-btn';
+      addBtn.setAttribute('data-cvz-suggestion-add', sug.id);
+      addBtn.textContent = 'Zum Set hinzuf\u00fcgen';
+      addBtn.disabled = noSlots;
+      if (noSlots) addBtn.title = 'Keine freien Pl\u00e4tze';
+      row.appendChild(addBtn);
+
+      var dismissBtn = document.createElement('button');
+      dismissBtn.type = 'button';
+      dismissBtn.className = 'cvz-prompt-delete-btn';
+      dismissBtn.setAttribute('data-cvz-suggestion-dismiss', sug.id);
+      dismissBtn.setAttribute('aria-label', 'Vorschlag verwerfen');
+      dismissBtn.setAttribute('title', 'Vorschlag verwerfen');
+      dismissBtn.textContent = '\u00d7';
+      row.appendChild(dismissBtn);
+
+      wrap.appendChild(row);
+    });
+
+    return wrap;
   }
 
   // NEU (25.09.2026): Baut eine <table> für eine Prompt-Liste einer Phase,
@@ -7675,9 +7862,23 @@
     // Zeilen umgestellt (gleiches Prinzip wie Keywords/Prompts).
     // GEÄNDERT (16.09.2026): URL-Spalte und Deactivate-Button ergänzt (page_url
     // aus search_queries, gespeichert via save_gsc_near_miss in run_topic.py).
+    // GEÄNDERT (08.10.2026): feste Spaltenbreiten + Mindestbreite. Vorher teilten
+    // sich 10 Spalten bei table-layout:fixed die Handybreite, die Inhalte liefen
+    // ineinander. Jetzt ist die Tabelle breiter als der Bildschirm und scrollt seitlich.
     var table = document.createElement('table');
-    table.className = 'cvz-table';
-    table.innerHTML = '<thead><tr><th style="width:26px;"></th><th>Suchanfrage</th><th>Rankende URL</th><th>Klicks</th><th>Impressionen</th><th>CTR</th><th>Position</th><th>AI Overview</th><th>Verkn\u00fcpfte \u00c4nderungen</th><th></th></tr></thead>';
+    table.className = 'cvz-table cvz-gsc-table';
+    table.innerHTML = '<thead><tr>' +
+      '<th style="width:26px;"></th>' +
+      '<th style="width:220px;">Suchanfrage</th>' +
+      '<th style="width:170px;">Rankende URL</th>' +
+      '<th style="width:70px;">Klicks</th>' +
+      '<th style="width:110px;">Impressionen</th>' +
+      '<th style="width:70px;">CTR</th>' +
+      '<th style="width:80px;">Position</th>' +
+      '<th style="width:120px;">AI Overview</th>' +
+      '<th style="width:220px;">Verkn\u00fcpfte \u00c4nderungen</th>' +
+      '<th style="width:44px;"></th>' +
+      '</tr></thead>';
     var tbody = document.createElement('tbody');
     gscRows.forEach(function (row) {
       var linkedEntries = (changelogEntries || []).filter(function (entry) {
@@ -7720,7 +7921,7 @@
     });
     table.appendChild(tbody);
     var tableScroll = document.createElement('div');
-    tableScroll.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    tableScroll.className = 'cvz-table-scroll';
     tableScroll.appendChild(table);
     section.appendChild(tableScroll);
     return section;
@@ -9417,6 +9618,19 @@
       '.cvz-gsc-page-url { color: var(--cvz-teal); font-size: 11px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; display: inline-block; vertical-align: middle; }' +
         '.cvz-gsc-cell-url { max-width: 150px; overflow: hidden; }' +
         '.cvz-gsc-cell-linked { color: var(--cvz-teal); max-width: 280px; }' +
+      // NEU (08.10.2026): Alle Tabellen scrollen seitlich, wenn sie nicht passen (Handy hoch
+      // und quer). Die Wrapper-Klasse setzt makeTablesScrollable() nach jedem render().
+      // Die Mindestbreite verhindert, dass table-layout:fixed Spalten ineinander quetscht.
+      '.cvz-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }' +
+      ':where(.cvz-table-scroll) > table { min-width: 560px; }' +
+      '.cvz-gsc-table { min-width: 1100px; }' +
+      '.cvz-gsc-table td { overflow-wrap: anywhere; vertical-align: top; }' +
+      '.cvz-gsc-table td.cvz-gsc-cell-url { overflow-wrap: normal; }' +
+      '.cvz-gsc-table th { white-space: nowrap; }' +
+      '@media (max-width: 600px) { .cvz-opp-table { min-width: 0; } }' +
+      '.cvz-prompt-slot-info { font-size: 13px; color: var(--cvz-text-muted); margin: 8px 0; }' +
+      '.cvz-prompt-slot-info-full { color: var(--cvz-orange, #e0a030); border-left: 3px solid var(--cvz-orange, #e0a030); padding: 4px 0 4px 10px; }' +
+      '.cvz-changelog-table-wrap > table { min-width: 520px; }' +
       '.cvz-gsc-row-clickable { cursor: pointer; }' +
       '.cvz-gsc-row-clickable:hover { background: rgba(79, 209, 197, 0.06); }' +
 
