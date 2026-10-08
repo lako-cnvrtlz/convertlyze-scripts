@@ -249,6 +249,23 @@
       '.cvz-cs-vbar-track{flex:0 0 140px;height:8px;background:rgba(255,255,255,.08);}',
       '.cvz-cs-vbar-fill{display:block;height:8px;background:var(--cvz-teal);}',
       '.cvz-cs-vcard details,.cvz-cs-method details{margin-top:6px;font-size:13px;}',
+      '.cvz-cs-expand{margin:10px 0 4px;}',
+      '.cvz-cs-expand>summary{list-style:none;display:inline-flex;align-items:center;gap:8px;padding:6px 12px;',
+        'border:1px solid var(--cvz-teal);color:var(--cvz-teal)!important;font-size:13px;font-weight:600;cursor:pointer;user-select:none;}',
+      '.cvz-cs-expand>summary::-webkit-details-marker{display:none;}',
+      '.cvz-cs-expand>summary::before{content:"\\25B8";font-size:11px;transition:transform .15s;}',
+      '.cvz-cs-expand[open]>summary::before{transform:rotate(90deg);}',
+      '.cvz-cs-expand>summary:hover{background:rgba(79,209,197,.1);}',
+      '.cvz-cs-status-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;}',
+      '.cvz-cs-status-label{font-size:13px;font-weight:600;color:var(--cvz-text);}',
+      '.cvz-cs-status-note{font-size:12px;color:var(--cvz-muted);flex-basis:100%;margin:0;}',
+      '.cvz-cs-status-saved{font-size:12px;color:var(--cvz-teal);}',
+      '.cvz-cs-src{padding:10px 14px;margin:0 0 8px;background:var(--cvz-surface);border:1px solid var(--cvz-border);border-left:3px solid var(--cvz-muted);}',
+      '.cvz-cs-src-comp{border-left-color:#de5b50;}',
+      '.cvz-cs-src p{margin:4px 0 0;font-size:13px;}',
+      '.cvz-cs-src-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}',
+      '.cvz-cs-src-head b{color:var(--cvz-text);}',
+      '.cvz-cs-src-no{color:#fca5a5;}',
       '.cvz-cs-vcard summary,.cvz-cs-method summary{cursor:pointer;color:var(--cvz-muted);}',
       '.cvz-cs-prio{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;margin-left:6px;border:1px solid var(--cvz-border-strong);}',
       '.cvz-cs-prio-hoch{color:#fca5a5;background:rgba(239,68,68,.12);}',
@@ -2605,7 +2622,7 @@
     wrap.appendChild(renderReportSection(4, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
     wrap.appendChild(renderReportSection(5, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
     wrap.appendChild(renderReportSection(6, 'Content-Flow: Themen-Baum bearbeiten', [renderFlowSection(sessionId, result, session)]));
-    wrap.appendChild(renderReportSection(7, 'GEO-Strategie', [renderVisibilitySection(session), renderOffsiteSection(result.offsite_measures), renderGeoSection(result.geo_strategy)]));
+    wrap.appendChild(renderReportSection(7, 'GEO-Strategie', [renderVisibilitySection(session), renderOffsiteSection(result.offsite_measures, result.offsite_sources), renderGeoSection(result.geo_strategy)]));
     wrap.appendChild(renderReportSection(8, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]));
     var fundingText = fundedBy
       ? 'Finanziert aus: ' + (fundedBy === 'ppu_strategy' ? 'Pay-per-Use-Credit' : 'Plan-Kontingent')
@@ -2750,8 +2767,9 @@
       if (subs.length > 0) {
         var subList = el('ul', { class: 'cvz-cs-brief-list' });
         subs.slice(0, 8).forEach(function (q) { subList.appendChild(el('li', {}, [q])); });
-        card.appendChild(el('details', {}, [
-          el('summary', {}, ['Teilfragen, die ChatGPT dahinter sucht (Vorlage für Abschnitte und FAQ)']),
+        var subShown = subs.slice(0, 8).length;
+        card.appendChild(el('details', { class: 'cvz-cs-expand' }, [
+          el('summary', {}, ['Aufklappen: ' + subShown + (subShown === 1 ? ' Teilfrage' : ' Teilfragen') + ', die ChatGPT dahinter sucht (Vorlage für Abschnitte und FAQ)']),
           subList,
           el('p', { class: 'cvz-cs-hint' }, ['Nur von ChatGPT, eine Momentaufnahme. Gemini liefert keine solchen Teilfragen.']),
         ]));
@@ -2774,10 +2792,21 @@
         method: 'PATCH',
         body: JSON.stringify({ status: statusSelect.value }),
       })
-        .then(function () { page.status = statusSelect.value; statusSelect.removeAttribute('disabled'); })
+        .then(function () {
+          page.status = statusSelect.value; statusSelect.removeAttribute('disabled');
+          statusSaved.textContent = '✓ gespeichert';
+          setTimeout(function () { statusSaved.textContent = ''; }, 2500);
+        })
         .catch(function (err) { statusSelect.value = previous; statusSelect.removeAttribute('disabled'); alert('Status konnte nicht gespeichert werden: ' + err.message); });
     });
-    var footer = el('div', { class: 'cvz-cs-page-card-footer' }, [statusSelect]);
+    var statusSaved = el('span', { class: 'cvz-cs-status-saved' });
+    var statusRow = el('div', { class: 'cvz-cs-status-row' }, [
+      el('label', { class: 'cvz-cs-status-label' }, ['Dein Bearbeitungsstatus:']),
+      statusSelect,
+      statusSaved,
+      el('p', { class: 'cvz-cs-status-note' }, ['Das setzt du selbst, es passiert nichts automatisch. Der Status dient deiner Übersicht, wird gespeichert und steht im Export. Neue Seiten stehen auf "Vorgeschlagen".']),
+    ]);
+    var footer = el('div', { class: 'cvz-cs-page-card-footer' }, [statusRow]);
     if (page.page_type === 'conversion_landingpage') footer.appendChild(buildLandingpageButton(page.topic));
     card.appendChild(footer);
     return card;
@@ -2916,14 +2945,14 @@
       var fmt = function (d) { return d.domain + ' (' + d.share + ' %)'; };
       card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Stattdessen zitiert: ' + doms.slice(0, 3).map(fmt).join(', ')]));
       if (doms.length > 3) {
-        card.appendChild(el('details', {}, [el('summary', {}, ['Weitere zitierte Quellen']), el('p', { class: 'cvz-cs-hint' }, [doms.slice(3).map(fmt).join(', ')])]));
+        card.appendChild(el('details', { class: 'cvz-cs-expand' }, [el('summary', {}, ['Aufklappen: weitere zitierte Quellen']), el('p', { class: 'cvz-cs-hint' }, [doms.slice(3).map(fmt).join(', ')])]));
       }
     }
     if (p.fan_out_queries && p.fan_out_queries.length > 0) {
       var fl = el('ul', { class: 'cvz-cs-brief-list' });
       p.fan_out_queries.forEach(function (q) { fl.appendChild(el('li', {}, [q])); });
-      card.appendChild(el('details', {}, [
-        el('summary', {}, ['Was ChatGPT dahinter sucht (' + p.fan_out_queries.length + ' Teilfragen)']),
+      card.appendChild(el('details', { class: 'cvz-cs-expand' }, [
+        el('summary', {}, ['Aufklappen: Was ChatGPT dahinter sucht (' + p.fan_out_queries.length + (p.fan_out_queries.length === 1 ? ' Teilfrage' : ' Teilfragen') + ')']),
         fl,
         el('p', { class: 'cvz-cs-hint' }, ['Nur von ChatGPT, eine Momentaufnahme.']),
       ]));
@@ -2959,17 +2988,51 @@
 
   // Off-Site-Maßnahmen aus der eigenen, parallelen KI-Abfrage. Domains und Zahlen stammen aus der
   // Messung, die Aktion und die Vermutung sind Einschätzungen der KI.
-  function renderOffsiteSection(measures) {
-    if (!measures || measures.length === 0) return null;
+  var DOMAIN_TYPE_LABELS = {
+    wettbewerber: 'Wettbewerber', vergleichs_bewertungsportal: 'Vergleichs- oder Bewertungsportal',
+    fachmedium: 'Fachmedium oder Branchenportal', verzeichnis: 'Verzeichnis oder Marktplatz',
+    ratgeber_blog: 'Ratgeber oder Blog', enzyklopaedie_behoerde: 'Nachschlagewerk oder Behörde',
+    unklar: 'Art nicht sicher erkennbar',
+  };
+
+  function renderOffsiteSources(sources) {
+    var wrap = el('div', {});
+    wrap.appendChild(el('h5', {}, ['Wer wird stattdessen zitiert?']));
+    wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+      'Einschätzung der KI aus Domain-Name und einer Beispiel-Quelle aus der Messung, nicht von uns geprüft. Bei Wettbewerbern und Nachschlagewerken planen wir keine Platzierung.',
+    ]));
+    sources.forEach(function (x) {
+      var comp = x.type === 'wettbewerber';
+      var row = el('div', { class: 'cvz-cs-src' + (comp ? ' cvz-cs-src-comp' : '') });
+      row.appendChild(el('div', { class: 'cvz-cs-src-head' }, [
+        el('b', {}, [x.domain]),
+        el('span', { class: 'cvz-cs-badge' }, [x.type_label || DOMAIN_TYPE_LABELS[x.type] || x.type]),
+        el('span', { class: 'cvz-cs-hint' }, ['bei ' + (x.prompts ? x.prompts.length : 0) + (x.prompts && x.prompts.length === 1 ? ' Frage' : ' Fragen') + ', bis zu ' + x.best_share + ' % der Antworten']),
+      ]));
+      if (x.reason) row.appendChild(el('p', { class: 'cvz-cs-hint' }, [x.reason]));
+      if (!x.offsite_possible) row.appendChild(el('p', { class: 'cvz-cs-src-no' }, ['Keine Off-Site-Maßnahme: ' + (comp ? 'Wettbewerber, dort kannst du nichts platzieren.' : 'dort lässt sich nichts platzieren.')]));
+      wrap.appendChild(row);
+    });
+    return wrap;
+  }
+
+  function renderOffsiteSection(measures, sources) {
+    var hasM = measures && measures.length > 0;
+    var hasS = sources && sources.length > 0;
+    if (!hasM && !hasS) return null;
     var box = el('div', { class: 'cvz-cs-geo' });
     box.appendChild(el('h5', {}, ['Off-Site: wo KI-Assistenten stattdessen hinschauen']));
     box.appendChild(el('p', { class: 'cvz-cs-hint' }, [
       'Bei diesen Fragen wird statt deiner Domain immer wieder dieselbe fremde Quelle zitiert. Eine Platzierung dort kann mehr bringen als eine weitere eigene Seite. Ob das klappt, ist eine Vermutung.',
     ]));
-    measures.forEach(function (m) {
+    if (hasS) box.appendChild(renderOffsiteSources(sources));
+    if (hasM) box.appendChild(el('h5', {}, ['Vorgeschlagene Maßnahmen']));
+    else box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für keine dieser Quellen schlagen wir eine Maßnahme vor.']));
+    (measures || []).forEach(function (m) {
       var card = el('div', { class: 'cvz-cs-page-card' });
       card.appendChild(el('div', { class: 'cvz-cs-page-card-badges' }, [
         el('span', { class: 'cvz-cs-badge' }, [OFFSITE_KIND_LABELS[m.kind] || m.kind]),
+        m.domain_type ? el('span', { class: 'cvz-cs-badge' }, [DOMAIN_TYPE_LABELS[m.domain_type] || m.domain_type]) : null,
         el('span', { class: 'cvz-cs-badge' }, ['Aufwand ' + m.effort]),
       ]));
       card.appendChild(el('h4', { class: 'cvz-cs-page-card-topic' }, [m.domain]));
@@ -2979,7 +3042,7 @@
       if (m.prompts && m.prompts.length > 0) {
         var l = el('ul', { class: 'cvz-cs-brief-list' });
         m.prompts.forEach(function (pr) { l.appendChild(el('li', {}, ['"' + pr + '"'])); });
-        card.appendChild(el('details', {}, [el('summary', {}, ['Betroffene Fragen']), l]));
+        card.appendChild(el('details', { class: 'cvz-cs-expand' }, [el('summary', {}, ['Aufklappen: betroffene Fragen (' + m.prompts.length + ')']), l]));
       }
       box.appendChild(card);
     });
