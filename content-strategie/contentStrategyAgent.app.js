@@ -7,7 +7,7 @@
     settingsUrl: '/member/einstellungen#integrationen',
     landingpageAssistantUrl: '/member/landingpage-assistant',
     pollIntervalMs: 3000,
-    pollTimeoutMs: 32 * 60 * 1000,
+    pollTimeoutMs: 42 * 60 * 1000, // muss über BACKGROUND_TURN_TIMEOUT_MS (40 Min) im Backend liegen
     chatPollIntervalMs: 1500,
     chatPollTimeoutMs: 2 * 60 * 1000,
   };
@@ -196,6 +196,29 @@
       '.cvz-cs-badge-audience{background:rgba(79,209,197,.12);color:var(--cvz-teal);border-color:rgba(79,209,197,.25);}',
       '.cvz-cs-badge-recommended{background:rgba(245,158,11,.12);color:#fcd34d;border-color:rgba(245,158,11,.25);}',
       '.cvz-cs-badge-commodity{background:rgba(239,68,68,.1);color:#fca5a5;border-color:rgba(239,68,68,.2);}',
+      /* ---- Sichtbarkeit je Frage (Karten) ---- */
+      '.cvz-cs-vcard{padding:12px 16px;background:var(--cvz-surface);border:1px solid var(--cvz-border);border-left-width:4px;margin-bottom:8px;}',
+      '.cvz-cs-vcard-luecke{border-left-color:var(--cvz-red);}',
+      '.cvz-cs-vcard-wackelig{border-left-color:var(--cvz-amber);}',
+      '.cvz-cs-vcard-stabil{border-left-color:var(--cvz-teal);}',
+      '.cvz-cs-vcard-zu_wenig_daten{border-left-color:var(--cvz-muted);}',
+      '.cvz-cs-vcard-title{font-size:15px;font-weight:600;color:var(--cvz-heading);margin:0 0 4px;}',
+      '.cvz-cs-vbadge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;margin-right:8px;border:1px solid var(--cvz-border-strong);}',
+      '.cvz-cs-vbadge-luecke{color:#fca5a5;background:rgba(239,68,68,.12);}',
+      '.cvz-cs-vbadge-wackelig{color:#fcd34d;background:rgba(245,158,11,.12);}',
+      '.cvz-cs-vbadge-stabil{color:var(--cvz-teal);background:rgba(79,209,197,.12);}',
+      '.cvz-cs-vbadge-zu_wenig_daten{color:var(--cvz-muted);}',
+      '.cvz-cs-vbar{display:flex;align-items:center;gap:8px;font-size:13px;margin:3px 0;}',
+      '.cvz-cs-vbar-label{width:90px;color:var(--cvz-muted);}',
+      '.cvz-cs-vbar-track{flex:0 0 140px;height:8px;background:rgba(255,255,255,.08);}',
+      '.cvz-cs-vbar-fill{display:block;height:8px;background:var(--cvz-teal);}',
+      '.cvz-cs-vcard details,.cvz-cs-method details{margin-top:6px;font-size:13px;}',
+      '.cvz-cs-vcard summary,.cvz-cs-method summary{cursor:pointer;color:var(--cvz-muted);}',
+      '.cvz-cs-prio{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;margin-left:6px;border:1px solid var(--cvz-border-strong);}',
+      '.cvz-cs-prio-hoch{color:#fca5a5;background:rgba(239,68,68,.12);}',
+      '.cvz-cs-prio-mittel{color:#fcd34d;background:rgba(245,158,11,.12);}',
+      '.cvz-cs-prio-niedrig,.cvz-cs-prio-ohne_messdaten{color:var(--cvz-muted);}',
+      '.cvz-cs-evidence{font-size:13px;color:var(--cvz-text);margin:6px 0;padding:6px 10px;background:rgba(255,255,255,.03);border:1px dashed var(--cvz-border-strong);}',
       '.cvz-cs-badge-role-coverage{background:rgba(79,209,197,.1);color:var(--cvz-teal);border-color:rgba(79,209,197,.2);}',
       '.cvz-cs-badge-role-citation{background:rgba(59,130,246,.12);color:#93c5fd;border-color:rgba(59,130,246,.25);}',
       '.cvz-cs-badge-role-existing{background:var(--cvz-surface);color:var(--cvz-muted);border-color:var(--cvz-border);}',
@@ -527,6 +550,7 @@
     pollStartedAt: null,
     currentSessionId: null,
     currentResult: null,
+    visibilityPrompts: [],
     chat: {
       sessionId: null,
       messages: [],
@@ -700,20 +724,13 @@
     var form = el('form', { class: 'cvz-cs-form' });
     var topicInput = el('input', { type: 'text', name: 'topic', placeholder: 'z.B. "Landingpage Software für B2B"', required: 'required' });
     if (prefill.topic) topicInput.value = prefill.topic;
-    var domainInput = el('input', { type: 'text', name: 'domain', placeholder: 'z.B. convertlyze.com (optional, für Abdeckungs-Check)' });
+    var domainInput = el('input', { type: 'text', name: 'domain', placeholder: 'z.B. convertlyze.com (ohne Tracker-Daten nötig für die Sichtbarkeits-Messung)' });
     if (prefill.domain) {
       domainInput.value = prefill.domain;
     } else if (state.gscStatus && state.gscStatus.connected && state.gscStatus.sites.length === 1) {
       var suggested = state.gscStatus.sites[0].site_url.replace(/^sc-domain:/, '').replace(/^https?:\/\//, '').replace(/\/$/, '');
       domainInput.value = suggested;
     }
-    var llmTypeSelect = el(
-      'select',
-      { name: 'geo_test_llm_type' },
-      GEO_LLM_TYPE_OPTIONS.map(function (o) {
-        return el('option', { value: o.value }, [o.label]);
-      })
-    );
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Thema / Ziel-Keyword', topicInput]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Eigene Domain', domainInput]));
     // NEU (Tracker-Verbindung): nur sichtbar, wenn der User Tracker-Themen hat.
@@ -736,14 +753,12 @@
       );
     }
     form.appendChild(
-      el('label', { class: 'cvz-cs-label' }, [
-        'Welchen KI-Assistenten möchtest du für die Prompt-Tests nutzen?',
-        llmTypeSelect,
-        el('span', { class: 'cvz-cs-hint' }, [
-          'Wir wählen innerhalb dieser Familie automatisch ein schnelles, websuche-fähiges Modell aus.',
-        ]),
+      el('p', { class: 'cvz-cs-hint' }, [
+        'Ohne Tracker-Daten messen wir deine KI-Sichtbarkeit einmalig frisch: ca. 16 Fragen deiner Zielgruppe, je 3 Mal bei ChatGPT und Gemini. Du bestätigst vorher Zielgruppe und Fragen.',
       ])
     );
+    var formError = el('p', { class: 'cvz-cs-quota-empty' });
+    form.appendChild(formError);
     var canStart = !state.quota || state.quota.can_start_session;
     var submitBtn = el('button', { type: 'submit', class: 'cvz-cs-submit-btn' }, ['Content-Cluster erstellen']);
     if (!canStart) submitBtn.setAttribute('disabled', 'disabled');
@@ -754,7 +769,12 @@
       var domain = domainInput.value.trim();
       if (!topic) return;
       var trackerTopicId = trackerSelect && trackerSelect.value ? trackerSelect.value : null;
-      startTopicValidation(topic, domain || undefined, llmTypeSelect.value, trackerTopicId);
+      if (!trackerTopicId && !domain) {
+        formError.textContent = 'Bitte deine Domain angeben: Ohne Tracker-Daten brauchen wir sie, um deine Sichtbarkeit zu messen.';
+        return;
+      }
+      formError.textContent = '';
+      startTopicValidation(topic, domain || undefined, trackerTopicId);
     });
     return form;
   }
@@ -823,7 +843,7 @@
     state.root.appendChild(box);
   }
 
-  function startTopicValidation(topic, domain, geoTestLlmType, trackerTopicId) {
+  function startTopicValidation(topic, domain, trackerTopicId) {
     renderValidating(topic);
     var controller = new AbortController();
     var timeoutId = setTimeout(function () {
@@ -836,7 +856,7 @@
     })
       .then(function (result) {
         clearTimeout(timeoutId);
-        renderTopicValidationResult(result, domain, geoTestLlmType, topic, trackerTopicId);
+        renderTopicValidationResult(result, domain, topic, trackerTopicId);
       })
       .catch(function (err) {
         clearTimeout(timeoutId);
@@ -848,7 +868,7 @@
       });
   }
 
-  function renderTopicValidationResult(result, domain, geoTestLlmType, originalTopic, trackerTopicId) {
+  function renderTopicValidationResult(result, domain, originalTopic, trackerTopicId) {
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
     wrap.appendChild(el('h3', {}, ['Bevor wir loslegen: ist "' + result.seed_topic + '" das richtige Thema?']));
@@ -909,7 +929,11 @@
     var confirmBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Content-Cluster erstellen']);
     confirmBtn.addEventListener('click', function () {
       var finalTopic = freeTextInput.value.trim() || chosenInput.value;
-      startGeneration(finalTopic, domain, geoTestLlmType, result.validation_id, trackerTopicId);
+      if (trackerTopicId) {
+        startGeneration(finalTopic, domain, result.validation_id, trackerTopicId, null);
+      } else {
+        startAudienceStep(finalTopic, domain, result.validation_id, originalTopic);
+      }
     });
     var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Zurück, Thema/Domain ändern']);
     backBtn.addEventListener('click', function () {
@@ -923,7 +947,218 @@
     state.root.appendChild(wrap);
   }
 
-  function startGeneration(topic, domain, geoTestLlmType, validationId, trackerTopicId) {
+  // ==================== NEU: ZIELGRUPPE + PROMPT-PLAN (nur ohne Tracker-Daten) ====================
+  var PHASE_OPTIONS = [
+    { value: 'exploration', label: 'Orientierung' },
+    { value: 'evaluation', label: 'Bewertung' },
+    { value: 'comparison', label: 'Vergleich' },
+    { value: 'decision', label: 'Entscheidung' },
+  ];
+  var PHASE_LABEL_MAP = PHASE_OPTIONS.reduce(function (acc, o) { acc[o.value] = o.label; return acc; }, { discovery: 'Entdeckung' });
+  var ORIGIN_LABEL_MAP = {
+    real_ai_question: 'echte KI-Frage',
+    paa: 'Google-Nutzerfrage',
+    keyword: 'Keyword',
+    derived: 'abgeleitet (ohne Datenbeleg)',
+    tracker: 'Tracker',
+  };
+  var MIN_PROMPTS_KEEP = 4;
+
+  function renderBusy(title, hint) {
+    clear(state.root);
+    state.root.appendChild(renderQuotaBanner());
+    state.root.appendChild(el('div', { class: 'cvz-cs-processing' }, [
+      el('div', { class: 'cvz-cs-spinner' }),
+      el('p', { class: 'cvz-cs-progress-text' }, [title]),
+      hint ? el('p', { class: 'cvz-cs-hint' }, [hint]) : null,
+    ]));
+  }
+
+  function startAudienceStep(topic, domain, validationId, originalTopic) {
+    renderBusy('Ich überlege, wer bei deinem Thema mitentscheidet …', 'Dauert meist unter einer Minute.');
+    apiFetch('/api/content-strategy/suggest-audience', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain }),
+    })
+      .then(function (res) { renderAudienceStep(res.audience, topic, domain, validationId, originalTopic); })
+      .catch(function (err) { renderError('Zielgruppen-Vorschlag fehlgeschlagen: ' + err.message); });
+  }
+
+  function renderAudienceStep(audience, topic, domain, validationId, originalTopic) {
+    clear(state.root);
+    var wrap = el('div', { class: 'cvz-cs-topic-check' });
+    wrap.appendChild(el('h3', {}, ['Stimmt diese Zielgruppe?']));
+    wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+      'Das ist ein Vorschlag, keine Tatsache. Die Fragen für die Messung werden aus diesen Rollen abgeleitet. Passe an, was nicht stimmt.',
+    ]));
+    var groupInput = el('input', { type: 'text' });
+    groupInput.value = audience.zielgruppe || '';
+    wrap.appendChild(el('label', { class: 'cvz-cs-label' }, ['Zielgruppe in einem Satz', groupInput]));
+
+    var soloBox = el('input', { type: 'checkbox' });
+    soloBox.checked = !!audience.ist_solo_zielgruppe;
+    wrap.appendChild(el('label', { class: 'cvz-cs-label' }, [soloBox, ' Eine einzelne Person entscheidet allein (kein Buying Center)']));
+
+    var rolesBox = el('div', {});
+    var rows = [];
+    var championName = 'cvz_cs_champion_' + Math.random().toString(36).slice(2);
+    function addRoleRow(role) {
+      var nameInput = el('input', { type: 'text', placeholder: 'Rolle, z.B. Marketingleitung' });
+      nameInput.value = role.rolle || '';
+      var phaseSelect = el('select', {}, PHASE_OPTIONS.map(function (o) { return el('option', { value: o.value }, [o.label]); }));
+      phaseSelect.value = role.einstiegsphase || 'exploration';
+      var motivation = el('input', { type: 'text', placeholder: 'Was will diese Rolle erreichen?' });
+      motivation.value = role.motivation || '';
+      var objection = el('input', { type: 'text', placeholder: 'Typischer Einwand' });
+      objection.value = role.einwand || '';
+      var champion = el('input', { type: 'radio', name: championName });
+      champion.checked = !!role.ist_champion;
+      var box = el('div', { class: 'cvz-cs-topic-option' });
+      var row = { box: box, name: nameInput, phase: phaseSelect, motivation: motivation, objection: objection, champion: champion };
+      var removeBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Rolle entfernen']);
+      removeBtn.addEventListener('click', function () {
+        rows = rows.filter(function (r) { return r !== row; });
+        rolesBox.removeChild(box);
+        refresh();
+      });
+      [
+        el('label', { class: 'cvz-cs-label' }, ['Rolle', nameInput]),
+        el('label', { class: 'cvz-cs-label' }, ['Steigt ein in Phase', phaseSelect]),
+        el('label', { class: 'cvz-cs-label' }, ['Motivation', motivation]),
+        el('label', { class: 'cvz-cs-label' }, ['Einwand', objection]),
+        el('label', { class: 'cvz-cs-label' }, [champion, ' Champion (treibt die Entscheidung)']),
+        removeBtn,
+      ].forEach(function (n) { box.appendChild(n); });
+      if (role.begruendung) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Warum diese Rolle: ' + role.begruendung]));
+      rows.push(row);
+      rolesBox.appendChild(box);
+    }
+    (audience.rollen || []).forEach(addRoleRow);
+    wrap.appendChild(rolesBox);
+
+    var addBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Rolle hinzufügen']);
+    addBtn.addEventListener('click', function () {
+      addRoleRow({ rolle: '', einstiegsphase: 'exploration', ist_champion: rows.length === 0 });
+      refresh();
+    });
+    wrap.appendChild(addBtn);
+
+    if (audience.annahmen && audience.annahmen.length > 0) {
+      var assumptions = el('ul', { class: 'cvz-cs-topic-alt-list' });
+      audience.annahmen.forEach(function (a) { assumptions.appendChild(el('li', {}, [a])); });
+      wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Annahmen hinter dem Vorschlag:']));
+      wrap.appendChild(assumptions);
+    }
+
+    var errorLine = el('p', { class: 'cvz-cs-quota-empty' });
+    wrap.appendChild(errorLine);
+    var nextBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Zielgruppe bestätigen und Fragen erstellen']);
+    var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Zurück']);
+    backBtn.addEventListener('click', function () {
+      clear(state.root);
+      state.root.appendChild(renderQuotaBanner());
+      state.root.appendChild(renderForm({ topic: originalTopic, domain: domain }));
+    });
+    function refresh() {
+      addBtn.style.display = rows.length >= 3 ? 'none' : '';
+      rolesBox.style.display = soloBox.checked ? 'none' : '';
+      addBtn.style.display = soloBox.checked || rows.length >= 3 ? 'none' : '';
+    }
+    soloBox.addEventListener('change', refresh);
+    refresh();
+
+    nextBtn.addEventListener('click', function () {
+      var solo = soloBox.checked;
+      var roles = solo ? [] : rows.map(function (r) {
+        return {
+          rolle: r.name.value.trim(),
+          ist_champion: r.champion.checked,
+          einstiegsphase: r.phase.value,
+          motivation: r.motivation.value.trim(),
+          einwand: r.objection.value.trim(),
+        };
+      });
+      if (!solo && roles.length === 0) { errorLine.textContent = 'Bitte mindestens eine Rolle angeben oder "Einzelperson" wählen.'; return; }
+      if (roles.some(function (r) { return r.rolle.length < 2; })) { errorLine.textContent = 'Jede Rolle braucht einen Namen.'; return; }
+      if (!solo && !roles.some(function (r) { return r.ist_champion; })) roles[0].ist_champion = true;
+      errorLine.textContent = '';
+      startPromptPlan({
+        ist_solo_zielgruppe: solo,
+        rollen: roles,
+        zielgruppe: groupInput.value.trim(),
+        annahmen: audience.annahmen || [],
+      }, topic, domain, validationId, originalTopic);
+    });
+    wrap.appendChild(el('div', { class: 'cvz-cs-topic-check-actions' }, [backBtn, nextBtn]));
+    state.root.appendChild(renderQuotaBanner());
+    state.root.appendChild(wrap);
+  }
+
+  function startPromptPlan(audience, topic, domain, validationId, originalTopic) {
+    renderBusy('Ich stelle die Fragen deiner Zielgruppe zusammen …', 'Dafür werden echte Suchdaten abgefragt. Das dauert bis zu einer Minute.');
+    apiFetch('/api/content-strategy/prompt-plan', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain, audience: audience }),
+    })
+      .then(function (res) { renderPromptPlanStep(res, topic, domain, validationId, audience, originalTopic); })
+      .catch(function (err) { renderError('Prompt-Plan fehlgeschlagen: ' + err.message); });
+  }
+
+  function renderPromptPlanStep(res, topic, domain, validationId, audience, originalTopic) {
+    clear(state.root);
+    var plan = res.plan;
+    var wrap = el('div', { class: 'cvz-cs-topic-check' });
+    wrap.appendChild(el('h3', {}, ['Diese Fragen messen wir bei ChatGPT und Gemini']));
+    wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+      'Jede Frage wird je Anbieter 3 Mal gestellt. Das ist eine Momentaufnahme, kein Trend. Du kannst Fragen abwählen, mindestens ' + MIN_PROMPTS_KEEP + ' müssen bleiben.',
+    ]));
+    var s = plan.signals || {};
+    wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+      'Datenbasis: ' + (s.real_ai_questions || 0) + ' echte KI-Fragen, ' + (s.paa_questions || 0) + ' Google-Nutzerfragen, ' + (s.related_keywords || 0) + ' verwandte Keywords.',
+    ]));
+    (plan.warnings || []).forEach(function (w) { wrap.appendChild(el('p', { class: 'cvz-cs-gsc-hint' }, [w])); });
+
+    var checks = [];
+    PHASE_OPTIONS.forEach(function (ph) {
+      var inPhase = (plan.prompts || []).filter(function (p) { return p.phase === ph.value; });
+      if (inPhase.length === 0) return;
+      wrap.appendChild(el('h4', {}, [ph.label]));
+      inPhase.forEach(function (p) {
+        var box = el('input', { type: 'checkbox' });
+        box.checked = true;
+        box.addEventListener('change', updateCount);
+        checks.push({ box: box, prompt: p.prompt });
+        var meta = ORIGIN_LABEL_MAP[p.origin] || p.origin;
+        if (p.role) meta += ' · ' + p.role;
+        if (typeof p.ai_search_volume === 'number') meta += ' · KI-Suchvolumen ca. ' + p.ai_search_volume;
+        wrap.appendChild(el('div', { class: 'cvz-cs-topic-option' }, [
+          el('label', {}, [box, ' ' + p.prompt]),
+          el('p', { class: 'cvz-cs-hint' }, [meta]),
+        ]));
+      });
+    });
+
+    var countLine = el('p', { class: 'cvz-cs-hint' });
+    wrap.appendChild(countLine);
+    var startBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Messung starten und Content-Cluster erstellen']);
+    function updateCount() {
+      var n = checks.filter(function (c) { return c.box.checked; }).length;
+      countLine.textContent = n + ' von ' + checks.length + ' Fragen ausgewählt (' + (n * 6) + ' Abfragen).';
+      if (n < MIN_PROMPTS_KEEP) startBtn.setAttribute('disabled', 'disabled'); else startBtn.removeAttribute('disabled');
+    }
+    updateCount();
+    startBtn.addEventListener('click', function () {
+      var selected = checks.filter(function (c) { return c.box.checked; }).map(function (c) { return c.prompt; });
+      startGeneration(topic, domain, validationId, null, { prompt_plan_id: res.prompt_plan_id, selected_prompts: selected });
+    });
+    var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Zurück zur Zielgruppe']);
+    backBtn.addEventListener('click', function () { renderAudienceStep(audience, topic, domain, validationId, originalTopic); });
+    wrap.appendChild(el('div', { class: 'cvz-cs-topic-check-actions' }, [backBtn, startBtn]));
+    state.root.appendChild(renderQuotaBanner());
+    state.root.appendChild(wrap);
+  }
+
+  function startGeneration(topic, domain, validationId, trackerTopicId, planExtra) {
     renderProcessing(topic);
     apiFetch('/api/content-strategy/generate', {
       method: 'POST',
@@ -932,9 +1167,10 @@
         topic: topic,
         domain: domain,
         run_prompt_test: true,
-        geo_test_llm_type: geoTestLlmType,
         validation_id: validationId,
         tracker_topic_id: trackerTopicId || undefined,
+        prompt_plan_id: planExtra ? planExtra.prompt_plan_id : undefined,
+        selected_prompts: planExtra ? planExtra.selected_prompts : undefined,
       }),
     })
       .then(function (res) {
@@ -2180,7 +2416,15 @@
     return root;
   }
 
+  function getVisibilityPrompts(session) {
+    var fresh = session && session.visibility_measurement;
+    var snap = session && session.tracker_snapshot;
+    return (fresh && fresh.prompts) || (snap && snap.prompts) || [];
+  }
+
   function renderResult(sessionId, result, fundedBy, session) {
+    // Für die Seiten-Karten: Messdaten der Fragen (Teilfragen/Fan-out), siehe renderPageCard.
+    state.visibilityPrompts = getVisibilityPrompts(session);
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
     wrap.appendChild(renderReportHeader(result, session, sessionId));
@@ -2190,7 +2434,7 @@
     wrap.appendChild(renderReportSection(4, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
     wrap.appendChild(renderReportSection(5, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
     wrap.appendChild(renderReportSection(6, 'Content-Flow: Themen-Baum bearbeiten', [renderFlowSection(sessionId, result, session)]));
-    wrap.appendChild(renderReportSection(7, 'GEO-Strategie', [renderGeoSection(result.geo_strategy)]));
+    wrap.appendChild(renderReportSection(7, 'GEO-Strategie', [renderVisibilitySection(session), renderOffsiteSection(result.offsite_measures), renderGeoSection(result.geo_strategy)]));
     wrap.appendChild(renderReportSection(8, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]));
     var fundingText = fundedBy
       ? 'Finanziert aus: ' + (fundedBy === 'ppu_strategy' ? 'Pay-per-Use-Credit' : 'Plan-Kontingent')
@@ -2311,6 +2555,37 @@
       card.appendChild(el('p', { class: 'cvz-cs-page-card-type-explanation' }, [PAGE_TYPE_EXPLANATIONS[page.page_type]]));
     }
     if (page.reasoning) card.appendChild(renderProse(page.reasoning, 'cvz-cs-page-card-reasoning'));
+    if (page.addresses_prompts && page.addresses_prompts.length > 0) {
+      var ev = page.evidence;
+      if (ev) {
+        var prioText = { hoch: 'Priorität hoch', mittel: 'Priorität mittel', niedrig: 'Priorität niedrig', ohne_messdaten: 'Ohne belastbare Messdaten' }[ev.priority] || ev.priority;
+        card.appendChild(el('p', { class: 'cvz-cs-evidence' }, [
+          'Beleg: ' + ev.basis + (ev.ai_search_volume ? ' · KI-Suchvolumen ca. ' + ev.ai_search_volume : ''),
+          el('span', { class: 'cvz-cs-prio cvz-cs-prio-' + ev.priority }, [prioText]),
+        ]));
+      }
+      var promptList = el('ul', { class: 'cvz-cs-brief-list' });
+      page.addresses_prompts.forEach(function (pr) { promptList.appendChild(el('li', {}, ['"' + pr + '"'])); });
+      card.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Beantwortet diese gemessenen KI-Fragen:']));
+      card.appendChild(promptList);
+      // Teilfragen, in die ChatGPT die Fragen zerlegt hat: Vorlage für Abschnitte/FAQ dieser Seite.
+      var wanted = {};
+      page.addresses_prompts.forEach(function (pr) { wanted[pr.toLowerCase()] = true; });
+      var subs = [];
+      (state.visibilityPrompts || []).forEach(function (vp) {
+        if (!wanted[String(vp.prompt).toLowerCase()]) return;
+        (vp.fan_out_queries || []).forEach(function (q) { if (subs.indexOf(q) === -1) subs.push(q); });
+      });
+      if (subs.length > 0) {
+        var subList = el('ul', { class: 'cvz-cs-brief-list' });
+        subs.slice(0, 8).forEach(function (q) { subList.appendChild(el('li', {}, [q])); });
+        card.appendChild(el('details', {}, [
+          el('summary', {}, ['Teilfragen, die ChatGPT dahinter sucht (Vorlage für Abschnitte und FAQ)']),
+          subList,
+          el('p', { class: 'cvz-cs-hint' }, ['Nur von ChatGPT, eine Momentaufnahme. Gemini liefert keine solchen Teilfragen.']),
+        ]));
+      }
+    }
     if (page.content_brief && page.content_brief.length > 0) card.appendChild(renderContentBrief(page.content_brief));
     if (page.commodity_risk && page.commodity_reasoning) {
       card.appendChild(el('p', { class: 'cvz-cs-commodity-note' }, ['Commodity-Hinweis: ' + page.commodity_reasoning]));
@@ -2397,6 +2672,147 @@
   function buildLandingpageButton(topic) {
     var href = CONFIG.landingpageAssistantUrl + '?new=1&topic=' + encodeURIComponent(topic);
     return el('a', { class: 'cvz-cs-build-btn', href: href }, ['Jetzt mit dem Landingpage-Tool bauen']);
+  }
+
+  // NEU: Ergebnis je Prompt, aus dem Tracker-Snapshot oder der Frischmessung (gleiches Format).
+  // Alte Sessions haben beides nicht, dann bleibt der Abschnitt weg (null).
+  var VERDICT_LABEL_MAP = { luecke: 'Lücke', wackelig: 'Wackelig', stabil: 'Stabil', zu_wenig_daten: 'Zu wenig Daten' };
+  function visibilityRate(n, total) { return total > 0 ? n + ' von ' + total + ' Antworten' : 'keine Daten'; }
+
+  function renderVisibilitySection(session) {
+    var prompts = getVisibilityPrompts(session);
+    if (!prompts || prompts.length === 0) return null;
+    var fresh = session && session.visibility_measurement;
+    var box = el('div', { class: 'cvz-cs-geo' });
+    box.appendChild(el('h5', {}, ['Sichtbarkeit je Frage deiner Zielgruppe']));
+    if (fresh) {
+      var when = fresh.measured_at ? new Date(fresh.measured_at).toLocaleDateString('de-DE') : '';
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+        'Einzelmessung vom ' + when + ': ' + fresh.completed_calls + ' Antworten von ChatGPT und Gemini. Eine Momentaufnahme, kein Trend; KI-Antworten schwanken.',
+      ]));
+      if (fresh.budget_exhausted || fresh.failed_calls > 0 || fresh.skipped_calls > 0) {
+        box.appendChild(el('p', { class: 'cvz-cs-gsc-hint' }, [
+          'Nicht alle geplanten Abfragen liefen durch (' + fresh.failed_calls + ' fehlgeschlagen, ' + fresh.skipped_calls + ' übersprungen). Wo Daten fehlen, steht das bei der Frage.',
+        ]));
+      }
+    } else {
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Aus deinen Tracker-Daten, Zeitraum siehe Ausgangslage.']));
+    }
+    var ORDER = { luecke: 0, wackelig: 1, zu_wenig_daten: 2, stabil: 3 };
+    PHASE_OPTIONS.concat([{ value: 'discovery', label: 'Entdeckung' }, { value: '', label: 'Ohne Phase' }]).forEach(function (ph) {
+      var inPhase = prompts.filter(function (p) { return (p.phase || '') === ph.value; });
+      if (inPhase.length === 0) return;
+      inPhase.sort(function (a, b) { return (ORDER[a.verdict] != null ? ORDER[a.verdict] : 9) - (ORDER[b.verdict] != null ? ORDER[b.verdict] : 9); });
+      box.appendChild(el('h6', {}, [ph.label]));
+      inPhase.forEach(function (p) { box.appendChild(renderVisibilityCard(p)); });
+    });
+    box.appendChild(renderMethodSection(session));
+    return box;
+  }
+
+  var PROVIDER_NAME_MAP = { chat_gpt: 'ChatGPT', gemini: 'Gemini', google_ai_overview: 'Google AI Overview' };
+
+  function renderVisibilityCard(p) {
+    var card = el('div', { class: 'cvz-cs-vcard cvz-cs-vcard-' + p.verdict });
+    card.appendChild(el('p', { class: 'cvz-cs-vcard-title' }, [
+      el('span', { class: 'cvz-cs-vbadge cvz-cs-vbadge-' + p.verdict }, [VERDICT_LABEL_MAP[p.verdict] || p.verdict]),
+      '"' + p.prompt + '"',
+    ]));
+    var meta = ORIGIN_LABEL_MAP[p.origin] || p.origin;
+    if (p.role) meta += ' · ' + p.role;
+    if (typeof p.ai_search_volume === 'number') meta += ' · KI-Suchvolumen ca. ' + p.ai_search_volume;
+    card.appendChild(el('p', { class: 'cvz-cs-hint' }, [meta]));
+    if (p.runs > 0) {
+      (p.by_provider && p.by_provider.length > 0 ? p.by_provider : [{ provider: '', runs: p.runs, cited: p.cited }]).forEach(function (b) {
+        var pct = b.runs > 0 ? Math.round((b.cited / b.runs) * 100) : 0;
+        var fill = el('span', { class: 'cvz-cs-vbar-fill' });
+        fill.style.width = pct + '%';
+        card.appendChild(el('div', { class: 'cvz-cs-vbar' }, [
+          el('span', { class: 'cvz-cs-vbar-label' }, [PROVIDER_NAME_MAP[b.provider] || b.provider || 'Gesamt']),
+          el('span', { class: 'cvz-cs-vbar-track' }, [fill]),
+          el('span', {}, ['zitiert in ' + b.cited + ' von ' + b.runs]),
+        ]));
+      });
+      card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Erwähnt (ohne Quellenlink) in ' + p.mentioned + ' von ' + p.runs + ' Antworten.']));
+    } else {
+      card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine gültigen Antworten, kein Urteil möglich.']));
+    }
+    if (p.runs_without_sources) {
+      card.appendChild(el('p', { class: 'cvz-cs-hint' }, [p.runs_without_sources + ' von ' + p.runs + ' Antworten enthielten gar keine Quellen. Die Lücke ist hier mit Vorsicht zu lesen.']));
+    }
+    var doms = p.top_cited_domains || [];
+    if (doms.length > 0) {
+      var fmt = function (d) { return d.domain + ' (' + d.share + ' %)'; };
+      card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Stattdessen zitiert: ' + doms.slice(0, 3).map(fmt).join(', ')]));
+      if (doms.length > 3) {
+        card.appendChild(el('details', {}, [el('summary', {}, ['Weitere zitierte Quellen']), el('p', { class: 'cvz-cs-hint' }, [doms.slice(3).map(fmt).join(', ')])]));
+      }
+    }
+    if (p.fan_out_queries && p.fan_out_queries.length > 0) {
+      var fl = el('ul', { class: 'cvz-cs-brief-list' });
+      p.fan_out_queries.forEach(function (q) { fl.appendChild(el('li', {}, [q])); });
+      card.appendChild(el('details', {}, [
+        el('summary', {}, ['Was ChatGPT dahinter sucht (' + p.fan_out_queries.length + ' Teilfragen)']),
+        fl,
+        el('p', { class: 'cvz-cs-hint' }, ['Nur von ChatGPT, eine Momentaufnahme.']),
+      ]));
+    }
+    return card;
+  }
+
+  // Methodik und Grenzen: eingeklappt, damit der Bericht nicht überladen wirkt, aber jederzeit prüfbar.
+  function renderMethodSection(session) {
+    var fresh = session && session.visibility_measurement;
+    var snap = session && session.tracker_snapshot;
+    var items = [];
+    if (fresh) {
+      items.push('Gemessen am ' + (fresh.measured_at ? new Date(fresh.measured_at).toLocaleString('de-DE') : '') + ' bei ChatGPT und Gemini (Deutsch, Standort Deutschland), je Frage bis zu ' + fresh.runs_per_prompt + ' Läufe pro Anbieter.');
+      items.push(fresh.completed_calls + ' von ' + fresh.planned_calls + ' geplanten Abfragen lieferten eine Antwort (' + fresh.failed_calls + ' fehlgeschlagen, ' + fresh.skipped_calls + ' wegen des Zeitbudgets übersprungen).');
+      items.push('"Zitiert" heißt: Deine Domain steht als Quelle in der Antwort (Subdomains zählen nicht). "Erwähnt" heißt: Der Domain-Name steht im Text.');
+      items.push('Das Urteil "stabil" bedeutet, dass die Domain in mindestens zwei Dritteln der Antworten zitiert wurde. "Lücke" heißt nie zitiert, "wackelig" dazwischen. Die Schwelle ist eine Festlegung, kein Branchenstandard.');
+    } else if (snap) {
+      items.push('Aus dem Customer Journey Tracker, ' + snap.runs_in_window + ' Abfragen in den letzten ' + snap.window_days + ' Tagen.');
+    }
+    items.push('Teilfragen (Fan-out) gibt es nur von ChatGPT, nicht von Gemini.');
+    items.push('Ergebnisse von KI-Assistenten schwanken von Antwort zu Antwort. Eine Einzelmessung zeigt eine Richtung, keine Garantie, und sie sagt nicht, WARUM eine Domain (nicht) zitiert wird.');
+    items.push('Zahlen und Belege stammen aus der Messung. Empfehlungen und Hypothesen sind Einschätzungen der KI.');
+    var list = el('ul', { class: 'cvz-cs-brief-list' });
+    items.forEach(function (t) { list.appendChild(el('li', {}, [t])); });
+    return el('div', { class: 'cvz-cs-method' }, [el('details', {}, [el('summary', {}, ['Datenbasis und Methode']), list])]);
+  }
+
+  var OFFSITE_KIND_LABELS = {
+    listing: 'Eintrag', gastbeitrag: 'Gastbeitrag', pr_erwaehnung: 'PR / Erwähnung',
+    bewertungsportal: 'Bewertungsportal', vergleichsportal: 'Vergleichsportal', sonstiges: 'Prüfen',
+  };
+
+  // Off-Site-Maßnahmen aus der eigenen, parallelen KI-Abfrage. Domains und Zahlen stammen aus der
+  // Messung, die Aktion und die Vermutung sind Einschätzungen der KI.
+  function renderOffsiteSection(measures) {
+    if (!measures || measures.length === 0) return null;
+    var box = el('div', { class: 'cvz-cs-geo' });
+    box.appendChild(el('h5', {}, ['Off-Site: wo KI-Assistenten stattdessen hinschauen']));
+    box.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+      'Bei diesen Fragen wird statt deiner Domain immer wieder dieselbe fremde Quelle zitiert. Eine Platzierung dort kann mehr bringen als eine weitere eigene Seite. Ob das klappt, ist eine Vermutung.',
+    ]));
+    measures.forEach(function (m) {
+      var card = el('div', { class: 'cvz-cs-page-card' });
+      card.appendChild(el('div', { class: 'cvz-cs-page-card-badges' }, [
+        el('span', { class: 'cvz-cs-badge' }, [OFFSITE_KIND_LABELS[m.kind] || m.kind]),
+        el('span', { class: 'cvz-cs-badge' }, ['Aufwand ' + m.effort]),
+      ]));
+      card.appendChild(el('h4', { class: 'cvz-cs-page-card-topic' }, [m.domain]));
+      card.appendChild(el('p', {}, [m.action]));
+      card.appendChild(el('p', { class: 'cvz-cs-evidence' }, ['Beleg: ' + m.basis]));
+      if (m.hypothesis) card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Vermutung: ' + m.hypothesis]));
+      if (m.prompts && m.prompts.length > 0) {
+        var l = el('ul', { class: 'cvz-cs-brief-list' });
+        m.prompts.forEach(function (pr) { l.appendChild(el('li', {}, ['"' + pr + '"'])); });
+        card.appendChild(el('details', {}, [el('summary', {}, ['Betroffene Fragen']), l]));
+      }
+      box.appendChild(card);
+    });
+    return box;
   }
 
   function renderGeoSection(geo) {
