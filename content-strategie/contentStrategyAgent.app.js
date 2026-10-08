@@ -196,6 +196,42 @@
       '.cvz-cs-badge-audience{background:rgba(79,209,197,.12);color:var(--cvz-teal);border-color:rgba(79,209,197,.25);}',
       '.cvz-cs-badge-recommended{background:rgba(245,158,11,.12);color:#fcd34d;border-color:rgba(245,158,11,.25);}',
       '.cvz-cs-badge-commodity{background:rgba(239,68,68,.1);color:#fca5a5;border-color:rgba(239,68,68,.2);}',
+      /* ---- Mehrzeilige Felder, die mit dem Text wachsen ---- */
+      '#cvz-content-strategy-agent textarea.cvz-cs-autogrow{display:block;width:100%;box-sizing:border-box;min-height:42px;resize:vertical;overflow:hidden;line-height:1.45;font-family:inherit;font-size:14px;}',
+      '.cvz-cs-topic-option .cvz-cs-label,.cvz-cs-topic-check .cvz-cs-label{text-align:left;align-items:stretch;}',
+      /* ---- Zielgruppen-Schritt ---- */
+      '#cvz-content-strategy-agent .cvz-cs-section-title{display:flex;align-items:center;gap:10px;font-size:16px;margin:26px 0 10px;text-align:left;}',
+      '.cvz-cs-modes{display:flex;flex-wrap:wrap;gap:10px;}',
+      '#cvz-content-strategy-agent .cvz-cs-mode{display:flex;flex:1 1 260px;align-items:flex-start;gap:10px;padding:10px 14px;border:1px solid var(--cvz-border-strong);background:var(--cvz-surface);cursor:pointer;text-align:left;font-size:14px;}',
+      '#cvz-content-strategy-agent .cvz-cs-mode input,#cvz-content-strategy-agent .cvz-cs-champion input{width:auto;padding:0;margin:3px 0 0;}',
+      '.cvz-cs-role-card{border:1px solid var(--cvz-border-strong);background:var(--cvz-surface);padding:14px 16px;margin-bottom:12px;text-align:left;}',
+      '.cvz-cs-role-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--cvz-border);}',
+      '.cvz-cs-role-title{font-family:"Syne",sans-serif;font-weight:700;color:var(--cvz-heading);}',
+      '#cvz-content-strategy-agent .cvz-cs-champion{display:inline-flex;align-items:center;gap:8px;padding:5px 12px;border:1px solid var(--cvz-border-strong);cursor:pointer;font-size:13px;font-weight:600;}',
+      '#cvz-content-strategy-agent .cvz-cs-champion-on{border-color:var(--cvz-teal);color:var(--cvz-teal);background:rgba(79,209,197,.12);}',
+      '.cvz-cs-role-grid{display:grid;grid-template-columns:2fr 1fr;gap:12px;}',
+      '@media (max-width:600px){.cvz-cs-role-grid{grid-template-columns:1fr;}}',
+      '.cvz-cs-field{display:flex;flex-direction:column;gap:5px;margin:0 0 12px;text-align:left;}',
+      '.cvz-cs-field-label{font-size:13px;font-weight:600;color:var(--cvz-text);}',
+      '.cvz-cs-role-foot{display:flex;justify-content:flex-end;}',
+      '.cvz-cs-role-add{margin:4px 0 8px;}',
+      '.cvz-cs-link-btn{background:none;border:none;padding:0;color:var(--cvz-muted);font-size:13px;text-decoration:underline;cursor:pointer;font-family:inherit;}',
+      '.cvz-cs-link-btn:hover{color:var(--cvz-red);}',
+      '.cvz-cs-champion-status{font-size:13px;margin:6px 0 0;text-align:left;}',
+      '.cvz-cs-champion-ok{color:var(--cvz-teal);}',
+      '.cvz-cs-champion-missing{color:var(--cvz-amber);font-weight:600;}',
+      /* ---- Schritt-Anzeige ---- */
+      '.cvz-cs-stepper{list-style:none;margin:0 0 6px;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px;}',
+      '.cvz-cs-stepper li{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--cvz-muted);}',
+      '.cvz-cs-step-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border:1px solid var(--cvz-border-strong);font-size:12px;font-weight:700;}',
+      '.cvz-cs-step-done{color:var(--cvz-text);}',
+      '.cvz-cs-step-done .cvz-cs-step-num{background:rgba(79,209,197,.15);border-color:var(--cvz-teal);color:var(--cvz-teal);}',
+      '.cvz-cs-step-current{color:var(--cvz-heading);font-weight:700;}',
+      '.cvz-cs-step-current .cvz-cs-step-num{background:var(--cvz-teal);border-color:var(--cvz-teal);color:#0d1117;}',
+      '.cvz-cs-stepbox{padding:12px 16px;margin-bottom:16px;background:var(--cvz-surface);border:1px solid var(--cvz-border);}',
+      '.cvz-cs-stepbox-title{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--cvz-muted);margin:0 0 8px;}',
+      '.cvz-cs-stepnote{font-size:13px;color:var(--cvz-amber);margin:8px 0 0;}',
+      '.cvz-cs-callout{padding:10px 14px;margin:0 0 14px;border-left:4px solid var(--cvz-teal);background:rgba(79,209,197,.08);font-size:14px;}',
       /* ---- Sichtbarkeit je Frage (Karten) ---- */
       '.cvz-cs-vcard{padding:12px 16px;background:var(--cvz-surface);border:1px solid var(--cvz-border);border-left-width:4px;margin-bottom:8px;}',
       '.cvz-cs-vcard-luecke{border-left-color:var(--cvz-red);}',
@@ -551,6 +587,8 @@
     currentSessionId: null,
     currentResult: null,
     visibilityPrompts: [],
+    wizardActive: false,
+    wizardSteps: null,
     chat: {
       sessionId: null,
       messages: [],
@@ -719,7 +757,66 @@
     return acc;
   }, {});
 
+  // ==================== SCHRITT-ANZEIGE ====================
+  // Zeigt dem Kunden vorab und in jedem Schritt, was noch kommt. Wichtig: Bis zum letzten Schritt
+  // gehen Eingaben verloren, wenn die Seite geschlossen wird. Erst die Erstellung läuft im Hintergrund.
+  var STEPS_FULL = ['Thema prüfen und bestätigen', 'Zielgruppe bestätigen', 'Fragen auswählen', 'Strategie wird erstellt'];
+  var STEPS_TRACKER = ['Thema prüfen und bestätigen', 'Strategie wird erstellt'];
+  var STEP_LAST_HINT = 'ab hier läuft alles im Hintergrund';
+  var STEP_LEAVE_WARNING = 'Bitte schließe diese Seite erst, wenn "Strategie wird erstellt" läuft. Bis dahin gehen deine Eingaben verloren.';
+
+  // current: Index des aktuellen Schritts (0-basiert), -1 = noch nichts begonnen (Vorschau im Formular)
+  function renderStepper(steps, current, withWarning) {
+    var list = el('ol', { class: 'cvz-cs-stepper' });
+    steps.forEach(function (label, i) {
+      var cls = i < current ? 'cvz-cs-step-done' : i === current ? 'cvz-cs-step-current' : '';
+      var isLast = i === steps.length - 1;
+      list.appendChild(el('li', { class: cls }, [
+        el('span', { class: 'cvz-cs-step-num' }, [i < current ? '✓' : String(i + 1)]),
+        label + (isLast ? ' (' + STEP_LAST_HINT + ')' : ''),
+      ]));
+    });
+    var box = el('div', { class: 'cvz-cs-stepbox' }, [
+      el('p', { class: 'cvz-cs-stepbox-title' }, [current < 0 ? 'So läuft es ab' : 'Schritt ' + (current + 1) + ' von ' + steps.length]),
+      list,
+    ]);
+    if (withWarning) box.appendChild(el('p', { class: 'cvz-cs-stepnote' }, [STEP_LEAVE_WARNING]));
+    return box;
+  }
+
+  // Mehrzeiliges Feld, das so hoch wird wie sein Text (statt einzeilig abzuschneiden).
+  // Die Höhe wird nach dem Einfügen in die Seite und bei jeder Eingabe neu berechnet.
+  function autoGrow(area) {
+    area.style.height = 'auto';
+    area.style.height = Math.max(area.scrollHeight + 2, 42) + 'px';
+  }
+  function makeGrowArea(value, placeholder, registry) {
+    var area = el('textarea', { class: 'cvz-cs-autogrow', rows: '1' });
+    if (placeholder) area.setAttribute('placeholder', placeholder);
+    area.value = value || '';
+    area.addEventListener('input', function () { autoGrow(area); });
+    if (registry) registry.push(area);
+    return area;
+  }
+  // Ändert sich die Fensterbreite (Handy drehen, Fenster ziehen), brechen Zeilen anders um: neu berechnen.
+  window.addEventListener('resize', function () {
+    Array.prototype.forEach.call(document.querySelectorAll('textarea.cvz-cs-autogrow'), autoGrow);
+  });
+  function growAllLater(registry) {
+    // Zweimal: sofort nach dem Einfügen und nochmal, wenn Schriften geladen sind (ändert die Textbreite).
+    registry.forEach(autoGrow);
+    setTimeout(function () { registry.forEach(autoGrow); }, 150);
+  }
+
+  // Wirkt nur, solange der Kunde in den Schritten VOR der Erstellung ist (state.wizardActive).
+  window.addEventListener('beforeunload', function (event) {
+    if (!state.wizardActive) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+
   function renderForm(prefill) {
+    state.wizardActive = false;
     prefill = prefill || {};
     var form = el('form', { class: 'cvz-cs-form' });
     var topicInput = el('input', { type: 'text', name: 'topic', placeholder: 'z.B. "Landingpage Software für B2B"', required: 'required' });
@@ -759,6 +856,15 @@
     );
     var formError = el('p', { class: 'cvz-cs-quota-empty' });
     form.appendChild(formError);
+    // Vorschau der Schritte, passt sich an, ob Tracker-Daten gewählt sind (dann entfallen Zielgruppe und Fragen).
+    var overview = el('div', {});
+    function refreshOverview() {
+      clear(overview);
+      overview.appendChild(renderStepper(trackerSelect && trackerSelect.value ? STEPS_TRACKER : STEPS_FULL, -1, true));
+    }
+    refreshOverview();
+    if (trackerSelect) trackerSelect.addEventListener('change', refreshOverview);
+    form.appendChild(overview);
     var canStart = !state.quota || state.quota.can_start_session;
     var submitBtn = el('button', { type: 'submit', class: 'cvz-cs-submit-btn' }, ['Content-Cluster erstellen']);
     if (!canStart) submitBtn.setAttribute('disabled', 'disabled');
@@ -833,6 +939,7 @@
   }
 
   function renderValidating(topic) {
+    state.wizardActive = true;
     clear(state.root);
     var box = el('div', { class: 'cvz-cs-processing' }, [
       el('div', { class: 'cvz-cs-spinner' }),
@@ -840,10 +947,12 @@
       el('p', { class: 'cvz-cs-hint' }, ['Das dauert normalerweise unter einer Minute, deutlich kürzer als die eigentliche Strategie-Erstellung.']),
     ]);
     state.root.appendChild(renderQuotaBanner());
+    state.root.appendChild(renderStepper(state.wizardSteps || STEPS_FULL, 0, true));
     state.root.appendChild(box);
   }
 
   function startTopicValidation(topic, domain, trackerTopicId) {
+    state.wizardSteps = trackerTopicId ? STEPS_TRACKER : STEPS_FULL;
     renderValidating(topic);
     var controller = new AbortController();
     var timeoutId = setTimeout(function () {
@@ -869,8 +978,15 @@
   }
 
   function renderTopicValidationResult(result, domain, originalTopic, trackerTopicId) {
+    state.wizardActive = true;
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
+    wrap.appendChild(renderStepper(state.wizardSteps || STEPS_FULL, 0, true));
+    wrap.appendChild(el('p', { class: 'cvz-cs-callout' }, [
+      trackerTopicId
+        ? 'Bitte bestätige das Thema. Danach startet die Erstellung der Strategie.'
+        : 'Bitte bestätige das Thema oder wähle eine Alternative. Danach folgt die Zielgruppe, und erst dann geht es in die Erstellung.',
+    ]));
     wrap.appendChild(el('h3', {}, ['Bevor wir loslegen: ist "' + result.seed_topic + '" das richtige Thema?']));
     var seedVolText = topicVolumeText(result.seed_search_volume, result.seed_volume_status);
 
@@ -926,7 +1042,7 @@
 
     wrap.appendChild(el('label', { class: 'cvz-cs-label' }, ['Oder eigene Formulierung für den Cluster:', freeTextInput]));
 
-    var confirmBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Content-Cluster erstellen']);
+    var confirmBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, [trackerTopicId ? 'Thema bestätigen und Strategie erstellen' : 'Thema bestätigen, weiter zur Zielgruppe']);
     confirmBtn.addEventListener('click', function () {
       var finalTopic = freeTextInput.value.trim() || chosenInput.value;
       if (trackerTopicId) {
@@ -964,9 +1080,11 @@
   };
   var MIN_PROMPTS_KEEP = 4;
 
-  function renderBusy(title, hint) {
+  function renderBusy(title, hint, stepIndex) {
+    state.wizardActive = true;
     clear(state.root);
     state.root.appendChild(renderQuotaBanner());
+    state.root.appendChild(renderStepper(STEPS_FULL, stepIndex, true));
     state.root.appendChild(el('div', { class: 'cvz-cs-processing' }, [
       el('div', { class: 'cvz-cs-spinner' }),
       el('p', { class: 'cvz-cs-progress-text' }, [title]),
@@ -975,7 +1093,7 @@
   }
 
   function startAudienceStep(topic, domain, validationId, originalTopic) {
-    renderBusy('Ich überlege, wer bei deinem Thema mitentscheidet …', 'Dauert meist unter einer Minute.');
+    renderBusy('Ich überlege, wer bei deinem Thema mitentscheidet …', 'Dauert meist unter einer Minute.', 1);
     apiFetch('/api/content-strategy/suggest-audience', {
       method: 'POST',
       body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain }),
@@ -984,91 +1102,135 @@
       .catch(function (err) { renderError('Zielgruppen-Vorschlag fehlgeschlagen: ' + err.message); });
   }
 
+  // Ein beschriftetes Feld: Beschriftung links über dem Feld, nie zentriert.
+  function field(labelText, control) {
+    return el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, [labelText]), control]);
+  }
+
+  function sectionTitle(number, text) {
+    return el('h4', { class: 'cvz-cs-section-title' }, [el('span', { class: 'cvz-cs-step-num' }, [String(number)]), text]);
+  }
+
   function renderAudienceStep(audience, topic, domain, validationId, originalTopic) {
+    state.wizardActive = true;
     clear(state.root);
+    var growAreas = [];
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
+    wrap.appendChild(renderStepper(STEPS_FULL, 1, true));
     wrap.appendChild(el('h3', {}, ['Stimmt diese Zielgruppe?']));
-    wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [
-      'Das ist ein Vorschlag, keine Tatsache. Die Fragen für die Messung werden aus diesen Rollen abgeleitet. Passe an, was nicht stimmt.',
+    wrap.appendChild(el('div', { class: 'cvz-cs-callout' }, [
+      el('strong', {}, ['Das ist jetzt zu tun: ']),
+      'Prüfe den Vorschlag von Claude und ändere, was nicht stimmt. Lege genau eine Rolle als Champion fest. Aus diesen Rollen werden danach die Fragen für die Messung abgeleitet.',
     ]));
-    var groupInput = el('input', { type: 'text' });
-    groupInput.value = audience.zielgruppe || '';
-    wrap.appendChild(el('label', { class: 'cvz-cs-label' }, ['Zielgruppe in einem Satz', groupInput]));
 
-    var soloBox = el('input', { type: 'checkbox' });
-    soloBox.checked = !!audience.ist_solo_zielgruppe;
-    wrap.appendChild(el('label', { class: 'cvz-cs-label' }, [soloBox, ' Eine einzelne Person entscheidet allein (kein Buying Center)']));
+    // 1. Zielgruppe
+    wrap.appendChild(sectionTitle(1, 'Zielgruppe in einem Satz'));
+    var groupInput = makeGrowArea(audience.zielgruppe || '', '', growAreas);
+    wrap.appendChild(groupInput);
 
+    // 2. Wer entscheidet?
+    wrap.appendChild(sectionTitle(2, 'Wer entscheidet über den Kauf?'));
+    var modeName = 'cvz_cs_mode_' + Math.random().toString(36).slice(2);
+    var multiRadio = el('input', { type: 'radio', name: modeName });
+    var soloRadio = el('input', { type: 'radio', name: modeName });
+    multiRadio.checked = !audience.ist_solo_zielgruppe;
+    soloRadio.checked = !!audience.ist_solo_zielgruppe;
+    wrap.appendChild(el('div', { class: 'cvz-cs-modes' }, [
+      el('label', { class: 'cvz-cs-mode' }, [multiRadio, el('span', {}, [el('strong', {}, ['Mehrere Personen']), ' (Buying Center, z.B. Fachbereich, Geschäftsführung, IT)'])]),
+      el('label', { class: 'cvz-cs-mode' }, [soloRadio, el('span', {}, [el('strong', {}, ['Eine Person allein']), ' (keine weiteren Rollen nötig)'])]),
+    ]));
+
+    // 3. Rollen
+    var rolesSection = el('div', {});
+    rolesSection.appendChild(sectionTitle(3, 'Rollen im Buying Center (höchstens 3)'));
+    rolesSection.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+      'Der Champion treibt die Entscheidung voran und bekommt in der Messung die meisten Fragen. Es muss genau eine Rolle Champion sein.',
+    ]));
     var rolesBox = el('div', {});
     var rows = [];
     var championName = 'cvz_cs_champion_' + Math.random().toString(36).slice(2);
+    var championStatus = el('p', { class: 'cvz-cs-champion-status' });
+    var errorLine = el('p', { class: 'cvz-cs-quota-empty' });
+
+    function refresh() {
+      var solo = soloRadio.checked;
+      rolesSection.style.display = solo ? 'none' : '';
+      addBtn.style.display = rows.length >= 3 ? 'none' : '';
+      rows.forEach(function (r, i) {
+        r.title.textContent = 'Rolle ' + (i + 1);
+        r.championLabel.className = 'cvz-cs-champion' + (r.champion.checked ? ' cvz-cs-champion-on' : '');
+        r.removeBtn.style.display = rows.length > 1 ? '' : 'none';
+      });
+      var champ = rows.filter(function (r) { return r.champion.checked; })[0];
+      championStatus.className = 'cvz-cs-champion-status ' + (champ ? 'cvz-cs-champion-ok' : 'cvz-cs-champion-missing');
+      championStatus.textContent = champ
+        ? 'Champion: ' + (champ.name.value.trim() || 'Rolle ohne Namen')
+        : 'Noch kein Champion gewählt. Bitte bei genau einer Rolle "Champion" anklicken.';
+      if (champ && errorLine.textContent.indexOf('Champion') !== -1) errorLine.textContent = ''; // erledigte Fehlermeldung nicht stehen lassen
+      if (!solo) growAllLater(growAreas);
+    }
+
     function addRoleRow(role) {
-      var nameInput = el('input', { type: 'text', placeholder: 'Rolle, z.B. Marketingleitung' });
+      var nameInput = el('input', { type: 'text', placeholder: 'z.B. Marketingleitung' });
       nameInput.value = role.rolle || '';
       var phaseSelect = el('select', {}, PHASE_OPTIONS.map(function (o) { return el('option', { value: o.value }, [o.label]); }));
       phaseSelect.value = role.einstiegsphase || 'exploration';
-      var motivation = el('input', { type: 'text', placeholder: 'Was will diese Rolle erreichen?' });
-      motivation.value = role.motivation || '';
-      var objection = el('input', { type: 'text', placeholder: 'Typischer Einwand' });
-      objection.value = role.einwand || '';
+      var motivation = makeGrowArea(role.motivation, 'Was will diese Rolle erreichen?', growAreas);
+      var objection = makeGrowArea(role.einwand, 'Was hält diese Rolle zurück?', growAreas);
       var champion = el('input', { type: 'radio', name: championName });
       champion.checked = !!role.ist_champion;
-      var box = el('div', { class: 'cvz-cs-topic-option' });
-      var row = { box: box, name: nameInput, phase: phaseSelect, motivation: motivation, objection: objection, champion: champion };
-      var removeBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Rolle entfernen']);
+      var title = el('span', { class: 'cvz-cs-role-title' });
+      var championLabel = el('label', { class: 'cvz-cs-champion' }, [champion, ' Champion']);
+      var removeBtn = el('button', { type: 'button', class: 'cvz-cs-link-btn' }, ['Diese Rolle entfernen']);
+      var card = el('div', { class: 'cvz-cs-role-card' });
+      var row = { card: card, title: title, championLabel: championLabel, removeBtn: removeBtn, name: nameInput, phase: phaseSelect, motivation: motivation, objection: objection, champion: champion };
       removeBtn.addEventListener('click', function () {
         rows = rows.filter(function (r) { return r !== row; });
-        rolesBox.removeChild(box);
+        rolesBox.removeChild(card);
         refresh();
       });
-      [
-        el('label', { class: 'cvz-cs-label' }, ['Rolle', nameInput]),
-        el('label', { class: 'cvz-cs-label' }, ['Steigt ein in Phase', phaseSelect]),
-        el('label', { class: 'cvz-cs-label' }, ['Motivation', motivation]),
-        el('label', { class: 'cvz-cs-label' }, ['Einwand', objection]),
-        el('label', { class: 'cvz-cs-label' }, [champion, ' Champion (treibt die Entscheidung)']),
-        removeBtn,
-      ].forEach(function (n) { box.appendChild(n); });
-      if (role.begruendung) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Warum diese Rolle: ' + role.begruendung]));
+      champion.addEventListener('change', refresh);
+      nameInput.addEventListener('input', refresh);
+      card.appendChild(el('div', { class: 'cvz-cs-role-head' }, [title, championLabel]));
+      if (role.begruendung) card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Warum Claude diese Rolle vorschlägt: ' + role.begruendung]));
+      card.appendChild(el('div', { class: 'cvz-cs-role-grid' }, [field('Name der Rolle', nameInput), field('Steigt ein in Phase', phaseSelect)]));
+      card.appendChild(field('Motivation: Was will diese Rolle erreichen?', motivation));
+      card.appendChild(field('Einwand: Was hält diese Rolle zurück?', objection));
+      card.appendChild(el('div', { class: 'cvz-cs-role-foot' }, [removeBtn]));
       rows.push(row);
-      rolesBox.appendChild(box);
+      rolesBox.appendChild(card);
     }
-    (audience.rollen || []).forEach(addRoleRow);
-    wrap.appendChild(rolesBox);
 
-    var addBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Rolle hinzufügen']);
+    var addBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['+ Rolle hinzufügen']);
     addBtn.addEventListener('click', function () {
       addRoleRow({ rolle: '', einstiegsphase: 'exploration', ist_champion: rows.length === 0 });
       refresh();
     });
-    wrap.appendChild(addBtn);
+    (audience.rollen || []).forEach(addRoleRow);
+    rolesSection.appendChild(rolesBox);
+    rolesSection.appendChild(el('div', { class: 'cvz-cs-role-add' }, [addBtn]));
+    rolesSection.appendChild(championStatus);
+    wrap.appendChild(rolesSection);
 
     if (audience.annahmen && audience.annahmen.length > 0) {
       var assumptions = el('ul', { class: 'cvz-cs-topic-alt-list' });
       audience.annahmen.forEach(function (a) { assumptions.appendChild(el('li', {}, [a])); });
-      wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Annahmen hinter dem Vorschlag:']));
-      wrap.appendChild(assumptions);
+      wrap.appendChild(el('details', {}, [el('summary', { class: 'cvz-cs-hint' }, ['Annahmen hinter dem Vorschlag anzeigen']), assumptions]));
     }
 
-    var errorLine = el('p', { class: 'cvz-cs-quota-empty' });
     wrap.appendChild(errorLine);
-    var nextBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Zielgruppe bestätigen und Fragen erstellen']);
+    var nextBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Zielgruppe bestätigen, weiter zu den Fragen']);
     var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Zurück']);
     backBtn.addEventListener('click', function () {
       clear(state.root);
       state.root.appendChild(renderQuotaBanner());
       state.root.appendChild(renderForm({ topic: originalTopic, domain: domain }));
     });
-    function refresh() {
-      addBtn.style.display = rows.length >= 3 ? 'none' : '';
-      rolesBox.style.display = soloBox.checked ? 'none' : '';
-      addBtn.style.display = soloBox.checked || rows.length >= 3 ? 'none' : '';
-    }
-    soloBox.addEventListener('change', refresh);
-    refresh();
+    multiRadio.addEventListener('change', refresh);
+    soloRadio.addEventListener('change', refresh);
 
     nextBtn.addEventListener('click', function () {
-      var solo = soloBox.checked;
+      var solo = soloRadio.checked;
       var roles = solo ? [] : rows.map(function (r) {
         return {
           rolle: r.name.value.trim(),
@@ -1078,9 +1240,9 @@
           einwand: r.objection.value.trim(),
         };
       });
-      if (!solo && roles.length === 0) { errorLine.textContent = 'Bitte mindestens eine Rolle angeben oder "Einzelperson" wählen.'; return; }
+      if (!solo && roles.length === 0) { errorLine.textContent = 'Bitte mindestens eine Rolle angeben oder oben "Eine Person allein" wählen.'; return; }
       if (roles.some(function (r) { return r.rolle.length < 2; })) { errorLine.textContent = 'Jede Rolle braucht einen Namen.'; return; }
-      if (!solo && !roles.some(function (r) { return r.ist_champion; })) roles[0].ist_champion = true;
+      if (!solo && !roles.some(function (r) { return r.ist_champion; })) { errorLine.textContent = 'Bitte lege einen Champion fest: Klicke bei genau einer Rolle auf "Champion".'; return; }
       errorLine.textContent = '';
       startPromptPlan({
         ist_solo_zielgruppe: solo,
@@ -1092,10 +1254,12 @@
     wrap.appendChild(el('div', { class: 'cvz-cs-topic-check-actions' }, [backBtn, nextBtn]));
     state.root.appendChild(renderQuotaBanner());
     state.root.appendChild(wrap);
+    refresh();
+    growAllLater(growAreas);
   }
 
   function startPromptPlan(audience, topic, domain, validationId, originalTopic) {
-    renderBusy('Ich stelle die Fragen deiner Zielgruppe zusammen …', 'Dafür werden echte Suchdaten abgefragt. Das dauert bis zu einer Minute.');
+    renderBusy('Ich stelle die Fragen deiner Zielgruppe zusammen …', 'Dafür werden echte Suchdaten abgefragt. Das dauert bis zu einer Minute.', 2);
     apiFetch('/api/content-strategy/prompt-plan', {
       method: 'POST',
       body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain, audience: audience }),
@@ -1105,9 +1269,11 @@
   }
 
   function renderPromptPlanStep(res, topic, domain, validationId, audience, originalTopic) {
+    state.wizardActive = true;
     clear(state.root);
     var plan = res.plan;
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
+    wrap.appendChild(renderStepper(STEPS_FULL, 2, true));
     wrap.appendChild(el('h3', {}, ['Diese Fragen messen wir bei ChatGPT und Gemini']));
     wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [
       'Jede Frage wird je Anbieter 3 Mal gestellt. Das ist eine Momentaufnahme, kein Trend. Du kannst Fragen abwählen, mindestens ' + MIN_PROMPTS_KEEP + ' müssen bleiben.',
@@ -1140,7 +1306,7 @@
 
     var countLine = el('p', { class: 'cvz-cs-hint' });
     wrap.appendChild(countLine);
-    var startBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Messung starten und Content-Cluster erstellen']);
+    var startBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Fragen bestätigen, Messung und Strategie starten']);
     function updateCount() {
       var n = checks.filter(function (c) { return c.box.checked; }).length;
       countLine.textContent = n + ' von ' + checks.length + ' Fragen ausgewählt (' + (n * 6) + ' Abfragen).';
@@ -1271,6 +1437,7 @@
   }
 
   function renderProcessing(topic) {
+    state.wizardActive = false;
     clear(state.root);
     var startedAt = Date.now();
     var baseText = 'Baue Content-Cluster für "' + topic + '" …';
@@ -1278,13 +1445,16 @@
       el('div', { class: 'cvz-cs-spinner' }),
       el('p', { class: 'cvz-cs-progress-text' }, [baseText]),
       el('p', { class: 'cvz-cs-hint' }, ['Lehn dich gerne einen Augenblick zurück. Die Entwicklung der Strategie dauert aktuell ca. 15 Minuten.']),
+      el('p', { class: 'cvz-cs-callout' }, ['Du kannst diese Seite jetzt schließen. Die Strategie läuft im Hintergrund weiter und liegt danach in deinen gespeicherten Strategien.']),
     ]);
     state.root.appendChild(renderQuotaBanner());
+    if (state.wizardSteps) state.root.appendChild(renderStepper(state.wizardSteps, state.wizardSteps.length - 1, false));
     state.root.appendChild(box);
     startProgressTicker(startedAt, baseText);
   }
 
   function renderError(message, body) {
+    state.wizardActive = false;
     clear(state.root);
     var box = el('div', { class: 'cvz-cs-error' }, [el('p', {}, [message])]);
     if (body && typeof body.ppu_strategy_credits_remaining === 'number') {
@@ -2425,6 +2595,7 @@
   function renderResult(sessionId, result, fundedBy, session) {
     // Für die Seiten-Karten: Messdaten der Fragen (Teilfragen/Fan-out), siehe renderPageCard.
     state.visibilityPrompts = getVisibilityPrompts(session);
+    state.wizardActive = false;
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
     wrap.appendChild(renderReportHeader(result, session, sessionId));
