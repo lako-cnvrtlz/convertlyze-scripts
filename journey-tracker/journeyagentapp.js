@@ -4572,8 +4572,13 @@
     return nav;
   }
 
+  // Das Backend akzeptiert nur diese Zeiträume (422 sonst). Ungültige Werte
+  // (z.B. NaN aus einem fehlenden data-Attribut) fallen auf 12 zurück.
+  var ALLOWED_FANOUT_WEEKS = [4, 12, 26];
+
   function getFanOutWeeks(topicId) {
-    return state.fanOutWeeksByTopic[topicId] || 12;
+    var w = state.fanOutWeeksByTopic[topicId];
+    return ALLOWED_FANOUT_WEEKS.indexOf(w) !== -1 ? w : 12;
   }
 
   function fanOutKey(topicId) {
