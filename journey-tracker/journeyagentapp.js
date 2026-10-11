@@ -152,6 +152,7 @@
     fanOutRunsCache: {},      // { [promptId]: [Läufe mit fan_out_queries] } (lazy beim Aufklappen)
     loadingFanOutRuns: {},    // { [promptId]: true }
     fanOutRunErrors: {},      // { [promptId]: 'Fehlertext' }
+    fanOutRunsInfo: {},       // { [promptId]: { total, withField } } Diagnose: was hat der Server geliefert?
     fanOutDaySel: {},         // { [promptId]: 'YYYY-MM-DD' } gewählter Tag, fehlt = Gesamt
     fanOutDaysExpanded: {},   // { [promptId]: true } = alle Tage statt nur die neuesten 8
     keywordRankHistoryCache: {},
@@ -237,6 +238,7 @@
       purgeDetail.prompts.forEach(function (pr) {
         delete state.fanOutRunsCache[pr.id];
         delete state.fanOutRunErrors[pr.id];
+        delete state.fanOutRunsInfo[pr.id];
       });
     }
     delete state.topicDetailCache[topicId];
@@ -4648,26 +4650,6 @@
     render();
   }
 
-  // NEU: Läufe eines Prompts laden (erst beim Aufklappen, nicht für alle Prompts auf einmal).
-  // Eigener Cache, damit die bestehende Prompt-Detailansicht nicht beeinflusst wird.
-  async function maybeLoadFanOutRuns(topicId, promptId) {
-    if (!topicId || !promptId) return;
-    if (state.fanOutRunsCache[promptId] || state.loadingFanOutRuns[promptId] || state.fanOutRunErrors[promptId]) return;
-    state.loadingFanOutRuns[promptId] = true;
-    render();
-    try {
-      var data = await loadPromptCitations(topicId, promptId);
-      state.fanOutRunsCache[promptId] = (data.chat_gpt || []).filter(function (r) {
-        return r.fan_out_queries && r.fan_out_queries.length > 0 && r.collected_at;
-      });
-    } catch (e) {
-      console.error('[CVZ Visibility] Läufe für Fan-out konnten nicht geladen werden:', e);
-      state.fanOutRunErrors[promptId] = e.message || 'Unbekannter Fehler';
-    }
-    state.loadingFanOutRuns[promptId] = false;
-    render();
-  }
-
   // Gruppiert Läufe nach Kalendertag (lokale Zeit), neueste zuerst.
   // Bewusst NICHT groupRunsIntoRounds: Das fasst 6,5 Tage zusammen, hier soll jeder Messtag einzeln klickbar sein.
   function groupFanOutRunsByDay(runs) {
@@ -4889,7 +4871,6 @@
 
       details.addEventListener('toggle', function () {
         state.openFanOutPrompts[p.prompt_id] = details.open;
-        if (details.open && p.queries && p.queries.length > 0) maybeLoadFanOutRuns(topicId, p.prompt_id);
       });
       section.appendChild(details);
     });
@@ -4918,30 +4899,28 @@
       return chips;
     }
 
-    var runs = state.fanOutRunsCache[pid];
-    if (state.loadingFanOutRuns[pid] || (!runs && !state.fanOutRunErrors[pid])) {
-      var ld = document.createElement('p');
-      ld.className = 'cvz-card-placeholder-text';
-      ld.style.margin = '8px 0 0';
-      ld.textContent = 'Messtage werden geladen...';
-      body.appendChild(ld);
+    // Einzelne Läufe kommen direkt vom Backend (by_prompt[].runs), kein Nachladen nötig.
+    if (!Array.isArray(p.runs)) {
+      var noRuns = document.createElement('p');
+      noRuns.className = 'cvz-card-placeholder-text';
+      noRuns.style.margin = '8px 0 0';
+      noRuns.textContent = 'Nach Messtagen kann hier noch nicht sortiert werden: Das Backend liefert die einzelnen Läufe (by_prompt[].runs) noch nicht. Gesamtübersicht:';
+      body.appendChild(noRuns);
       body.appendChild(totalChips());
       return body;
     }
-    if (state.fanOutRunErrors[pid]) {
-      var er = document.createElement('p');
-      er.className = 'cvz-card-placeholder-text';
-      er.style.margin = '8px 0 0';
-      er.textContent = 'Die einzelnen Messtage konnten nicht geladen werden (' + state.fanOutRunErrors[pid] + '). Hier die Gesamtübersicht:';
-      body.appendChild(er);
-      body.appendChild(totalChips());
-      return body;
-    }
+    var runs = p.runs.map(function (r) { return { collected_at: r.collected_at, fan_out_queries: r.queries || [] }; })
+      .filter(function (r) { return r.collected_at && r.fan_out_queries.length > 0; });
 
     // Nur Tage im gewählten Zeitraum (4/12/26 Wochen), passend zur Gesamtliste.
     var cutoff = Date.now() - getFanOutWeeks(topicId) * 7 * 24 * 3600 * 1000;
     var days = groupFanOutRunsByDay(runs.filter(function (r) { return new Date(r.collected_at).getTime() >= cutoff; }));
     if (days.length === 0) {
+      var why = document.createElement('p');
+      why.className = 'cvz-card-placeholder-text';
+      why.style.margin = '8px 0 0';
+      why.textContent = 'Keine Läufe mit Fan-out im gewählten Zeitraum. Gesamtübersicht:';
+      body.appendChild(why);
       body.appendChild(totalChips());
       return body;
     }
