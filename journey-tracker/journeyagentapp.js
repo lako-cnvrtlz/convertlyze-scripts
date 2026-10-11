@@ -148,6 +148,12 @@
     fanOutWeeksByTopic: {},
     fanOutShowSingles: {},    // { [topicId]: true } = auch Queries zeigen, die nur in 1 Lauf vorkamen
     openFanOutPrompts: {},    // { [promptId]: true } = aufgeklappt
+    fanOutShowAll: {},        // { [topicId]: true } = Top-Liste komplett statt nur 10 Zeilen
+    fanOutRunsCache: {},      // { [promptId]: [Läufe mit fan_out_queries] } (lazy beim Aufklappen)
+    loadingFanOutRuns: {},    // { [promptId]: true }
+    fanOutRunErrors: {},      // { [promptId]: 'Fehlertext' }
+    fanOutDaySel: {},         // { [promptId]: 'YYYY-MM-DD' } gewählter Tag, fehlt = Gesamt
+    fanOutDaysExpanded: {},   // { [promptId]: true } = alle Tage statt nur die neuesten 8
     keywordRankHistoryCache: {},
     loadingKeywordRankHistory: {},
     expandedKeywordId: null,
@@ -225,6 +231,14 @@
   // diese Daten während des Laufs oft leer geladen wurden (z. B. ohne
   // Wettbewerber) und sonst nach dem Ende des Laufs weiter angezeigt würden.
   function purgeTopicCaches(topicId) {
+    // NEU: Lauf-Daten der Prompts dieses Themas verwerfen (werden beim nächsten Aufklappen neu geladen).
+    var purgeDetail = state.topicDetailCache[topicId];
+    if (purgeDetail && purgeDetail.prompts) {
+      purgeDetail.prompts.forEach(function (pr) {
+        delete state.fanOutRunsCache[pr.id];
+        delete state.fanOutRunErrors[pr.id];
+      });
+    }
     delete state.topicDetailCache[topicId];
     delete state.dashboardDataCache[topicId];
     delete state.contentChangesCache[topicId];
@@ -1985,6 +1999,32 @@
     if (fanOutSinglesBtn) {
       var foSinglesTopic = fanOutSinglesBtn.getAttribute('data-cvz-fanout-singles');
       state.fanOutShowSingles[foSinglesTopic] = !state.fanOutShowSingles[foSinglesTopic];
+      render();
+      return;
+    }
+    // NEU: Alle Top-Queries zeigen / wieder auf 10 kürzen.
+    var fanOutAllBtn = event.target.closest('[data-cvz-fanout-showall]');
+    if (fanOutAllBtn) {
+      var foAllTopic = fanOutAllBtn.getAttribute('data-cvz-fanout-showall');
+      state.fanOutShowAll[foAllTopic] = !state.fanOutShowAll[foAllTopic];
+      render();
+      return;
+    }
+    // NEU: Tag-Auswahl pro Prompt (leerer Wert = Gesamt).
+    var fanOutDayBtn = event.target.closest('[data-cvz-fanout-day-prompt]');
+    if (fanOutDayBtn) {
+      var foDayPrompt = fanOutDayBtn.getAttribute('data-cvz-fanout-day-prompt');
+      var foDay = fanOutDayBtn.getAttribute('data-cvz-fanout-day');
+      if (foDay) state.fanOutDaySel[foDayPrompt] = foDay;
+      else delete state.fanOutDaySel[foDayPrompt];
+      render();
+      return;
+    }
+    // NEU: Weitere Tage einblenden / wieder kürzen.
+    var fanOutDaysMoreBtn = event.target.closest('[data-cvz-fanout-days-more]');
+    if (fanOutDaysMoreBtn) {
+      var foMorePrompt = fanOutDaysMoreBtn.getAttribute('data-cvz-fanout-days-more');
+      state.fanOutDaysExpanded[foMorePrompt] = !state.fanOutDaysExpanded[foMorePrompt];
       render();
       return;
     }
@@ -4608,6 +4648,49 @@
     render();
   }
 
+  // NEU: Läufe eines Prompts laden (erst beim Aufklappen, nicht für alle Prompts auf einmal).
+  // Eigener Cache, damit die bestehende Prompt-Detailansicht nicht beeinflusst wird.
+  async function maybeLoadFanOutRuns(topicId, promptId) {
+    if (!topicId || !promptId) return;
+    if (state.fanOutRunsCache[promptId] || state.loadingFanOutRuns[promptId] || state.fanOutRunErrors[promptId]) return;
+    state.loadingFanOutRuns[promptId] = true;
+    render();
+    try {
+      var data = await loadPromptCitations(topicId, promptId);
+      state.fanOutRunsCache[promptId] = (data.chat_gpt || []).filter(function (r) {
+        return r.fan_out_queries && r.fan_out_queries.length > 0 && r.collected_at;
+      });
+    } catch (e) {
+      console.error('[CVZ Visibility] Läufe für Fan-out konnten nicht geladen werden:', e);
+      state.fanOutRunErrors[promptId] = e.message || 'Unbekannter Fehler';
+    }
+    state.loadingFanOutRuns[promptId] = false;
+    render();
+  }
+
+  // Gruppiert Läufe nach Kalendertag (lokale Zeit), neueste zuerst.
+  // Bewusst NICHT groupRunsIntoRounds: Das fasst 6,5 Tage zusammen, hier soll jeder Messtag einzeln klickbar sein.
+  function groupFanOutRunsByDay(runs) {
+    var byDay = {};
+    runs.forEach(function (r) {
+      var d = new Date(r.collected_at);
+      if (isNaN(d.getTime())) return;
+      var mm = d.getMonth() + 1, dd = d.getDate();
+      var key = d.getFullYear() + '-' + (mm < 10 ? '0' : '') + mm + '-' + (dd < 10 ? '0' : '') + dd;
+      if (!byDay[key]) {
+        byDay[key] = { key: key, label: (dd < 10 ? '0' : '') + dd + '.' + (mm < 10 ? '0' : '') + mm + '.', runCount: 0, counts: {} };
+      }
+      byDay[key].runCount++;
+      var seen = {};
+      r.fan_out_queries.forEach(function (q) {
+        if (!q || seen[q]) return;
+        seen[q] = true;
+        byDay[key].counts[q] = (byDay[key].counts[q] || 0) + 1;
+      });
+    });
+    return Object.keys(byDay).sort().reverse().map(function (k) { return byDay[k]; });
+  }
+
   function renderDatenTab(detail) {
     var wrap = document.createElement('div');
 
@@ -4701,8 +4784,9 @@
     intro.className = 'cvz-card-placeholder-text';
     intro.style.marginBottom = '10px';
     intro.textContent =
-      'Wenn ChatGPT im Web recherchiert, zerlegt es den Prompt in mehrere Suchanfragen. ' +
-      'Das sind die Themen, zu denen ChatGPT Quellen sucht. Die Liste gilt nur für ChatGPT, ' +
+      'Ein Prompt ist die Frage, die wir ChatGPT stellen (z. B. \u201eWelche Tools gibt es für X?\u201c). ' +
+      'Eine Query ist eine Suchanfrage, die ChatGPT daraufhin selbst im Web startet, um Quellen für seine Antwort zu finden. ' +
+      'Aus einem Prompt entstehen meist mehrere Queries. Die Liste gilt nur für ChatGPT, ' +
       'für Gemini liefert der Datenanbieter diese Information nicht.';
     section.appendChild(intro);
 
@@ -4767,78 +4851,18 @@
     }
     if (withFo === 0) return section;
 
-    // --- Themenweit
-    var showSingles = !!state.fanOutShowSingles[topicId];
-    var minRuns = showSingles ? 1 : 2;
-    var allQueries = data.queries || [];
-    var visible = allQueries.filter(function (q) { return q.run_count >= minRuns; });
-    var hiddenSingles = allQueries.length - allQueries.filter(function (q) { return q.run_count >= 2; }).length;
-    var MAX_ROWS = 50;
-
-    var topLabel = document.createElement('p');
-    topLabel.className = 'cvz-changelog-guided-label';
-    topLabel.textContent = 'Häufigste Queries über alle Prompts';
-    section.appendChild(topLabel);
-
-    var toolbar = document.createElement('div');
-    toolbar.className = 'cvz-fanout-toolbar';
-    var singlesBtn = document.createElement('button');
-    singlesBtn.type = 'button';
-    singlesBtn.className = 'cvz-weeks-preset-btn' + (showSingles ? ' cvz-weeks-preset-btn-active' : '');
-    singlesBtn.setAttribute('data-cvz-fanout-singles', topicId);
-    singlesBtn.textContent = showSingles ? 'Auch einmalige Queries: an' : 'Auch einmalige Queries zeigen (' + hiddenSingles + ')';
-    toolbar.appendChild(singlesBtn);
-    section.appendChild(toolbar);
-
-    if (visible.length === 0) {
-      var noStable = document.createElement('p');
-      noStable.className = 'cvz-card-placeholder-text';
-      noStable.textContent = 'Keine Query kam in mindestens zwei Läufen vor. Mit weiteren Läufen wird die Auswertung aussagekräftiger.';
-      section.appendChild(noStable);
-    } else {
-      var table = document.createElement('table');
-      table.className = 'cvz-table';
-      table.style.minWidth = '640px';
-      table.innerHTML =
-        '<thead><tr>' +
-          '<th>Query</th>' +
-          '<th style="width:110px;text-align:right;">Läufe</th>' +
-          '<th style="width:110px;text-align:right;">Prompts</th>' +
-          '<th style="width:150px;">Zuletzt gesehen</th>' +
-        '</tr></thead>';
-      var tbody = document.createElement('tbody');
-      visible.slice(0, MAX_ROWS).forEach(function (q) {
-        var promptTitles = (q.prompts || []).slice(0, 5).map(function (p) { return p.prompt_text || ''; }).join('\n');
-        var share = q.share_of_fan_out_runs != null ? ' (' + Math.round(q.share_of_fan_out_runs * 100) + ' %)' : '';
-        var tr = document.createElement('tr');
-        tr.innerHTML =
-          '<td>' + escapeHtml(q.query) + '</td>' +
-          '<td style="text-align:right;">' + escapeHtml(q.run_count) + '<span class="cvz-fanout-chip-count">' + escapeHtml(share) + '</span></td>' +
-          '<td style="text-align:right;" title="' + escapeHtml(promptTitles) + '">' + escapeHtml(q.prompt_count) + '</td>' +
-          '<td style="color:var(--cvz-text-muted,#8b98a5);">' + (q.last_seen ? escapeHtml(formatRelativeTime(q.last_seen)) : '\u2013') + '</td>';
-        tbody.appendChild(tr);
-      });
-      table.appendChild(tbody);
-      var tableWrap = document.createElement('div');
-      tableWrap.style.overflowX = 'auto';
-      tableWrap.appendChild(table);
-      section.appendChild(tableWrap);
-      if (visible.length > MAX_ROWS) {
-        var more = document.createElement('p');
-        more.className = 'cvz-card-placeholder-text';
-        more.style.marginTop = '6px';
-        more.textContent = 'Gezeigt: die ' + MAX_ROWS + ' häufigsten von ' + visible.length + ' Queries.';
-        section.appendChild(more);
-      }
-    }
-
     // --- Pro Prompt
     var byPrompt = data.by_prompt || [];
     var promptLabel = document.createElement('p');
     promptLabel.className = 'cvz-changelog-guided-label';
-    promptLabel.style.marginTop = '20px';
-    promptLabel.textContent = 'Pro Prompt: in welche Suchanfragen ChatGPT ihn zerlegt';
+    promptLabel.style.marginTop = '8px';
+    promptLabel.textContent = 'Pro Prompt: in welche Suchanfragen ChatGPT ihn zerlegt (' + (data.queries || []).length + ' verschiedene Queries insgesamt)';
     section.appendChild(promptLabel);
+    var promptHint = document.createElement('p');
+    promptHint.className = 'cvz-card-placeholder-text';
+    promptHint.style.margin = '0 0 6px';
+    promptHint.textContent = 'Klicke auf einen Prompt, um seine Queries zu sehen und nach Messtag durchzublättern.';
+    section.appendChild(promptHint);
 
     byPrompt.forEach(function (p) {
       var details = document.createElement('details');
@@ -4860,28 +4884,149 @@
         none.textContent = 'Für diesen Prompt hat ChatGPT in diesem Zeitraum keine Suchanfragen geliefert.';
         details.appendChild(none);
       } else {
-        var chips = document.createElement('div');
-        chips.className = 'cvz-fanout-chips';
-        p.queries.forEach(function (q) {
-          var chip = document.createElement('span');
-          chip.className = 'cvz-fanout-chip';
-          chip.textContent = q.query;
-          var count = document.createElement('span');
-          count.className = 'cvz-fanout-chip-count';
-          count.textContent = q.run_count + '\u00d7';
-          chip.appendChild(count);
-          chips.appendChild(chip);
-        });
-        details.appendChild(chips);
+        details.appendChild(buildFanOutPromptBody(topicId, p));
       }
 
       details.addEventListener('toggle', function () {
         state.openFanOutPrompts[p.prompt_id] = details.open;
+        if (details.open && p.queries && p.queries.length > 0) maybeLoadFanOutRuns(topicId, p.prompt_id);
       });
       section.appendChild(details);
     });
 
     return section;
+  }
+
+  // NEU: Inhalt eines aufgeklappten Prompts: Tag-Auswahl (Gesamt + einzelne Messtage) und Queries.
+  function buildFanOutPromptBody(topicId, p) {
+    var body = document.createElement('div');
+    var pid = p.prompt_id;
+
+    function totalChips() {
+      var chips = document.createElement('div');
+      chips.className = 'cvz-fanout-chips';
+      p.queries.forEach(function (q) {
+        var chip = document.createElement('span');
+        chip.className = 'cvz-fanout-chip';
+        chip.textContent = q.query;
+        var count = document.createElement('span');
+        count.className = 'cvz-fanout-chip-count';
+        count.textContent = q.run_count + '\u00d7';
+        chip.appendChild(count);
+        chips.appendChild(chip);
+      });
+      return chips;
+    }
+
+    var runs = state.fanOutRunsCache[pid];
+    if (state.loadingFanOutRuns[pid] || (!runs && !state.fanOutRunErrors[pid])) {
+      var ld = document.createElement('p');
+      ld.className = 'cvz-card-placeholder-text';
+      ld.style.margin = '8px 0 0';
+      ld.textContent = 'Messtage werden geladen...';
+      body.appendChild(ld);
+      body.appendChild(totalChips());
+      return body;
+    }
+    if (state.fanOutRunErrors[pid]) {
+      var er = document.createElement('p');
+      er.className = 'cvz-card-placeholder-text';
+      er.style.margin = '8px 0 0';
+      er.textContent = 'Die einzelnen Messtage konnten nicht geladen werden (' + state.fanOutRunErrors[pid] + '). Hier die Gesamtübersicht:';
+      body.appendChild(er);
+      body.appendChild(totalChips());
+      return body;
+    }
+
+    // Nur Tage im gewählten Zeitraum (4/12/26 Wochen), passend zur Gesamtliste.
+    var cutoff = Date.now() - getFanOutWeeks(topicId) * 7 * 24 * 3600 * 1000;
+    var days = groupFanOutRunsByDay(runs.filter(function (r) { return new Date(r.collected_at).getTime() >= cutoff; }));
+    if (days.length === 0) {
+      body.appendChild(totalChips());
+      return body;
+    }
+
+    var sel = state.fanOutDaySel[pid];
+    var selIdx = -1;
+    days.forEach(function (d, i) { if (d.key === sel) selIdx = i; });
+    if (selIdx === -1) sel = null;
+
+    var LIMIT = 8;
+    var expanded = !!state.fanOutDaysExpanded[pid];
+    // Ein gewählter, älterer Tag bleibt sichtbar, auch wenn die Liste gekürzt ist.
+    var shownDays = (expanded || days.length <= LIMIT) ? days : days.slice(0, LIMIT);
+    if (!expanded && selIdx >= LIMIT) shownDays = shownDays.concat([days[selIdx]]);
+
+    var bar = document.createElement('div');
+    bar.className = 'cvz-fanout-chips';
+    bar.style.margin = '8px 0 6px';
+    function dayBtn(label, key, active, title) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cvz-weeks-preset-btn' + (active ? ' cvz-weeks-preset-btn-active' : '');
+      b.setAttribute('data-cvz-fanout-day-prompt', pid);
+      b.setAttribute('data-cvz-fanout-day', key);
+      b.textContent = label;
+      if (title) b.title = title;
+      return b;
+    }
+    bar.appendChild(dayBtn('Gesamt', '', sel === null, 'Alle Läufe im Zeitraum zusammen'));
+    shownDays.forEach(function (d) {
+      bar.appendChild(dayBtn(d.label, d.key, d.key === sel, d.runCount + (d.runCount === 1 ? ' Lauf' : ' Läufe') + ' an diesem Tag'));
+    });
+    if (days.length > LIMIT) {
+      var more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'cvz-weeks-preset-btn';
+      more.setAttribute('data-cvz-fanout-days-more', pid);
+      more.textContent = expanded ? 'Weniger Tage' : 'Weitere ' + (days.length - LIMIT) + ' Tage';
+      bar.appendChild(more);
+    }
+    body.appendChild(bar);
+
+    if (sel === null) {
+      var gInfo = document.createElement('p');
+      gInfo.className = 'cvz-card-placeholder-text';
+      gInfo.style.margin = '0';
+      gInfo.textContent = 'Alle Queries im gewählten Zeitraum, mit Anzahl der Läufe, in denen sie vorkamen.';
+      body.appendChild(gInfo);
+      body.appendChild(totalChips());
+      return body;
+    }
+
+    var day = days[selIdx];
+    var older = days[selIdx + 1] || null;
+    var qs = Object.keys(day.counts).sort(function (a, b) { return day.counts[b] - day.counts[a] || (a < b ? -1 : 1); });
+    var head = document.createElement('p');
+    head.className = 'cvz-card-placeholder-text';
+    head.style.margin = '0';
+    head.textContent = qs.length + ' Queries am ' + day.label + ' (' + day.runCount + (day.runCount === 1 ? ' Lauf' : ' Läufe') + ')' +
+      (older ? '. \u201eneu\u201c = nicht im vorherigen Messtag (' + older.label + ') enthalten.' : '.');
+    body.appendChild(head);
+
+    var chips = document.createElement('div');
+    chips.className = 'cvz-fanout-chips';
+    qs.forEach(function (q) {
+      var chip = document.createElement('span');
+      chip.className = 'cvz-fanout-chip';
+      chip.textContent = q;
+      if (day.runCount > 1) {
+        var cnt = document.createElement('span');
+        cnt.className = 'cvz-fanout-chip-count';
+        cnt.textContent = day.counts[q] + '/' + day.runCount;
+        chip.appendChild(cnt);
+      }
+      if (older && !older.counts[q]) {
+        var nw = document.createElement('span');
+        nw.className = 'cvz-fanout-chip-count';
+        nw.style.color = 'var(--cvz-amber, #f0b429)';
+        nw.textContent = 'neu';
+        chip.appendChild(nw);
+      }
+      chips.appendChild(chip);
+    });
+    body.appendChild(chips);
+    return body;
   }
 
   function renderTrendChart(trendData) {
@@ -9421,7 +9566,11 @@
       '.cvz-fanout-coverage { font-size: 13px; color: var(--cvz-text); margin: 0 0 6px; }' +
       '.cvz-fanout-warn { font-size: 12px; color: var(--cvz-amber); margin: 0 0 10px; }' +
       '.cvz-fanout-prompt { border-bottom: 1px solid var(--cvz-border); padding: 8px 0; }' +
-      '.cvz-fanout-prompt > summary { cursor: pointer; font-size: 13px; color: var(--cvz-text); }' +
+      '.cvz-fanout-prompt > summary { cursor: pointer; font-size: 13px; color: var(--cvz-text); list-style: none; display: flex; align-items: baseline; gap: 6px; }' +
+      '.cvz-fanout-prompt > summary::-webkit-details-marker { display: none; }' +
+      '.cvz-fanout-prompt > summary::before { content: "▸"; color: var(--cvz-accent, #4fd1c5); font-size: 12px; flex-shrink: 0; }' +
+      '.cvz-fanout-prompt[open] > summary::before { content: "▾"; }' +
+      '.cvz-fanout-prompt > summary:hover { color: var(--cvz-accent, #4fd1c5); }' +
       '.cvz-fanout-prompt-meta { margin-left: 8px; font-size: 12px; color: var(--cvz-text-muted); }' +
       // NEU (25.09.2026, Kundenwunsch): Zeitraum-Preset-Picker (4/12/26 Wochen).
       '.cvz-weeks-preset-picker { display: flex; gap: 6px; flex-shrink: 0; }' +
@@ -10027,6 +10176,90 @@
   // --- VISIBILITY COMPARISON CHART ---
   // Zeigt per Liniendiagramm: eigene Zitierrate pro Journey-Phase vs. Top-5-Wettbewerber.
   // X-Achse = 4 Journey-Phasen, Y-Achse = Zitierrate 0-100 %.
+  // NEU: Welche Arten von Inhalten werden pro Journey-Phase zitiert?
+  // Basis: share_of_voice (pro Phase die zitierten Domains inkl. content_type).
+  // Gewichtung: cited_count (wie oft zitiert); fehlt er, zählt jede Domain 1.
+  function renderContentTypeByPhase(dashData) {
+    if (!dashData || dashData._error || !dashData.share_of_voice) return null;
+    var sov = dashData.share_of_voice;
+    var LABELS = { exploration: 'Erforschung', evaluation: 'Bewertung', comparison: 'Vergleich', decision: 'Entscheidung' };
+    var TYPE_COLORS = ['#4fd1c5', '#c98e2a', '#de5b50', '#8878ca', '#4ec68a', '#5aacd2', '#e8855b', '#a3c97a', '#c97ab5', '#7b8794'];
+
+    var rows = [];
+    var typeTotals = {};
+    PHASE_ORDER.forEach(function (phase) {
+      var entries = sov[phase] || [];
+      var counts = {}, total = 0;
+      entries.forEach(function (e) {
+        var t = e.content_type || 'unbekannt';
+        var w = (e.cited_count != null && e.cited_count > 0) ? e.cited_count : 1;
+        counts[t] = (counts[t] || 0) + w;
+        total += w;
+        typeTotals[t] = (typeTotals[t] || 0) + w;
+      });
+      if (total > 0) rows.push({ phase: phase, counts: counts, total: total });
+    });
+    if (rows.length === 0) return null;
+
+    var types = Object.keys(typeTotals).sort(function (a, b) { return typeTotals[b] - typeTotals[a]; });
+    function colorFor(t) { return t === 'unbekannt' ? '#4a5560' : TYPE_COLORS[types.indexOf(t) % TYPE_COLORS.length]; }
+    function labelFor(t) { return t === 'unbekannt' ? 'Nicht klassifiziert' : (CONTENT_TYPE_LABELS[t] || t); }
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    section.style.marginTop = '24px';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Zitierte Content-Typen pro Phase';
+    section.appendChild(heading);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '14px';
+    sub.textContent = 'Welche Arten von Inhalten KI-Systeme in der jeweiligen Journey-Phase zitieren (Anteil an allen Zitierungen der erfassten Domains, inkl. Wettbewerber). Zeigt, welches Format ihr für eine Phase brauchst.';
+    section.appendChild(sub);
+
+    var legend = document.createElement('div');
+    legend.style.cssText = 'display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;';
+    types.forEach(function (t) {
+      var item = document.createElement('span');
+      item.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+      var sw = document.createElement('span');
+      sw.style.cssText = 'width:10px;height:10px;border-radius:2px;flex-shrink:0;background:' + colorFor(t) + ';';
+      item.appendChild(sw);
+      item.appendChild(document.createTextNode(labelFor(t)));
+      legend.appendChild(item);
+    });
+    section.appendChild(legend);
+
+    var card = document.createElement('div');
+    card.className = 'cvz-card';
+    card.style.cssText = 'padding:16px 18px;';
+    rows.forEach(function (row) {
+      var line = document.createElement('div');
+      line.style.cssText = 'display:flex;align-items:center;gap:12px;margin-bottom:10px;';
+      var lbl = document.createElement('span');
+      lbl.style.cssText = 'width:92px;flex-shrink:0;font-size:12px;color:var(--cvz-text,#e6edf3);';
+      lbl.textContent = LABELS[row.phase] || row.phase;
+      line.appendChild(lbl);
+      var bar = document.createElement('div');
+      bar.style.cssText = 'display:flex;flex:1;height:26px;overflow:hidden;min-width:0;';
+      Object.keys(row.counts).sort(function (a, b) { return row.counts[b] - row.counts[a]; }).forEach(function (t) {
+        var pct = row.counts[t] / row.total * 100;
+        var seg = document.createElement('div');
+        seg.style.cssText = 'width:' + pct.toFixed(2) + '%;background:' + colorFor(t) + ';display:flex;align-items:center;justify-content:center;font-size:10px;color:#0d1117;overflow:hidden;white-space:nowrap;';
+        seg.title = labelFor(t) + ': ' + Math.round(pct) + ' % (' + row.counts[t] + ' Zitierungen)';
+        if (pct >= 9) seg.textContent = Math.round(pct) + ' %';
+        bar.appendChild(seg);
+      });
+      line.appendChild(bar);
+      card.appendChild(line);
+    });
+    section.appendChild(card);
+    return section;
+  }
+
   function renderVisibilityComparisonChart(topicId, detail) {
     var dashData = state.dashboardDataCache[topicId];
     if (!dashData || dashData._error || !dashData.phase_scores) return null;
@@ -10069,7 +10302,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt alle zitierten Domains, auch nicht best\u00e4tigte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck.';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt alle zitierten Domains, auch nicht best\u00e4tigte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck. Ein Klick auf einen Namen in der Legende blendet die Linie aus bzw. wieder ein.';
     section.appendChild(sub);
 
     // Favicon-Hilfsfunktion
@@ -10091,7 +10324,8 @@
       item.type = 'button';
       item.className = 'cvz-chart-legend-item' + (hidden ? ' cvz-chart-legend-item-hidden' : '');
       item.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;background:none;border:none;padding:0;margin:0;' +
-        (domain ? 'cursor:pointer;' : '') +
+        (domain ? 'cursor:pointer;font-family:inherit;' : '') +
+        (hidden ? 'opacity:.4;text-decoration:line-through;' : '') +
         (own ? 'color:var(--cvz-text,#e6edf3);font-weight:600;' : 'color:var(--cvz-text-muted,#8b98a5);');
       if (domain) {
         item.setAttribute('data-cvz-chart-domain-toggle', domain);
@@ -10112,7 +10346,8 @@
       item.type = 'button';
       item.className = 'cvz-chart-legend-item' + (hidden ? ' cvz-chart-legend-item-hidden' : '');
       item.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);background:none;border:none;padding:0;margin:0;' +
-        (domain ? 'cursor:pointer;' : '');
+        (domain ? 'cursor:pointer;font-family:inherit;' : '') +
+        (hidden ? 'opacity:.4;text-decoration:line-through;' : '');
       if (domain) {
         item.setAttribute('data-cvz-chart-domain-toggle', domain);
         item.setAttribute('data-cvz-chart-domain-topic', topicId);
@@ -10173,7 +10408,8 @@
       return count > 0 ? Math.round(total / count) : 0;
     });
 
-    var seriesList = [{ label: ownDomain, color: '#4fd1c5', values: ownValues }];
+    var seriesList = [];
+    if (!isChartDomainHidden(topicId, ownDomain)) seriesList.push({ label: ownDomain, color: '#4fd1c5', values: ownValues });
 
     // Wettbewerber-Zitierraten pro aktiver Phase
     topComps.forEach(function (domain, i) {
@@ -10181,7 +10417,7 @@
         var entry = (sov[phase] || []).filter(function (c) { return c.domain === domain; })[0];
         return entry ? Math.round(entry.citation_rate || 0) : 0;
       });
-      seriesList.push({ label: domain, color: COMP_COLORS[i], values: values });
+      if (!isChartDomainHidden(topicId, domain)) seriesList.push({ label: domain, color: COMP_COLORS[i], values: values });
     });
     // NEU (17.09.2026): Gepinnte Extra-Wettbewerber (gestrichelte Linien)
     extraComps.forEach(function (domain, i) {
@@ -10189,7 +10425,7 @@
         var entry = (sov[phase] || []).filter(function (c) { return c.domain === domain; })[0];
         return entry ? Math.round(entry.citation_rate || 0) : 0;
       });
-      seriesList.push({ label: domain, color: COMP_COLORS[5 + i], values: values, dashed: true });
+      if (!isChartDomainHidden(topicId, domain)) seriesList.push({ label: domain, color: COMP_COLORS[5 + i], values: values, dashed: true });
     });
 
     // Chart-Karte
@@ -10225,6 +10461,13 @@
     });
     svgWrap.appendChild(labelRow);
 
+    if (seriesList.length === 0) {
+      var allHiddenMsg = document.createElement('p');
+      allHiddenMsg.className = 'cvz-card-placeholder-text';
+      allHiddenMsg.style.cssText = 'margin:8px 0 0;font-style:italic;';
+      allHiddenMsg.textContent = 'Alle Linien sind ausgeblendet. Klicke oben in der Legende auf einen Namen, um sie wieder einzublenden.';
+      svgWrap.appendChild(allHiddenMsg);
+    }
     chartCard.appendChild(svgWrap);
     section.appendChild(chartCard);
 
@@ -10468,6 +10711,10 @@
     // Wettbewerbs-Sichtbarkeitsvergleich (Chart)
     var compChart = renderVisibilityComparisonChart(topicId, detail);
     if (compChart) wrap.appendChild(compChart);
+
+    // NEU: Content-Typen pro Phase
+    var ctChart = renderContentTypeByPhase(dashData);
+    if (ctChart) wrap.appendChild(ctChart);
 
     // NEU (23.09.2026): Sichtbarkeit je Rolle, inkl. Rollen bearbeiten
     wrap.appendChild(renderRoleVisibilitySection(topicId, detail));
