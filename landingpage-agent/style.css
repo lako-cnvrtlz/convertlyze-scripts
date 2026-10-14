@@ -487,6 +487,11 @@
     height: 62vh;
     height: 62dvh;
   }
+  .cvz-workspace .cvz-interview-body {
+    flex: none;
+    height: 62vh;
+    height: 62dvh;
+  }
 
   /* ---------- Tabellen als Karten ab Tablet ----------
      Greift nur bei Tabellen, die app.js per cvzLabelTablesForCards() mit
@@ -635,3 +640,105 @@
 @media (prefers-reduced-motion: reduce) {
   .cvz-spinner, .cvz-spinner-inline { animation-duration: 2s; }
 }
+/* ============================================================================
+   PILLAR PAGE (Seitentyp-Auswahl, Statusleiste, Interview)
+   Gleiche Regeln wie oben: alles unter .cvz-app bzw. .cvz-workspace,
+   Präfix cvz-, keine Rundungen.
+   ============================================================================ */
+
+/* ---------- Seitentyp-Auswahl (Formular, Schritt "Seitentyp") ---------- */
+.cvz-app .cvz-type-cards { display: flex; flex-direction: column; gap: 12px; }
+.cvz-app button.cvz-type-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  width: 100%; text-align: left; font-family: inherit; cursor: pointer;
+  background: var(--cvz-bg); color: var(--cvz-text);
+  border: 1px solid var(--cvz-border); border-radius: 0px; padding: 16px 18px;
+}
+.cvz-app button.cvz-type-card:hover { border-color: var(--cvz-teal); }
+.cvz-app button.cvz-type-card.selected { border-color: var(--cvz-teal); background: var(--cvz-teal-dim); }
+.cvz-app .cvz-type-card-title { font-weight: 700; font-size: 1rem; }
+.cvz-app .cvz-type-card-text { font-size: 0.85rem; line-height: 1.5; color: var(--cvz-text-muted); }
+
+/* ---------- Statusleiste + Tabs im Vorschau-Panel ---------- */
+.cvz-workspace .cvz-pillar-bar {
+  border-bottom: 1px solid var(--cvz-border); background: var(--cvz-bg-elevated);
+  display: flex; flex-direction: column;
+}
+.cvz-workspace .cvz-pillar-status {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px;
+  padding: 10px 20px; font-size: 0.85rem; color: var(--cvz-text);
+}
+.cvz-workspace .cvz-pillar-status:empty { display: none; }
+.cvz-workspace .cvz-pillar-badge {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 3px 8px; border: 1px solid var(--cvz-border); color: var(--cvz-text-muted); border-radius: 0px;
+}
+.cvz-workspace .cvz-pillar-badge.done { border-color: var(--cvz-teal); color: var(--cvz-teal); }
+.cvz-workspace .cvz-pillar-reason { flex-basis: 100%; color: var(--cvz-text-muted); font-size: 0.8rem; }
+.cvz-workspace button.cvz-pillar-apply { padding: 7px 14px; font-size: 0.82rem; margin-left: auto; border: 1px solid var(--cvz-teal); color: var(--cvz-teal); }
+.cvz-workspace .cvz-pillar-tabs { display: flex; gap: 0; padding: 0 12px; }
+.cvz-workspace button.cvz-pillar-tab {
+  background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0px;
+  color: var(--cvz-text-muted); font-family: inherit; font-size: 0.85rem; font-weight: 600;
+  padding: 10px 14px; cursor: pointer;
+}
+.cvz-workspace button.cvz-pillar-tab:hover { color: var(--cvz-text); }
+.cvz-workspace button.cvz-pillar-tab.active { color: var(--cvz-teal); border-bottom-color: var(--cvz-teal); }
+
+/* ---------- Interview ---------- */
+.cvz-workspace .cvz-interview-body {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; background: var(--cvz-bg);
+  overscroll-behavior: contain; display: flex; flex-direction: column; gap: 14px;
+}
+.cvz-workspace .cvz-interview-body .cvz-hint { margin: 0; font-size: 0.82rem; color: var(--cvz-text-muted); line-height: 1.5; }
+.cvz-workspace .cvz-iv-item {
+  border: 1px solid var(--cvz-border); background: var(--cvz-bg-elevated); border-radius: 0px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+}
+.cvz-workspace .cvz-iv-item.answered { border-left: 3px solid var(--cvz-teal); }
+.cvz-workspace .cvz-iv-head { display: flex; gap: 6px; flex-wrap: wrap; }
+.cvz-workspace .cvz-iv-badge {
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  padding: 2px 7px; border: 1px solid var(--cvz-border); color: var(--cvz-text-muted); border-radius: 0px;
+}
+.cvz-workspace .cvz-iv-badge.must { border-color: var(--cvz-danger); color: var(--cvz-danger); }
+.cvz-workspace .cvz-iv-badge.ok { border-color: var(--cvz-teal); color: var(--cvz-teal); }
+.cvz-workspace .cvz-iv-question { font-weight: 600; font-size: 0.95rem; line-height: 1.4; color: var(--cvz-text); }
+.cvz-workspace .cvz-iv-why { font-size: 0.82rem; line-height: 1.5; color: var(--cvz-text-muted); }
+.cvz-workspace .cvz-iv-weak { font-size: 0.82rem; color: var(--cvz-text-muted); }
+.cvz-workspace .cvz-iv-weak summary { cursor: pointer; color: var(--cvz-teal); }
+.cvz-workspace .cvz-iv-weak p { margin: 6px 0 0; }
+.cvz-workspace .cvz-iv-item textarea.cvz-input,
+.cvz-workspace .cvz-iv-item input.cvz-input {
+  width: 100%; background: var(--cvz-bg); color: var(--cvz-text); font-family: inherit; font-size: 0.9rem;
+  border: 1px solid var(--cvz-border); border-radius: 0px; padding: 10px 12px;
+}
+.cvz-workspace .cvz-iv-item textarea.cvz-input { resize: vertical; min-height: 84px; }
+.cvz-workspace .cvz-iv-item textarea.cvz-input:focus,
+.cvz-workspace .cvz-iv-item input.cvz-input:focus { outline: none; border-color: var(--cvz-teal); }
+.cvz-workspace .cvz-iv-appr { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--cvz-text-muted); cursor: pointer; }
+.cvz-workspace .cvz-iv-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cvz-workspace .cvz-iv-actions button.cvz-btn-secondary { padding: 8px 18px; font-size: 0.85rem; border: 1px solid var(--cvz-border); }
+.cvz-workspace .cvz-iv-actions button.cvz-btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+.cvz-workspace .cvz-iv-msg { font-size: 0.8rem; color: var(--cvz-teal); }
+.cvz-workspace .cvz-iv-msg.bad { color: var(--cvz-danger); }
+
+@media (max-width: 767px) {
+  .cvz-workspace .cvz-pillar-status { padding: 10px 14px; }
+  .cvz-workspace .cvz-pillar-tabs { padding: 0 6px; }
+  .cvz-workspace .cvz-interview-body { padding: 12px 14px; }
+  .cvz-workspace button.cvz-pillar-apply { margin-left: 0; }
+}
+
+/* ---------- Pillar: Übernahme aus der Content-Strategie (Formular) ---------- */
+.cvz-app .cvz-strategy-card {
+  border: 1px solid var(--cvz-border); background: var(--cvz-bg); border-radius: 0px;
+  padding: 14px 16px; margin-bottom: 20px;
+}
+.cvz-app .cvz-strategy-card .cvz-hint { margin: 8px 0 0; }
+.cvz-app p.cvz-strategy-applied {
+  margin: 12px 0 0; padding: 10px 12px; font-size: 0.82rem; line-height: 1.5;
+  color: var(--cvz-text); background: var(--cvz-teal-dim); border-left: 3px solid var(--cvz-teal); border-radius: 0px;
+}
+.cvz-app p.cvz-strategy-error { margin: 8px 0 0; font-size: 0.82rem; color: var(--cvz-danger); }
+.cvz-app .cvz-strategy-error[hidden] { display: none !important; }
