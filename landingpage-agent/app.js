@@ -211,7 +211,10 @@ const cvzState = {
   conversion_target_value: '',
   messy_middle_phase: '',
   sender_name: '',
-  cluster_text: ''                  // eine Unterseite pro Zeile: "Keyword" oder "Keyword | https://url"
+  cluster_text: '',                 // eine Unterseite pro Zeile: "Keyword" oder "Keyword | https://url"
+  // Aus der Content-Strategie übernommen (optional): { session_id, pillar_index, label, child_count }
+  strategy: null,
+  strategy_context: ''
 };
 // Die Schritte hängen vom Seitentyp ab. cvzState.step bleibt ein Index, der
 // Inhalt kommt über den Schritt-Schlüssel. Die Landingpage-Schritte sind
@@ -970,6 +973,7 @@ function cvzToggleNoCustomerReasons(checked) {
 }
 function cvzBuildExistingContent() {
   const parts = [];
+  if (cvzState.page_type === 'pillar' && cvzState.strategy_context) parts.push(cvzState.strategy_context);
   if (cvzState.existing_content) parts.push(cvzState.existing_content);
   if (cvzState.reference_urls.length > 0) parts.push('Referenz-Links:\n' + cvzState.reference_urls.join('\n'));
   cvzState.pdfExtracts.forEach(p => parts.push(`[PDF: ${p.filename}]\n${p.text}`));
@@ -1092,12 +1096,14 @@ function cvzRenderPillarTopic() {
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Welches Thema soll die Pillar Page abdecken?</h1>
     <p class="cvz-subtitle">Das Hauptthema, unter dem ihr gefunden und zitiert werden wollt.</p>
+    <div id="cvz-strategy-box"></div>
     <label class="cvz-label">Thema / Ziel-Keyword</label>
     <input class="cvz-input" id="cvz-in-keyword" placeholder="z.B. SAP S/4HANA Migration" value="${cvzEsc(cvzState.keyword)}">
     <label class="cvz-label">Hauptzielgruppe (Persona)</label>
     <input class="cvz-input" id="cvz-in-audience" placeholder="z.B. IT-Leiter im Mittelstand mit SAP ECC" value="${cvzEsc(cvzState.target_audience)}">
     <p class="cvz-hint"><a href="https://www.convertlyze.com/content-hub/icp-generator" target="_blank" rel="noopener" style="color:var(--cvz-teal);">Unsicher bei deiner Zielgruppe? → Kostenloser ICP- & Persona-Assistent</a></p>
   `;
+  cvzRenderStrategyBox();
 }
 function cvzRenderPillarGoal() {
   const k = cvzState.conversion_target_kind;
@@ -1374,7 +1380,7 @@ function cvzBuildBriefBody(userId, page_project_id, competitorUrls) {
       body.type_brief.conversion_target = { kind: cvzState.conversion_target_kind, value: cvzState.conversion_target_value };
     }
     const pages = cvzParseClusterText(cvzState.cluster_text);
-    if (pages.length > 0) body.type_brief.cluster_context = { source: 'manuell', supporting_pages: pages };
+    if (pages.length > 0) body.type_brief.cluster_context = { source: cvzState.strategy && cvzState.strategy.pillar_index !== null ? 'strategie' : 'manuell', supporting_pages: pages };
     return body;
   }
   return {
@@ -2008,6 +2014,209 @@ async function cvzSaveInterviewAnswer(id) {
     const b2 = document.getElementById('cvz-iv-save-' + id);
     if (b2) b2.disabled = false;
   }
+}
+
+// ==================== PILLAR PAGE: INFOS AUS DER CONTENT-STRATEGIE ÜBERNEHMEN ====================
+// Die Content-Strategie liefert pro Cluster Pillar Pages mit Keyword, Zielgruppe,
+// Phase im Entscheidungsweg, Briefing-Stichpunkten und den zugehörigen
+// Unterseiten. Hier wählt der User eine fertige Strategie und darin eine
+// Pillar Page; das Formular wird vorbefüllt. Alle Felder bleiben änderbar.
+// Es gibt keine Pflicht: wer keine Strategie hat, füllt das Formular wie bisher.
+//
+// Datenquellen (gleiches Backend, gleiche Anmeldung):
+//   GET /api/content-strategy/sessions   -> Liste (nur status 'done' ist brauchbar)
+//   GET /api/content-strategy/:id        -> Session inkl. result (ContentClusterResult)
+let cvzStrategySessions = null;          // null = noch nicht geladen, [] = geladen/leer
+let cvzStrategyLoadError = '';
+const cvzStrategyResults = {};           // session_id -> result
+let cvzStrategyBusy = false;
+
+async function cvzLoadStrategySessions() {
+  if (cvzStrategySessions !== null) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/content-strategy/sessions`, { headers: cvzAuthHeaders() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    cvzStrategySessions = (data.sessions || []).filter(s => s.status === 'done');
+    cvzStrategyLoadError = '';
+  } catch (e) {
+    console.error('Strategien konnten nicht geladen werden:', e.message);
+    // Kein harter Fehler: das Formular funktioniert auch ohne Strategie.
+    cvzStrategySessions = [];
+    cvzStrategyLoadError = 'Strategien konnten nicht geladen werden. Du kannst das Formular trotzdem manuell ausfüllen.';
+  }
+}
+
+async function cvzLoadStrategyResult(sessionId) {
+  if (cvzStrategyResults[sessionId]) return cvzStrategyResults[sessionId];
+  const res = await fetch(`${API_BASE}/api/content-strategy/${encodeURIComponent(sessionId)}`, { headers: cvzAuthHeaders() });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data || !data.result || !Array.isArray(data.result.supporting_pages)) throw new Error('Strategie enthält noch kein Ergebnis');
+  cvzStrategyResults[sessionId] = data.result;
+  return data.result;
+}
+
+function cvzStrategyPillarPages(result) {
+  return (result.supporting_pages || [])
+    .map((p, index) => ({ p, index }))
+    .filter(x => x.p.page_type === 'pillar_page');
+}
+
+function cvzFormatStrategyDate(iso) {
+  try { return new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return ''; }
+}
+
+// Zeichnet die Auswahl. Wird beim Rendern des Themen-Schritts und nach jeder
+// Auswahländerung aufgerufen. Die Felder des Formulars selbst fasst die
+// Funktion nicht an, sie liegen außerhalb von #cvz-strategy-box.
+async function cvzRenderStrategyBox() {
+  const box = document.getElementById('cvz-strategy-box');
+  if (!box) return;
+  box.innerHTML = '<p class="cvz-hint">Strategien werden geladen …</p>';
+  await cvzLoadStrategySessions();
+  const box2 = document.getElementById('cvz-strategy-box');
+  if (!box2) return; // Schritt wurde inzwischen gewechselt
+  if (cvzStrategySessions.length === 0) {
+    box2.innerHTML = cvzStrategyLoadError ? `<p class="cvz-hint">${cvzEsc(cvzStrategyLoadError)}</p>` : '';
+    return;
+  }
+  const st = cvzState.strategy;
+  const sessionOptions = cvzStrategySessions.map(s => `
+    <option value="${cvzEsc(s.id)}" ${st && st.session_id === s.id ? 'selected' : ''}>${cvzEsc(s.seed_topic)}${s.domain ? ' · ' + cvzEsc(s.domain) : ''} · ${cvzEsc(cvzFormatStrategyDate(s.updated_at || s.created_at))}</option>
+  `).join('');
+  let pillarHtml = '';
+  if (st && cvzStrategyResults[st.session_id]) {
+    const pillars = cvzStrategyPillarPages(cvzStrategyResults[st.session_id]);
+    if (pillars.length === 0) {
+      pillarHtml = '<p class="cvz-hint">Diese Strategie enthält keine Pillar Page. Wähle eine andere oder fülle das Formular manuell aus.</p>';
+    } else {
+      pillarHtml = `
+        <label class="cvz-label">Pillar Page aus der Strategie</label>
+        <div class="cvz-select-wrap">
+          <select class="cvz-input" id="cvz-in-strategy-pillar" onchange="cvzOnStrategyPillarChange(this.value)">
+            <option value="" ${st.pillar_index === null ? 'selected' : ''} disabled>Pillar Page auswählen …</option>
+            ${pillars.map(x => `<option value="${x.index}" ${st.pillar_index === x.index ? 'selected' : ''}>${cvzEsc(x.p.topic)} (${cvzEsc(x.p.keyword)})</option>`).join('')}
+          </select>
+        </div>`;
+    }
+  }
+  const applied = st && st.pillar_index !== null
+    ? `<p class="cvz-strategy-applied">Übernommen aus „${cvzEsc(st.label)}“: Thema, Zielgruppe, Phase, Abschluss-Ziel, ${st.child_count} Unterseite${st.child_count === 1 ? '' : 'n'} und das Briefing der Strategie. Alles bleibt änderbar.</p>`
+    : '';
+  box2.innerHTML = `
+    <div class="cvz-strategy-card">
+      <label class="cvz-label" style="margin-top:0;">Aus deiner Content-Strategie übernehmen (optional)</label>
+      <div class="cvz-select-wrap">
+        <select class="cvz-input" id="cvz-in-strategy-session" onchange="cvzOnStrategySessionChange(this.value)" ${cvzStrategyBusy ? 'disabled' : ''}>
+          <option value="" ${!st ? 'selected' : ''}>Keine Strategie verwenden</option>
+          ${sessionOptions}
+        </select>
+      </div>
+      ${cvzStrategyBusy ? '<p class="cvz-hint">Strategie wird geladen …</p>' : ''}
+      <p class="cvz-strategy-error" id="cvz-strategy-error" hidden></p>
+      ${pillarHtml}
+      ${applied}
+    </div>`;
+}
+
+function cvzShowStrategyError(msg) {
+  const el = document.getElementById('cvz-strategy-error');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.hidden = !msg;
+}
+
+async function cvzOnStrategySessionChange(sessionId) {
+  if (!sessionId) { cvzClearStrategy(); return; }
+  const meta = cvzStrategySessions.find(s => s.id === sessionId);
+  cvzState.strategy = { session_id: sessionId, pillar_index: null, label: meta ? meta.seed_topic : 'Strategie', child_count: 0 };
+  cvzState.strategy_context = '';
+  cvzStrategyBusy = true;
+  await cvzRenderStrategyBox();
+  try {
+    const result = await cvzLoadStrategyResult(sessionId);
+    cvzStrategyBusy = false;
+    const pillars = cvzStrategyPillarPages(result);
+    await cvzRenderStrategyBox();
+    // Genau eine Pillar Page: direkt übernehmen, spart einen Klick.
+    if (pillars.length === 1) cvzOnStrategyPillarChange(String(pillars[0].index));
+  } catch (e) {
+    console.error('Strategie konnte nicht geladen werden:', e.message);
+    cvzStrategyBusy = false;
+    cvzState.strategy = null;
+    await cvzRenderStrategyBox();
+    cvzShowStrategyError('Diese Strategie konnte nicht geladen werden. Du kannst das Formular manuell ausfüllen.');
+  }
+}
+
+function cvzClearStrategy() {
+  // Bereits übernommene Feldwerte bleiben stehen: sie gehören jetzt dem User.
+  cvzState.strategy = null;
+  cvzState.strategy_context = '';
+  cvzRenderStrategyBox();
+}
+
+// Überträgt eine Pillar Page der Strategie in den Formular-State.
+// Reine Funktion ohne DOM, damit sie einzeln prüfbar ist.
+function cvzMapStrategyPillar(result, pillarIndex) {
+  const pillar = result.supporting_pages[pillarIndex];
+  const children = (result.supporting_pages || []).filter((p, i) => i !== pillarIndex && p.parent_index === pillarIndex);
+  const conv = result.conversion_page || null;
+  const clusterLines = children.slice(0, 30).map(c => {
+    const url = c.existing_coverage && c.existing_coverage.url ? c.existing_coverage.url : '';
+    return url ? `${c.keyword} | ${url}` : c.keyword;
+  });
+  const ctx = [];
+  ctx.push(`Dieses Briefing stammt aus der Content-Strategie "${result.seed_topic}".`);
+  if (pillar.reasoning) ctx.push(`Warum diese Seite: ${pillar.reasoning}`);
+  if (Array.isArray(pillar.content_brief) && pillar.content_brief.length > 0) {
+    ctx.push('Inhaltliche Stichpunkte aus der Strategie:\n' + pillar.content_brief.map(b => `- ${b}`).join('\n'));
+  }
+  if (pillar.intent_separation && pillar.intent_separation.cannibalization_guard) {
+    ctx.push(`Abgrenzung zur Conversion-Seite: ${pillar.intent_separation.cannibalization_guard}`);
+  }
+  if (children.length > 0) {
+    ctx.push('Unterseiten laut Strategie:\n' + children.map(c => `- ${c.topic} (${c.keyword})${c.estimated_volume ? `, Suchvolumen ${c.estimated_volume}` : ''}`).join('\n'));
+  }
+  return {
+    keyword: pillar.keyword,
+    target_audience: pillar.primary_audience || '',
+    messy_middle_phase: pillar.messy_middle_phase === 'exploration'
+      ? 'Exploration (Leser sucht Orientierung und versteht das Thema noch)'
+      : pillar.messy_middle_phase === 'evaluation'
+        ? 'Evaluation (Leser vergleicht Optionen und Anbieter)'
+        : '',
+    conversion_target_kind: 'text',
+    conversion_target_value: conv ? `${conv.topic} (Keyword: ${conv.keyword})` : '',
+    cluster_text: clusterLines.join('\n'),
+    strategy_context: ctx.join('\n\n'),
+    child_count: children.length,
+    label: result.seed_topic
+  };
+}
+
+function cvzOnStrategyPillarChange(value) {
+  const st = cvzState.strategy;
+  if (!st || value === '' || value === null) return;
+  const result = cvzStrategyResults[st.session_id];
+  const idx = Number(value);
+  if (!result || !result.supporting_pages[idx]) return;
+  const m = cvzMapStrategyPillar(result, idx);
+  cvzState.keyword = m.keyword;
+  if (m.target_audience) cvzState.target_audience = m.target_audience;
+  cvzState.messy_middle_phase = m.messy_middle_phase;
+  cvzState.conversion_target_kind = m.conversion_target_kind;
+  cvzState.conversion_target_value = m.conversion_target_value;
+  cvzState.cluster_text = m.cluster_text;
+  cvzState.strategy_context = m.strategy_context;
+  cvzState.strategy = { session_id: st.session_id, pillar_index: idx, label: m.label, child_count: m.child_count };
+  // Sichtbare Felder dieses Schritts nachziehen.
+  const kw = document.getElementById('cvz-in-keyword');
+  const au = document.getElementById('cvz-in-audience');
+  if (kw) kw.value = cvzState.keyword;
+  if (au) au.value = cvzState.target_audience;
+  cvzRenderStrategyBox();
 }
 
 // ==================== INIT ====================
