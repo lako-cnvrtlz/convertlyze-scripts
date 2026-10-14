@@ -1543,11 +1543,26 @@ function cvzOpenChat(sessionData) {
 function cvzUpdateQuota(remaining, limit) {
   document.getElementById('cvz-quota').textContent = `${remaining}/${limit} Sessions übrig`;
 }
+function cvzStripPreviewLinks(htmlDocument) {
+  try {
+    const doc = new DOMParser().parseFromString(htmlDocument, 'text/html');
+    doc.querySelectorAll('a[href]').forEach(a => {
+      a.removeAttribute('href');
+      a.removeAttribute('target');
+      a.removeAttribute('rel');
+    });
+    doc.querySelectorAll('base').forEach(b => b.remove());
+    return '<!DOCTYPE html>' + doc.documentElement.outerHTML;
+  } catch (e) {
+    console.warn('Links in der Vorschau konnten nicht entfernt werden:', e.message);
+    return htmlDocument;
+  }
+}
 function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
   const iframe = document.createElement('iframe');
-  iframe.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+  iframe.setAttribute('sandbox', 'allow-same-origin');
   iframe.setAttribute('title', 'Landingpage-Vorschau');
-  iframe.srcdoc = htmlDocument;
+  iframe.srcdoc = cvzStripPreviewLinks(htmlDocument);
   iframe.addEventListener('load', () => {
     let measuredHeight = null;
     try {
@@ -1635,7 +1650,13 @@ function cvzUpdatePreviewPanel(htmlDocument, version) {
 }
 function cvzDownloadCurrentStructure() {
   if (!cvzLatestStructureHtml) return;
-  const blob = new Blob([cvzLatestStructureHtml], { type: 'text/html' });
+  let downloadHtml = cvzLatestStructureHtml;
+  try {
+    const dl = new DOMParser().parseFromString(cvzLatestStructureHtml, 'text/html');
+    dl.querySelectorAll('[data-cvz-preview-only]').forEach(el => el.remove());
+    downloadHtml = '<!DOCTYPE html>' + dl.documentElement.outerHTML;
+  } catch (e) { console.warn('Vorschau-Hinweise konnten nicht entfernt werden:', e.message); }
+  const blob = new Blob([downloadHtml], { type: 'text/html' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -1905,12 +1926,13 @@ function cvzRenderPillarStatus() {
   const st = cvzInterview.status;
   if (!el) return;
   if (!st) { el.textContent = ''; return; }
-  const open = Math.max(0, st.mandatoryTotal - st.mandatoryAnswered);
+  const declined = st.mandatoryDeclined || 0;
+  const open = Math.max(0, st.mandatoryTotal - st.mandatoryAnswered - declined);
   if (tab) tab.textContent = open > 0 ? `Interview (${open} offen)` : 'Interview';
   const isDone = st.status === 'fertig';
   const label = isDone ? 'Fertig' : 'Gerüst';
   let html = `<span class="cvz-pillar-badge ${isDone ? 'done' : ''}">${label}</span> ` +
-    `<span>${st.mandatoryAnswered} von ${st.mandatoryTotal} Pflichtfragen beantwortet</span>`;
+    `<span>${st.mandatoryAnswered} von ${st.mandatoryTotal} Pflichtfragen beantwortet${declined > 0 ? `, ${declined} ohne Antwort` : ''}</span>`;
   if (!isDone && st.reason) html += `<span class="cvz-pillar-reason">${cvzEsc(st.reason)}</span>`;
   if (st.stalePlaceholders > 0) {
     html += `<button type="button" class="cvz-btn-secondary cvz-pillar-apply" onclick="cvzApplyInterviewToPage()">Antworten in die Seite einarbeiten</button>`;
@@ -1922,7 +1944,7 @@ function cvzRenderPillarStatus() {
 // schreiben. Dafür schicken wir ihm eine normale Chat-Nachricht.
 function cvzApplyInterviewToPage() {
   cvzSetPreviewTab('preview');
-  cvzSendMessage('Ich habe Interview-Antworten ergänzt. Bitte arbeite sie in die Seite ein, ersetze die passenden Platzhalter und erzeuge eine neue Version.');
+  cvzSendMessage('Ich habe Interview-Antworten ergänzt oder Fragen als "Keine Antwort möglich" markiert. Bitte arbeite beides ein und erzeuge eine neue Version. Beantwortete Fragen ersetzen die Platzhalter. Bei Fragen ohne Antwort ersetzt du die Sektion durch allgemeine Informationen oder entfernst sie.');
 }
 
 function cvzRememberInterviewDraft(id) {
@@ -1943,13 +1965,29 @@ function cvzRenderInterview() {
     el.innerHTML = '<p class="cvz-hint">Noch keine Fragen. Sie erscheinen, sobald das Gerüst steht.</p>' + clusterHtml;
     return;
   }
-  const intro = '<p class="cvz-hint">Beantworte, was du aus eigener Erfahrung belegen kannst. Leere Antworten bleiben Platzhalter, es wird nichts erfunden. Zahlen sind willkommen, eine Quelle musst du nicht nennen.</p>';
+  const intro = '<p class="cvz-hint">Beantworte, was du aus eigener Erfahrung belegen kannst. Leere Antworten bleiben Platzhalter, es wird nichts erfunden. Zahlen sind willkommen, eine Quelle musst du nicht nennen. Kannst du eine Frage nicht beantworten, wähle „Keine Antwort möglich“. Die Seite kommt dann ohne diese Aussage aus oder enthält allgemeine Informationen.</p>';
   const items = cvzInterview.items.map(i => {
     const d = cvzInterviewDrafts[i.id];
     const text = d ? d.text : (i.answer_text || '');
     const prov = d ? d.provenance : (i.answer_provenance || '');
     const approved = d ? d.approved : (i.approved_for_publication !== false);
     const answered = !!(i.answer_text && i.answer_text.trim().length >= 20);
+    if (i.declined && !answered) {
+      return `
+    <div class="cvz-iv-item declined" id="cvz-iv-${cvzEsc(i.id)}">
+      <div class="cvz-iv-head">
+        ${i.mandatory ? '<span class="cvz-iv-badge must">Pflicht</span>' : '<span class="cvz-iv-badge">Optional</span>'}
+        <span class="cvz-iv-badge">${cvzEsc(CVZ_KIND_LABELS[i.kind] || i.kind)}</span>
+        <span class="cvz-iv-badge">Keine Antwort möglich</span>
+      </div>
+      <div class="cvz-iv-question">${cvzEsc(i.question)}</div>
+      <div class="cvz-iv-why">Die Seite wird ohne diese Aussage erstellt oder mit allgemeinen Informationen.</div>
+      <div class="cvz-iv-actions">
+        <button type="button" class="cvz-btn-secondary" id="cvz-iv-undo-${cvzEsc(i.id)}" onclick="cvzDeclineInterviewItem('${cvzEsc(i.id)}', false)">Doch beantworten</button>
+        <span class="cvz-iv-msg" id="cvz-iv-msg-${cvzEsc(i.id)}" role="status"></span>
+      </div>
+    </div>`;
+    }
     return `
     <div class="cvz-iv-item ${answered ? 'answered' : ''}" id="cvz-iv-${cvzEsc(i.id)}">
       <div class="cvz-iv-head">
@@ -1965,6 +2003,7 @@ function cvzRenderInterview() {
       <label class="cvz-iv-appr"><input type="checkbox" id="cvz-iv-appr-${cvzEsc(i.id)}" ${approved ? 'checked' : ''} onchange="cvzRememberInterviewDraft('${cvzEsc(i.id)}')"> Zur Veröffentlichung freigegeben</label>
       <div class="cvz-iv-actions">
         <button type="button" class="cvz-btn-secondary" id="cvz-iv-save-${cvzEsc(i.id)}" onclick="cvzSaveInterviewAnswer('${cvzEsc(i.id)}')">Speichern</button>
+        <button type="button" class="cvz-btn-secondary cvz-iv-decline" id="cvz-iv-decline-${cvzEsc(i.id)}" onclick="cvzDeclineInterviewItem('${cvzEsc(i.id)}', true)">Keine Antwort möglich</button>
         <span class="cvz-iv-msg" id="cvz-iv-msg-${cvzEsc(i.id)}" role="status"></span>
       </div>
     </div>`;
@@ -1993,6 +2032,35 @@ function cvzRenderClusterSuggestions() {
     </div>`).join('');
   return `<div class="cvz-cl-wrap"><h4 class="cvz-cl-title">Empfohlene Unterseiten und Beiträge</h4>
     <p class="cvz-hint">Diese Themen fehlen noch im Cluster und lohnen sich laut Recherche. Die Pillar Page verlinkt erst darauf, wenn die Seiten existieren und du sie im Brief als Cluster einträgst.</p>${rows}</div>`;
+}
+
+// "Keine Antwort möglich" setzen oder zurücknehmen. Eine vorhandene Antwort wird dabei gelöscht.
+async function cvzDeclineInterviewItem(id, declined) {
+  const msg = document.getElementById('cvz-iv-msg-' + id);
+  const setMsg = (text, bad) => { if (msg) { msg.textContent = text; msg.classList.toggle('bad', !!bad); } };
+  if (declined) {
+    const hasText = !!(document.getElementById('cvz-iv-text-' + id) || {}).value;
+    if (hasText && !window.confirm('Die eingegebene Antwort wird dabei verworfen. Fortfahren?')) return;
+  }
+  setMsg('Wird gespeichert …', false);
+  try {
+    const res = await fetch(`${API_BASE}/api/page-agent/interview/answer`, {
+      method: 'POST', headers: cvzAuthHeaders(),
+      body: JSON.stringify({ user_id: cvzUserId(), page_project_id: cvzState.page_project_id, item_key: id, text: '', declined: !!declined, answered_by: 'user' })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setMsg(data.error || `Fehler (HTTP ${res.status})`, true); return; }
+    delete cvzInterviewDrafts[id];
+    cvzInterview.items = data.interview_items || cvzInterview.items;
+    cvzInterview.status = data.pillar_status || cvzInterview.status;
+    if (Array.isArray(data.cluster_suggestions)) cvzInterview.clusters = data.cluster_suggestions;
+    if (data.structure_html_document) cvzUpdatePreviewPanel(data.structure_html_document, data.structure_version);
+    cvzRenderPillarStatus();
+    cvzRenderInterview();
+  } catch (e) {
+    console.error('Absage konnte nicht gespeichert werden:', e);
+    setMsg('Speichern fehlgeschlagen. Bitte erneut versuchen.', true);
+  }
 }
 
 async function cvzSaveInterviewAnswer(id) {
