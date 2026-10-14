@@ -2008,7 +2008,8 @@ function cvzRenderInterview() {
       </div>
     </div>`;
   }).join('');
-  el.innerHTML = intro + items + clusterHtml;
+  const toolbar = '<div class="cvz-iv-toolbar"><button type="button" class="cvz-btn-secondary" id="cvz-iv-pdf" onclick="cvzExportInterviewPdf(this)">Offene Fragen als PDF (für den Fachbereich)</button><span class="cvz-iv-msg" id="cvz-iv-pdf-msg" role="status" hidden></span></div>';
+  el.innerHTML = toolbar + intro + items + clusterHtml;
 }
 
 // Ergebnis der Cluster-Recherche: Unterseiten und Beiträge, die sich zum Thema
@@ -2106,6 +2107,20 @@ async function cvzSaveInterviewAnswer(id) {
     const b2 = document.getElementById('cvz-iv-save-' + id);
     if (b2) b2.disabled = false;
   }
+}
+
+
+// ---------- Fragenliste als PDF ----------
+// Offene Fragen als PDF für den Fachbereich. Erstellt der Server (Puppeteer, gleiche Route und
+// gleiches Layout wie die anderen Exporte, type "interview"). Es erscheinen nur Fragetexte.
+function cvzExportInterviewPdf(btn) {
+  const err = document.getElementById('cvz-iv-pdf-msg');
+  return cvzExportPdf({
+    buttonEl: btn,
+    errorEl: err,
+    type: 'interview',
+    downloadName: `convertlyze-fragen-fachbereich-${Date.now()}.pdf`,
+  });
 }
 
 // ==================== PILLAR PAGE: INFOS AUS DER CONTENT-STRATEGIE ÜBERNEHMEN ====================
