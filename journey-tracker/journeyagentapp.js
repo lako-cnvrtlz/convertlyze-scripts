@@ -194,6 +194,11 @@
     // NEU (17.09.2026): Phase-Filter fuer Content-Luecken und Quellen-Analyse
     gapPhaseFilter: null,
     sourcePhaseFilter: null,
+    // NEU (14.10.2026): Quellen-Ansicht "Wer wird zitiert?" (renderSourceMatrixSection)
+    sourceRoleFilter: null,
+    sourceOnlyCompetitors: false,
+    sourceShowAll: false,
+    sourceExpanded: {},
     // NEU (20.09.2026): Pro-Topic gepinnte Wettbewerber fuer den Vergleichs-Chart
     chartPinnedComps: {},
     // NEU (20.09.2026): Gezielter Retry einzelner Schritte (retryStep/renderStepNotice).
@@ -1868,6 +1873,34 @@
     var sourcePhaseFilter = event.target.closest('[data-cvz-source-phase-filter]');
     if (sourcePhaseFilter) {
       state.sourcePhaseFilter = sourcePhaseFilter.getAttribute('data-cvz-source-phase-filter') || null;
+      state.sourceExpanded = {};
+      render();
+      return;
+    }
+    // NEU (14.10.2026): Quellen-Ansicht: Rollen-Filter, Wettbewerber-Filter, Mehr-Button, Zeile auf/zu
+    var smRole = event.target.closest('[data-cvz-sm-role]');
+    if (smRole) {
+      state.sourceRoleFilter = smRole.getAttribute('data-cvz-sm-role') || null;
+      state.sourceExpanded = {};
+      render();
+      return;
+    }
+    var smComp = event.target.closest('[data-cvz-sm-comp]');
+    if (smComp) {
+      state.sourceOnlyCompetitors = smComp.getAttribute('data-cvz-sm-comp') === '1';
+      render();
+      return;
+    }
+    var smMore = event.target.closest('[data-cvz-sm-more]');
+    if (smMore) {
+      state.sourceShowAll = !state.sourceShowAll;
+      render();
+      return;
+    }
+    var smRow = event.target.closest('[data-cvz-sm-row]');
+    if (smRow) {
+      var smKey = smRow.getAttribute('data-cvz-sm-row');
+      state.sourceExpanded[smKey] = !state.sourceExpanded[smKey];
       render();
       return;
     }
@@ -2038,7 +2071,7 @@
       if (newTab === 'daten' && state.activeDataView === 'fanout' && state.activeView === 'topic-detail') {
         maybeLoadFanOut(state.activeTopicId);
       }
-      if ((newTab === 'situation' || newTab === 'daten') && state.activeView === 'topic-detail') {
+      if ((newTab === 'situation' || newTab === 'daten' || newTab === 'journey') && state.activeView === 'topic-detail') {
         maybeLoadBuyingCenter(state.activeTopicId);
       }
       if (newTab === 'situation' && state.activeView === 'topic-detail') {
@@ -8502,6 +8535,375 @@
     return section;
   }
 
+  // =========================================================================
+  // NEU (14.10.2026): Quellen-Ansicht "Wer wird zitiert?" (Phase x Rolle x Frage)
+  // =========================================================================
+  // Ersetzt zwei Tabellen, die dieselben Zahlen doppelt zeigten (Situation:
+  // "Wettbewerber-Sichtbarkeit pro Phase", Journey Map: "Quellen-Analyse").
+  // Datenbasis: dashData.prompt_source_matrix (siehe dashboard.py,
+  // _compute_prompt_source_matrix), eine Zeile pro Frage mit den Läufen im
+  // 12-Wochen-Fenster. Profil-Infos (Typ, Zusammenfassung, Tipp) kommen weiter
+  // aus dashData.share_of_voice, dort sind sie schon pro Domain aufgelöst.
+  //
+  // Zählweise bewusst "bei x von y Fragen" statt Prozent der Antworten: so
+  // rechnet auch "Sichtbarkeit je Rolle", und bei 1 bis 3 Fragen pro Zelle
+  // wären Prozentwerte irreführend. Eine Frage zählt, wenn die Domain in
+  // mindestens einer ChatGPT- oder Gemini-Antwort zitiert wurde.
+
+  var SM_TOP_ROWS = 12;
+
+  function buildSourceMatrixModel(topicId, dashData, detail) {
+    var raw = dashData && dashData.prompt_source_matrix;
+    if (!raw || !raw.length) return null;
+
+    // Nur aktuell aktive Fragen: deaktivierte Fragen sind keine Arbeitsgrundlage mehr.
+    var rows = raw.filter(function (r) { return r.is_active !== false; });
+    if (!rows.length) return null;
+
+    // Rollen: Reihenfolge und Namen aus dem Buying Center, falls schon geladen,
+    // sonst Reihenfolge des ersten Auftretens und persona-Text der Frage.
+    var bc = state.buyingCenterCache[topicId];
+    var bcNames = {}, bcOrder = [];
+    if (bc && !bc._error && bc.rollen) {
+      bc.rollen.forEach(function (r) { bcNames[r.role_id] = r.rolle; bcOrder.push(r.role_id); });
+    }
+    var roleMap = {}, roleList = [];
+    rows.forEach(function (r) {
+      var key = r.role_id || '__none__';
+      if (!roleMap[key]) {
+        roleMap[key] = { key: key, label: r.role_id ? (bcNames[r.role_id] || r.persona || 'Rolle') : 'Ohne Rolle', n: 0 };
+        roleList.push(roleMap[key]);
+      }
+      roleMap[key].n++;
+    });
+    roleList.sort(function (a, b) {
+      if (a.key === '__none__') return 1;
+      if (b.key === '__none__') return -1;
+      var ia = bcOrder.indexOf(a.key), ib = bcOrder.indexOf(b.key);
+      if (ia === -1) ia = 999;
+      if (ib === -1) ib = 999;
+      return ia - ib;
+    });
+    // Ohne echte Rollen gibt es nichts zu filtern.
+    var hasRoles = roleList.some(function (r) { return r.key !== '__none__'; });
+
+    // Profile (Typ, Zusammenfassung, Differenzierungstipp) und Wettbewerber-Markierung je Domain
+    var profiles = {};
+    var sov = (dashData && dashData.share_of_voice) || {};
+    PHASE_ORDER.forEach(function (ph) {
+      (sov[ph] || []).forEach(function (e) {
+        var p = profiles[e.domain] || (profiles[e.domain] = { byPhase: {}, any: null, marked: false });
+        p.byPhase[ph] = e;
+        if (e.is_marked_competitor) p.marked = true;
+        if (!p.any || (!p.any.summary && e.summary)) p.any = e;
+      });
+    });
+    var anyMarked = Object.keys(profiles).some(function (d) { return profiles[d].marked; });
+
+    return {
+      rows: rows,
+      roles: roleList,
+      roleMap: roleMap,
+      hasRoles: hasRoles,
+      profiles: profiles,
+      anyMarked: anyMarked,
+      ownDomain: (detail && detail.topic && detail.topic.own_domain) || ''
+    };
+  }
+
+  function smFilterRows(model, phase, roleKey) {
+    return model.rows.filter(function (r) {
+      if (phase && r.phase !== phase) return false;
+      if (roleKey && (r.role_id || '__none__') !== roleKey) return false;
+      return true;
+    });
+  }
+
+  // Aggregiert die Fremd-Domains über eine Menge von Fragen.
+  function smAggregate(rows) {
+    var agg = {};
+    rows.forEach(function (r) {
+      Object.keys(r.domains || {}).forEach(function (d) {
+        var a = agg[d] || (agg[d] = { domain: d, prompts: [], runs: 0, phases: {}, roles: {} });
+        a.prompts.push(r);
+        a.runs += r.domains[d];
+        a.phases[r.phase] = true;
+        a.roles[r.role_id || '__none__'] = true;
+      });
+    });
+    return Object.keys(agg).map(function (d) { return agg[d]; }).sort(function (a, b) {
+      return (b.prompts.length - a.prompts.length) || (b.runs - a.runs) || (a.domain < b.domain ? -1 : 1);
+    });
+  }
+
+  function smFavicon(domain) {
+    return '<img class="cvz-sm-favicon" src="https://www.google.com/s2/favicons?sz=32&domain=' +
+      encodeURIComponent(domain) + '" alt="">';
+  }
+
+  function smPhaseDot(phase) {
+    return '<span class="cvz-sm-dot" title="' + escapeHtml(PHASE_LABELS[phase] || phase) +
+      '" style="background:' + (PHASE_COLORS[phase] || '#8b98a5') + '"></span>';
+  }
+
+  function smRoleLabel(model, r) {
+    var key = r.role_id || '__none__';
+    return (model.roleMap[key] && model.roleMap[key].label) || r.persona || 'Ohne Rolle';
+  }
+
+  function smChipRow(label, active, attr, value, extraStyle) {
+    return '<button type="button" class="cvz-persona-chip' + (active ? ' cvz-persona-chip-active' : '') + '" ' +
+      attr + '="' + escapeHtml(value) + '"' + (extraStyle ? ' style="' + extraStyle + '"' : '') + '>' +
+      escapeHtml(label) + '</button>';
+  }
+
+  // Liste der Fragen hinter einer Zeile: Lücken (ihr nicht zitiert) zuerst.
+  function smPromptListHtml(model, rows, domain) {
+    var sorted = rows.slice().sort(function (a, b) {
+      var ga = a.own_cited_runs > 0 ? 1 : 0, gb = b.own_cited_runs > 0 ? 1 : 0;
+      if (ga !== gb) return ga - gb;
+      return PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase);
+    });
+    var html = '<div class="cvz-sm-prompts">';
+    sorted.forEach(function (r) {
+      var ownCited = r.own_cited_runs > 0;
+      var ownTag = ownCited
+        ? '<span class="cvz-sm-own cvz-sm-own-yes">Ihr: zitiert (' + r.own_cited_runs + ' von ' + r.total_runs + ' Antworten)</span>'
+        : '<span class="cvz-sm-own cvz-sm-own-no">Ihr: nicht zitiert</span>';
+      var detailLine;
+      if (domain) {
+        detailLine = escapeHtml(domain) + ' in ' + r.domains[domain] + ' von ' + r.total_runs + ' Antworten';
+      } else {
+        // Eigene Zeile: wer wird stattdessen genannt?
+        var others = Object.keys(r.domains || {}).slice(0, 3);
+        detailLine = others.length
+          ? 'Stattdessen genannt: ' + others.map(escapeHtml).join(', ')
+          : 'Keine Quellen in den Antworten';
+      }
+      html += '<div class="cvz-sm-prompt">' +
+        '<div class="cvz-sm-prompt-text">' + smPhaseDot(r.phase) + escapeHtml(r.prompt_text || '') + '</div>' +
+        '<div class="cvz-sm-prompt-meta">' +
+          '<span class="cvz-sm-role">' + escapeHtml(smRoleLabel(model, r)) + '</span>' +
+          '<span>' + detailLine + '</span>' + ownTag +
+        '</div></div>';
+    });
+    return html + '</div>';
+  }
+
+  function renderSourceMatrixSection(topicId, dashData, detail) {
+    var model = buildSourceMatrixModel(topicId, dashData, detail);
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    if (!model) return null;
+
+    var headRow = document.createElement('div');
+    headRow.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Wer wird zitiert? Quellen und Wettbewerber';
+    headRow.appendChild(heading);
+    headRow.appendChild(makeTip(
+      'Zeigt, welche Domains in den KI-Antworten der letzten 12 Wochen als Quelle auftauchen, und bei welchen Fragen und Rollen. ' +
+      '"Bei 3 von 5 Fragen" heißt: In mindestens einer ChatGPT- oder Gemini-Antwort auf 3 von 5 Fragen wurde die Domain zitiert. ' +
+      'Das ist bewusst keine Prozent-Zitierrate pro Antwort, damit die Zahlen zu "Sichtbarkeit je Rolle" passen. ' +
+      'Zeile anklicken, um die Fragen dahinter zu sehen. Fragen mit "Ihr: nicht zitiert" sind die konkreten Content-Lücken.'
+    ));
+    section.appendChild(headRow);
+
+    var phase = state.sourcePhaseFilter;
+    var roleKey = state.sourceRoleFilter;
+    if (roleKey && !model.roleMap[roleKey]) roleKey = null;
+
+    // Filter: Phase
+    var html = '<div class="cvz-sm-filters"><span class="cvz-sm-filter-label">Phase</span><div class="cvz-persona-filter">';
+    html += smChipRow('Alle', !phase, 'data-cvz-source-phase-filter', '');
+    PHASE_ORDER.forEach(function (ph) {
+      html += smChipRow(PHASE_LABELS[ph], phase === ph, 'data-cvz-source-phase-filter', ph,
+        'border-left-color:' + (PHASE_COLORS[ph] || '') + ';');
+    });
+    html += '</div></div>';
+    // Filter: Rolle
+    if (model.hasRoles) {
+      html += '<div class="cvz-sm-filters"><span class="cvz-sm-filter-label">Rolle</span><div class="cvz-persona-filter">';
+      html += smChipRow('Alle', !roleKey, 'data-cvz-sm-role', '');
+      model.roles.forEach(function (r) {
+        html += smChipRow(r.label, roleKey === r.key, 'data-cvz-sm-role', r.key);
+      });
+      html += '</div></div>';
+    }
+    // Filter: nur beobachtete Wettbewerber
+    if (model.anyMarked) {
+      html += '<div class="cvz-sm-filters"><span class="cvz-sm-filter-label">Domains</span><div class="cvz-persona-filter">' +
+        smChipRow('Alle', !state.sourceOnlyCompetitors, 'data-cvz-sm-comp', '0') +
+        smChipRow('Nur beobachtete Wettbewerber', state.sourceOnlyCompetitors, 'data-cvz-sm-comp', '1') +
+        '</div></div>';
+    }
+
+    var scoped = smFilterRows(model, phase, roleKey);
+    if (!scoped.length) {
+      html += '<p class="cvz-card-placeholder-text">Für diese Kombination aus Phase und Rolle gibt es keine gemessenen Fragen. ' +
+        'Auswahl ändern oder unter "Sichtbarkeit je Rolle" einen Prompt ergänzen.</p>';
+      var emptyBox = document.createElement('div');
+      emptyBox.innerHTML = html;
+      section.appendChild(emptyBox);
+      return section;
+    }
+
+    var total = scoped.length;
+    var ownCount = scoped.filter(function (r) { return r.own_cited_runs > 0; }).length;
+    var agg = smAggregate(scoped);
+    if (state.sourceOnlyCompetitors) {
+      agg = agg.filter(function (a) { return model.profiles[a.domain] && model.profiles[a.domain].marked; });
+    }
+    var visible = state.sourceShowAll ? agg : agg.slice(0, SM_TOP_ROWS);
+
+    html += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table class="cvz-sm-table"><thead><tr>' +
+      '<th>Domain</th><th>Typ</th><th>Zitiert bei</th><th>Phasen</th><th>Rollen</th>' +
+      '</tr></thead><tbody>';
+
+    // Erste Zeile: eure Domain
+    var ownOpen = !!state.sourceExpanded['__own__'];
+    var ownPct = Math.round(ownCount / total * 100);
+    html += '<tr class="cvz-sm-row cvz-sm-row-own" data-cvz-sm-row="__own__">' +
+      '<td class="cvz-sm-domain"><span class="cvz-sm-chev">' + (ownOpen ? '▲' : '▼') + '</span>' +
+        (model.ownDomain ? smFavicon(model.ownDomain) : '') +
+        '<span class="cvz-sm-domain-name">' + escapeHtml(model.ownDomain || 'Eure Domain') + '</span>' +
+        '<span class="cvz-sm-badge cvz-sm-badge-own">Ihr</span></td>' +
+      '<td><span class="cvz-sm-type">-</span></td>' +
+      '<td class="cvz-sm-cite"><div class="cvz-sm-cite-inner"><div class="cvz-sm-bar"><div class="cvz-sm-bar-fill cvz-sm-bar-own" style="width:' + ownPct + '%"></div></div>' +
+        '<span class="cvz-sm-cite-text">' + ownCount + ' von ' + total + (total === 1 ? ' Frage' : ' Fragen') + '</span></div></td>' +
+      '<td>' + PHASE_ORDER.map(function (ph) {
+        var has = scoped.some(function (r) { return r.phase === ph && r.own_cited_runs > 0; });
+        return has ? smPhaseDot(ph) : '';
+      }).join('') + '</td>' +
+      '<td></td></tr>';
+    if (ownOpen) {
+      html += '<tr class="cvz-sm-expand"><td colspan="5">' +
+        '<p class="cvz-sm-expand-head">' + (total - ownCount) + ' von ' + total + ' Fragen ohne eure Domain als Quelle (zuerst gelistet):</p>' +
+        smPromptListHtml(model, scoped, null) + '</td></tr>';
+    }
+
+    // Fremd-Domains
+    visible.forEach(function (a) {
+      var prof = model.profiles[a.domain];
+      var info = prof ? ((phase && prof.byPhase[phase]) || prof.any) : null;
+      var open = !!state.sourceExpanded[a.domain];
+      var pct = Math.round(a.prompts.length / total * 100);
+      var typeLabel = info && info.content_type ? (CONTENT_TYPE_LABELS[info.content_type] || info.content_type) : '-';
+      var roleKeys = Object.keys(a.roles);
+      html += '<tr class="cvz-sm-row" data-cvz-sm-row="' + escapeHtml(a.domain) + '">' +
+        '<td class="cvz-sm-domain"><span class="cvz-sm-chev">' + (open ? '▲' : '▼') + '</span>' +
+          smFavicon(a.domain) + '<span class="cvz-sm-domain-name">' + escapeHtml(a.domain) + '</span>' +
+          (prof && prof.marked ? '<span class="cvz-sm-badge">Wettbewerber</span>' : '') + '</td>' +
+        '<td><span class="cvz-sm-type">' + escapeHtml(typeLabel) + '</span></td>' +
+        '<td class="cvz-sm-cite"><div class="cvz-sm-cite-inner"><div class="cvz-sm-bar"><div class="cvz-sm-bar-fill" style="width:' + pct + '%"></div></div>' +
+          '<span class="cvz-sm-cite-text">' + a.prompts.length + ' von ' + total + (total === 1 ? ' Frage' : ' Fragen') + '</span></div></td>' +
+        '<td>' + PHASE_ORDER.filter(function (ph) { return a.phases[ph]; }).map(smPhaseDot).join('') + '</td>' +
+        '<td>' + (model.hasRoles ? roleKeys.map(function (k) {
+          return '<span class="cvz-sm-role">' + escapeHtml((model.roleMap[k] && model.roleMap[k].label) || 'Rolle') + '</span>';
+        }).join('') : '') + '</td></tr>';
+      if (open) {
+        var gaps = a.prompts.filter(function (r) { return !(r.own_cited_runs > 0); }).length;
+        html += '<tr class="cvz-sm-expand"><td colspan="5">';
+        if (info && info.summary) {
+          html += '<p class="cvz-sm-summary">' + escapeHtml(info.summary) + '</p>';
+        }
+        if (info && info.differentiation_suggestion) {
+          html += '<p class="cvz-sm-tip"><strong>Differenzierung:</strong> ' + escapeHtml(info.differentiation_suggestion) + '</p>';
+        }
+        html += '<p class="cvz-sm-expand-head">Zitiert bei ' + a.prompts.length + (a.prompts.length === 1 ? ' Frage' : ' Fragen') +
+          ', bei ' + gaps + ' davon seid ihr nicht zitiert (zuerst gelistet):</p>' +
+          smPromptListHtml(model, a.prompts, a.domain) + '</td></tr>';
+      }
+    });
+    html += '</tbody></table></div>';
+
+    if (agg.length > SM_TOP_ROWS) {
+      html += '<p style="margin:10px 0 0;"><button type="button" class="cvz-link-btn" data-cvz-sm-more="1">' +
+        (state.sourceShowAll ? 'Weniger anzeigen' : 'Alle ' + agg.length + ' Domains anzeigen') + '</button></p>';
+    }
+    if (!agg.length) {
+      html += '<p class="cvz-card-placeholder-text" style="margin-top:10px;">In dieser Auswahl wurden keine fremden Domains zitiert.</p>';
+    }
+    html += '<p class="cvz-sm-foot">Zeitraum: letzte 12 Wochen, nur ChatGPT und Gemini. Typ, Zusammenfassung und Differenzierung ' +
+      'liegen nur für die meistzitierten Domains je Phase vor.</p>';
+
+    var box = document.createElement('div');
+    box.innerHTML = html;
+    section.appendChild(box);
+    return section;
+  }
+
+  // Kurzfassung für den Situation-Tab: Rolle x Phase, je Zelle die meistzitierten Domains.
+  function renderSourceMatrixCompact(topicId, dashData, detail) {
+    var model = buildSourceMatrixModel(topicId, dashData, detail);
+    if (!model) return null;
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    var headRow = document.createElement('div');
+    headRow.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Wer wird stattdessen zitiert?';
+    headRow.appendChild(heading);
+    headRow.appendChild(makeTip(
+      'Pro Rolle und Journey-Phase die zwei Domains, die in den KI-Antworten der letzten 12 Wochen bei den meisten Fragen als Quelle genannt wurden. ' +
+      '"2/3" heißt: bei 2 von 3 Fragen. Die vollständige Liste mit den Fragen dahinter steht im Tab Journey Map.'
+    ));
+    var link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'cvz-create-toggle-btn';
+    link.style.marginLeft = 'auto';
+    link.setAttribute('data-cvz-tab', 'journey');
+    link.textContent = 'Alle Quellen und Fragen ansehen';
+    headRow.appendChild(link);
+    section.appendChild(headRow);
+
+    var rowsDef = model.hasRoles ? model.roles : [{ key: null, label: 'Alle Fragen' }];
+    var th = 'text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
+      'color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#232b36);white-space:nowrap;';
+    var html = '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table style="width:100%;min-width:640px;border-collapse:collapse;font-size:13px;"><thead><tr>' +
+      '<th style="' + th + '">' + (model.hasRoles ? 'Rolle' : '') + '</th>' +
+      PHASE_ORDER.map(function (ph) {
+        return '<th style="' + th + '"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;background:' +
+          PHASE_COLORS[ph] + ';"></span>' + escapeHtml(PHASE_LABELS[ph]) + '</th>';
+      }).join('') + '</tr></thead><tbody>';
+
+    rowsDef.forEach(function (rd) {
+      html += '<tr><td style="padding:10px;border-bottom:1px solid var(--cvz-border,#232b36);font-weight:600;white-space:nowrap;vertical-align:top;">' +
+        escapeHtml(rd.label) + '</td>';
+      PHASE_ORDER.forEach(function (ph) {
+        var cellRows = smFilterRows(model, ph, rd.key);
+        html += '<td style="padding:8px 10px;border-bottom:1px solid var(--cvz-border,#232b36);vertical-align:top;">';
+        if (!cellRows.length) {
+          html += '<span style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);opacity:.7;">nicht gemessen</span>';
+        } else {
+          var top = smAggregate(cellRows).slice(0, 2);
+          if (!top.length) {
+            html += '<span style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);">keine Quellen</span>';
+          } else {
+            top.forEach(function (a) {
+              html += '<div class="cvz-sm-cell-dom">' + smFavicon(a.domain) +
+                '<span class="cvz-sm-cell-name">' + escapeHtml(a.domain) + '</span>' +
+                '<span class="cvz-sm-cell-n">' + a.prompts.length + '/' + cellRows.length + '</span></div>';
+            });
+          }
+        }
+        html += '</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+
+    var box = document.createElement('div');
+    box.innerHTML = html;
+    section.appendChild(box);
+    return section;
+  }
+
   function renderJourneyShareOfVoice(shareOfVoice) {
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -8550,13 +8952,13 @@
           var tr = document.createElement('tr');
           tr.innerHTML =
             '<td class="cvz-sov-domain">' + escapeHtml(comp.domain || '') + '</td>' +
-            '<td><span class="cvz-opportunity-type">' + escapeHtml(CONTENT_TYPE_LABELS[comp.content_type] || comp.content_type || '-') + '</span></td>' +
-            '<td class="cvz-sov-rate">' +
+            '<td><span class="cvz-sm-type">' + escapeHtml(CONTENT_TYPE_LABELS[comp.content_type] || comp.content_type || '-') + '</span></td>' +
+            '<td class="cvz-sov-rate"><div class="cvz-sov-rate-inner">' +
               '<div class="cvz-journey-bar-wrap cvz-sov-bar-wrap">' +
                 '<div class="cvz-journey-bar-fill" style="width:' + pct + '%;background:' + phaseColor + '"></div>' +
               '</div>' +
               '<span>' + pct + '%</span>' +
-            '</td>' +
+            '</div></td>' +
             '<td class="cvz-sov-tip">' + escapeHtml(comp.differentiation_suggestion || '-') + '</td>';
           tbody.appendChild(tr);
         });
@@ -10011,9 +10413,49 @@
       '.cvz-sov-table td { padding: 10px 16px; border-bottom: 1px solid var(--cvz-border); vertical-align: top; }' +
       '.cvz-sov-table tr:last-child td { border-bottom: none; }' +
       '.cvz-sov-domain { font-weight: 500; }' +
-      '.cvz-sov-rate { display: flex; align-items: center; gap: 8px; white-space: nowrap; }' +
+      '.cvz-sov-rate { white-space: nowrap; }' +
+      '.cvz-sov-rate-inner { display: flex; align-items: center; gap: 8px; }' +
       '.cvz-sov-bar-wrap { width: 80px; flex-shrink: 0; }' +
       '.cvz-sov-tip { color: var(--cvz-text-muted); max-width: 300px; }' +
+
+      // NEU (14.10.2026): Quellen-Ansicht "Wer wird zitiert?"
+      '.cvz-sm-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }' +
+      '.cvz-sm-filter-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--cvz-text-muted); min-width: 52px; }' +
+      '.cvz-sm-table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 13px; margin-top: 8px; }' +
+      '.cvz-sm-table th { text-align: left; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--cvz-text-muted); padding: 8px 12px; border-bottom: 1px solid var(--cvz-border); white-space: nowrap; }' +
+      '.cvz-sm-table td { padding: 10px 12px; border-bottom: 1px solid var(--cvz-border); vertical-align: middle; }' +
+      '.cvz-sm-row { cursor: pointer; }' +
+      '.cvz-sm-row:hover td { background: rgba(255,255,255,0.03); }' +
+      '.cvz-sm-row-own td { background: rgba(79,209,197,0.07); }' +
+      '.cvz-sm-row-own:hover td { background: rgba(79,209,197,0.11); }' +
+      '.cvz-sm-domain { font-weight: 600; white-space: nowrap; }' +
+      '.cvz-sm-chev { display: inline-block; width: 14px; font-size: 9px; color: var(--cvz-text-muted); }' +
+      '.cvz-sm-favicon { width: 14px; height: 14px; border-radius: 2px; vertical-align: middle; margin-right: 6px; object-fit: contain; }' +
+      '.cvz-sm-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; font-size: 10px; font-weight: 600; border: 1px solid var(--cvz-border); color: var(--cvz-text-muted); }' +
+      '.cvz-sm-badge-own { border-color: var(--cvz-teal, #4fd1c5); color: var(--cvz-teal, #4fd1c5); }' +
+      '.cvz-sm-type { font-size: 12px; color: var(--cvz-text-muted); white-space: nowrap; }' +
+      '.cvz-sm-cite-inner { display: flex; align-items: center; gap: 10px; white-space: nowrap; }' +
+      '.cvz-sm-bar { width: 90px; height: 6px; background: var(--cvz-border); flex-shrink: 0; }' +
+      '.cvz-sm-bar-fill { height: 100%; background: #8878ca; }' +
+      '.cvz-sm-bar-own { background: var(--cvz-teal, #4fd1c5); }' +
+      '.cvz-sm-cite-text { font-weight: 600; font-size: 12px; }' +
+      '.cvz-sm-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; flex-shrink: 0; }' +
+      '.cvz-sm-role { display: inline-block; margin: 0 4px 2px 0; padding: 1px 7px; font-size: 11px; border: 1px solid var(--cvz-border); color: var(--cvz-text-muted); white-space: nowrap; }' +
+      '.cvz-sm-expand td { padding: 4px 12px 16px 36px; background: rgba(255,255,255,0.02); }' +
+      '.cvz-sm-summary { margin: 8px 0 6px; font-size: 13px; line-height: 1.45; }' +
+      '.cvz-sm-tip { margin: 0 0 8px; font-size: 12px; line-height: 1.45; color: var(--cvz-text-muted); }' +
+      '.cvz-sm-expand-head { margin: 10px 0 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cvz-text-muted); }' +
+      '.cvz-sm-prompts { display: flex; flex-direction: column; gap: 8px; }' +
+      '.cvz-sm-prompt { padding: 8px 10px; border: 1px solid var(--cvz-border); }' +
+      '.cvz-sm-prompt-text { font-size: 13px; line-height: 1.4; }' +
+      '.cvz-sm-prompt-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 5px; font-size: 11px; color: var(--cvz-text-muted); }' +
+      '.cvz-sm-own { font-weight: 600; }' +
+      '.cvz-sm-own-no { color: var(--cvz-red, #de5b50); }' +
+      '.cvz-sm-own-yes { color: var(--cvz-teal, #4fd1c5); }' +
+      '.cvz-sm-foot { margin: 12px 0 0; font-size: 11px; color: var(--cvz-text-muted); }' +
+      '.cvz-sm-cell-dom { display: flex; align-items: center; gap: 4px; margin-bottom: 3px; white-space: nowrap; }' +
+      '.cvz-sm-cell-name { font-size: 12px; font-weight: 600; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }' +
+      '.cvz-sm-cell-n { font-size: 11px; color: var(--cvz-text-muted); margin-left: 4px; }' +
 
       '.cvz-content-change-form { margin-bottom: 12px; }' +
       '.cvz-content-change-fields {' +
@@ -10703,7 +11145,12 @@
     // eingeklappt und stand hinter mehreren anderen Abschnitten, für eine
     // so wichtige Analyse zu gut versteckt. Sie steht jetzt direkt hier,
     // gleich hinter dem Wettbewerbsvergleich, im ersten Tab.
-    wrap.appendChild(renderJourneyShareOfVoice(dashData && dashData.share_of_voice));
+    // GEÄNDERT (14.10.2026): Kurzfassung (Rolle x Phase, meistzitierte Domains)
+    // statt der vollen Tabelle, die identisch im Journey-Map-Tab steht. Fällt
+    // auf die bisherige Tabelle zurück, solange das Backend noch keine
+    // prompt_source_matrix liefert.
+    var _smCompact = (dashData && !dashError) ? renderSourceMatrixCompact(topicId, dashData, detail) : null;
+    wrap.appendChild(_smCompact || renderJourneyShareOfVoice(dashData && dashData.share_of_voice));
 
     // Beste Content-Chancen
     var bestChances = SHOW_LEGACY_RECOMMENDATIONS ? renderBestContentChancesSection(detail.best_content_chances, detail.topic) : null;
@@ -11422,7 +11869,13 @@
     // Quellen-Analyse (GEAENDERT 17.09.2026: phase-gruppiert via share_of_voice)
     var _sov = data.share_of_voice || {};
     var _hasSov = PHASE_ORDER.some(function (p) { return _sov[p] && _sov[p].length; });
-    if (_hasSov || (detail.source_profiles && detail.source_profiles.length > 0)) {
+    // GEÄNDERT (14.10.2026): neue Ansicht "Wer wird zitiert?" (Phase x Rolle x Frage),
+    // ersetzt die Quellen-Analyse-Tabelle. Alte Tabelle bleibt als Fallback, solange
+    // das Backend keine prompt_source_matrix liefert.
+    var _smFull = renderSourceMatrixSection(topicId, data, detail);
+    if (_smFull) {
+      wrap.appendChild(_smFull);
+    } else if (_hasSov || (detail.source_profiles && detail.source_profiles.length > 0)) {
       wrap.appendChild(renderSourceProfilesSection(detail.source_profiles, topicId, _sov));
     }
 
