@@ -52,7 +52,7 @@
 }
 
 .cvz-app {
-  width: 100%; max-width: 640px;
+  width: 100%; max-width: 840px;
   margin: 0 auto; padding: 24px 0;
 }
 
@@ -90,7 +90,7 @@
   display: flex; gap: 6px; margin-bottom: 28px; font-size: 0.72rem;
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--cvz-text-muted);
 }
-.cvz-steps .step { flex: 1; padding-bottom: 8px; border-bottom: 2px solid var(--cvz-border); }
+.cvz-steps .step { flex: 1 1 auto; white-space: nowrap; padding-bottom: 8px; border-bottom: 2px solid var(--cvz-border); }
 .cvz-steps .step.active { color: var(--cvz-teal); border-bottom-color: var(--cvz-teal); font-weight: 600; }
 .cvz-steps .step.done { color: var(--cvz-text); border-bottom-color: var(--cvz-text); }
 
@@ -558,6 +558,8 @@
    konsistent sind. Eine auf ~350px herunterskalierte 1440px-Desktopansicht
    ist unlesbar - der Desktop-Button wird hier entfernt, nicht deaktiviert. */
 @media (max-width: 767px) {
+  /* Schmale Bildschirme: Schrittnamen dürfen umbrechen. */
+  .cvz-steps .step { white-space: normal; flex: 1 1 0; }
   #cvz-device-desktop { display: none; }
   .cvz-msg { max-width: 94%; }
   .cvz-card { padding: 28px 20px; }
