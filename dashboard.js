@@ -594,6 +594,7 @@
       '.cvz-d-btn-primary{background:var(--cvz-teal);color:var(--cvz-bg);}' +
       '.cvz-d-btn-outline{background:transparent;color:var(--cvz-teal);border-color:var(--cvz-teal);' +
         'font-size:13px;}' +
+      '.cvz-d-card-btn{margin-top:14px;padding:10px 22px;font-size:14px;}' +
       '.cvz-d-title{font-size:22px;font-weight:700;color:var(--cvz-text);margin:0 0 16px;}' +
       '.cvz-a-body-empty{padding:60px 20px;text-align:center;color:var(--cvz-muted);}' +
       '.cvz-a-body-error{padding:60px 20px;text-align:center;color:#f87171;}' +
@@ -727,6 +728,11 @@
         (opts.withBar
           ? '<div class="cvz-d-bar-track"><div id="' + opts.barFillId + '" class="cvz-d-bar-fill"></div></div>'
           : '') +
+        // NEU: Einstiegs-Button direkt in der Karte (opts.cta = { tool, id, label, href }). Der
+        // delegierte Klick-Handler ([data-cvz-tool]) greift auch hier und zeigt bei 0 Kontingent den Kauf-Hinweis.
+        (opts.cta
+          ? '<a id="' + opts.cta.id + '" data-cvz-tool="' + opts.cta.tool + '" class="cvz-d-btn cvz-d-btn-primary cvz-d-card-btn" href="' + opts.cta.href + '">' + escapeHtml(opts.cta.label) + '</a>'
+          : '') +
       '</div>'
     );
   }
@@ -743,10 +749,10 @@
       '<h2 class="cvz-d-title">Übersicht</h2>' +
       '<div class="cvz-d-stats">' +
         statCardHtml({ wrapperId: 'cvz-d-c1', iconKey: 'barChart', label: 'Analysen diesen Monat',        valueId: 'cvz-d-c1-value', subId: 'cvz-d-c1-sub', withBar: true, barFillId: 'cvz-d-c1-bar' }) +
-        statCardHtml({ wrapperId: 'cvz-d-c2', iconKey: 'check',    label: 'Verbleibende Analysen',         valueId: 'cvz-d-c2-value', subId: 'cvz-d-c2-sub', withBar: false }) +
+        statCardHtml({ wrapperId: 'cvz-d-c2', iconKey: 'check',    label: 'Verbleibende Analysen',         valueId: 'cvz-d-c2-value', subId: 'cvz-d-c2-sub', withBar: false, cta: { tool: 'analyse', id: 'cvz-d-card-btn-analyse', label: 'Neue Analyse', href: CONFIG.NEW_ANALYSIS_URL } }) +
         statCardHtml({ wrapperId: 'cvz-d-c3', iconKey: 'plan',     label: 'Aktiver Plan',                   valueId: 'cvz-d-c3-value', subId: 'cvz-d-c3-sub', withBar: false }) +
         statCardHtml({ wrapperId: 'cvz-d-c4', iconKey: 'aufbau',   label: 'Aufbau-Sessions diesen Monat',   valueId: 'cvz-d-c4-value', subId: 'cvz-d-c4-sub', withBar: true, barFillId: 'cvz-d-c4-bar', hidden: true }) +
-        statCardHtml({ wrapperId: 'cvz-d-c5', iconKey: 'check',    label: 'Verbleibende Aufbau-Sessions',  valueId: 'cvz-d-c5-value', subId: 'cvz-d-c5-sub', withBar: false, hidden: true }) +
+        statCardHtml({ wrapperId: 'cvz-d-c5', iconKey: 'check',    label: 'Verbleibende Aufbau-Sessions',  valueId: 'cvz-d-c5-value', subId: 'cvz-d-c5-sub', withBar: false, hidden: true, cta: { tool: 'aufbau', id: 'cvz-d-card-btn-aufbau', label: 'Landingpage aufbauen', href: CONFIG.NEW_LANDINGPAGE_URL } }) +
         statCardHtml({ wrapperId: 'cvz-d-c6', iconKey: 'cart',     label: 'Pay-per-Use Analysen',          valueId: 'cvz-d-c6-value', subId: 'cvz-d-c6-sub', withBar: false, hidden: true }) +
         statCardHtml({ wrapperId: 'cvz-d-c7', iconKey: 'cart',     label: 'Pay-per-Use Aufbau-Sessions',   valueId: 'cvz-d-c7-value', subId: 'cvz-d-c7-sub', withBar: false, hidden: true }) +
         // NEU (siehe Chat-Verlauf, Lasse: "Bei den Informationen sollten wir auch Strategie mit
@@ -755,12 +761,12 @@
         // renderStatCards() blendet sie nur ein, wenn der Plan ueberhaupt ein Content-Strategie-
         // Kontingent oder PPU-Guthaben hat (gleiche Logik wie showAufbauCards/Karte 6-7).
         statCardHtml({ wrapperId: 'cvz-d-c8', iconKey: 'strategy', label: 'Content-Strategien diesen Monat', valueId: 'cvz-d-c8-value', subId: 'cvz-d-c8-sub', withBar: true, barFillId: 'cvz-d-c8-bar', hidden: true }) +
-        statCardHtml({ wrapperId: 'cvz-d-c9', iconKey: 'check',    label: 'Verbleibende Content-Strategien', valueId: 'cvz-d-c9-value', subId: 'cvz-d-c9-sub', withBar: false, hidden: true }) +
+        statCardHtml({ wrapperId: 'cvz-d-c9', iconKey: 'check',    label: 'Verbleibende Content-Strategien', valueId: 'cvz-d-c9-value', subId: 'cvz-d-c9-sub', withBar: false, hidden: true, cta: { tool: 'strategie', id: 'cvz-d-card-btn-strategie', label: 'Content-Strategie erstellen', href: CONFIG.CONTENT_STRATEGY_PAGE_URL } }) +
         statCardHtml({ wrapperId: 'cvz-d-c10', iconKey: 'cart',    label: 'Pay-per-Use Content-Strategien', valueId: 'cvz-d-c10-value', subId: 'cvz-d-c10-sub', withBar: false, hidden: true }) +
         // NEU (v10): Customer Journey Tracker. Beide Karten starten hidden und werden in
         // renderStatCards() nur eingeblendet, wenn Topics vorhanden sind (inklusive oder gebucht).
         statCardHtml({ wrapperId: 'cvz-d-c11', iconKey: 'tracker', label: 'Tracker-Topics',  valueId: 'cvz-d-c11-value', subId: 'cvz-d-c11-sub', withBar: true, barFillId: 'cvz-d-c11-bar', hidden: true }) +
-        statCardHtml({ wrapperId: 'cvz-d-c12', iconKey: 'check',   label: 'Freie Topics',    valueId: 'cvz-d-c12-value', subId: 'cvz-d-c12-sub', withBar: false, hidden: true }) +
+        statCardHtml({ wrapperId: 'cvz-d-c12', iconKey: 'check',   label: 'Freie Topics',    valueId: 'cvz-d-c12-value', subId: 'cvz-d-c12-sub', withBar: false, hidden: true, cta: { tool: 'tracker', id: 'cvz-d-card-btn-tracker', label: 'Tracker öffnen', href: CONFIG.TRACKER_URL } }) +
       '</div>' +
       '<div class="cvz-d-actions">' +
         '<a id="cvz-d-btn-new-analysis" data-cvz-tool="analyse" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">Neue Analyse</a>' +
@@ -868,12 +874,14 @@
       var panel = document.getElementById('cvz-tab-panel-' + name);
       if (panel) panel.style.display = (name === tabName) ? '' : 'none';
     });
-    // Aufbau-Tab laedt lazy (erst beim ersten Oeffnen) - siehe WHY-Kommentar
-    // bei fetchPageProjects/state.aufbauLoaded weiter oben. Strategien-Tab
+    // Aufbau-Tab laedt bei JEDEM Oeffnen neu (nicht nur beim ersten): Das Backend loescht
+    // fehlgeschlagene Pillar-Starts selbst, die Liste soll das sofort zeigen und keine
+    // Geister-Eintraege aus einem aelteren Ladestand behalten. state.aufbauLoaded bleibt als
+    // Flag erhalten (wird in loadAndRenderAufbauProjects gesetzt). Strategien-Tab
     // braucht das nicht: state.strategySessions ist schon eager geladen
     // (loadRecentActivity/initDashboard), renderStrategyPage() paginiert nur
     // ueber den bereits vorhandenen Array.
-    if (tabName === 'aufbau' && !state.aufbauLoaded) loadAndRenderAufbauProjects();
+    if (tabName === 'aufbau') loadAndRenderAufbauProjects();
   }
   // Blendet nur die Tabs/Panels ein, auf die der User Zugriff hat, und zeigt
   // die Tab-Leiste selbst nur, wenn dadurch ueberhaupt mehr als ein Tab
@@ -1126,6 +1134,29 @@
         strategie: (typeof strategyRenewalDate !== 'undefined' && strategyRenewalDate) ? strategyRenewalDate.toLocaleDateString('de-DE') : null,
       },
     };
+
+    // Einstiegs-Buttons: In der Karte "Verbleibend" (bzw. "Freie Topics") steht der Button zum
+    // Tool. Die Button-Reihe darunter zeigt nur die Tools, deren Karte ausgeblendet ist (z.B.
+    // Plan ohne Aufbau-Kontingent), damit jeder Einstieg erreichbar bleibt und nichts doppelt
+    // steht. Bei 0 Kontingent heisst der Karten-Button "Mehr kaufen"; der Klick oeffnet den
+    // vorhandenen Kauf-Hinweis. Beim Tracker bleibt es immer "Tracker öffnen": von dort kommt man
+    // auch bei 0 freien Topics zur Uebersicht.
+    var cardBtnLabel = function (tool, normal) { return state.credits[tool] > 0 ? normal : 'Mehr kaufen'; };
+    setText('cvz-d-card-btn-analyse',   cardBtnLabel('analyse',   'Neue Analyse'));
+    setText('cvz-d-card-btn-aufbau',    cardBtnLabel('aufbau',    'Landingpage aufbauen'));
+    setText('cvz-d-card-btn-strategie', cardBtnLabel('strategie', 'Content-Strategie erstellen'));
+    var rowVisible = {
+      'cvz-d-btn-new-analysis': false,              // Karte "Verbleibende Analysen" ist immer sichtbar
+      'cvz-d-btn-new-page':     !showAufbauCards,
+      'cvz-d-btn-new-strategy': !showStrategyCards,
+      'cvz-d-btn-tracker':      !showTrackerCards,
+    };
+    var anyRowButton = false;
+    Object.keys(rowVisible).forEach(function (id) {
+      showEl(document.getElementById(id), rowVisible[id], 'inline-flex');
+      if (rowVisible[id]) anyRowButton = true;
+    });
+    showEl(document.querySelector('#cvz-dashboard-app .cvz-d-actions'), anyRowButton, 'flex');
 
     // User-Kopfbereich (weiterhin Webflow-Elemente, unveraendert)
     setUserHeader(user);
