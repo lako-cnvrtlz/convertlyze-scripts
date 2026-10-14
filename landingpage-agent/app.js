@@ -136,7 +136,7 @@ function cvzRenderQuotaBanner() {
     display: block;
     margin-bottom: 16px;
     padding: 10px 14px;
-    border-radius: 8px;
+    border-radius: 0px;
     font-size: 0.85rem;
     line-height: 1.4;
     border: 1px solid ${depleted ? 'var(--cvz-danger)' : 'var(--cvz-border)'};
@@ -473,7 +473,7 @@ function cvzRenderStep2() {
     <div class="cvz-chip-row" id="cvz-pdf-chips">${cvzRenderPdfChips()}</div>
     <label class="cvz-label">Eure Markenfarbe (optional)</label>
     <div style="display:flex; gap:10px; align-items:center;">
-      <input type="color" id="cvz-in-brand-color-picker" value="${/^#([0-9a-fA-F]{6})$/.test(cvzState.brand_color) ? cvzState.brand_color : '#4f46e5'}" style="width:44px; height:40px; padding:2px; border-radius:8px; border:1px solid var(--cvz-border); background:var(--cvz-bg); cursor:pointer;" oninput="cvzSyncBrandColorFromPicker(this.value)">
+      <input type="color" id="cvz-in-brand-color-picker" value="${/^#([0-9a-fA-F]{6})$/.test(cvzState.brand_color) ? cvzState.brand_color : '#4f46e5'}" style="width:44px; height:40px; padding:2px; border-radius:0px; border:1px solid var(--cvz-border); background:var(--cvz-bg); cursor:pointer;" oninput="cvzSyncBrandColorFromPicker(this.value)">
       <input class="cvz-input" id="cvz-in-brand-color" placeholder="#4f46e5" value="${cvzEsc(cvzState.brand_color)}" style="flex:1;" oninput="cvzSyncBrandColorFromText(this.value)">
     </div>
     <p class="cvz-hint">Direkte Eingabe hat Vorrang vor der automatischen Erkennung aus der Website unten - keine Bestätigung im Chat nötig, da hier eindeutig.</p>
