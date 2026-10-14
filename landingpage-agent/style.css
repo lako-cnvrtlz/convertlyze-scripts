@@ -112,7 +112,7 @@
 .cvz-app textarea.cvz-input,
 .cvz-app select.cvz-input {
   width: 100%; padding: 12px 14px; background: var(--cvz-bg);
-  border: 1px solid var(--cvz-border); border-radius: 10px;
+  border: 1px solid var(--cvz-border); border-radius: 0px;
   color: var(--cvz-text); font-size: 0.95rem; font-family: inherit;
 }
 /* appearance:none entfernt auch den nativen Dropdown-Pfeil - der wird
@@ -154,7 +154,7 @@
 .cvz-chip {
   display: flex; align-items: center; gap: 6px;
   background: var(--cvz-teal-dim); border: 1px solid var(--cvz-teal);
-  color: var(--cvz-teal); border-radius: 999px; padding: 6px 12px; font-size: 0.85rem;
+  color: var(--cvz-teal); border-radius: 0px; padding: 6px 12px; font-size: 0.85rem;
 }
 .cvz-chip button {
   background: none; border: none; color: var(--cvz-teal); cursor: pointer;
@@ -190,7 +190,7 @@
 
 .cvz-badge {
   font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
-  border-radius: 999px; padding: 3px 8px; white-space: nowrap;
+  border-radius: 0px; padding: 3px 8px; white-space: nowrap;
   background: var(--cvz-teal-dim); color: var(--cvz-teal); border: 1px solid var(--cvz-teal);
 }
 
@@ -459,7 +459,7 @@
   text-align: center; padding: 40px; color: var(--cvz-text-muted); font-size: 0.9rem;
 }
 .cvz-preview-frame-outer {
-  margin: 0 auto; overflow: hidden; border: 1px solid var(--cvz-border); border-radius: 8px; background: #fff;
+  margin: 0 auto; overflow: hidden; border: 1px solid var(--cvz-border); border-radius: 0px; background: #fff;
 }
 .cvz-preview-frame-inner { transform-origin: top left; }
 .cvz-preview-frame-inner iframe { display: block; border: none; }
