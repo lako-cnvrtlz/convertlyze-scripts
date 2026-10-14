@@ -1545,7 +1545,7 @@ function cvzUpdateQuota(remaining, limit) {
 }
 function cvzRenderStructureIframe(container, htmlDocument, onLoaded) {
   const iframe = document.createElement('iframe');
-  iframe.setAttribute('sandbox', 'allow-same-origin');
+  iframe.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
   iframe.setAttribute('title', 'Landingpage-Vorschau');
   iframe.srcdoc = htmlDocument;
   iframe.addEventListener('load', () => {
@@ -1943,7 +1943,7 @@ function cvzRenderInterview() {
     el.innerHTML = '<p class="cvz-hint">Noch keine Fragen. Sie erscheinen, sobald das Gerüst steht.</p>' + clusterHtml;
     return;
   }
-  const intro = '<p class="cvz-hint">Beantworte, was du aus eigener Erfahrung belegen kannst. Leere Antworten bleiben Platzhalter, es wird nichts erfunden. Zahlen brauchen eine Quelle.</p>';
+  const intro = '<p class="cvz-hint">Beantworte, was du aus eigener Erfahrung belegen kannst. Leere Antworten bleiben Platzhalter, es wird nichts erfunden. Zahlen sind willkommen, eine Quelle musst du nicht nennen.</p>';
   const items = cvzInterview.items.map(i => {
     const d = cvzInterviewDrafts[i.id];
     const text = d ? d.text : (i.answer_text || '');
@@ -1961,7 +1961,7 @@ function cvzRenderInterview() {
       ${i.why_asked ? `<div class="cvz-iv-why">${cvzEsc(i.why_asked)}</div>` : ''}
       ${i.weak_answer_example ? `<details class="cvz-iv-weak"><summary>Was keine gute Antwort ist</summary><p>${cvzEsc(i.weak_answer_example)}</p></details>` : ''}
       <textarea class="cvz-input" id="cvz-iv-text-${cvzEsc(i.id)}" rows="4" placeholder="Deine Antwort mit konkreten Details" oninput="cvzRememberInterviewDraft('${cvzEsc(i.id)}')">${cvzEsc(text)}</textarea>
-      <input class="cvz-input" id="cvz-iv-prov-${cvzEsc(i.id)}" placeholder="Quelle (Pflicht, wenn die Antwort Zahlen enthält)" value="${cvzEsc(prov)}" oninput="cvzRememberInterviewDraft('${cvzEsc(i.id)}')">
+      <input class="cvz-input" id="cvz-iv-prov-${cvzEsc(i.id)}" placeholder="Quelle oder Kontext (optional, z.B. eigene Projekte, Zeitraum)" value="${cvzEsc(prov)}" oninput="cvzRememberInterviewDraft('${cvzEsc(i.id)}')">
       <label class="cvz-iv-appr"><input type="checkbox" id="cvz-iv-appr-${cvzEsc(i.id)}" ${approved ? 'checked' : ''} onchange="cvzRememberInterviewDraft('${cvzEsc(i.id)}')"> Zur Veröffentlichung freigegeben</label>
       <div class="cvz-iv-actions">
         <button type="button" class="cvz-btn-secondary" id="cvz-iv-save-${cvzEsc(i.id)}" onclick="cvzSaveInterviewAnswer('${cvzEsc(i.id)}')">Speichern</button>
