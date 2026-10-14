@@ -16,7 +16,7 @@
  *     belegter Topics liefert die neue RPC get_tracker_topic_usage (siehe
  *     tracker-topic-usage-rpc.sql, VOR dem Deployment in Supabase anlegen). Ohne die RPC
  *     zeigen die Karten nur das Limit.
- *   - NEU: Hinweis-Fenster, wenn jemand auf "Neue Analyse", "Landingpage aufbauen",
+ *   - NEU: Hinweis-Fenster, wenn jemand auf "Neue Analyse", "Seite aufbauen",
  *     "Content-Strategie erstellen" oder einen der "Erste/Neue ..."-Links in den Tabs klickt
  *     und für dieses Tool weder Plan-Kontingent noch Pay-per-Use-Guthaben übrig hat.
  *     Beim Tracker greift die Sperre nur, wenn gar keine Topics vorhanden sind, sonst
@@ -752,7 +752,7 @@
         statCardHtml({ wrapperId: 'cvz-d-c2', iconKey: 'check',    label: 'Verbleibende Analysen',         valueId: 'cvz-d-c2-value', subId: 'cvz-d-c2-sub', withBar: false, cta: { tool: 'analyse', id: 'cvz-d-card-btn-analyse', label: 'Neue Analyse', href: CONFIG.NEW_ANALYSIS_URL } }) +
         statCardHtml({ wrapperId: 'cvz-d-c3', iconKey: 'plan',     label: 'Aktiver Plan',                   valueId: 'cvz-d-c3-value', subId: 'cvz-d-c3-sub', withBar: false }) +
         statCardHtml({ wrapperId: 'cvz-d-c4', iconKey: 'aufbau',   label: 'Aufbau-Sessions diesen Monat',   valueId: 'cvz-d-c4-value', subId: 'cvz-d-c4-sub', withBar: true, barFillId: 'cvz-d-c4-bar', hidden: true }) +
-        statCardHtml({ wrapperId: 'cvz-d-c5', iconKey: 'check',    label: 'Verbleibende Aufbau-Sessions',  valueId: 'cvz-d-c5-value', subId: 'cvz-d-c5-sub', withBar: false, hidden: true, cta: { tool: 'aufbau', id: 'cvz-d-card-btn-aufbau', label: 'Landingpage aufbauen', href: CONFIG.NEW_LANDINGPAGE_URL } }) +
+        statCardHtml({ wrapperId: 'cvz-d-c5', iconKey: 'check',    label: 'Verbleibende Aufbau-Sessions',  valueId: 'cvz-d-c5-value', subId: 'cvz-d-c5-sub', withBar: false, hidden: true, cta: { tool: 'aufbau', id: 'cvz-d-card-btn-aufbau', label: 'Seite aufbauen', href: CONFIG.NEW_LANDINGPAGE_URL } }) +
         statCardHtml({ wrapperId: 'cvz-d-c6', iconKey: 'cart',     label: 'Pay-per-Use Analysen',          valueId: 'cvz-d-c6-value', subId: 'cvz-d-c6-sub', withBar: false, hidden: true }) +
         statCardHtml({ wrapperId: 'cvz-d-c7', iconKey: 'cart',     label: 'Pay-per-Use Aufbau-Sessions',   valueId: 'cvz-d-c7-value', subId: 'cvz-d-c7-sub', withBar: false, hidden: true }) +
         // NEU (siehe Chat-Verlauf, Lasse: "Bei den Informationen sollten wir auch Strategie mit
@@ -770,7 +770,7 @@
       '</div>' +
       '<div class="cvz-d-actions">' +
         '<a id="cvz-d-btn-new-analysis" data-cvz-tool="analyse" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">Neue Analyse</a>' +
-        '<a id="cvz-d-btn-new-page" data-cvz-tool="aufbau" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">Landingpage aufbauen</a>' +
+        '<a id="cvz-d-btn-new-page" data-cvz-tool="aufbau" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_LANDINGPAGE_URL + '">Seite aufbauen</a>' +
         // GEÄNDERT (siehe Chat-Verlauf, Lasse: "Plan ändern kann raus, dafür Content-Strategie
         // erstellen rein") - "Plan ändern" (Link auf /preise) ist damit nicht mehr direkt aus
         // dem Dashboard erreichbar. Gleiche Sichtbarkeits-Logik wie die anderen beiden CTA-
@@ -1143,7 +1143,7 @@
     // auch bei 0 freien Topics zur Uebersicht.
     var cardBtnLabel = function (tool, normal) { return state.credits[tool] > 0 ? normal : 'Mehr kaufen'; };
     setText('cvz-d-card-btn-analyse',   cardBtnLabel('analyse',   'Neue Analyse'));
-    setText('cvz-d-card-btn-aufbau',    cardBtnLabel('aufbau',    'Landingpage aufbauen'));
+    setText('cvz-d-card-btn-aufbau',    cardBtnLabel('aufbau',    'Seite aufbauen'));
     setText('cvz-d-card-btn-strategie', cardBtnLabel('strategie', 'Content-Strategie erstellen'));
     var rowVisible = {
       'cvz-d-btn-new-analysis': false,              // Karte "Verbleibende Analysen" ist immer sichtbar
