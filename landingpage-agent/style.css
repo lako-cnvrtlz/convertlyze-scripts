@@ -701,6 +701,8 @@
 .cvz-workspace .cvz-cl-title { margin: 0 0 6px; font-size: 0.95rem; }
 .cvz-workspace .cvz-cl-item { padding: 10px 0; border-bottom: 1px solid var(--cvz-border, rgba(0,0,0,.08)); }
 .cvz-workspace .cvz-iv-item.answered { border-left: 3px solid var(--cvz-teal); }
+.cvz-workspace .cvz-iv-item.declined { border-left: 3px solid var(--cvz-border); opacity: 0.85; }
+.cvz-workspace .cvz-iv-actions button.cvz-iv-decline { color: var(--cvz-text-muted); }
 .cvz-workspace .cvz-iv-head { display: flex; gap: 6px; flex-wrap: wrap; }
 .cvz-workspace .cvz-iv-badge {
   font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
