@@ -1106,33 +1106,28 @@ function cvzRenderPillarTopic() {
   cvzRenderStrategyBox();
 }
 function cvzRenderPillarGoal() {
-  const k = cvzState.conversion_target_kind;
   const phase = cvzState.messy_middle_phase;
+  const fromStrategy = !!(cvzState.strategy && cvzState.strategy.pillar_index !== null && cvzState.conversion_target_value);
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Wohin soll die Seite führen?</h1>
-    <p class="cvz-subtitle">Eine Pillar Page verkauft nicht, sie führt weiter. Ein sanfter Abschluss-Hinweis ohne Formular.</p>
-    <label class="cvz-label">Ziel des Abschlusses</label>
-    <div class="cvz-select-wrap">
-      <select class="cvz-input" id="cvz-in-target-kind">
-        <option value="text" ${k === 'text' ? 'selected' : ''}>Beschreibung (z.B. Beratungsgespräch, Newsletter)</option>
-        <option value="url" ${k === 'url' ? 'selected' : ''}>Eine Seite von euch (URL)</option>
-      </select>
-    </div>
-    <input class="cvz-input" id="cvz-in-target-value" style="margin-top:8px;" placeholder="z.B. Kostenloses Erstgespräch oder https://eure-seite.de/demo" value="${cvzEsc(cvzState.conversion_target_value)}">
-    <p class="cvz-hint">Ohne Angabe bekommt die Seite keinen Abschluss-Hinweis.</p>
-    <label class="cvz-label">Wo steht der Leser? (optional)</label>
+    <p class="cvz-subtitle">Eine Pillar Page verkauft nicht, sie informiert. Am Ende kann ein dezenter Hinweis auf den nächsten Schritt stehen, ohne Formular.</p>
+    <label class="cvz-label">Nächster Schritt für den Leser (optional)</label>
+    <input class="cvz-input" id="cvz-in-target-value" placeholder="Seite oder Aktion, z.B. https://eure-seite.de/beratung oder Kostenloses Erstgespräch" value="${cvzEsc(cvzState.conversion_target_value)}">
+    <p class="cvz-hint">${fromStrategy ? 'Vorbelegt aus deiner Content-Strategie: die Seite, zu der diese Pillar Page weiterführen soll. Du kannst sie ändern oder löschen. ' : ''}Eine Adresse mit https:// wird als Link verwendet, alles andere als Beschreibung. Bleibt das Feld leer, bekommt die Seite keinen Abschluss-Hinweis.</p>
+    <label class="cvz-label">In welcher Phase ist der Leser? (optional)</label>
     <div class="cvz-select-wrap">
       <select class="cvz-input" id="cvz-in-phase">
         <option value="" ${!phase ? 'selected' : ''}>Keine Angabe</option>
-        <option value="Exploration (Leser sucht Orientierung und versteht das Thema noch)" ${phase.startsWith('Exploration') ? 'selected' : ''}>Orientierung (versteht das Thema noch)</option>
-        <option value="Evaluation (Leser vergleicht Optionen und Anbieter)" ${phase.startsWith('Evaluation') ? 'selected' : ''}>Vergleich (wägt Optionen ab)</option>
+        <option value="Exploration (Leser sucht Orientierung und versteht das Thema noch)" ${phase.startsWith('Exploration') ? 'selected' : ''}>Informieren: Leser lernt das Thema erst kennen</option>
+        <option value="Evaluation (Leser vergleicht Optionen und Anbieter)" ${phase.startsWith('Evaluation') ? 'selected' : ''}>Vergleichen: Leser wägt Optionen oder Anbieter ab</option>
       </select>
     </div>
+    <p class="cvz-hint">Bestimmt Tiefe und Tonfall: Wer das Thema erst kennenlernt, braucht Grundlagen, wer vergleicht, braucht Kriterien.</p>
     <label class="cvz-label">Autor / Absender (optional)</label>
     <input class="cvz-input" id="cvz-in-sender" placeholder="z.B. Name und Rolle des Experten, der die Seite verantwortet" value="${cvzEsc(cvzState.sender_name)}">
-    <label class="cvz-label">Unterseiten im Themen-Cluster (optional)</label>
-    <textarea class="cvz-input" id="cvz-in-cluster" rows="5" placeholder="Eine Unterseite pro Zeile:\nS/4HANA Kosten\\nGreenfield vs. Brownfield | https://eure-seite.de/greenfield-brownfield">${cvzEsc(cvzState.cluster_text)}</textarea>
-    <p class="cvz-hint">Nur diese Seiten darf die Pillar Page verlinken, und jede wird verlinkt. Ohne Cluster gibt es keine Verlinkung in der Mitte der Seite.</p>
+    <label class="cvz-label">Bereits vorhandene Unterseiten (optional)</label>
+    <textarea class="cvz-input" id="cvz-in-cluster" rows="5" placeholder="Eine Seite pro Zeile, Thema | Adresse:\nS/4HANA Kosten | https://eure-seite.de/kosten">${cvzEsc(cvzState.cluster_text)}</textarea>
+    <p class="cvz-hint">Nur Seiten, die es schon gibt. Die Pillar Page verlinkt genau diese. Gibt es noch keine, lass das Feld leer: Der Assistent recherchiert dann, welche Unterseiten und Beiträge sich lohnen, und zeigt sie dir als Empfehlung.</p>
   `;
 }
 function cvzRenderPillarContext() {
@@ -1162,8 +1157,9 @@ function cvzRenderPillarContext() {
   `;
 }
 function cvzSyncPillarGoalFields() {
-  cvzState.conversion_target_kind = document.getElementById('cvz-in-target-kind').value === 'url' ? 'url' : 'text';
   cvzState.conversion_target_value = document.getElementById('cvz-in-target-value').value.trim();
+  // Eine Adresse mit http(s):// ist ein Link, alles andere eine Beschreibung.
+  cvzState.conversion_target_kind = /^https?:\/\//i.test(cvzState.conversion_target_value) ? 'url' : 'text';
   cvzState.messy_middle_phase = document.getElementById('cvz-in-phase').value;
   cvzState.sender_name = document.getElementById('cvz-in-sender').value.trim();
   cvzState.cluster_text = document.getElementById('cvz-in-cluster').value;
@@ -1189,7 +1185,7 @@ function cvzValidateStep() {
     cvzSyncPillarGoalFields();
     if (cvzState.conversion_target_value) {
       if (cvzState.conversion_target_kind === 'url') {
-        try { new URL(cvzState.conversion_target_value); } catch { return `"${cvzState.conversion_target_value}" ist keine gültige URL (mit https:// beginnen) - oder als Beschreibung eintragen.`; }
+        try { new URL(cvzState.conversion_target_value); } catch { return `"${cvzState.conversion_target_value}" ist keine gültige Adresse. Prüfe den Link oder beschreibe den nächsten Schritt in Worten.`; }
       }
     }
     for (const p of cvzParseClusterText(cvzState.cluster_text)) {
@@ -2191,10 +2187,11 @@ function cvzMapStrategyPillar(result, pillarIndex) {
   const pillar = result.supporting_pages[pillarIndex];
   const children = (result.supporting_pages || []).filter((p, i) => i !== pillarIndex && p.parent_index === pillarIndex);
   const conv = result.conversion_page || null;
-  const clusterLines = children.slice(0, 30).map(c => {
-    const url = c.existing_coverage && c.existing_coverage.url ? c.existing_coverage.url : '';
-    return url ? `${c.keyword} | ${url}` : c.keyword;
-  });
+  // Verlinkt wird nur, was es schon gibt (mit URL). Geplante Unterseiten ohne Seite gehen
+  // als Kontext an den Assistenten und kommen als Empfehlung zurück.
+  const isLive = c => !!(c.existing_coverage && c.existing_coverage.url);
+  const clusterLines = children.filter(isLive).slice(0, 30).map(c => `${c.keyword} | ${c.existing_coverage.url}`);
+  const planned = children.filter(c => !isLive(c));
   const ctx = [];
   ctx.push(`Dieses Briefing stammt aus der Content-Strategie "${result.seed_topic}".`);
   if (pillar.reasoning) ctx.push(`Warum diese Seite: ${pillar.reasoning}`);
@@ -2204,8 +2201,12 @@ function cvzMapStrategyPillar(result, pillarIndex) {
   if (pillar.intent_separation && pillar.intent_separation.cannibalization_guard) {
     ctx.push(`Abgrenzung zur Conversion-Seite: ${pillar.intent_separation.cannibalization_guard}`);
   }
-  if (children.length > 0) {
-    ctx.push('Unterseiten laut Strategie:\n' + children.map(c => `- ${c.topic} (${c.keyword})${c.estimated_volume ? `, Suchvolumen ${c.estimated_volume}` : ''}`).join('\n'));
+  const live = children.filter(isLive);
+  if (live.length > 0) {
+    ctx.push('Bereits vorhandene Unterseiten (werden verlinkt):\n' + live.map(c => `- ${c.topic} (${c.keyword})`).join('\n'));
+  }
+  if (planned.length > 0) {
+    ctx.push('Laut Strategie geplante Unterseiten, die es noch NICHT gibt (nicht verlinken, aber gern als cluster_suggestions empfehlen):\n' + planned.map(c => `- ${c.topic} (${c.keyword})${c.estimated_volume ? `, Suchvolumen ${c.estimated_volume}` : ''}`).join('\n'));
   }
   return {
     keyword: pillar.keyword,
@@ -2216,7 +2217,7 @@ function cvzMapStrategyPillar(result, pillarIndex) {
         ? 'Evaluation (Leser vergleicht Optionen und Anbieter)'
         : '',
     conversion_target_kind: 'text',
-    conversion_target_value: conv ? `${conv.topic} (Keyword: ${conv.keyword})` : '',
+    conversion_target_value: conv ? conv.topic : '',
     cluster_text: clusterLines.join('\n'),
     strategy_context: ctx.join('\n\n'),
     child_count: children.length,
