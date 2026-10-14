@@ -695,6 +695,9 @@
   border: 1px solid var(--cvz-border); background: var(--cvz-bg-elevated); border-radius: 0px;
   padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
 }
+.cvz-workspace .cvz-cl-wrap { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--cvz-border, rgba(0,0,0,.12)); }
+.cvz-workspace .cvz-cl-title { margin: 0 0 6px; font-size: 0.95rem; }
+.cvz-workspace .cvz-cl-item { padding: 10px 0; border-bottom: 1px solid var(--cvz-border, rgba(0,0,0,.08)); }
 .cvz-workspace .cvz-iv-item.answered { border-left: 3px solid var(--cvz-teal); }
 .cvz-workspace .cvz-iv-head { display: flex; gap: 6px; flex-wrap: wrap; }
 .cvz-workspace .cvz-iv-badge {
