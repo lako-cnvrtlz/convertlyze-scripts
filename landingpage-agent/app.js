@@ -1828,12 +1828,14 @@ async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
 // /interview/answer liefert structure_html_document gleich mit). Die Texte
 // auf der Seite selbst ändert aber erst ein neuer Chat-Turn: bis dahin zeigt
 // der Status "noch nicht eingearbeitet" (stalePlaceholders).
-let cvzInterview = { items: [], status: null };
+let cvzInterview = { items: [], status: null, clusters: [] };
 // Ungespeicherte Eingaben bleiben erhalten, wenn der Tab neu gerendert wird
 // (z.B. weil ein Chat-Turn neue Fragen liefert).
 const cvzInterviewDrafts = {};
 let cvzPreviewTab = 'preview';
 const CVZ_KIND_LABELS = { zahl: 'Zahl', fall: 'Fall', position: 'Position' };
+const CVZ_CLUSTER_FORMAT_LABELS = { blog_artikel: 'Blogartikel', ratgeber: 'Ratgeber', vergleich: 'Vergleich', checkliste: 'Checkliste', glossar: 'Glossar', fallstudie: 'Fallstudie', landingpage: 'Landingpage' };
+const CVZ_CLUSTER_INTENT_LABELS = { informational: 'Information', commercial: 'Vergleich/Kauf', transactional: 'Anfrage' };
 
 // Titel, Download und PDF-Button je Seitentyp. Für die Landingpage bleibt
 // alles beim Alten.
@@ -1896,6 +1898,7 @@ function cvzApplyPillarData(data) {
   cvzEnsurePillarUi();
   if (Array.isArray(data.interview_items)) cvzInterview.items = data.interview_items;
   if (data.pillar_status) cvzInterview.status = data.pillar_status;
+  if (Array.isArray(data.cluster_suggestions)) cvzInterview.clusters = data.cluster_suggestions;
   cvzRenderPillarStatus();
   cvzRenderInterview();
 }
@@ -1939,8 +1942,9 @@ function cvzRenderInterview() {
   if (!el) return;
   // Offene Eingaben sichern, bevor das DOM ersetzt wird.
   cvzInterview.items.forEach(i => { if (document.getElementById('cvz-iv-text-' + i.id)) cvzRememberInterviewDraft(i.id); });
+  const clusterHtml = cvzRenderClusterSuggestions();
   if (cvzInterview.items.length === 0) {
-    el.innerHTML = '<p class="cvz-hint">Noch keine Fragen. Sie erscheinen, sobald das Gerüst steht.</p>';
+    el.innerHTML = '<p class="cvz-hint">Noch keine Fragen. Sie erscheinen, sobald das Gerüst steht.</p>' + clusterHtml;
     return;
   }
   const intro = '<p class="cvz-hint">Beantworte, was du aus eigener Erfahrung belegen kannst. Leere Antworten bleiben Platzhalter, es wird nichts erfunden. Zahlen brauchen eine Quelle.</p>';
@@ -1969,7 +1973,30 @@ function cvzRenderInterview() {
       </div>
     </div>`;
   }).join('');
-  el.innerHTML = intro + items;
+  el.innerHTML = intro + items + clusterHtml;
+}
+
+// Ergebnis der Cluster-Recherche: Unterseiten und Beiträge, die sich zum Thema
+// lohnen. Reine Empfehlung. Verlinkt wird erst, wenn die Seiten existieren und
+// im Brief als Cluster eingetragen sind.
+function cvzRenderClusterSuggestions() {
+  const list = Array.isArray(cvzInterview.clusters) ? cvzInterview.clusters : [];
+  if (list.length === 0) return '';
+  const order = { hoch: 0, mittel: 1, niedrig: 2 };
+  const sorted = list.slice().sort((a, b) => (order[a.priority] ?? 3) - (order[b.priority] ?? 3));
+  const rows = sorted.map(c => `
+    <div class="cvz-cl-item">
+      <div class="cvz-iv-head">
+        <span class="cvz-iv-badge ${c.priority === 'hoch' ? 'ok' : ''}">Priorität ${cvzEsc(c.priority)}</span>
+        <span class="cvz-iv-badge">${cvzEsc(CVZ_CLUSTER_FORMAT_LABELS[c.format] || c.format)}</span>
+        <span class="cvz-iv-badge">${cvzEsc(CVZ_CLUSTER_INTENT_LABELS[c.intent] || c.intent)}</span>
+        ${typeof c.search_volume === 'number' ? `<span class="cvz-iv-badge">${c.search_volume.toLocaleString('de-DE')} Suchen/Monat</span>` : ''}
+      </div>
+      <div class="cvz-iv-question">${cvzEsc(c.working_title)}</div>
+      <div class="cvz-iv-why">Keyword: ${cvzEsc(c.keyword)}. ${cvzEsc(c.why_worth)}</div>
+    </div>`).join('');
+  return `<div class="cvz-cl-wrap"><h4 class="cvz-cl-title">Empfohlene Unterseiten und Beiträge</h4>
+    <p class="cvz-hint">Diese Themen fehlen noch im Cluster und lohnen sich laut Recherche. Die Pillar Page verlinkt erst darauf, wenn die Seiten existieren und du sie im Brief als Cluster einträgst.</p>${rows}</div>`;
 }
 
 async function cvzSaveInterviewAnswer(id) {
@@ -2002,6 +2029,7 @@ async function cvzSaveInterviewAnswer(id) {
     delete cvzInterviewDrafts[id];
     cvzInterview.items = data.interview_items || cvzInterview.items;
     cvzInterview.status = data.pillar_status || cvzInterview.status;
+    if (Array.isArray(data.cluster_suggestions)) cvzInterview.clusters = data.cluster_suggestions;
     if (data.structure_html_document) cvzUpdatePreviewPanel(data.structure_html_document, data.structure_version);
     cvzRenderPillarStatus();
     cvzRenderInterview();
