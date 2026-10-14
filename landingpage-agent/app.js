@@ -201,12 +201,39 @@ const cvzState = {
   // Vom URL-Filter aussortierte Vorschlaege - bleiben einklappbar sichtbar,
   // damit ein faelschlich gefilterter Treffer nicht verloren geht.
   filteredOutCompetitors: [],
-  manualCompetitors: []
+  manualCompetitors: [],
+  // Seitentyp: 'landingpage' (Standard) oder 'pillar'. Die Auswahl erscheint
+  // nur, wenn GET /form-options mehr als einen Typ liefert (Feature-Flag
+  // PAGE_TYPES_ENABLED im Backend).
+  page_type: 'landingpage',
+  // Nur Pillar Page:
+  conversion_target_kind: 'text',   // 'url' oder 'text'
+  conversion_target_value: '',
+  messy_middle_phase: '',
+  sender_name: '',
+  cluster_text: ''                  // eine Unterseite pro Zeile: "Keyword" oder "Keyword | https://url"
 };
-const STEP_LABELS = ['Thema', 'Ziel', 'Angebot', 'Wettbewerber'];
+// Die Schritte hängen vom Seitentyp ab. cvzState.step bleibt ein Index, der
+// Inhalt kommt über den Schritt-Schlüssel. Die Landingpage-Schritte sind
+// unverändert, nur 'type' kommt davor, wenn mehr als ein Typ aktiv ist.
+const CVZ_STEP_LABELS = {
+  type: 'Seitentyp',
+  topic: 'Thema', goal: 'Ziel', offer: 'Angebot', competitors: 'Wettbewerber',
+  p_topic: 'Thema', p_goal: 'Ziel & Cluster', p_context: 'Kontext'
+};
+function cvzStepKeys() {
+  const keys = cvzState.page_type === 'pillar'
+    ? ['p_topic', 'p_goal', 'p_context']
+    : ['topic', 'goal', 'offer', 'competitors'];
+  if (cvzPageTypes.length > 1) keys.unshift('type');
+  return keys;
+}
+function cvzCurrentStepKey() {
+  return cvzStepKeys()[cvzState.step];
+}
 function cvzRenderSteps() {
   const el = document.getElementById('cvz-steps');
-  el.innerHTML = STEP_LABELS.map((label, i) => {
+  el.innerHTML = cvzStepKeys().map(k => CVZ_STEP_LABELS[k]).map((label, i) => {
     const cls = i === cvzState.step ? 'active' : (i < cvzState.step ? 'done' : '');
     return `<div class="step ${cls}">${i + 1} · ${label}</div>`;
   }).join('');
@@ -237,6 +264,9 @@ function cvzShowError(msg) {
 // nicht nachfragen.
 let cvzBusinessTypeGroups = [];
 let cvzFunnelStages = [];
+// [{ key, label, has_interview, preview_title, download_base_name }] aus
+// /form-options. Fehlt das Feld (altes Backend), bleibt es bei der Landingpage.
+let cvzPageTypes = [];
 // Fallback, falls /form-options nicht erreichbar ist. Bewusst nur die
 // Funnel-Stages: ohne sie wäre Schritt 1 komplett unbedienbar. Für
 // business_type gibt es KEINEN Fallback – eine geratene Liste ist genau
@@ -262,10 +292,12 @@ async function cvzLoadFormOptions() {
     cvzFunnelStages = Array.isArray(data.funnel_stages) && data.funnel_stages.length > 0
       ? data.funnel_stages
       : CVZ_FUNNEL_STAGES_FALLBACK;
+    cvzPageTypes = Array.isArray(data.page_types) ? data.page_types : [];
   } catch (e) {
     console.error('form-options konnten nicht geladen werden:', e.message);
     cvzBusinessTypeGroups = [];
     cvzFunnelStages = CVZ_FUNNEL_STAGES_FALLBACK;
+    cvzPageTypes = [];
   }
 }
 // true, wenn der aktuell gewählte Typ ein Freitextfeld verlangt.
@@ -336,7 +368,6 @@ function cvzRenderStep0() {
     <input class="cvz-input" id="cvz-in-audience" placeholder="z.B. Marketing-Leiter in KMUs" value="${cvzEsc(cvzState.target_audience)}">
     <p class="cvz-hint"><a href="https://www.convertlyze.com/content-hub/icp-generator" target="_blank" rel="noopener" style="color:var(--cvz-teal);">Unsicher bei deiner Zielgruppe? → Kostenloser ICP- & Persona-Assistent</a></p>
   `;
-  document.getElementById('cvz-btn-back').style.visibility = 'hidden';
 }
 // ==================== SCHRITT 1: ZIEL ====================
 const CONVERSION_GOAL_GROUPS = {
@@ -410,7 +441,6 @@ function cvzRenderStep1() {
     </div>
     <p class="cvz-hint" id="cvz-funnel-stage-hint">${cvzEsc(cvzFunnelStageHint(cvzState.funnel_stage))}</p>
   `;
-  document.getElementById('cvz-btn-back').style.visibility = 'visible';
 }
 // ==================== SCHRITT 2: ANGEBOT ====================
 function cvzRenderStep2() {
@@ -924,8 +954,9 @@ function cvzSyncBrandColorFromPicker(hex) {
 }
 function cvzSyncBrandColorFromText(value) {
   cvzState.brand_color = value.trim();
-  if (/^#([0-9a-fA-F]{6})$/.test(cvzState.brand_color)) {
-    document.getElementById('cvz-in-brand-color-picker').value = cvzState.brand_color;
+  const picker = document.getElementById('cvz-in-brand-color-picker');
+  if (picker && /^#([0-9a-fA-F]{6})$/.test(cvzState.brand_color)) {
+    picker.value = cvzState.brand_color;
   }
 }
 function cvzToggleNoCustomerReasons(checked) {
@@ -944,8 +975,8 @@ function cvzBuildExistingContent() {
   cvzState.pdfExtracts.forEach(p => parts.push(`[PDF: ${p.filename}]\n${p.text}`));
   return parts.join('\n\n');
 }
-function cvzValidateStep() {
-  if (cvzState.step === 0) {
+function cvzValidateLpStep(key) {
+  if (key === 'topic') {
     cvzSyncStep0Fields();
     if (!cvzState.keyword) return 'Bitte ein Thema/Keyword eingeben.';
     if (!cvzState.business_type) return 'Bitte eine Produktkategorie auswählen.';
@@ -954,12 +985,12 @@ function cvzValidateStep() {
     }
     if (!cvzState.target_audience) return 'Bitte eine Zielgruppe angeben.';
   }
-  if (cvzState.step === 1) {
+  if (key === 'goal') {
     cvzSyncStep1Fields();
     if (!cvzState.conversion_goal) return 'Bitte ein Conversion-Ziel angeben.';
     if (!cvzState.funnel_stage) return 'Bitte eine Funnel-Stage auswählen.';
   }
-  if (cvzState.step === 2) {
+  if (key === 'offer') {
     cvzSyncStep2Fields();
     if (cvzState.usps.length === 0) return 'Bitte mindestens eine USP eintragen.';
     if (cvzState.features.length === 0) return 'Bitte mindestens ein Feature eintragen.';
@@ -974,13 +1005,14 @@ function cvzValidateStep() {
       }
     }
   }
-  if (cvzState.step === 3) {
+  if (key === 'competitors') {
     const total = cvzTotalCompetitorCount();
     if (total === 0) return 'Bitte mindestens einen Wettbewerber auswählen oder ergänzen.';
     if (total > CVZ_MAX_COMPETITORS) return `Maximal ${CVZ_MAX_COMPETITORS} Wettbewerber möglich - bitte welche abwählen.`;
   }
   return null;
 }
+
 async function cvzGoNext() {
   // GEÄNDERT: Sperre jetzt anhand von canStart (Plan-Kontingent ODER
   // gekaufte Aufbau-PPU-Credits), nicht mehr allein anhand von remaining -
@@ -994,10 +1026,9 @@ async function cvzGoNext() {
   const error = cvzValidateStep();
   if (error) { cvzShowError(error); return; }
   cvzShowError(null);
-  if (cvzState.step < STEP_LABELS.length - 1) {
+  if (cvzState.step < cvzStepKeys().length - 1) {
     cvzState.step++;
     cvzRenderStep();
-    document.getElementById('cvz-btn-next').textContent = cvzState.step === STEP_LABELS.length - 1 ? 'Launch →' : 'Weiter →';
   } else {
     await cvzLaunch();
   }
@@ -1007,20 +1038,172 @@ function cvzGoBack() {
   cvzState.step--;
   cvzShowError(null);
   cvzRenderStep();
-  document.getElementById('cvz-btn-next').textContent = cvzState.step === STEP_LABELS.length - 1 ? 'Launch →' : 'Weiter →';
 }
 function cvzRenderStep() {
   cvzRenderSteps();
-  if (cvzState.step === 0) cvzRenderStep0();
-  if (cvzState.step === 1) cvzRenderStep1();
-  if (cvzState.step === 2) cvzRenderStep2();
-  if (cvzState.step === 3) cvzRenderStep3();
+  const key = cvzCurrentStepKey();
+  if (key === 'type') cvzRenderStepType();
+  if (key === 'topic') cvzRenderStep0();
+  if (key === 'goal') cvzRenderStep1();
+  if (key === 'offer') cvzRenderStep2();
+  if (key === 'competitors') cvzRenderStep3();
+  if (key === 'p_topic') cvzRenderPillarTopic();
+  if (key === 'p_goal') cvzRenderPillarGoal();
+  if (key === 'p_context') cvzRenderPillarContext();
+  document.getElementById('cvz-btn-back').style.visibility = cvzState.step === 0 ? 'hidden' : 'visible';
+  document.getElementById('cvz-btn-next').textContent = cvzState.step === cvzStepKeys().length - 1 ? 'Launch →' : 'Weiter →';
   // Banner/Button-Zustand nach jedem Render-Wechsel erneut anwenden - der
   // Button selbst liegt ausserhalb von #cvz-step-content und wird beim
   // Schrittwechsel nicht neu erzeugt, aber diese Zeile macht die Funktion
   // robust gegen ein spaeteres Embed, das den Button doch neu rendert.
   cvzRenderQuotaBanner();
   cvzUpdateNextButtonState();
+}
+
+// ==================== SEITENTYP-AUSWAHL ====================
+function cvzRenderStepType() {
+  const cards = cvzPageTypes.map(t => `
+    <button type="button" class="cvz-type-card ${cvzState.page_type === t.key ? 'selected' : ''}" onclick="cvzSelectPageType('${cvzEsc(t.key)}')">
+      <span class="cvz-type-card-title">${cvzEsc(t.label)}</span>
+      <span class="cvz-type-card-text">${cvzEsc(CVZ_PAGE_TYPE_TEXT[t.key] || '')}</span>
+    </button>
+  `).join('');
+  document.getElementById('cvz-step-content').innerHTML = `
+    <h1 class="cvz-title">Was möchtest du aufbauen?</h1>
+    <p class="cvz-subtitle">Eine Session baut eine Seite. Der Preis ist für beide Typen gleich.</p>
+    <div class="cvz-type-cards">${cards}</div>
+  `;
+}
+const CVZ_PAGE_TYPE_TEXT = {
+  landingpage: 'Eine Seite mit einem Conversion-Ziel, etwa Demo oder Angebot. Der Assistent analysiert, fragt nach und baut die Struktur nach deiner Zustimmung.',
+  pillar: 'Die zentrale Ratgeberseite zu einem Thema. Der Assistent baut sofort ein Gerüst und stellt dir Fragen, die nur ein Experte beantworten kann.'
+};
+function cvzSelectPageType(key) {
+  if (!cvzPageTypes.some(t => t.key === key)) return;
+  cvzState.page_type = key;
+  cvzRenderStep();
+}
+function cvzPageTypeInfo() {
+  return cvzPageTypes.find(t => t.key === cvzState.page_type) || null;
+}
+
+// ==================== PILLAR PAGE: FORMULAR ====================
+function cvzRenderPillarTopic() {
+  document.getElementById('cvz-step-content').innerHTML = `
+    <h1 class="cvz-title">Welches Thema soll die Pillar Page abdecken?</h1>
+    <p class="cvz-subtitle">Das Hauptthema, unter dem ihr gefunden und zitiert werden wollt.</p>
+    <label class="cvz-label">Thema / Ziel-Keyword</label>
+    <input class="cvz-input" id="cvz-in-keyword" placeholder="z.B. SAP S/4HANA Migration" value="${cvzEsc(cvzState.keyword)}">
+    <label class="cvz-label">Hauptzielgruppe (Persona)</label>
+    <input class="cvz-input" id="cvz-in-audience" placeholder="z.B. IT-Leiter im Mittelstand mit SAP ECC" value="${cvzEsc(cvzState.target_audience)}">
+    <p class="cvz-hint"><a href="https://www.convertlyze.com/content-hub/icp-generator" target="_blank" rel="noopener" style="color:var(--cvz-teal);">Unsicher bei deiner Zielgruppe? → Kostenloser ICP- & Persona-Assistent</a></p>
+  `;
+}
+function cvzRenderPillarGoal() {
+  const k = cvzState.conversion_target_kind;
+  const phase = cvzState.messy_middle_phase;
+  document.getElementById('cvz-step-content').innerHTML = `
+    <h1 class="cvz-title">Wohin soll die Seite führen?</h1>
+    <p class="cvz-subtitle">Eine Pillar Page verkauft nicht, sie führt weiter. Ein sanfter Abschluss-Hinweis ohne Formular.</p>
+    <label class="cvz-label">Ziel des Abschlusses</label>
+    <div class="cvz-select-wrap">
+      <select class="cvz-input" id="cvz-in-target-kind">
+        <option value="text" ${k === 'text' ? 'selected' : ''}>Beschreibung (z.B. Beratungsgespräch, Newsletter)</option>
+        <option value="url" ${k === 'url' ? 'selected' : ''}>Eine Seite von euch (URL)</option>
+      </select>
+    </div>
+    <input class="cvz-input" id="cvz-in-target-value" style="margin-top:8px;" placeholder="z.B. Kostenloses Erstgespräch oder https://eure-seite.de/demo" value="${cvzEsc(cvzState.conversion_target_value)}">
+    <p class="cvz-hint">Ohne Angabe bekommt die Seite keinen Abschluss-Hinweis.</p>
+    <label class="cvz-label">Wo steht der Leser? (optional)</label>
+    <div class="cvz-select-wrap">
+      <select class="cvz-input" id="cvz-in-phase">
+        <option value="" ${!phase ? 'selected' : ''}>Keine Angabe</option>
+        <option value="Exploration (Leser sucht Orientierung und versteht das Thema noch)" ${phase.startsWith('Exploration') ? 'selected' : ''}>Orientierung (versteht das Thema noch)</option>
+        <option value="Evaluation (Leser vergleicht Optionen und Anbieter)" ${phase.startsWith('Evaluation') ? 'selected' : ''}>Vergleich (wägt Optionen ab)</option>
+      </select>
+    </div>
+    <label class="cvz-label">Autor / Absender (optional)</label>
+    <input class="cvz-input" id="cvz-in-sender" placeholder="z.B. Name und Rolle des Experten, der die Seite verantwortet" value="${cvzEsc(cvzState.sender_name)}">
+    <label class="cvz-label">Unterseiten im Themen-Cluster (optional)</label>
+    <textarea class="cvz-input" id="cvz-in-cluster" rows="5" placeholder="Eine Unterseite pro Zeile:\nS/4HANA Kosten\\nGreenfield vs. Brownfield | https://eure-seite.de/greenfield-brownfield">${cvzEsc(cvzState.cluster_text)}</textarea>
+    <p class="cvz-hint">Nur diese Seiten darf die Pillar Page verlinken, und jede wird verlinkt. Ohne Cluster gibt es keine Verlinkung in der Mitte der Seite.</p>
+  `;
+}
+function cvzRenderPillarContext() {
+  document.getElementById('cvz-step-content').innerHTML = `
+    <h1 class="cvz-title">Was soll der Assistent noch wissen?</h1>
+    <p class="cvz-subtitle">Alles hier ist optional. Je mehr echtes Material, desto weniger Platzhalter.</p>
+    <label class="cvz-label">Häufige Fragen und Einwände von Kunden (optional)</label>
+    <textarea class="cvz-input" id="cvz-in-customer-reasons" placeholder="Was fragen Kunden im Gespräch oder im Support zu diesem Thema immer wieder?" ${cvzState.no_customer_reasons ? 'disabled' : ''}>${cvzEsc(cvzState.customer_reasons)}</textarea>
+    <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:0.85rem; color:var(--cvz-text-muted); cursor:pointer; font-weight:400;">
+      <input type="checkbox" id="cvz-in-no-customer-reasons" ${cvzState.no_customer_reasons ? 'checked' : ''} onchange="cvzToggleNoCustomerReasons(this.checked)">
+      Keine Informationen vorhanden
+    </label>
+    <label class="cvz-label">Referenz-Links (optional)</label>
+    <input class="cvz-input" id="cvz-in-refurl" placeholder="URL eingeben, Enter drücken (Seite oder YouTube-Video)" onkeydown="cvzAddRefUrlOnEnter(event)">
+    <div class="cvz-chip-row" id="cvz-refurl-chips">${cvzRenderRefUrlChips()}</div>
+    <p class="cvz-hint">Bis zu 3 Links werden vom Assistenten tatsächlich abgerufen. Gut sind eigene Fachartikel, Studien oder Projektberichte.</p>
+    <label class="cvz-label">PDF hochladen (optional)</label>
+    <input type="file" accept="application/pdf" id="cvz-in-pdf" onchange="cvzUploadPdf(event)">
+    <div id="cvz-pdf-status" style="margin-top:8px;"></div>
+    <div class="cvz-chip-row" id="cvz-pdf-chips">${cvzRenderPdfChips()}</div>
+    <label class="cvz-label">Eure Markenfarbe (optional)</label>
+    <input class="cvz-input" id="cvz-in-brand-color" placeholder="#4f46e5" value="${cvzEsc(cvzState.brand_color)}" oninput="cvzSyncBrandColorFromText(this.value)">
+    <label class="cvz-label">Eure Website für den Marken-Look (optional)</label>
+    <input class="cvz-input" id="cvz-in-brand-url" placeholder="https://eure-website.de" value="${cvzEsc(cvzState.brand_reference_url)}">
+    <label class="cvz-label">Sonstiger Kontext (optional)</label>
+    <textarea class="cvz-input" id="cvz-in-existing" placeholder="Weitere Hinweise für den Assistenten">${cvzEsc(cvzState.existing_content)}</textarea>
+  `;
+}
+function cvzSyncPillarGoalFields() {
+  cvzState.conversion_target_kind = document.getElementById('cvz-in-target-kind').value === 'url' ? 'url' : 'text';
+  cvzState.conversion_target_value = document.getElementById('cvz-in-target-value').value.trim();
+  cvzState.messy_middle_phase = document.getElementById('cvz-in-phase').value;
+  cvzState.sender_name = document.getElementById('cvz-in-sender').value.trim();
+  cvzState.cluster_text = document.getElementById('cvz-in-cluster').value;
+}
+// "Keyword" oder "Keyword | URL" pro Zeile -> [{ keyword, url? }]. Maximal 30
+// (Grenze im Backend-Schema).
+function cvzParseClusterText(text) {
+  return String(text || '').split('\n').map(l => l.trim()).filter(Boolean).slice(0, 30).map(line => {
+    const [kw, url] = line.split('|').map(p => p.trim());
+    return url ? { keyword: kw, url } : { keyword: kw };
+  }).filter(p => p.keyword);
+}
+function cvzValidateStep() {
+  const key = cvzCurrentStepKey();
+  if (key === 'type') return null;
+  if (key === 'p_topic') {
+    cvzSyncStep0Fields();
+    if (!cvzState.keyword) return 'Bitte ein Thema/Keyword eingeben.';
+    if (!cvzState.target_audience) return 'Bitte eine Zielgruppe angeben.';
+    return null;
+  }
+  if (key === 'p_goal') {
+    cvzSyncPillarGoalFields();
+    if (cvzState.conversion_target_value) {
+      if (cvzState.conversion_target_kind === 'url') {
+        try { new URL(cvzState.conversion_target_value); } catch { return `"${cvzState.conversion_target_value}" ist keine gültige URL (mit https:// beginnen) - oder als Beschreibung eintragen.`; }
+      }
+    }
+    for (const p of cvzParseClusterText(cvzState.cluster_text)) {
+      if (p.url) {
+        try { new URL(p.url); } catch { return `Cluster-Zeile "${p.keyword}": "${p.url}" ist keine gültige URL.`; }
+      }
+    }
+    return null;
+  }
+  if (key === 'p_context') {
+    cvzSyncStep2Fields();
+    if (cvzState.brand_color && !/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(cvzState.brand_color)) {
+      return `"${cvzState.brand_color}" ist kein gültiger Hex-Farbcode (z.B. #4f46e5) - oder das Feld leer lassen.`;
+    }
+    if (cvzState.brand_reference_url) {
+      try { new URL(cvzState.brand_reference_url); } catch { return `"${cvzState.brand_reference_url}" ist keine gültige URL (mit https:// beginnen) - oder das Feld leer lassen.`; }
+    }
+    return null;
+  }
+  return cvzValidateLpStep(key);
 }
 // ==================== ASYNCHRONE TURNS: POLLING (siehe Chat-Begründung) ====================
 // /start-session (Kickoff) und /chat antworten seit dem Backend-Umbau nicht
@@ -1094,6 +1277,15 @@ const CVZ_KICKOFF_MESSAGES = [
 ];
 // Struktur-Turns sind erfahrungsgemäß deutlich kürzer (2-3 Minuten) als der
 // Kickoff, deshalb eigene, engere Schwellen.
+const CVZ_PILLAR_KICKOFF_MESSAGES = [
+  { at: 8,   text: 'Thema wird recherchiert. Hol dir in der Zeit gerne einen Kaffee' },
+  { at: 30,  text: 'Suchvolumen, People-Also-Ask und Top-Ergebnisse werden geprüft' },
+  { at: 70,  text: 'Referenzquellen werden gelesen' },
+  { at: 120, text: 'Das Gerüst der Pillar Page wird aufgebaut' },
+  { at: 180, text: 'Fragen an den Experten werden formuliert' },
+  { at: 250, text: 'Letzte Handgriffe am Gerüst' },
+  { at: 420, text: 'Läuft noch - bei umfangreichen Themen kann das etwas länger dauern' }
+];
 const CVZ_STRUCTURE_MESSAGES = [
   { at: 8,   text: 'Denkt nach' },
   { at: 20,  text: 'Baut Sektion für Sektion auf' },
@@ -1136,7 +1328,7 @@ function cvzShowLoading(text) {
   document.getElementById('cvz-form-card').style.display = 'none';
   document.getElementById('cvz-loading').style.display = 'block';
   if (cvzLoadingStopTicker) cvzLoadingStopTicker();
-  cvzLoadingStopTicker = cvzStartProgressTicker(text, CVZ_KICKOFF_MESSAGES, t => {
+  cvzLoadingStopTicker = cvzStartProgressTicker(text, cvzState.page_type === 'pillar' ? CVZ_PILLAR_KICKOFF_MESSAGES : CVZ_KICKOFF_MESSAGES, t => {
     document.getElementById('cvz-loading-text').textContent = t;
   });
 }
@@ -1161,25 +1353,31 @@ function cvzHideInitialLoading() {
   const loading = document.getElementById('cvz-loading');
   if (loading) loading.style.display = 'none';
 }
-async function cvzLaunch() {
-  const headers = cvzAuthHeaders();
-  const userId = cvzUserId();
-  const competitorUrls = [
-    ...cvzState.competitorSuggestions.filter(s => s.selected).map(s => s.url),
-    ...cvzState.manualCompetitors
-  ].slice(0, CVZ_MAX_COMPETITORS);
-  try {
-    cvzShowLoading('Projekt wird angelegt …');
-    const projectRes = await fetch(`${API_BASE}/api/page-agent/project`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ user_id: userId, name: cvzState.keyword })
-    });
-    if (!projectRes.ok) throw new Error((await projectRes.json()).error || 'Projekt konnte nicht angelegt werden');
-    const { page_project_id } = await projectRes.json();
-    cvzShowLoading('Briefing wird gespeichert …');
-    const briefRes = await fetch(`${API_BASE}/api/page-agent/brief`, {
-      method: 'POST', headers,
-      body: JSON.stringify({
+// Briefing-Body je Seitentyp. Die Landingpage bleibt exakt wie bisher.
+function cvzBuildBriefBody(userId, page_project_id, competitorUrls) {
+  if (cvzState.page_type === 'pillar') {
+    const body = {
+      user_id: userId, page_project_id,
+      keyword: cvzState.keyword,
+      target_audience: cvzState.target_audience,
+      existing_content: cvzBuildExistingContent() || null,
+      brand_reference_url: cvzState.brand_reference_url || null,
+      brand_color: cvzState.brand_color || null,
+      customer_reasons: cvzState.no_customer_reasons ? 'Keine Informationen vorhanden' : (cvzState.customer_reasons || null),
+      type_brief: {}
+    };
+    // Optionale Felder nur senden, wenn sie gefüllt sind: das Backend-Schema
+    // lehnt leere Strings bei conversion_target.value ab.
+    if (cvzState.messy_middle_phase) body.type_brief.messy_middle_phase = cvzState.messy_middle_phase;
+    if (cvzState.sender_name) body.type_brief.sender_name = cvzState.sender_name;
+    if (cvzState.conversion_target_value) {
+      body.type_brief.conversion_target = { kind: cvzState.conversion_target_kind, value: cvzState.conversion_target_value };
+    }
+    const pages = cvzParseClusterText(cvzState.cluster_text);
+    if (pages.length > 0) body.type_brief.cluster_context = { source: 'manuell', supporting_pages: pages };
+    return body;
+  }
+  return {
         user_id: userId, page_project_id,
         funnel_stage: cvzState.funnel_stage,
         conversion_goal: cvzState.conversion_goal,
@@ -1198,13 +1396,35 @@ async function cvzLaunch() {
         brand_reference_url: cvzState.brand_reference_url || null,
         brand_color: cvzState.brand_color || null,
         customer_reasons: cvzState.no_customer_reasons ? 'Keine Informationen vorhanden' : (cvzState.customer_reasons || null)
-      })
+      };
+}
+async function cvzLaunch() {
+  const headers = cvzAuthHeaders();
+  const userId = cvzUserId();
+  // Pillar Pages haben keinen Wettbewerber-Schritt: der Agent nimmt die
+  // organischen Top-Treffer der Suche selbst.
+  const competitorUrls = cvzState.page_type === 'pillar' ? [] : [
+    ...cvzState.competitorSuggestions.filter(s => s.selected).map(s => s.url),
+    ...cvzState.manualCompetitors
+  ].slice(0, CVZ_MAX_COMPETITORS);
+  try {
+    cvzShowLoading('Projekt wird angelegt …');
+    const projectRes = await fetch(`${API_BASE}/api/page-agent/project`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ user_id: userId, name: cvzState.keyword, page_type: cvzState.page_type })
+    });
+    if (!projectRes.ok) throw new Error((await projectRes.json()).error || 'Projekt konnte nicht angelegt werden');
+    const { page_project_id } = await projectRes.json();
+    cvzShowLoading('Briefing wird gespeichert …');
+    const briefRes = await fetch(`${API_BASE}/api/page-agent/brief`, {
+      method: 'POST', headers,
+      body: JSON.stringify(cvzBuildBriefBody(userId, page_project_id, competitorUrls))
     });
     if (!briefRes.ok) {
       const err = await briefRes.json();
       throw new Error(err.error + (err.missing_fields ? ` (${err.missing_fields.join(', ')})` : ''));
     }
-    cvzShowLoading('Hier wird die nächsten Minuten malocht. Hol dir in der Zeit gerne einen Kaffee …');
+    cvzShowLoading(cvzState.page_type === 'pillar' ? 'Thema wird recherchiert …' : 'Hier wird die nächsten Minuten malocht. Hol dir in der Zeit gerne einen Kaffee …');
     const sessionRes = await fetch(`${API_BASE}/api/page-agent/start-session`, {
       method: 'POST', headers,
       body: JSON.stringify({ user_id: userId, page_project_id })
@@ -1272,9 +1492,12 @@ async function cvzTryResume() {
     const data = await res.json();
     cvzState.session_id = data.session_id;
     cvzState.page_project_id = data.page_project_id;
+    cvzState.page_type = data.page_type === 'pillar' ? 'pillar' : 'landingpage';
     document.getElementById('cvz-form-app').style.display = 'none';
     document.getElementById('cvz-workspace').style.display = 'flex';
     cvzUpdateQuota(data.sessions_remaining, data.sessions_limit);
+    cvzApplyPageTypeUi();
+    cvzApplyPillarData(data);
     // Die erste Nachricht ist der von start-session erzeugte Kickoff-Prompt.
     // Er gehoert in die Historie fuer das Modell, aber nicht in die Ansicht -
     // der Verlauf soll direkt mit der Analyse der Ausgangslage beginnen.
@@ -1306,9 +1529,14 @@ function cvzOpenChat(sessionData) {
   document.getElementById('cvz-form-app').style.display = 'none';
   document.getElementById('cvz-workspace').style.display = 'flex';
   cvzUpdateQuota(sessionData.sessions_remaining, sessionData.sessions_limit);
+  cvzApplyPageTypeUi();
+  cvzApplyPillarData(sessionData);
   // Nur die Antwort des Assistenten wird gerendert - der Kickoff-Prompt
-  // entsteht serverseitig und taucht hier ohnehin nicht auf.
-  cvzAppendMessage('assistant', sessionData.message);
+  // entsteht serverseitig und taucht hier ohnehin nicht auf. Bei Pillar
+  // kommt das Gerüst schon mit dem Kickoff, dann wird auch die Vorschau
+  // befüllt. Bei der Landingpage fehlt die Struktur hier, das Verhalten
+  // bleibt wie bisher.
+  cvzAppendMessage('assistant', sessionData.message, sessionData.structure_html_document, sessionData.structure_version);
 }
 function cvzUpdateQuota(remaining, limit) {
   document.getElementById('cvz-quota').textContent = `${remaining}/${limit} Sessions übrig`;
@@ -1400,7 +1628,8 @@ function cvzUpdatePreviewPanel(htmlDocument, version) {
   document.getElementById('cvz-preview-download').disabled = false;
   // PDF-Export: Landingpage-Button erst klickbar, sobald eine Struktur
   // existiert - genau wie der HTML-Download-Button direkt darüber.
-  document.getElementById('cvz-export-landingpage-pdf').disabled = false;
+  // Pillar: PDF-Export ist noch nicht für diesen Typ gebaut (siehe cvzApplyPageTypeUi).
+  document.getElementById('cvz-export-landingpage-pdf').disabled = cvzState.page_type === 'pillar';
 }
 function cvzDownloadCurrentStructure() {
   if (!cvzLatestStructureHtml) return;
@@ -1408,7 +1637,7 @@ function cvzDownloadCurrentStructure() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'landingpage.html';
+  a.download = (cvzPageTypeInfo() && cvzPageTypeInfo().download_base_name ? cvzPageTypeInfo().download_base_name : 'landingpage') + '.html';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -1468,13 +1697,13 @@ function cvzAppendMessage(role, text, structureHtmlDocument, structureVersion, o
   return bubble;
 }
 let cvzIsSending = false;
-async function cvzSendMessage() {
+async function cvzSendMessage(presetMessage) {
   if (cvzIsSending) return;
   const input = document.getElementById('cvz-chat-input');
-  const message = input.value.trim();
+  const message = (typeof presetMessage === 'string' ? presetMessage : input.value).trim();
   if (!message) return;
   cvzIsSending = true;
-  input.value = '';
+  if (typeof presetMessage !== 'string') input.value = '';
   input.disabled = true;
   document.getElementById('cvz-chat-send').disabled = true;
   cvzAppendMessage('user', message);
@@ -1505,6 +1734,7 @@ async function cvzSendMessage() {
     loadingBubble.remove();
     cvzAppendMessage('assistant', finalData.message, finalData.structure_html_document, finalData.structure_version);
     cvzUpdateQuota(finalData.sessions_remaining, finalData.sessions_limit);
+    cvzApplyPillarData(finalData);
   } catch (err) {
     stopTicker();
     loadingBubble.remove();
@@ -1585,6 +1815,201 @@ async function cvzExportPdf({ buttonEl, errorEl, type, downloadName }) {
     }
   }
 }
+// ==================== PILLAR PAGE: WORKSPACE (STATUS, INTERVIEW) ====================
+// Die Pillar Page kommt als Gerüst mit Platzhaltern. Was nur ein Experte
+// wissen kann, steht als Interview-Frage im zweiten Tab der Vorschau. Jede
+// gespeicherte Antwort rendert die Vorschau serverseitig neu (POST
+// /interview/answer liefert structure_html_document gleich mit). Die Texte
+// auf der Seite selbst ändert aber erst ein neuer Chat-Turn: bis dahin zeigt
+// der Status "noch nicht eingearbeitet" (stalePlaceholders).
+let cvzInterview = { items: [], status: null };
+// Ungespeicherte Eingaben bleiben erhalten, wenn der Tab neu gerendert wird
+// (z.B. weil ein Chat-Turn neue Fragen liefert).
+const cvzInterviewDrafts = {};
+let cvzPreviewTab = 'preview';
+const CVZ_KIND_LABELS = { zahl: 'Zahl', fall: 'Fall', position: 'Position' };
+
+// Titel, Download und PDF-Button je Seitentyp. Für die Landingpage bleibt
+// alles beim Alten.
+function cvzApplyPageTypeUi() {
+  const isPillar = cvzState.page_type === 'pillar';
+  const info = cvzPageTypeInfo();
+  const title = document.getElementById('cvz-toolbar-title') || document.querySelector('.cvz-toolbar-title');
+  if (title) title.textContent = isPillar ? 'Pillar-Page-Assistent' : 'Landingpage-Assistent';
+  const prevTitle = document.querySelector('#cvz-preview-panel .cvz-preview-header .title');
+  if (prevTitle) prevTitle.textContent = (info && info.preview_title) ? info.preview_title.replace(/-Vorschau$/, '') + ' Vorschau' : 'Vorschau';
+  const pdf = document.getElementById('cvz-export-landingpage-pdf');
+  if (pdf) pdf.hidden = isPillar;
+  const empty = document.getElementById('cvz-preview-empty');
+  if (empty && isPillar) empty.textContent = 'Sobald das Gerüst erstellt ist, erscheint hier die Vorschau.';
+  if (isPillar) cvzEnsurePillarUi();
+}
+
+// Legt Statusleiste, Tabs und Interview-Fläche im Vorschau-Panel an. Per JS
+// statt im Embed, damit die Landingpage-Ansicht ohne Pillar unverändert bleibt.
+function cvzEnsurePillarUi() {
+  const panel = document.getElementById('cvz-preview-panel');
+  if (!panel || document.getElementById('cvz-pillar-bar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'cvz-pillar-bar';
+  bar.className = 'cvz-pillar-bar';
+  bar.innerHTML = `
+    <div class="cvz-pillar-status" id="cvz-pillar-status"></div>
+    <div class="cvz-pillar-tabs" role="tablist">
+      <button type="button" class="cvz-pillar-tab active" id="cvz-tab-preview" role="tab" onclick="cvzSetPreviewTab('preview')">Vorschau</button>
+      <button type="button" class="cvz-pillar-tab" id="cvz-tab-interview" role="tab" onclick="cvzSetPreviewTab('interview')">Interview</button>
+    </div>`;
+  const header = panel.querySelector('.cvz-preview-header');
+  header.insertAdjacentElement('afterend', bar);
+  const body = document.createElement('div');
+  body.id = 'cvz-interview-body';
+  body.className = 'cvz-interview-body';
+  body.hidden = true;
+  document.getElementById('cvz-preview-body').insertAdjacentElement('afterend', body);
+}
+
+function cvzSetPreviewTab(tab) {
+  cvzPreviewTab = tab === 'interview' ? 'interview' : 'preview';
+  const showInterview = cvzPreviewTab === 'interview';
+  const pv = document.getElementById('cvz-preview-body');
+  const iv = document.getElementById('cvz-interview-body');
+  if (pv) pv.hidden = showInterview;
+  if (iv) iv.hidden = !showInterview;
+  const t1 = document.getElementById('cvz-tab-preview');
+  const t2 = document.getElementById('cvz-tab-interview');
+  if (t1) t1.classList.toggle('active', !showInterview);
+  if (t2) t2.classList.toggle('active', showInterview);
+  // Ein versteckter Rahmen hat Breite 0; die Skalierung muss beim Zurückwechseln neu berechnet werden.
+  if (!showInterview) cvzApplyPreviewScale();
+}
+
+// Nimmt Pillar-Felder aus /resume, /start-session-Ergebnis, /chat/status
+// oder /interview entgegen. Für die Landingpage tut die Funktion nichts.
+function cvzApplyPillarData(data) {
+  if (cvzState.page_type !== 'pillar' || !data) return;
+  cvzEnsurePillarUi();
+  if (Array.isArray(data.interview_items)) cvzInterview.items = data.interview_items;
+  if (data.pillar_status) cvzInterview.status = data.pillar_status;
+  cvzRenderPillarStatus();
+  cvzRenderInterview();
+}
+
+function cvzRenderPillarStatus() {
+  const el = document.getElementById('cvz-pillar-status');
+  const tab = document.getElementById('cvz-tab-interview');
+  const st = cvzInterview.status;
+  if (!el) return;
+  if (!st) { el.textContent = ''; return; }
+  const open = Math.max(0, st.mandatoryTotal - st.mandatoryAnswered);
+  if (tab) tab.textContent = open > 0 ? `Interview (${open} offen)` : 'Interview';
+  const isDone = st.status === 'fertig';
+  const label = isDone ? 'Fertig' : 'Gerüst';
+  let html = `<span class="cvz-pillar-badge ${isDone ? 'done' : ''}">${label}</span> ` +
+    `<span>${st.mandatoryAnswered} von ${st.mandatoryTotal} Pflichtfragen beantwortet</span>`;
+  if (!isDone && st.reason) html += `<span class="cvz-pillar-reason">${cvzEsc(st.reason)}</span>`;
+  if (st.stalePlaceholders > 0) {
+    html += `<button type="button" class="cvz-btn-secondary cvz-pillar-apply" onclick="cvzApplyInterviewToPage()">Antworten in die Seite einarbeiten</button>`;
+  }
+  el.innerHTML = html;
+}
+
+// Die Antworten stehen in der Datenbank, die Seite muss der Agent neu
+// schreiben. Dafür schicken wir ihm eine normale Chat-Nachricht.
+function cvzApplyInterviewToPage() {
+  cvzSetPreviewTab('preview');
+  cvzSendMessage('Ich habe Interview-Antworten ergänzt. Bitte arbeite sie in die Seite ein, ersetze die passenden Platzhalter und erzeuge eine neue Version.');
+}
+
+function cvzRememberInterviewDraft(id) {
+  const t = document.getElementById('cvz-iv-text-' + id);
+  const p = document.getElementById('cvz-iv-prov-' + id);
+  const a = document.getElementById('cvz-iv-appr-' + id);
+  if (!t) return;
+  cvzInterviewDrafts[id] = { text: t.value, provenance: p ? p.value : '', approved: a ? a.checked : true };
+}
+
+function cvzRenderInterview() {
+  const el = document.getElementById('cvz-interview-body');
+  if (!el) return;
+  // Offene Eingaben sichern, bevor das DOM ersetzt wird.
+  cvzInterview.items.forEach(i => { if (document.getElementById('cvz-iv-text-' + i.id)) cvzRememberInterviewDraft(i.id); });
+  if (cvzInterview.items.length === 0) {
+    el.innerHTML = '<p class="cvz-hint">Noch keine Fragen. Sie erscheinen, sobald das Gerüst steht.</p>';
+    return;
+  }
+  const intro = '<p class="cvz-hint">Beantworte, was du aus eigener Erfahrung belegen kannst. Leere Antworten bleiben Platzhalter, es wird nichts erfunden. Zahlen brauchen eine Quelle.</p>';
+  const items = cvzInterview.items.map(i => {
+    const d = cvzInterviewDrafts[i.id];
+    const text = d ? d.text : (i.answer_text || '');
+    const prov = d ? d.provenance : (i.answer_provenance || '');
+    const approved = d ? d.approved : (i.approved_for_publication !== false);
+    const answered = !!(i.answer_text && i.answer_text.trim().length >= 20);
+    return `
+    <div class="cvz-iv-item ${answered ? 'answered' : ''}" id="cvz-iv-${cvzEsc(i.id)}">
+      <div class="cvz-iv-head">
+        ${i.mandatory ? '<span class="cvz-iv-badge must">Pflicht</span>' : '<span class="cvz-iv-badge">Optional</span>'}
+        <span class="cvz-iv-badge">${cvzEsc(CVZ_KIND_LABELS[i.kind] || i.kind)}</span>
+        ${answered ? '<span class="cvz-iv-badge ok">Beantwortet</span>' : ''}
+      </div>
+      <div class="cvz-iv-question">${cvzEsc(i.question)}</div>
+      ${i.why_asked ? `<div class="cvz-iv-why">${cvzEsc(i.why_asked)}</div>` : ''}
+      ${i.weak_answer_example ? `<details class="cvz-iv-weak"><summary>Was keine gute Antwort ist</summary><p>${cvzEsc(i.weak_answer_example)}</p></details>` : ''}
+      <textarea class="cvz-input" id="cvz-iv-text-${cvzEsc(i.id)}" rows="4" placeholder="Deine Antwort mit konkreten Details" oninput="cvzRememberInterviewDraft('${cvzEsc(i.id)}')">${cvzEsc(text)}</textarea>
+      <input class="cvz-input" id="cvz-iv-prov-${cvzEsc(i.id)}" placeholder="Quelle (Pflicht, wenn die Antwort Zahlen enthält)" value="${cvzEsc(prov)}" oninput="cvzRememberInterviewDraft('${cvzEsc(i.id)}')">
+      <label class="cvz-iv-appr"><input type="checkbox" id="cvz-iv-appr-${cvzEsc(i.id)}" ${approved ? 'checked' : ''} onchange="cvzRememberInterviewDraft('${cvzEsc(i.id)}')"> Zur Veröffentlichung freigegeben</label>
+      <div class="cvz-iv-actions">
+        <button type="button" class="cvz-btn-secondary" id="cvz-iv-save-${cvzEsc(i.id)}" onclick="cvzSaveInterviewAnswer('${cvzEsc(i.id)}')">Speichern</button>
+        <span class="cvz-iv-msg" id="cvz-iv-msg-${cvzEsc(i.id)}" role="status"></span>
+      </div>
+    </div>`;
+  }).join('');
+  el.innerHTML = intro + items;
+}
+
+async function cvzSaveInterviewAnswer(id) {
+  cvzRememberInterviewDraft(id);
+  const d = cvzInterviewDrafts[id];
+  const msg = document.getElementById('cvz-iv-msg-' + id);
+  const btn = document.getElementById('cvz-iv-save-' + id);
+  const setMsg = (text, bad) => { if (msg) { msg.textContent = text; msg.classList.toggle('bad', !!bad); } };
+  if (!d) return;
+  if (btn) btn.disabled = true;
+  setMsg('Wird gespeichert …', false);
+  try {
+    const res = await fetch(`${API_BASE}/api/page-agent/interview/answer`, {
+      method: 'POST', headers: cvzAuthHeaders(),
+      body: JSON.stringify({
+        user_id: cvzUserId(),
+        page_project_id: cvzState.page_project_id,
+        item_key: id,
+        text: d.text,
+        provenance: d.provenance || null,
+        approved_for_publication: d.approved,
+        answered_by: 'user'
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setMsg(data.error || `Fehler (HTTP ${res.status})`, true);
+      return;
+    }
+    delete cvzInterviewDrafts[id];
+    cvzInterview.items = data.interview_items || cvzInterview.items;
+    cvzInterview.status = data.pillar_status || cvzInterview.status;
+    if (data.structure_html_document) cvzUpdatePreviewPanel(data.structure_html_document, data.structure_version);
+    cvzRenderPillarStatus();
+    cvzRenderInterview();
+    const msg2 = document.getElementById('cvz-iv-msg-' + id);
+    if (msg2) msg2.textContent = 'Gespeichert';
+  } catch (e) {
+    console.error('Interview-Antwort konnte nicht gespeichert werden:', e);
+    setMsg('Speichern fehlgeschlagen. Bitte erneut versuchen.', true);
+  } finally {
+    const b2 = document.getElementById('cvz-iv-save-' + id);
+    if (b2) b2.disabled = false;
+  }
+}
+
 // ==================== INIT ====================
 // Sofort beim Laden, noch vor jedem await: Formular ausblenden und einen
 // simplen Ladezustand zeigen. Ohne das war für die Dauer von
