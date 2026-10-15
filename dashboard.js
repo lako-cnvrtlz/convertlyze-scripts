@@ -1,13 +1,35 @@
 /**
- * dashboard-v10.js
+ * dashboard-v11.js
  * -----------------
  * Member-Dashboard: Stat-Karten, Aktions-Buttons, Analysen-Liste, PDF-Download,
  * Team-Einladungen (Sichtbarkeit), "Zuletzt aktiv"-Uebersicht - komplett aus JS
  * generiert, kein Custom-Attribute-Bauplan mehr in Webflow noetig.
  *
  * Seite: /member/dashboard
- * Embedding: jsDelivr (<script src=".../dashboard-v9.js">)
+ * Embedding: jsDelivr (<script src=".../dashboard-v11.js">)
  * Dependencies: window.supabase (global), window.$memberstackDom
+ *
+ * ÄNDERUNGEN ggü. v10 (Team-Daten, Erneuerungsdaten, Live-Aktualisierung):
+ *   - GEÄNDERT: Die Owner-Zeile (Plan, Credits, Perioden, Topics) wird bei Team-Mitgliedern
+ *     nicht mehr per direktem .from('users').select() geladen, sondern ueber die neue RPC
+ *     get_team_billing_user (SECURITY DEFINER, siehe get_team_billing_user.sql, VOR dem
+ *     Deployment in Supabase anlegen). WHY: Das Frontend arbeitet mit Anon-Key ohne auth.uid(),
+ *     der direkte Select auf die Owner-Zeile kam per RLS still leer zurueck, und das Dashboard
+ *     zeigte stattdessen die (veralteten) Plan-Daten der Member-Zeile an - ohne Fehlermeldung.
+ *   - NEU: Schlaegt das Laden der Owner-Daten fehl (console.warn mit Fehler), zeigt das Dashboard
+ *     fuer Team-Mitglieder eine Fehlermeldung statt stillschweigend falscher Zahlen aus der
+ *     Member-Zeile.
+ *   - GEÄNDERT: "Erneuert sich am ..." zeigt nie mehr ein Datum in der Vergangenheit. Die
+ *     Datumslogik (rollToFuture) rechnet bei abgelaufenen Perioden auf den naechsten
+ *     zukuenftigen Termin vor. Reihenfolge fuer Analysen: next_credit_reset_date, dann
+ *     period_start_date + 1 Monat, erst ganz zuletzt license_expires_at (bei Jahresplaenen
+ *     waere das sonst das Vertragsende statt des naechsten monatlichen Credit-Resets).
+ *     Aufbau und Strategien: period_start + 1 Monat, ebenfalls vorgerechnet.
+ *     ACHTUNG: Das ist nur die ANZEIGE des naechsten Termins. Die Zaehler (z.B. 5/5) setzt
+ *     weiterhin das Backend zurueck, das Dashboard rechnet sie nicht selbst um.
+ *   - NEU: Die Kontingent-Karten laden sich neu, sobald eine Analyse abgeschlossen ist oder
+ *     fehlschlaegt (Polling) bzw. sich Analysen per Realtime aendern. Vorher aktualisierten
+ *     sich nur die Zeilen der Liste, nicht die Zahlen darueber.
  *
  * ÄNDERUNGEN ggü. v9 (Tracker, Kontingent-Hinweis, neuer Analysen-Look):
  *   - NEU: Customer Journey Tracker im Dashboard: zwei Stat-Karten (Topics belegt / frei)
@@ -239,6 +261,39 @@
     return new Date(dateStr).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
 
+  // NEU (v11): Monats-Arithmetik fuer die "Erneuert sich am"-Anzeige.
+  // addMonths rechnet immer vom urspruenglichen Anker aus (nicht Monat fuer Monat weiter),
+  // damit ein Anker am 31. nicht dauerhaft auf den 28. rutscht. Faellt der Zieltag in einen
+  // kuerzeren Monat, wird auf dessen letzten Tag gekappt.
+  function addMonths(date, n) {
+    var r   = new Date(date.getTime());
+    var day = r.getDate();
+    r.setMonth(r.getMonth() + n);
+    if (r.getDate() !== day) r.setDate(0);
+    return r;
+  }
+
+  // Liefert den ersten Termin base + k Monate (ab firstOffset), der in der Zukunft liegt.
+  // firstOffset 0: base ist selbst ein faelliger Termin (next_credit_reset_date).
+  // firstOffset 1: base ist ein Periodenstart, der naechste Termin liegt einen Monat spaeter.
+  // Rein fuer die Anzeige - die Zaehler setzt das Backend zurueck, nicht dieses Script.
+  function rollToFuture(base, firstOffset) {
+    if (!base || isNaN(base.getTime())) return null;
+    var k = firstOffset;
+    var d = addMonths(base, k);
+    var guard = 0;
+    while (d.getTime() <= Date.now() && guard < 240) {
+      k++;
+      d = addMonths(base, k);
+      guard++;
+    }
+    return d;
+  }
+
+  function formatDateDe(d) {
+    return d ? d.toLocaleDateString('de-DE') : null;
+  }
+
   // -- Cookie helpers -----------------------------------------------------------
 
   function getCookie(name) {
@@ -302,16 +357,20 @@
         .single();
       if (result.data) {
         if (result.data.owner_user_id) {
-          var ownerResult = await window.supabase
-            .from('users')
-            // ERGÄNZT (siehe Chat-Verlauf, Content-Strategie-Stat-Karten): fehlte bisher hier,
-            // obwohl page_agent_sessions_used_current_period/_period_start (das exakte Aufbau-
-            // Pendant) schon immer mitgeholt wurde - ohne diese beiden Felder waeren die neuen
-            // Karten 8/9 fuer Team-Members (billing laeuft ueber bu, siehe WHY-Kommentar oben)
-            // immer leer geblieben.
-            .select('id, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, license_type, license_status, license_expires_at, next_credit_reset_date, period_start_date, plan_price, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start, ai_visibility_topics_limit, ai_visibility_topics_plan_included, ai_visibility_topics_purchased, ai_visibility_trial_started_at')
-            .eq('id', result.data.owner_user_id)
-            .single();
+          // GEÄNDERT (v11): Owner-Zeile per RPC statt per direktem Select.
+          // WHY: Das Frontend laeuft per Memberstack + Anon-Key, auth.uid() ist null. Ein direkter
+          // Select auf die Zeile des Owners kam per RLS still leer zurueck (200 OK, keine Zeile,
+          // kein Fehler) - das Dashboard fiel dann unbemerkt auf die Plan-Daten der Member-Zeile
+          // zurueck. Die RPC get_team_billing_user (SECURITY DEFINER) prueft serverseitig, dass
+          // der Aufrufer wirklich Mitglied dieses Owners ist, und liefert nur Plan-/Zaehlerfelder.
+          // Wichtig: Kein Fallback auf die Member-Zeile mehr - fehlt _billingUser, bricht
+          // initDashboard mit einer Fehlermeldung ab (siehe showTeamDataError).
+          var ownerResult = await window.supabase.rpc('get_team_billing_user', {
+            p_user_id: result.data.id,
+          });
+          if (ownerResult.error) {
+            console.warn('[CVZ] Owner-Daten laden fehlgeschlagen:', ownerResult.error);
+          }
           if (ownerResult.data) result.data._billingUser = ownerResult.data;
         }
         return result.data;
@@ -954,16 +1013,18 @@
     var isBetaPlan  = bu.license_type === 'Beta';
 
     // Karte 2: Verbleibende Analysen (Wert + Renewal/Status als ein Satz)
+    // GEÄNDERT (v11): Reihenfolge next_credit_reset_date -> period_start_date + 1 Monat ->
+    // license_expires_at (nur noch letzter Fallback: bei Jahresplaenen waere es sonst das
+    // Vertragsende statt des naechsten monatlichen Resets). Vergangene Termine werden per
+    // rollToFuture auf den naechsten zukuenftigen vorgerechnet.
     var renewalSub = '';
+    var renewalDate = null;
     if (isPaid) {
-      var renewalDate = null;
-      if (bu.license_expires_at)          renewalDate = new Date(bu.license_expires_at).toLocaleDateString('de-DE');
-      else if (bu.next_credit_reset_date) renewalDate = new Date(bu.next_credit_reset_date).toLocaleDateString('de-DE');
-      else if (bu.period_start_date) {
-        var d = new Date(bu.period_start_date);
-        d.setMonth(d.getMonth() + 1);
-        renewalDate = d.toLocaleDateString('de-DE');
-      }
+      var renewalDateObj = null;
+      if (bu.next_credit_reset_date)      renewalDateObj = rollToFuture(new Date(bu.next_credit_reset_date), 0);
+      else if (bu.period_start_date)      renewalDateObj = rollToFuture(new Date(bu.period_start_date), 1);
+      else if (bu.license_expires_at)     renewalDateObj = new Date(bu.license_expires_at);
+      renewalDate = formatDateDe(renewalDateObj);
       renewalSub = renewalDate ? ('Erneuert sich am ' + renewalDate) : '-';
     } else if (isFreePlan) {
       renewalSub = analysesLeft > 0 ? '1 kostenlose Analyse verfügbar' : 'Kostenlose Analyse bereits genutzt';
@@ -1000,13 +1061,15 @@
     if (bar4) bar4.style.width = Math.min(sessionsPercent, 100) + '%';
     showEl(document.getElementById('cvz-d-c4'), showAufbauCards, 'flex');
 
+    // GEÄNDERT (v11): period_start + 1 Monat, bei abgelaufener Periode auf den naechsten
+    // zukuenftigen Termin vorgerechnet (rollToFuture). aufbauRenewalDate bleibt ein String.
     var aufbauRenewalSub = '';
+    var aufbauRenewalDate = null;
     if (isFreePlan) {
       aufbauRenewalSub = sessionsLeft > 0 ? '1 kostenlose Aufbau-Session verfügbar' : 'Kostenlose Aufbau-Session bereits genutzt';
     } else if (bu.page_agent_sessions_period_start) {
-      var aufbauRenewalDate = new Date(bu.page_agent_sessions_period_start);
-      aufbauRenewalDate.setMonth(aufbauRenewalDate.getMonth() + 1);
-      aufbauRenewalSub = 'Erneuert sich am ' + aufbauRenewalDate.toLocaleDateString('de-DE');
+      aufbauRenewalDate = formatDateDe(rollToFuture(new Date(bu.page_agent_sessions_period_start), 1));
+      aufbauRenewalSub = aufbauRenewalDate ? ('Erneuert sich am ' + aufbauRenewalDate) : '-';
     } else {
       aufbauRenewalSub = '-';
     }
@@ -1051,13 +1114,14 @@
     var bar8 = document.getElementById('cvz-d-c8-bar');
     if (bar8) bar8.style.width = Math.min(strategyPercent, 100) + '%';
     showEl(document.getElementById('cvz-d-c8'), showStrategyCards, 'flex');
+    // GEÄNDERT (v11): wie bei den Aufbau-Sessions vorgerechnet, strategyRenewalDate bleibt ein String.
     var strategyRenewalSub = '';
+    var strategyRenewalDate = null;
     if (isFreePlan) {
       strategyRenewalSub = strategyLeft > 0 ? '1 kostenlose Content-Strategie verfügbar' : 'Kostenlose Content-Strategie bereits genutzt';
     } else if (bu.content_strategy_sessions_period_start) {
-      var strategyRenewalDate = new Date(bu.content_strategy_sessions_period_start);
-      strategyRenewalDate.setMonth(strategyRenewalDate.getMonth() + 1);
-      strategyRenewalSub = 'Erneuert sich am ' + strategyRenewalDate.toLocaleDateString('de-DE');
+      strategyRenewalDate = formatDateDe(rollToFuture(new Date(bu.content_strategy_sessions_period_start), 1));
+      strategyRenewalSub = strategyRenewalDate ? ('Erneuert sich am ' + strategyRenewalDate) : '-';
     } else {
       strategyRenewalSub = '-';
     }
@@ -1130,8 +1194,8 @@
       planLimit: { analyse: limit, aufbau: sessionsLimitNum, strategie: strategyLimitNum },
       renewal: {
         analyse:   renewalDate || null,
-        aufbau:    (typeof aufbauRenewalDate !== 'undefined' && aufbauRenewalDate) ? aufbauRenewalDate.toLocaleDateString('de-DE') : null,
-        strategie: (typeof strategyRenewalDate !== 'undefined' && strategyRenewalDate) ? strategyRenewalDate.toLocaleDateString('de-DE') : null,
+        aufbau:    aufbauRenewalDate || null,
+        strategie: strategyRenewalDate || null,
       },
     };
 
@@ -1306,11 +1370,19 @@
   // Laedt User + Topic-Nutzung neu und aktualisiert Karten und Kontingent-Stand. Wird
   // aufgerufen, wenn der Browser-Tab wieder sichtbar wird (z.B. nach einer Analyse in einem
   // anderen Tab), damit Karten und Hinweis nicht mit altem Stand arbeiten.
+  // NEU (v11): wird zusaetzlich nach abgeschlossenen/fehlgeschlagenen Analysen (silentRefresh)
+  // und nach Realtime-Aenderungen an den Analysen aufgerufen. Ein Lauf gleichzeitig reicht
+  // (refreshCreditsRunning), damit sich Polling und Realtime nicht ueberholen.
+  var refreshCreditsRunning = false;
   async function refreshCredits() {
-    if (!state.limitsLoaded || !state.memberstackId) return;
+    if (!state.limitsLoaded || !state.memberstackId || refreshCreditsRunning) return;
+    refreshCreditsRunning = true;
     try {
       var u = await fetchUser(state.memberstackId, 1);
       if (!u) return;
+      // Fehlen bei einem Team-Mitglied die Owner-Daten, lieber den letzten guten Stand
+      // behalten, als die Karten mit Member-Zeilen-Werten zu ueberschreiben.
+      if (u.owner_user_id && !u._billingUser) return;
       var ubu = u._billingUser || u;
       var topics = trackerNeedsUsage(ubu)
         ? await fetchTrackerUsage(u.id)
@@ -1318,7 +1390,25 @@
       renderStatCards(u, state.sessionsLimit, state.contentStrategyLimit, topics);
     } catch (e) {
       console.warn('[CVZ] refreshCredits:', e);
+    } finally {
+      refreshCreditsRunning = false;
     }
+  }
+
+  // NEU (v11): Fehlermeldung fuer Team-Mitglieder, wenn die Owner-Daten nicht geladen werden
+  // konnten. Besser als stillschweigend die (veralteten) Werte der Member-Zeile anzuzeigen.
+  function showTeamDataError() {
+    var stats   = document.querySelector('#cvz-dashboard-app .cvz-d-stats');
+    var actions = document.querySelector('#cvz-dashboard-app .cvz-d-actions');
+    showEl(stats, false);
+    showEl(actions, false);
+    showEl(document.getElementById('cvz-tabs'), false);
+    if (!state.container) return;
+    state.container.innerHTML =
+      '<div class="cvz-a-body-error">' +
+        '<p style="font-weight:600;margin-bottom:8px;">Team-Daten konnten nicht geladen werden</p>' +
+        '<p class="cvz-a-error-sub">Bitte lade die Seite neu. Besteht das Problem weiter, kontaktiere den Support.</p>' +
+      '</div>';
   }
 
   // -- UI: Klick-Hinweis (Ersatz/Ergaenzung fuer Hover) -----------------------
@@ -2112,17 +2202,24 @@
     if (!freshData) return;
 
     var changed = false;
+    // NEU (v11): merkt sich, ob eine Analyse abgeschlossen wurde oder fehlgeschlagen ist.
+    // Dann haben sich Verbrauch/Reservierung geaendert und die Karten muessen neu geladen werden.
+    var creditsAffected = false;
     freshData.forEach(function (fresh) {
       var idx = state.analysesData.findIndex(function (a) { return a.id === fresh.id; });
       if (idx === -1) {
         state.analysesData.unshift(fresh);
         changed = true;
+        creditsAffected = true;
         return;
       }
       if (state.analysesData[idx].status === fresh.status) return;
 
       state.analysesData[idx] = fresh;
       changed = true;
+      if (fresh.status === 'completed' || fresh.status === 'error' || fresh.status === 'failed') {
+        creditsAffected = true;
+      }
 
       var row = state.container
         ? state.container.querySelector('[data-analysis-id="' + fresh.id + '"]')
@@ -2146,6 +2243,7 @@
       state.totalPages = Math.max(1, Math.ceil(state.analysesData.length / CONFIG.PAGE_SIZE));
       updatePaginationInfo();
     }
+    if (creditsAffected) refreshCredits();
     if (!hasProcessingAnalyses()) stopPolling();
   }
 
@@ -2177,7 +2275,8 @@
         .channel('analyses-realtime-' + userId)
         .on('postgres_changes',
           { event: '*', schema: 'public', table: 'analyses', filter: 'user_id=eq.' + userId },
-          async function () { await loadAndRenderAnalyses(true); }
+          // NEU (v11): nach jeder Aenderung an den Analysen auch die Kontingent-Karten neu laden
+          async function () { await loadAndRenderAnalyses(true); refreshCredits(); }
         )
         .on('system', {}, function (status) {
           if (status === 'SUBSCRIBED') loadAndRenderAnalyses(true);
@@ -2286,6 +2385,18 @@
           console.error('[CVZ] Team-Invite Fehler:', e);
         }
       }
+
+      // NEU (v11): Team-Mitglied ohne ladbare Owner-Daten -> Fehlermeldung statt falscher Zahlen
+      // aus der Member-Zeile (siehe Kommentar bei fetchUser).
+      if (currentUser.owner_user_id && !currentUser._billingUser) {
+        console.error('[CVZ] Owner-Daten fehlen fuer Team-Mitglied, Dashboard wird nicht angezeigt.');
+        showTeamDataError();
+        document.body.classList.add('content-loaded');
+        return;
+      }
+      // Plan-Daten aus dem (ggf. neu geladenen) User uebernehmen
+      state.licenseType  = (currentUser._billingUser || currentUser).license_type || '';
+      state.hasPdfAccess = checkPdfAccess(currentUser);
 
       // Credit-Reset
       if (await triggerCreditResetIfPaid(currentUser)) {
