@@ -1065,11 +1065,24 @@
 
     wrap.appendChild(el('label', { class: 'cvz-cs-label' }, ['Oder eigene Formulierung für den Cluster:', freeTextInput]));
 
+    // NEU (Tracker-Pfad): Hier gibt es keinen Zielgruppen-Schritt, also kommen die Kundenfragen aus
+    // Vertrieb und Support direkt in diesem Schritt dazu.
+    var trackerQuestions = null;
+    var trackerGrowAreas = [];
+    var trackerErrorLine = el('p', { class: 'cvz-cs-quota-empty' });
+    if (trackerTopicId) {
+      trackerQuestions = renderCustomerQuestionsBlock(wrap, [], trackerGrowAreas, null).input;
+      wrap.appendChild(trackerErrorLine);
+    }
+
     var confirmBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, [trackerTopicId ? 'Thema bestätigen und Strategie erstellen' : 'Thema bestätigen, weiter zur Zielgruppe']);
     confirmBtn.addEventListener('click', function () {
       var finalTopic = freeTextInput.value.trim() || chosenInput.value;
       if (trackerTopicId) {
-        startGeneration(finalTopic, domain, result.validation_id, trackerTopicId, null);
+        var trackerParsed = parseCustomerQuestions(trackerQuestions ? trackerQuestions.value : '');
+        if (trackerParsed.error) { trackerErrorLine.textContent = trackerParsed.error; return; }
+        trackerErrorLine.textContent = '';
+        startGeneration(finalTopic, domain, result.validation_id, trackerTopicId, null, trackerParsed.list);
       } else {
         startAudienceStep(finalTopic, domain, result.validation_id, originalTopic);
       }
@@ -1084,6 +1097,7 @@
 
     state.root.appendChild(renderQuotaBanner());
     state.root.appendChild(wrap);
+    growAllLater(trackerGrowAreas);
   }
 
   // ==================== NEU: ZIELGRUPPE + PROMPT-PLAN (nur ohne Tracker-Daten) ====================
@@ -1096,6 +1110,7 @@
   var PHASE_LABEL_MAP = PHASE_OPTIONS.reduce(function (acc, o) { acc[o.value] = o.label; return acc; }, { discovery: 'Entdeckung' });
   var ORIGIN_LABEL_MAP = {
     real_ai_question: 'echte KI-Frage',
+    vertrieb: 'Kundenfrage aus Vertrieb/Support',
     paa: 'Google-Nutzerfrage',
     keyword: 'Keyword',
     derived: 'abgeleitet (ohne Datenbeleg)',
@@ -1132,6 +1147,63 @@
 
   function sectionTitle(number, text) {
     return el('h4', { class: 'cvz-cs-section-title' }, [el('span', { class: 'cvz-cs-step-num' }, [String(number)]), text]);
+  }
+
+  // NEU: Kundenfragen aus Vertrieb/Support. Das Textfeld hat eine Frage pro Zeile. Die Grenzen
+  // gelten genauso im Backend (MAX_CUSTOMER_QUESTIONS 8, 3 bis 200 Zeichen). Zu viel oder zu Langes
+  // wird hier gemeldet statt still gekürzt, damit der Kunde nichts Wichtiges verliert.
+  var MAX_CUSTOMER_QUESTIONS = 8;
+  var CUSTOMER_QUESTION_MIN = 3;
+  var CUSTOMER_QUESTION_MAX = 200;
+  function parseCustomerQuestions(text) {
+    var seen = {};
+    var list = [];
+    String(text || '').split(/\r?\n/).forEach(function (line) {
+      // Aufzählungszeichen und Nummerierung am Zeilenanfang entfernen ("- ", "• ", "1. ", "2) ")
+      var q = line.replace(/^\s*(?:[-*\u2022\u2013\u2014]+|\d{1,2}[.)])\s+/, '').replace(/\s+/g, ' ').trim();
+      if (q.length < CUSTOMER_QUESTION_MIN) return;
+      var key = q.toLowerCase();
+      if (seen[key]) return;
+      seen[key] = true;
+      list.push(q);
+    });
+    if (list.length > MAX_CUSTOMER_QUESTIONS) {
+      return { list: list, error: 'Bitte höchstens ' + MAX_CUSTOMER_QUESTIONS + ' Fragen angeben (aktuell ' + list.length + '). Nimm die wichtigsten.' };
+    }
+    var tooLong = list.filter(function (q) { return q.length > CUSTOMER_QUESTION_MAX; })[0];
+    if (tooLong) {
+      return { list: list, error: 'Eine Frage ist zu lang (höchstens ' + CUSTOMER_QUESTION_MAX + ' Zeichen): "' + tooLong.slice(0, 50) + '…". Bitte kürzen oder auf zwei Zeilen aufteilen.' };
+    }
+    return { list: list, error: '' };
+  }
+
+  // NEU: gemeinsamer Baustein für Zielgruppen-Schritt UND Themen-Schritt im Tracker-Pfad (dort gibt
+  // es keinen Zielgruppen-Schritt). Hängt Titel, Hinweis, Textfeld und Zähler an container.
+  // number = Nummer im Titel, null = Titel ohne Nummer.
+  function renderCustomerQuestionsBlock(container, initialList, growAreas, number) {
+    var title = number
+      ? sectionTitle(number, 'Häufige Fragen aus Vertrieb und Support (optional)')
+      : el('h4', { class: 'cvz-cs-section-title' }, ['Häufige Fragen aus Vertrieb und Support (optional)']);
+    container.appendChild(title);
+    container.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+      'Welche Fragen und Einwände hören Vertrieb oder Support am häufigsten, bevor jemand kauft? Eine Frage pro Zeile, möglichst im Originalwortlaut der Kunden. 3 bis 5 reichen, höchstens ' + MAX_CUSTOMER_QUESTIONS + '. Das ist die Kundensicht, die Suchdaten nicht zeigen.',
+    ]));
+    var input = makeGrowArea((initialList || []).join('\n'),
+      'z.B.\nSeid ihr DSGVO-konform und wo liegen die Daten?\nWie lange dauert die Einführung?\nWas passiert mit unseren bestehenden Seiten?', growAreas);
+    input.style.minHeight = '96px';
+    container.appendChild(input);
+    var count = el('p', { class: 'cvz-cs-hint' });
+    container.appendChild(count);
+    container.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+      'Keine Daten dazu? Dann lass das Feld leer. Bitte keine Vermutungen eintragen: Sie würden später wie echte Kundenfragen behandelt.',
+    ]));
+    function updateCount() {
+      var parsed = parseCustomerQuestions(input.value);
+      count.textContent = parsed.list.length === 0 ? '' : parsed.list.length + ' von ' + MAX_CUSTOMER_QUESTIONS + ' Fragen erkannt.';
+    }
+    input.addEventListener('input', updateCount);
+    updateCount();
+    return { input: input, numberEl: title.querySelector ? title.querySelector('.cvz-cs-step-num') : null };
   }
 
   function renderAudienceStep(audience, topic, domain, validationId, originalTopic) {
@@ -1178,6 +1250,7 @@
     function refresh() {
       var solo = soloRadio.checked;
       rolesSection.style.display = solo ? 'none' : '';
+      if (qNum) qNum.textContent = solo ? '3' : '4';
       addBtn.style.display = rows.length >= 3 ? 'none' : '';
       rows.forEach(function (r, i) {
         r.title.textContent = 'Rolle ' + (i + 1);
@@ -1235,6 +1308,11 @@
     rolesSection.appendChild(championStatus);
     wrap.appendChild(rolesSection);
 
+    // NEU: Fragen aus Vertrieb und Support (optional). Gilt für Buying Center UND Solo-Zielgruppe.
+    var questionsBlock = renderCustomerQuestionsBlock(wrap, audience.kundenfragen, growAreas, 4);
+    var questionsInput = questionsBlock.input;
+    var qNum = questionsBlock.numberEl;
+
     if (audience.annahmen && audience.annahmen.length > 0) {
       var assumptions = el('ul', { class: 'cvz-cs-topic-alt-list' });
       audience.annahmen.forEach(function (a) { assumptions.appendChild(el('li', {}, [a])); });
@@ -1266,12 +1344,15 @@
       if (!solo && roles.length === 0) { errorLine.textContent = 'Bitte mindestens eine Rolle angeben oder oben "Eine Person allein" wählen.'; return; }
       if (roles.some(function (r) { return r.rolle.length < 2; })) { errorLine.textContent = 'Jede Rolle braucht einen Namen.'; return; }
       if (!solo && !roles.some(function (r) { return r.ist_champion; })) { errorLine.textContent = 'Bitte lege einen Champion fest: Klicke bei genau einer Rolle auf "Champion".'; return; }
+      var customerQuestions = parseCustomerQuestions(questionsInput.value);
+      if (customerQuestions.error) { errorLine.textContent = customerQuestions.error; return; }
       errorLine.textContent = '';
       startPromptPlan({
         ist_solo_zielgruppe: solo,
         rollen: roles,
         zielgruppe: groupInput.value.trim(),
         annahmen: audience.annahmen || [],
+        kundenfragen: customerQuestions.list,
       }, topic, domain, validationId, originalTopic);
     });
     wrap.appendChild(el('div', { class: 'cvz-cs-topic-check-actions' }, [backBtn, nextBtn]));
@@ -1323,7 +1404,7 @@
         wrap.appendChild(el('div', { class: 'cvz-cs-topic-option' }, [
           el('label', {}, [box, ' ' + p.prompt]),
           el('p', { class: 'cvz-cs-hint' }, [meta]),
-        ]));
+        ].concat(p.customer_question ? [el('p', { class: 'cvz-cs-hint' }, ['Ausgangspunkt (deine Kundenfrage): "' + p.customer_question + '"'])] : [])));
       });
     });
 
@@ -1347,7 +1428,7 @@
     state.root.appendChild(wrap);
   }
 
-  function startGeneration(topic, domain, validationId, trackerTopicId, planExtra) {
+  function startGeneration(topic, domain, validationId, trackerTopicId, planExtra, customerQuestions) {
     renderProcessing(topic);
     apiFetch('/api/content-strategy/generate', {
       method: 'POST',
@@ -1360,6 +1441,8 @@
         tracker_topic_id: trackerTopicId || undefined,
         prompt_plan_id: planExtra ? planExtra.prompt_plan_id : undefined,
         selected_prompts: planExtra ? planExtra.selected_prompts : undefined,
+        // NEU: nur im Tracker-Pfad (sonst stecken die Kundenfragen schon in der bestätigten Zielgruppe des Plans)
+        customer_questions: trackerTopicId && customerQuestions && customerQuestions.length > 0 ? customerQuestions : undefined,
       }),
     })
       .then(function (res) {
