@@ -24,9 +24,14 @@
  *     zukuenftigen Termin vor. Reihenfolge fuer Analysen: next_credit_reset_date, dann
  *     period_start_date + 1 Monat, erst ganz zuletzt license_expires_at (bei Jahresplaenen
  *     waere das sonst das Vertragsende statt des naechsten monatlichen Credit-Resets).
- *     Aufbau und Strategien: period_start + 1 Monat, ebenfalls vorgerechnet.
- *     ACHTUNG: Das ist nur die ANZEIGE des naechsten Termins. Die Zaehler (z.B. 5/5) setzt
- *     weiterhin das Backend zurueck, das Dashboard rechnet sie nicht selbst um.
+ *     Aufbau und Strategien: bei zahlenden Plaenen dasselbe Datum wie die Analysen
+ *     (Abrechnungstag), bei anderen Plaenen period_start + 1 Monat, vorgerechnet.
+ *     ACHTUNG: Das ist nur die ANZEIGE. Die Zaehler setzt die SQL-Funktion
+ *     reset_user_credits_if_due zentral am Abrechnungstag zurueck (siehe billing-anchor-reset.sql).
+ *   - NEU: Aufbau-Projekte zeigen ihren Typ (page_projects.page_type: Landingpage oder
+ *     Pillar Page), im Aufbau-Tab und in "Zuletzt aktiv". Ohne page_type in den Daten wird
+ *     nichts angezeigt. Die Node-API muss page_type mitliefern, die RPC get_recent_page_projects
+ *     muss um die Spalte erweitert werden (siehe Chat).
  *   - NEU: Die Kontingent-Karten laden sich neu, sobald eine Analyse abgeschlossen ist oder
  *     fehlschlaegt (Polling) bzw. sich Analysen per Realtime aendern. Vorher aktualisierten
  *     sich nur die Zeilen der Liste, nicht die Zahlen darueber.
@@ -1067,6 +1072,9 @@
     var aufbauRenewalDate = null;
     if (isFreePlan) {
       aufbauRenewalSub = sessionsLeft > 0 ? '1 kostenlose Aufbau-Session verfügbar' : 'Kostenlose Aufbau-Session bereits genutzt';
+    } else if (isPaid && renewalDate) {
+      aufbauRenewalDate = renewalDate;
+      aufbauRenewalSub = 'Erneuert sich am ' + renewalDate;
     } else if (bu.page_agent_sessions_period_start) {
       aufbauRenewalDate = formatDateDe(rollToFuture(new Date(bu.page_agent_sessions_period_start), 1));
       aufbauRenewalSub = aufbauRenewalDate ? ('Erneuert sich am ' + aufbauRenewalDate) : '-';
@@ -1119,6 +1127,9 @@
     var strategyRenewalDate = null;
     if (isFreePlan) {
       strategyRenewalSub = strategyLeft > 0 ? '1 kostenlose Content-Strategie verfügbar' : 'Kostenlose Content-Strategie bereits genutzt';
+    } else if (isPaid && renewalDate) {
+      strategyRenewalDate = renewalDate;
+      strategyRenewalSub = 'Erneuert sich am ' + renewalDate;
     } else if (bu.content_strategy_sessions_period_start) {
       strategyRenewalDate = formatDateDe(rollToFuture(new Date(bu.content_strategy_sessions_period_start), 1));
       strategyRenewalSub = strategyRenewalDate ? ('Erneuert sich am ' + strategyRenewalDate) : '-';
@@ -1746,6 +1757,15 @@
     structure_ready: { text: 'Struktur erstellt', color: '#4fd1c5' },
     done:            { text: 'Fertig',            color: '#059669' },
   };
+  // NEU (v11): Typ des Aufbau-Projekts (page_projects.page_type: 'landingpage' | 'pillar').
+  // Liefert '' bei fehlendem/unbekanntem Typ, dann wird nichts angezeigt statt zu raten.
+  var PAGE_TYPE_LABELS = {
+    landingpage: 'Landingpage',
+    pillar:      'Pillar Page',
+  };
+  function pageTypeLabel(pageType) {
+    return PAGE_TYPE_LABELS[pageType] || '';
+  }
   function renderAufbauSkeleton(el) {
     var rows = '';
     for (var i = 0; i < 3; i++) {
@@ -1789,7 +1809,8 @@
         '</div>' +
         '<span class="cvz-p-badge" style="color:' + statusInfo.color + ';"></span>';
       row.querySelector('.cvz-p-name').textContent = p.name || 'Unbenanntes Projekt';
-      row.querySelector('.cvz-p-meta').textContent = 'Zuletzt bearbeitet: ' + formatRelativeTime(p.updated_at);
+      var typeLabel = pageTypeLabel(p.page_type);
+      row.querySelector('.cvz-p-meta').textContent = (typeLabel ? typeLabel + ' · ' : '') + 'Zuletzt bearbeitet: ' + formatRelativeTime(p.updated_at);
       row.querySelector('.cvz-p-badge').textContent = statusInfo.text;
       row.addEventListener('click', function () {
         window.location.href = buildAufbauProjectUrl(p.id);
@@ -1873,7 +1894,7 @@
       return {
         type:      'aufbau',
         iconKey:   'aufbau',
-        title:     'Aufbau-Session',
+        title:     pageTypeLabel(p.page_type) ? 'Aufbau-Session · ' + pageTypeLabel(p.page_type) : 'Aufbau-Session',
         context:   truncate(p.name || 'Unbenanntes Projekt', 60),
         timestamp: p.updated_at,
         href:      buildAufbauProjectUrl(p.id),
