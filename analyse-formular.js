@@ -6,8 +6,11 @@
   var CONFIG = {
     supabaseUrl:     'https://zpkifipmyeunorhtepzq.supabase.co',
     supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU',
-    // WHY: Webhook-URL und Secret wurden aus dem Frontend entfernt.
-    // trigger-analysis Edge Function fügt das Secret serverseitig hinzu.
+    // WHY: Die Analyse läuft jetzt im eigenen Worker (Railway) statt in Make.
+    // Der Worker prüft das Memberstack-Token serverseitig und legt die Secrets selbst ab.
+    // Rückfall: useWorker auf false setzen, dann läuft es wieder über die alte Edge Function (Make).
+    useWorker:       true,
+    workerUrl:       'https://DEINE-RAILWAY-DOMAIN/api/analyze',
     triggerUrl:      'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/trigger-analysis',
     maxInitAttempts: 30,
     initRetryMs:     300,
@@ -38,6 +41,18 @@
       id:    result?.data?.id    || null,
       email: result?.data?.auth?.email || result?.data?.email || null,
     };
+  }
+
+  // Das Memberstack-Token (JWT) des eingeloggten Nutzers
+  async function getMemberToken() {
+    try {
+      var c = await window.$memberstackDom.getMemberCookie();
+      if (typeof c === 'string') return c;
+      return c?.data || null;
+    } catch (e) {
+      console.warn('[CVZ] Token nicht lesbar:', e);
+      return null;
+    }
   }
 
   async function fetchCredits(memberstackId) {
@@ -71,17 +86,57 @@
       return;
     }
 
-    // WHY: FormData → JSON damit trigger-analysis Edge Function das
-    // Webhook-Secret serverseitig anhängen kann (nie im Browser-Source).
     var payload = {};
     new FormData(formEl).forEach(function(v, k) { payload[k] = v; });
 
-    var res = await fetch(CONFIG.triggerUrl, {
+    // ALTER WEG (Make über Edge Function) – nur noch als Rückfall
+    if (!CONFIG.useWorker) {
+      var legacy = await fetch(CONFIG.triggerUrl, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      window.location.href = legacy.ok ? '/analyse/in-arbeit' : '/analyse/fehler';
+      return;
+    }
+
+    // NEUER WEG: Worker. Das Token beweist dem Server, wer du bist.
+    var token = await getMemberToken();
+    if (!token) {
+      window.location.href = '/analyse/fehler';
+      return;
+    }
+
+    var res = await fetch(CONFIG.workerUrl, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': 'Bearer ' + token,
+      },
+      body: JSON.stringify(payload),
     });
-    window.location.href = res.ok ? '/analyse/in-arbeit' : '/analyse/fehler';
+
+    var data = null;
+    try { data = await res.json(); } catch (e) { /* Antwort war kein JSON */ }
+
+    // Der Worker antwortet auch bei "keine Credits" und "Lizenz abgelaufen" mit Status 200.
+    // Erfolg heißt deshalb: Status ok UND success === true.
+    if (res.ok && data && data.success === true) {
+      window.location.href = '/analyse/in-arbeit';
+      return;
+    }
+
+    console.warn('[CVZ] Analyse nicht gestartet:', res.status, data);
+
+    // Warteschlange voll: Nutzer kann es gleich nochmal versuchen, kein Fehler-Redirect
+    if (res.status === 503) {
+      setSubmitButton('idle', 'Analyse starten');
+      alert((data && data.message) || 'Gerade sind sehr viele Analysen in Arbeit. Bitte versuche es in ein paar Minuten erneut.');
+      return;
+    }
+
+    // Alles andere (kein Credit, Lizenz abgelaufen, nicht angemeldet, Serverfehler)
+    window.location.href = '/analyse/fehler';
   }
 
   // ── UI layer ─────────────────────────────────────────────────────────────────
