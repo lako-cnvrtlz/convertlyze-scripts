@@ -10,7 +10,7 @@
     // Der Worker prüft das Memberstack-Token serverseitig und legt die Secrets selbst ab.
     // Rückfall: useWorker auf false setzen, dann läuft es wieder über die alte Edge Function (Make).
     useWorker:       true,
-    workerUrl:       'https://DEINE-RAILWAY-DOMAIN/api/analyze',
+    workerUrl:       'https://convertlyze-analysis-worker-production.up.railway.app/api/analyze',
     triggerUrl:      'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/trigger-analysis',
     maxInitAttempts: 30,
     initRetryMs:     300,
