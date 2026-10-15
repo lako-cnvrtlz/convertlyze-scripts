@@ -1,13 +1,30 @@
 /**
- * dashboard-v11.js
+ * dashboard-v12.js
  * -----------------
  * Member-Dashboard: Stat-Karten, Aktions-Buttons, Analysen-Liste, PDF-Download,
  * Team-Einladungen (Sichtbarkeit), "Zuletzt aktiv"-Uebersicht - komplett aus JS
  * generiert, kein Custom-Attribute-Bauplan mehr in Webflow noetig.
  *
  * Seite: /member/dashboard
- * Embedding: jsDelivr (<script src=".../dashboard-v11.js">)
+ * Embedding: jsDelivr (<script src=".../dashboard-v12.js">)
  * Dependencies: window.supabase (global), window.$memberstackDom
+ *
+ * ÄNDERUNGEN ggü. v11 (Kontingent-Übersicht neu geordnet, UX):
+ *   - GEÄNDERT: Statt 12 Stat-Karten (Verbrauch / Verbleibend / Pay-per-Use je Tool) gibt es jetzt
+ *     eine schmale Plan-Kopfzeile (Plan, Monatskontingent, Erneuerungsdatum) und genau 4 Karten
+ *     pro Tool: Analysen, Aufbau-Sessions, Content-Strategien, Tracker. Jede Karte zeigt EINE
+ *     grosse Zahl ("verfuegbar", Plan-Kontingent + Pay-per-Use zusammen), darunter die
+ *     Aufschluesselung, einen Balken fuer das Plan-Kontingent und einen Button.
+ *   - NEU: Farblogik: Karten bleiben neutral, bei weniger als 20 % Plan-Rest ohne Pay-per-Use
+ *     gelb, bei 0 rot.
+ *   - NEU: Tracker-Karte liest Nutzung UND Limit aus der RPC get_tracker_quota (siehe
+ *     tracker-quota-rpc.sql, VOR dem Deployment in Supabase anlegen). Dashboard und Tracker
+ *     nutzen damit dieselbe Quelle. Ohne die RPC faellt das Dashboard auf get_tracker_topic_usage
+ *     und das Limit der eigenen Zeile zurueck. Ueber dem Limit (z.B. nach Downgrade) erscheint
+ *     eine rote Meldung statt "300 %".
+ *   - Unveraendert: Tabs, Analysenliste, Realtime/Polling, Kontingent-Hinweis-Fenster, Team-Logik.
+ *   - Die Button-Reihe unter den Karten zeigt nur noch Tools, deren Karte ausgeblendet ist
+ *     (z.B. Plan ohne Aufbau-Kontingent), damit jeder Einstieg erreichbar bleibt.
  *
  * ÄNDERUNGEN ggü. v10 (Team-Daten, Erneuerungsdaten, Live-Aktualisierung):
  *   - GEÄNDERT: Die Owner-Zeile (Plan, Credits, Perioden, Topics) wird bei Team-Mitgliedern
@@ -452,6 +469,29 @@
     return isNaN(n) ? null : Math.max(0, Math.round(n));
   }
 
+  // NEU (v12): Nutzung UND Limit des Trackers aus einer Quelle (RPC get_tracker_quota, siehe
+  // tracker-quota-rpc.sql). Dieselbe Logik wie im Tracker selbst (team-weit, Limit der Owner-Zeile),
+  // damit Dashboard und Tracker nie wieder unterschiedliche Zahlen zeigen. Fehlt die RPC, faellt die
+  // Funktion auf get_tracker_topic_usage zurueck (dann ohne eigenes Limit: es gilt das der Zeile bu).
+  async function fetchTrackerQuota(userId) {
+    if (!userId) return null;
+    var result = await window.supabase.rpc('get_tracker_quota', { p_user_id: userId });
+    if (!result.error && result.data) {
+      var d = Array.isArray(result.data) ? result.data[0] : result.data;
+      if (d && d.used != null) {
+        return {
+          used:      Math.max(0, Math.round(Number(d.used))),
+          limit:     d.limit != null ? Math.max(0, Math.round(Number(d.limit))) : null,
+          included:  d.plan_included != null ? Math.round(Number(d.plan_included)) : null,
+          purchased: d.purchased != null ? Math.round(Number(d.purchased)) : null,
+        };
+      }
+    }
+    if (result.error) console.warn('[CVZ] fetchTrackerQuota (Fallback auf get_tracker_topic_usage):', result.error);
+    var n = await fetchTrackerUsage(userId);
+    return n == null ? null : { used: n, limit: null, included: null, purchased: null };
+  }
+
   // NEU (06.10.2026): Free Trial fuer den Tracker (Free Plan). Spiegel von get_trial_state()
   // in run_topic.py, die Laenge steht in CONFIG.TRACKER_TRIAL_DAYS. bu = Owner-/Kaeufer-Zeile.
   // Rueckgabe: { state: 'none' | 'available' | 'running' | 'expired', daysLeft, endsAt }
@@ -757,6 +797,27 @@
         'text-decoration:none;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;}' +
       '.cvz-nc-btn-primary{background:#4fd1c5;color:#0d1117;}' +
       '.cvz-nc-btn-secondary{background:transparent;color:#e6edf3;border-color:#30363d;}' +
+      // -- NEU (v12): Plan-Kopfzeile + Tool-Karten -------------------------------------
+      '.cvz-plan-bar{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;background:var(--cvz-card);border:1px solid var(--cvz-border);padding:14px 20px;margin-bottom:16px;}' +
+      '.cvz-plan-name{font-size:16px;font-weight:700;color:var(--cvz-text);}' +
+      '.cvz-plan-detail{font-size:13px;color:var(--cvz-muted);}' +
+      '.cvz-tc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:28px;}' +
+      '.cvz-tc{background:var(--cvz-card);border:1px solid var(--cvz-border);padding:20px;display:flex;flex-direction:column;gap:6px;}' +
+      '.cvz-tc-head{display:flex;align-items:center;gap:10px;margin-bottom:6px;}' +
+      '.cvz-tc-icon{width:36px;height:36px;background:var(--cvz-teal-dim);display:flex;align-items:center;justify-content:center;flex-shrink:0;}' +
+      '.cvz-tc-label{font-size:14px;font-weight:600;color:var(--cvz-text);}' +
+      '.cvz-tc-value{font-size:34px;font-weight:700;color:var(--cvz-text);line-height:1.1;display:flex;align-items:baseline;gap:8px;}' +
+      '.cvz-tc-unit{font-size:13px;font-weight:500;color:var(--cvz-muted);}' +
+      '.cvz-tc-sub{font-size:13px;color:var(--cvz-muted);}' +
+      '.cvz-tc-meta{font-size:12px;color:var(--cvz-muted);}' +
+      '.cvz-tc-meta:empty{display:none;}' +
+      '.cvz-tc-alert{display:none;font-size:13px;color:#f87171;border:1px solid rgba(248,113,113,0.4);background:rgba(248,113,113,0.08);padding:8px 10px;}' +
+      '.cvz-tc-foot{margin-top:auto;padding-top:12px;}' +
+      '.cvz-tc-foot .cvz-d-btn{width:100%;padding:10px 16px;font-size:14px;}' +
+      '.cvz-tc-warn .cvz-d-bar-fill{background:#f59e0b;}' +
+      '.cvz-tc-warn .cvz-tc-value{color:#f59e0b;}' +
+      '.cvz-tc-empty .cvz-d-bar-fill,.cvz-tc-over .cvz-d-bar-fill{background:#ef4444;}' +
+      '.cvz-tc-empty .cvz-tc-value,.cvz-tc-over .cvz-tc-value{color:#ef4444;}' +
       '@media (max-width:768px){' +
         '.cvz-p-main{width:100%;}' +
         '.cvz-p-side{width:100%;flex-wrap:wrap;}' +
@@ -781,27 +842,31 @@
     tracker:   '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" stroke="#4fd1c5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   };
 
-  function statCardHtml(opts) {
-    // opts: { wrapperId, iconKey, label, valueId, subId, withBar, barFillId, hidden }
+  function toolCardHtml(o) {
+    // o: { key, iconKey, label, unit, alert, hidden, cta: { label, href } }
+    var id = 'cvz-tc-' + o.key;
     return (
-      '<div id="' + opts.wrapperId + '" class="cvz-d-card"' + (opts.hidden ? ' style="display:none"' : '') + '>' +
-        '<div class="cvz-d-icon">' + ICONS[opts.iconKey] + '</div>' +
-        '<div class="cvz-d-label">' + escapeHtml(opts.label) + '</div>' +
-        '<div class="cvz-d-value"><span id="' + opts.valueId + '" class="cvz-d-skel">--</span></div>' +
-        '<div class="cvz-d-sub"><span id="' + opts.subId + '" class="cvz-d-skel">--</span></div>' +
-        (opts.withBar
-          ? '<div class="cvz-d-bar-track"><div id="' + opts.barFillId + '" class="cvz-d-bar-fill"></div></div>'
-          : '') +
-        // NEU: Einstiegs-Button direkt in der Karte (opts.cta = { tool, id, label, href }). Der
-        // delegierte Klick-Handler ([data-cvz-tool]) greift auch hier und zeigt bei 0 Kontingent den Kauf-Hinweis.
-        (opts.cta
-          ? '<a id="' + opts.cta.id + '" data-cvz-tool="' + opts.cta.tool + '" class="cvz-d-btn cvz-d-btn-primary cvz-d-card-btn" href="' + opts.cta.href + '">' + escapeHtml(opts.cta.label) + '</a>'
-          : '') +
+      '<div id="' + id + '" class="cvz-tc"' + (o.hidden ? ' style="display:none"' : '') + '>' +
+        '<div class="cvz-tc-head">' +
+          '<div class="cvz-tc-icon">' + ICONS[o.iconKey] + '</div>' +
+          '<div class="cvz-tc-label">' + escapeHtml(o.label) + '</div>' +
+        '</div>' +
+        '<div class="cvz-tc-value">' +
+          '<span id="' + id + '-value" class="cvz-d-skel">--</span>' +
+          '<span class="cvz-tc-unit" id="' + id + '-unit">' + escapeHtml(o.unit) + '</span>' +
+        '</div>' +
+        '<div class="cvz-tc-sub"><span id="' + id + '-sub" class="cvz-d-skel">--</span></div>' +
+        '<div class="cvz-d-bar-track"><div id="' + id + '-bar" class="cvz-d-bar-fill"></div></div>' +
+        '<div class="cvz-tc-meta" id="' + id + '-meta"></div>' +
+        (o.alert ? '<div class="cvz-tc-alert" id="' + id + '-alert"></div>' : '') +
+        '<div class="cvz-tc-foot">' +
+          '<a id="cvz-d-card-btn-' + o.key + '" data-cvz-tool="' + o.key + '" class="cvz-d-btn cvz-d-btn-primary" href="' + o.cta.href + '">' + escapeHtml(o.cta.label) + '</a>' +
+        '</div>' +
       '</div>'
     );
   }
 
-  function buildDashboardShell(root) {
+    function buildDashboardShell(root) {
     injectDashboardStyle();
 
     root.innerHTML =
@@ -811,26 +876,15 @@
       // nicht mehr danach - "Zuletzt aktiv" (cvz-ract-wrap) ist entsprechend weiter unten in
       // dieser Kette verschoben, keine eigene Logik-Änderung an der Activity-Section selbst.
       '<h2 class="cvz-d-title">Übersicht</h2>' +
-      '<div class="cvz-d-stats">' +
-        statCardHtml({ wrapperId: 'cvz-d-c1', iconKey: 'barChart', label: 'Analysen diesen Monat',        valueId: 'cvz-d-c1-value', subId: 'cvz-d-c1-sub', withBar: true, barFillId: 'cvz-d-c1-bar' }) +
-        statCardHtml({ wrapperId: 'cvz-d-c2', iconKey: 'check',    label: 'Verbleibende Analysen',         valueId: 'cvz-d-c2-value', subId: 'cvz-d-c2-sub', withBar: false, cta: { tool: 'analyse', id: 'cvz-d-card-btn-analyse', label: 'Neue Analyse', href: CONFIG.NEW_ANALYSIS_URL } }) +
-        statCardHtml({ wrapperId: 'cvz-d-c3', iconKey: 'plan',     label: 'Aktiver Plan',                   valueId: 'cvz-d-c3-value', subId: 'cvz-d-c3-sub', withBar: false }) +
-        statCardHtml({ wrapperId: 'cvz-d-c4', iconKey: 'aufbau',   label: 'Aufbau-Sessions diesen Monat',   valueId: 'cvz-d-c4-value', subId: 'cvz-d-c4-sub', withBar: true, barFillId: 'cvz-d-c4-bar', hidden: true }) +
-        statCardHtml({ wrapperId: 'cvz-d-c5', iconKey: 'check',    label: 'Verbleibende Aufbau-Sessions',  valueId: 'cvz-d-c5-value', subId: 'cvz-d-c5-sub', withBar: false, hidden: true, cta: { tool: 'aufbau', id: 'cvz-d-card-btn-aufbau', label: 'Seite aufbauen', href: CONFIG.NEW_LANDINGPAGE_URL } }) +
-        statCardHtml({ wrapperId: 'cvz-d-c6', iconKey: 'cart',     label: 'Pay-per-Use Analysen',          valueId: 'cvz-d-c6-value', subId: 'cvz-d-c6-sub', withBar: false, hidden: true }) +
-        statCardHtml({ wrapperId: 'cvz-d-c7', iconKey: 'cart',     label: 'Pay-per-Use Aufbau-Sessions',   valueId: 'cvz-d-c7-value', subId: 'cvz-d-c7-sub', withBar: false, hidden: true }) +
-        // NEU (siehe Chat-Verlauf, Lasse: "Bei den Informationen sollten wir auch Strategie mit
-        // reinnehmen") - exakt dasselbe Drei-Karten-Muster wie Aufbau (4/5/7): Verbrauch diesen
-        // Monat mit Balken, Verbleibend, Pay-per-Use. Alle drei starten hidden, showEl() in
-        // renderStatCards() blendet sie nur ein, wenn der Plan ueberhaupt ein Content-Strategie-
-        // Kontingent oder PPU-Guthaben hat (gleiche Logik wie showAufbauCards/Karte 6-7).
-        statCardHtml({ wrapperId: 'cvz-d-c8', iconKey: 'strategy', label: 'Content-Strategien diesen Monat', valueId: 'cvz-d-c8-value', subId: 'cvz-d-c8-sub', withBar: true, barFillId: 'cvz-d-c8-bar', hidden: true }) +
-        statCardHtml({ wrapperId: 'cvz-d-c9', iconKey: 'check',    label: 'Verbleibende Content-Strategien', valueId: 'cvz-d-c9-value', subId: 'cvz-d-c9-sub', withBar: false, hidden: true, cta: { tool: 'strategie', id: 'cvz-d-card-btn-strategie', label: 'Content-Strategie erstellen', href: CONFIG.CONTENT_STRATEGY_PAGE_URL } }) +
-        statCardHtml({ wrapperId: 'cvz-d-c10', iconKey: 'cart',    label: 'Pay-per-Use Content-Strategien', valueId: 'cvz-d-c10-value', subId: 'cvz-d-c10-sub', withBar: false, hidden: true }) +
-        // NEU (v10): Customer Journey Tracker. Beide Karten starten hidden und werden in
-        // renderStatCards() nur eingeblendet, wenn Topics vorhanden sind (inklusive oder gebucht).
-        statCardHtml({ wrapperId: 'cvz-d-c11', iconKey: 'tracker', label: 'Tracker-Topics',  valueId: 'cvz-d-c11-value', subId: 'cvz-d-c11-sub', withBar: true, barFillId: 'cvz-d-c11-bar', hidden: true }) +
-        statCardHtml({ wrapperId: 'cvz-d-c12', iconKey: 'check',   label: 'Freie Topics',    valueId: 'cvz-d-c12-value', subId: 'cvz-d-c12-sub', withBar: false, hidden: true, cta: { tool: 'tracker', id: 'cvz-d-card-btn-tracker', label: 'Tracker öffnen', href: CONFIG.TRACKER_URL } }) +
+      '<div class="cvz-plan-bar">' +
+        '<span class="cvz-plan-name"><span id="cvz-plan-name" class="cvz-d-skel">--</span></span>' +
+        '<span class="cvz-plan-detail"><span id="cvz-plan-detail" class="cvz-d-skel">--</span></span>' +
+      '</div>' +
+      '<div class="cvz-tc-grid">' +
+        toolCardHtml({ key: 'analyse',   iconKey: 'barChart', label: 'Analysen',           unit: 'verfügbar', cta: { label: 'Neue Analyse',                href: CONFIG.NEW_ANALYSIS_URL } }) +
+        toolCardHtml({ key: 'aufbau',    iconKey: 'aufbau',   label: 'Aufbau-Sessions',    unit: 'verfügbar', hidden: true, cta: { label: 'Seite aufbauen',              href: CONFIG.NEW_LANDINGPAGE_URL } }) +
+        toolCardHtml({ key: 'strategie', iconKey: 'strategy', label: 'Content-Strategien', unit: 'verfügbar', hidden: true, cta: { label: 'Content-Strategie erstellen', href: CONFIG.CONTENT_STRATEGY_PAGE_URL } }) +
+        toolCardHtml({ key: 'tracker',   iconKey: 'tracker',  label: 'Tracker-Topics',     unit: 'frei',      hidden: true, alert: true, cta: { label: 'Tracker öffnen',              href: CONFIG.TRACKER_URL } }) +
       '</div>' +
       '<div class="cvz-d-actions">' +
         '<a id="cvz-d-btn-new-analysis" data-cvz-tool="analyse" class="cvz-d-btn cvz-d-btn-primary" href="' + CONFIG.NEW_ANALYSIS_URL + '">Neue Analyse</a>' +
@@ -971,7 +1025,51 @@
 
   // -- UI: Stat-Karten befuellen -------------------------------------------------
 
-  function renderStatCards(user, sessionsLimit, contentStrategyLimit, activeTopics) {
+  // NEU (v12): Hilfsfunktionen fuer die vier Tool-Karten (Analysen, Aufbau, Strategien, Tracker).
+  // Eine Karte = eine Frage: "Wie oft kann ich das noch machen?" Plan-Kontingent und
+  // Pay-per-Use sind hier zu EINER Zahl zusammengefasst, die Aufschluesselung steht darunter.
+  function setToolCard(key, c) {
+    var id   = 'cvz-tc-' + key;
+    var card = document.getElementById(id);
+    setText(id + '-value', c.value);
+    setText(id + '-sub',   c.sub);
+    var bar = document.getElementById(id + '-bar');
+    if (bar) {
+      bar.style.width = Math.min(Math.max(c.pct || 0, 0), 100) + '%';
+      if (bar.parentNode) bar.parentNode.style.visibility = c.showBar ? 'visible' : 'hidden';
+    }
+    var meta = document.getElementById(id + '-meta');
+    if (meta) meta.textContent = c.meta || '';
+    var alertEl = document.getElementById(id + '-alert');
+    if (alertEl) {
+      alertEl.textContent = c.alert || '';
+      alertEl.style.display = c.alert ? 'block' : 'none';
+    }
+    if (card) {
+      card.classList.remove('cvz-tc-warn', 'cvz-tc-empty', 'cvz-tc-over');
+      if (c.state) card.classList.add('cvz-tc-' + c.state);
+    }
+    showEl(card, c.show, 'flex');
+  }
+
+  // Dringlichkeit: neutral solange alles passt, gelb bei < 20 % Plan-Rest ohne Pay-per-Use, rot bei 0.
+  function toolState(total, planLimit, planLeft, ppu) {
+    if (total <= 0) return 'empty';
+    if (planLimit > 0 && ppu === 0 && (planLeft / planLimit) < 0.2) return 'warn';
+    return '';
+  }
+
+  function toolSub(planLimit, planLeft, ppu, reserved) {
+    var parts = [];
+    parts.push(planLimit > 0 ? ('Plan: ' + planLeft + ' von ' + planLimit + ' übrig') : 'Nicht im Plan enthalten');
+    if (ppu > 0)      parts.push('+' + ppu + ' Pay-per-Use');
+    if (reserved > 0) parts.push(reserved + ' in Bearbeitung');
+    return parts.join(' · ');
+  }
+
+  // quota (v12): { used, limit, included, purchased } aus get_tracker_quota, oder null.
+  // limit/included/purchased koennen null sein (Fallback auf die alte RPC): dann gilt das Limit der Zeile bu.
+  function renderStatCards(user, sessionsLimit, contentStrategyLimit, quota) {
     var bu           = user._billingUser || user;
     var reserved     = Math.max(0, Math.round(Number(bu.reserved_credits || 0)));
     var used         = Math.round(Number(bu.credits_used_current_period || 0));
@@ -979,13 +1077,10 @@
     var ppuCredits   = Math.round(Number(user.ppu_credits || 0));
     var ppuReserved  = Math.round(Number(user.reserved_ppu_credits || 0));
     var ppuAvailable = Math.max(ppuCredits - ppuReserved, 0);
-    // Aufbau-PPU liegt wie ppu_credits auf der eigenen users-Zeile des Members
-    // (nicht auf bu/billingUser) - siehe Kommentar bei Karte 6/7 weiter unten.
+    // Aufbau-/Strategie-PPU liegen wie ppu_credits auf der eigenen users-Zeile des Members (nicht auf bu).
     var ppuAufbauCredits   = Math.round(Number(user.ppu_aufbau_credits || 0));
     var ppuAufbauReserved  = Math.round(Number(user.reserved_ppu_aufbau_credits || 0));
     var ppuAufbauAvailable = Math.max(ppuAufbauCredits - ppuAufbauReserved, 0);
-    // Strategie-PPU liegt genau wie ppu_aufbau_credits auf der eigenen users-Zeile des Members,
-    // nicht auf bu/billingUser - siehe Kommentar bei Karte 10 weiter unten.
     var ppuStrategyCredits   = Math.round(Number(user.ppu_strategy_credits || 0));
     var ppuStrategyReserved  = Math.round(Number(user.reserved_ppu_strategy_credits || 0));
     var ppuStrategyAvailable = Math.max(ppuStrategyCredits - ppuStrategyReserved, 0);
@@ -994,22 +1089,12 @@
       ? Math.max(0, Math.round(Number(bu.credits_remaining)) - reserved)
       : Math.max(0, limit - used - reserved);
 
-    // Chat-Kontingent wird weiterhin berechnet (falls an anderer Stelle noch gebraucht),
-    // aber aktuell in keiner Karte angezeigt - siehe Hinweis im Dateikopf.
+    // Chat-Kontingent wird weiterhin berechnet, aber in keiner Karte angezeigt (siehe Dateikopf).
     var chatUsed  = Math.round(Number(user.chat_messages_used_current_period || 0));
     var chatLimit = Math.round(Number(user.chat_messages_limit || 0));
     void chatUsed; void chatLimit;
 
     var percentRaw = limit ? ((used + reserved) / limit) * 100 : 0;
-
-    // Karte 1: Analysen diesen Monat
-    var usedDisplay = reserved > 0
-      ? (used + '/' + limit + ' Analysen (' + reserved + ' in Bearbeitung)')
-      : (used + '/' + limit + ' Analysen');
-    setText('cvz-d-c1-value', usedDisplay);
-    setText('cvz-d-c1-sub', Math.round(percentRaw) + '% des Limits genutzt');
-    var bar1 = document.getElementById('cvz-d-c1-bar');
-    if (bar1) bar1.style.width = Math.min(percentRaw, 100) + '%';
 
     // Plan-Flags
     var isPaid      = CONFIG.PAID_PLANS.indexOf(bu.license_type) !== -1;
@@ -1017,11 +1102,8 @@
     var isFreePlan  = bu.license_type === 'Free';
     var isBetaPlan  = bu.license_type === 'Beta';
 
-    // Karte 2: Verbleibende Analysen (Wert + Renewal/Status als ein Satz)
-    // GEÄNDERT (v11): Reihenfolge next_credit_reset_date -> period_start_date + 1 Monat ->
-    // license_expires_at (nur noch letzter Fallback: bei Jahresplaenen waere es sonst das
-    // Vertragsende statt des naechsten monatlichen Resets). Vergangene Termine werden per
-    // rollToFuture auf den naechsten zukuenftigen vorgerechnet.
+    // Erneuerungsdatum (unveraendert zu v11): next_credit_reset_date -> period_start + 1 Monat ->
+    // license_expires_at, vergangene Termine werden per rollToFuture vorgerechnet.
     var renewalSub = '';
     var renewalDate = null;
     if (isPaid) {
@@ -1038,36 +1120,38 @@
     } else if (isBetaPlan) {
       renewalSub = 'Beta-Analysen erneuern sich nicht automatisch';
     }
-    setText('cvz-d-c2-value', analysesLeft);
-    setText('cvz-d-c2-sub', renewalSub);
 
-    // Karte 3: Aktiver Plan
+    // -- Plan-Kopfzeile (v12): Plan, Monatskontingent und Erneuerung einmal statt in jeder Karte --
     var planName = bu.license_type || '-';
     if (planName.length > 0 && !isPayPerUse) planName = planName.charAt(0).toUpperCase() + planName.slice(1);
     if (!!user.owner_user_id) planName += ' (Team)';
-    setText('cvz-d-c3-value', planName);
-    setText('cvz-d-c3-sub', limit
+    var planDetail = limit
       ? (isPaid ? limit + ' Analysen pro Monat' : isPayPerUse ? '1 Analyse, kein Abo' : limit + ' Analyse(n)')
-      : '');
+      : '';
+    if (isPaid && renewalDate) planDetail += (planDetail ? ' · ' : '') + 'Erneuert sich am ' + renewalDate;
+    setText('cvz-plan-name', planName);
+    setText('cvz-plan-detail', planDetail);
 
-    // Karte 4+5: Aufbau-Sessions (nur wenn Plan ueberhaupt Kontingent hat), im gleichen
-    // Zwei-Karten-Muster wie die Analysen (Verbrauch diesen Monat + Verbleibend).
-    // WHY eigenes Reset-Datum: Aufbau-Sessions laufen auf einer eigenen Periode
-    // (page_agent_sessions_period_start), nicht auf der Analysen-Credits-Periode.
+    // -- Karte Analysen ------------------------------------------------------------------------
+    var analysesTotal = analysesLeft + ppuAvailable;
+    setToolCard('analyse', {
+      show:    true,
+      value:   analysesTotal,
+      sub:     toolSub(limit, analysesLeft, ppuAvailable, reserved + ppuReserved),
+      pct:     percentRaw,
+      showBar: limit > 0,
+      state:   toolState(analysesTotal, limit, analysesLeft, ppuAvailable),
+      meta:    isPaid ? '' : (renewalSub !== '-' ? renewalSub : ''),
+    });
+
+    // -- Karte Aufbau-Sessions -----------------------------------------------------------------
+    // Eigene Periode (page_agent_sessions_period_start), nicht die Analysen-Credits-Periode.
     var sessionsUsed     = Math.round(Number(bu.page_agent_sessions_used_current_period || 0));
     var sessionsLimitNum = Math.round(Number(sessionsLimit || 0));
     var sessionsLeft     = Math.max(sessionsLimitNum - sessionsUsed, 0);
     var sessionsPercent  = sessionsLimitNum ? (sessionsUsed / sessionsLimitNum) * 100 : 0;
     var showAufbauCards  = sessionsLimitNum > 0;
 
-    setText('cvz-d-c4-value', sessionsUsed + '/' + sessionsLimitNum + ' Aufbau-Sessions');
-    setText('cvz-d-c4-sub', Math.round(sessionsPercent) + '% des Kontingents genutzt');
-    var bar4 = document.getElementById('cvz-d-c4-bar');
-    if (bar4) bar4.style.width = Math.min(sessionsPercent, 100) + '%';
-    showEl(document.getElementById('cvz-d-c4'), showAufbauCards, 'flex');
-
-    // GEÄNDERT (v11): period_start + 1 Monat, bei abgelaufener Periode auf den naechsten
-    // zukuenftigen Termin vorgerechnet (rollToFuture). aufbauRenewalDate bleibt ein String.
     var aufbauRenewalSub = '';
     var aufbauRenewalDate = null;
     if (isFreePlan) {
@@ -1081,48 +1165,26 @@
     } else {
       aufbauRenewalSub = '-';
     }
-    setText('cvz-d-c5-value', sessionsLeft);
-    setText('cvz-d-c5-sub', aufbauRenewalSub);
-    showEl(document.getElementById('cvz-d-c5'), showAufbauCards, 'flex');
+    // Datum nur in der Karte zeigen, wenn es nicht schon in der Plan-Kopfzeile steht.
+    var aufbauMeta = (aufbauRenewalSub !== '-' && (!isPaid || aufbauRenewalDate !== renewalDate)) ? aufbauRenewalSub : '';
+    var aufbauTotal = sessionsLeft + ppuAufbauAvailable;
+    var showAufbauCard = showAufbauCards || ppuAufbauCredits > 0;
+    setToolCard('aufbau', {
+      show:    showAufbauCard,
+      value:   aufbauTotal,
+      sub:     toolSub(sessionsLimitNum, sessionsLeft, ppuAufbauAvailable, ppuAufbauReserved),
+      pct:     sessionsPercent,
+      showBar: sessionsLimitNum > 0,
+      state:   toolState(aufbauTotal, sessionsLimitNum, sessionsLeft, ppuAufbauAvailable),
+      meta:    aufbauMeta,
+    });
 
-    // Karte 6: Pay-per-Use (nur wenn vorhanden)
-    var ppuLabelText = ppuCredits === 0
-      ? 'Keine Pay-per-Use Analysen'
-      : ppuReserved > 0 && ppuAvailable === 0
-        ? 'Analyse wird gerade verarbeitet...'
-        : ppuReserved > 0
-          ? ppuAvailable + ' verfügbar (' + ppuReserved + ' in Bearbeitung)'
-          : ppuCredits + ' Pay-per-Use Analyse' + (ppuCredits > 1 ? 'n' : '') + ' verfügbar';
-    setText('cvz-d-c6-value', ppuAvailable);
-    setText('cvz-d-c6-sub', ppuLabelText);
-    showEl(document.getElementById('cvz-d-c6'), ppuCredits > 0, 'flex');
-    // Karte 7: Pay-per-Use Aufbau-Sessions (nur wenn vorhanden) - exakt dasselbe
-    // Muster wie Karte 6, nur fuer ppu_aufbau_credits statt ppu_credits.
-    var ppuAufbauLabelText = ppuAufbauCredits === 0
-      ? 'Keine Pay-per-Use Aufbau-Sessions'
-      : ppuAufbauReserved > 0 && ppuAufbauAvailable === 0
-        ? 'Session wird gerade verarbeitet...'
-        : ppuAufbauReserved > 0
-          ? ppuAufbauAvailable + ' verfügbar (' + ppuAufbauReserved + ' in Bearbeitung)'
-          : ppuAufbauCredits + ' Pay-per-Use Aufbau-Session' + (ppuAufbauCredits > 1 ? 's' : '') + ' verfügbar';
-    setText('cvz-d-c7-value', ppuAufbauAvailable);
-    setText('cvz-d-c7-sub', ppuAufbauLabelText);
-    showEl(document.getElementById('cvz-d-c7'), ppuAufbauCredits > 0, 'flex');
-    // Karte 8+9: Content-Strategien (nur wenn Plan ueberhaupt Kontingent hat) - exakt dasselbe
-    // Muster wie Karte 4+5 (Aufbau-Sessions), nur fuer content_strategy_sessions_* statt
-    // page_agent_sessions_*. Eigene Periode (content_strategy_sessions_period_start), nicht die
-    // Analysen-Credits-Periode - siehe migrations/content_strategy_quota.sql.
+    // -- Karte Content-Strategien (Muster wie Aufbau, eigene Periode) --------------------------
     var strategyUsed     = Math.round(Number(bu.content_strategy_sessions_used_current_period || 0));
     var strategyLimitNum = Math.round(Number(contentStrategyLimit || 0));
     var strategyLeft     = Math.max(strategyLimitNum - strategyUsed, 0);
     var strategyPercent  = strategyLimitNum ? (strategyUsed / strategyLimitNum) * 100 : 0;
     var showStrategyCards = strategyLimitNum > 0;
-    setText('cvz-d-c8-value', strategyUsed + '/' + strategyLimitNum + ' Content-Strategien');
-    setText('cvz-d-c8-sub', Math.round(strategyPercent) + '% des Kontingents genutzt');
-    var bar8 = document.getElementById('cvz-d-c8-bar');
-    if (bar8) bar8.style.width = Math.min(strategyPercent, 100) + '%';
-    showEl(document.getElementById('cvz-d-c8'), showStrategyCards, 'flex');
-    // GEÄNDERT (v11): wie bei den Aufbau-Sessions vorgerechnet, strategyRenewalDate bleibt ein String.
     var strategyRenewalSub = '';
     var strategyRenewalDate = null;
     if (isFreePlan) {
@@ -1136,36 +1198,36 @@
     } else {
       strategyRenewalSub = '-';
     }
-    setText('cvz-d-c9-value', strategyLeft);
-    setText('cvz-d-c9-sub', strategyRenewalSub);
-    showEl(document.getElementById('cvz-d-c9'), showStrategyCards, 'flex');
-    // Karte 10: Pay-per-Use Content-Strategien (nur wenn vorhanden) - exakt dasselbe Muster wie
-    // Karte 6/7, nur fuer ppu_strategy_credits statt ppu_credits/ppu_aufbau_credits.
-    var ppuStrategyLabelText = ppuStrategyCredits === 0
-      ? 'Keine Pay-per-Use Content-Strategien'
-      : ppuStrategyReserved > 0 && ppuStrategyAvailable === 0
-        ? 'Strategie wird gerade erstellt...'
-        : ppuStrategyReserved > 0
-          ? ppuStrategyAvailable + ' verfügbar (' + ppuStrategyReserved + ' in Bearbeitung)'
-          : ppuStrategyCredits + ' Pay-per-Use Content-Strategie' + (ppuStrategyCredits > 1 ? 'n' : '') + ' verfügbar';
-    setText('cvz-d-c10-value', ppuStrategyAvailable);
-    setText('cvz-d-c10-sub', ppuStrategyLabelText);
-    showEl(document.getElementById('cvz-d-c10'), ppuStrategyCredits > 0, 'flex');
-    // Karte 11+12: Customer Journey Tracker (nur wenn Topics vorhanden sind, inklusive oder
-    // gebucht). Das Limit liegt auf der Owner-/Kaeufer-Zeile (bu), nicht auf der Zeile eines
-    // Team-Mitglieds. activeTopics ist null, solange die RPC fehlt: dann nur das Limit zeigen.
-    // NEU (06.10.2026): Free Trial zaehlt als 1 Zusatz-Topic, solange er verfuegbar ist oder laeuft.
+    var strategyMeta = (strategyRenewalSub !== '-' && (!isPaid || strategyRenewalDate !== renewalDate)) ? strategyRenewalSub : '';
+    var strategyTotal = strategyLeft + ppuStrategyAvailable;
+    var showStrategyCard = showStrategyCards || ppuStrategyCredits > 0;
+    setToolCard('strategie', {
+      show:    showStrategyCard,
+      value:   strategyTotal,
+      sub:     toolSub(strategyLimitNum, strategyLeft, ppuStrategyAvailable, ppuStrategyReserved),
+      pct:     strategyPercent,
+      showBar: strategyLimitNum > 0,
+      state:   toolState(strategyTotal, strategyLimitNum, strategyLeft, ppuStrategyAvailable),
+      meta:    strategyMeta,
+    });
+
+    // -- Karte Customer Journey Tracker --------------------------------------------------------
+    // v12: Nutzung UND Limit kommen aus derselben Quelle wie im Tracker selbst (RPC get_tracker_quota,
+    // team-weit, Limit der Owner-Zeile). Nur wenn die RPC fehlt, gilt das Limit der Zeile bu.
+    // Free Trial zaehlt als 1 Zusatz-Topic, solange er verfuegbar ist oder laeuft (06.10.2026).
     var trial          = getTrackerTrial(bu);
     var trialSlot      = (trial.state === 'available' || trial.state === 'running') ? 1 : 0;
-    var topicsLimit    = Math.round(Number(bu.ai_visibility_topics_limit || 0)) + trialSlot;
-    var topicsIncluded = Math.round(Number(bu.ai_visibility_topics_plan_included || 0));
-    var topicsBought   = Math.round(Number(bu.ai_visibility_topics_purchased || 0));
-    var topicsKnown    = activeTopics != null;
-    var topicsUsed     = topicsKnown ? activeTopics : 0;
+    var baseLimit      = (quota && quota.limit != null) ? Math.round(Number(quota.limit)) : Math.round(Number(bu.ai_visibility_topics_limit || 0));
+    var topicsLimit    = baseLimit + trialSlot;
+    var topicsIncluded = (quota && quota.included  != null) ? Math.round(Number(quota.included))  : Math.round(Number(bu.ai_visibility_topics_plan_included || 0));
+    var topicsBought   = (quota && quota.purchased != null) ? Math.round(Number(quota.purchased)) : Math.round(Number(bu.ai_visibility_topics_purchased || 0));
+    var topicsKnown    = !!quota && quota.used != null;
+    var topicsUsed     = topicsKnown ? Math.max(0, Math.round(Number(quota.used))) : 0;
     var topicsFree     = Math.max(topicsLimit - topicsUsed, 0);
+    var topicsOver     = topicsKnown && topicsUsed > topicsLimit;
     var topicsPercent  = topicsLimit ? (topicsUsed / topicsLimit) * 100 : 0;
     var showTrackerCards = topicsLimit > 0;
-    setText('cvz-d-c11-value', topicsKnown ? (topicsUsed + '/' + topicsLimit + ' Topics') : (topicsLimit + ' Topics'));
+
     var trialText = '';
     if (trial.state === 'available') {
       trialText = 'Free Trial: ' + CONFIG.TRACKER_TRIAL_DAYS + ' Tage kostenlos testen';
@@ -1174,27 +1236,40 @@
         ? 'Free Trial endet in weniger als 24 Stunden'
         : 'Free Trial: noch ' + trial.daysLeft + ' Tage (bis ' + trial.endsAt.toLocaleDateString('de-DE') + ')';
     }
-    var c11Sub = topicsKnown ? (Math.round(topicsPercent) + '% der Topics belegt') : 'Limit deines Plans';
-    if (trialText) c11Sub = (topicsLimit - trialSlot > 0 ? c11Sub + ' \u00b7 ' : '') + trialText;
-    setText('cvz-d-c11-sub', c11Sub);
-    var bar11 = document.getElementById('cvz-d-c11-bar');
-    if (bar11) bar11.style.width = (topicsKnown ? Math.min(topicsPercent, 100) : 0) + '%';
-    showEl(document.getElementById('cvz-d-c11'), showTrackerCards, 'flex');
+    var trackerSub = topicsKnown ? (topicsUsed + ' von ' + topicsLimit + ' Topics belegt') : (topicsLimit + ' Topics im Limit');
+    if (trialText) trackerSub += ' · ' + trialText;
+
     var topicsSplit = [];
     if (topicsIncluded > 0) topicsSplit.push(topicsIncluded + ' im Plan enthalten');
     if (topicsBought > 0)   topicsSplit.push(topicsBought + ' gebucht');
     if (trialSlot > 0)      topicsSplit.push('1 im Free Trial');
-    setText('cvz-d-c12-value', topicsKnown ? topicsFree : '-');
-    setText('cvz-d-c12-sub', topicsSplit.length ? topicsSplit.join(', ') : '-');
-    showEl(document.getElementById('cvz-d-c12'), showTrackerCards, 'flex');
+
+    var trackerState = '';
+    if (topicsOver) trackerState = 'over';
+    else if (topicsKnown && topicsLimit > 0) {
+      if (topicsFree <= 0) trackerState = 'empty';
+      else if (topicsFree / topicsLimit < 0.2) trackerState = 'warn';
+    }
+    setToolCard('tracker', {
+      show:    showTrackerCards,
+      value:   topicsKnown ? topicsFree : '-',
+      sub:     trackerSub,
+      pct:     topicsKnown ? topicsPercent : 0,
+      showBar: topicsKnown,
+      state:   trackerState,
+      meta:    topicsSplit.join(', '),
+      // Ueber dem Limit ist nach einem Downgrade legitim - dann eine klare Meldung statt "300 %".
+      alert:   topicsOver
+        ? ('Über dem Limit: ' + (topicsUsed - topicsLimit) + (topicsUsed - topicsLimit === 1 ? ' Topic' : ' Topics') + ' zu viel. Archiviere Topics oder buche weitere.')
+        : '',
+    });
 
     // NEU (v10): Kontingent-Stand fuer den Hinweis beim Klick auf die Aktions-Buttons.
-    // Verfuegbar = Plan-Kontingent + Pay-per-Use-Guthaben (PPU liegt auf der eigenen Zeile des
-    // Members, das Plan-Kontingent auf bu). Nur UX, die Backends pruefen weiterhin selbst.
+    // Verfuegbar = Plan-Kontingent + Pay-per-Use-Guthaben. Nur UX, die Backends pruefen weiterhin selbst.
     state.credits = {
-      analyse:     analysesLeft + ppuAvailable,
-      aufbau:      sessionsLeft + ppuAufbauAvailable,
-      strategie:   strategyLeft + ppuStrategyAvailable,
+      analyse:     analysesTotal,
+      aufbau:      aufbauTotal,
+      strategie:   strategyTotal,
       topicsLimit: topicsLimit,
       trialState:  trial.state,
     };
@@ -1210,20 +1285,20 @@
       },
     };
 
-    // Einstiegs-Buttons: In der Karte "Verbleibend" (bzw. "Freie Topics") steht der Button zum
-    // Tool. Die Button-Reihe darunter zeigt nur die Tools, deren Karte ausgeblendet ist (z.B.
-    // Plan ohne Aufbau-Kontingent), damit jeder Einstieg erreichbar bleibt und nichts doppelt
-    // steht. Bei 0 Kontingent heisst der Karten-Button "Mehr kaufen"; der Klick oeffnet den
-    // vorhandenen Kauf-Hinweis. Beim Tracker bleibt es immer "Tracker öffnen": von dort kommt man
-    // auch bei 0 freien Topics zur Uebersicht.
+    // Karten-Buttons: bei 0 Kontingent "Mehr kaufen" (oeffnet den Kauf-Hinweis). Der Tracker-Button
+    // bleibt immer ein Einstieg in den Tracker ("Topics verwalten" bei Ueberschreitung).
     var cardBtnLabel = function (tool, normal) { return state.credits[tool] > 0 ? normal : 'Mehr kaufen'; };
     setText('cvz-d-card-btn-analyse',   cardBtnLabel('analyse',   'Neue Analyse'));
     setText('cvz-d-card-btn-aufbau',    cardBtnLabel('aufbau',    'Seite aufbauen'));
     setText('cvz-d-card-btn-strategie', cardBtnLabel('strategie', 'Content-Strategie erstellen'));
+    setText('cvz-d-card-btn-tracker',   topicsOver ? 'Topics verwalten' : 'Tracker öffnen');
+
+    // Button-Reihe unter den Karten: nur Tools, deren Karte ausgeblendet ist, damit jeder Einstieg
+    // erreichbar bleibt und nichts doppelt steht.
     var rowVisible = {
-      'cvz-d-btn-new-analysis': false,              // Karte "Verbleibende Analysen" ist immer sichtbar
-      'cvz-d-btn-new-page':     !showAufbauCards,
-      'cvz-d-btn-new-strategy': !showStrategyCards,
+      'cvz-d-btn-new-analysis': false,              // Karte Analysen ist immer sichtbar
+      'cvz-d-btn-new-page':     !showAufbauCard,
+      'cvz-d-btn-new-strategy': !showStrategyCard,
       'cvz-d-btn-tracker':      !showTrackerCards,
     };
     var anyRowButton = false;
@@ -1396,7 +1471,7 @@
       if (u.owner_user_id && !u._billingUser) return;
       var ubu = u._billingUser || u;
       var topics = trackerNeedsUsage(ubu)
-        ? await fetchTrackerUsage(u.id)
+        ? await fetchTrackerQuota(u.id)
         : null;
       renderStatCards(u, state.sessionsLimit, state.contentStrategyLimit, topics);
     } catch (e) {
@@ -2450,7 +2525,7 @@
       // NEU (v10): Tracker-Nutzung nur abfragen, wenn ueberhaupt Topics vorhanden sind.
       var trackerBu    = currentUser._billingUser || currentUser;
       var activeTopics = trackerNeedsUsage(trackerBu)
-        ? await fetchTrackerUsage(currentUser.id)
+        ? await fetchTrackerQuota(currentUser.id)
         : null;
       state.sessionsLimit        = sessionsLimit;
       state.contentStrategyLimit = contentStrategyLimit;
