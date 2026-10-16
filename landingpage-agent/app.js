@@ -1516,6 +1516,7 @@ async function cvzTryResume() {
     if (data.structure_html_document) {
       cvzUpdatePreviewPanel(data.structure_html_document, data.structure_version);
     }
+    if (window.CVZLandingpageExport) window.CVZLandingpageExport.apply(data, { keyword: cvzState.keyword, isPillar: cvzState.page_type === 'pillar' });
     // Einmal am Schluss scrollen statt bei jeder Nachricht: der ANFANG der
     // letzten Antwort steht oben, nicht deren Ende.
     cvzScrollChatTo(lastBubble, 'top');
@@ -1533,6 +1534,7 @@ function cvzOpenChat(sessionData) {
   cvzUpdateQuota(sessionData.sessions_remaining, sessionData.sessions_limit);
   cvzApplyPageTypeUi();
   cvzApplyPillarData(sessionData);
+  if (window.CVZLandingpageExport) window.CVZLandingpageExport.apply(sessionData, { keyword: cvzState.keyword, isPillar: cvzState.page_type === 'pillar' });
   // Nur die Antwort des Assistenten wird gerendert - der Kickoff-Prompt
   // entsteht serverseitig und taucht hier ohnehin nicht auf. Bei Pillar
   // kommt das Gerüst schon mit dem Kickoff, dann wird auch die Vorschau
@@ -1758,6 +1760,7 @@ async function cvzSendMessage(presetMessage) {
     cvzAppendMessage('assistant', finalData.message, finalData.structure_html_document, finalData.structure_version);
     cvzUpdateQuota(finalData.sessions_remaining, finalData.sessions_limit);
     cvzApplyPillarData(finalData);
+    if (window.CVZLandingpageExport) window.CVZLandingpageExport.apply(finalData, { keyword: cvzState.keyword, isPillar: cvzState.page_type === 'pillar' });
   } catch (err) {
     stopTicker();
     loadingBubble.remove();
@@ -2010,6 +2013,8 @@ function cvzRenderInterview() {
   }).join('');
   const toolbar = '<div class="cvz-iv-toolbar"><button type="button" class="cvz-btn-secondary" id="cvz-iv-pdf" onclick="cvzExportInterviewPdf(this)">Offene Fragen als PDF (für den Fachbereich)</button><span class="cvz-iv-msg" id="cvz-iv-pdf-msg" role="status" hidden></span></div>';
   el.innerHTML = toolbar + intro + items + clusterHtml;
+  // Aufgaben-Export (ClickUp, Asana, Jira): Menü in die Toolbar des Interviews hängen.
+  if (window.CVZPillarExport) window.CVZPillarExport.mount(el.querySelector('.cvz-iv-toolbar'), { items: cvzInterview.items, clusters: cvzInterview.clusters, keyword: cvzState.keyword });
 }
 
 // Ergebnis der Cluster-Recherche: Unterseiten und Beiträge, die sich zum Thema
