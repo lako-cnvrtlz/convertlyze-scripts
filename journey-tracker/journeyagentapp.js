@@ -12052,6 +12052,9 @@
     // fehlgeschlagen ist oder noch fehlt.
     var apStepNotice = renderStepNotice(detail, ['action_plan']);
     if (apStepNotice) wrap.appendChild(apStepNotice);
+    // Aufgaben-Export (ClickUp, Asana, Jira) für den Aktionsplan
+    var xpBtn = window.CVZTrackerExport ? window.CVZTrackerExport.createButton(detail) : null;
+    if (xpBtn) wrap.appendChild(xpBtn);
 
     var PHASE_ORDER = ['alle_phasen', 'exploration', 'evaluation', 'comparison', 'decision'];
     var PHASE_LABEL_MAP = {
