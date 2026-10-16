@@ -103,6 +103,7 @@
     // überschreibt.
     phaseTrendWeeksByTopic: {},
     phaseTrendCache: {},
+    phaseTrendChannelByTopic: {},
     isLoadingPhaseTrend: {},
     // NEU (25.09.2026, Kundenwunsch): welche Domains in der Wettbewerbs-
     // vergleichs-Grafik gerade ausgeblendet sind. Nur für die Sitzung (kein
@@ -2136,6 +2137,15 @@
       } else {
         maybeLoadPhaseTrend(weeksTopicId, weeksValue);
       }
+      return;
+    }
+
+    // NEU (Oktober 2026): Kanal-Auswahl im Phasen-Verlauf (Ø / ChatGPT / Gemini)
+    var phaseChannelBtn = event.target.closest('[data-cvz-phase-channel]');
+    if (phaseChannelBtn) {
+      state.phaseTrendChannelByTopic[phaseChannelBtn.getAttribute('data-cvz-phase-topic')] =
+        phaseChannelBtn.getAttribute('data-cvz-phase-channel');
+      render();
       return;
     }
 
@@ -6219,56 +6229,6 @@
       grid.appendChild(card);
     });
     section.appendChild(grid);
-    return section;
-  }
-
-  function renderVisibilityTrendSection(weeks, isLoading, changelogEntries) {
-    var section = document.createElement('div');
-    section.className = 'cvz-section';
-
-    var heading = document.createElement('p');
-    heading.className = 'cvz-section-label';
-    heading.textContent = 'Sichtbarkeits-Verlauf im Detail';
-    section.appendChild(heading);
-
-    if (isLoading) {
-      var loading = document.createElement('p');
-      loading.className = 'cvz-card-placeholder-text';
-      loading.textContent = 'Lädt...';
-      section.appendChild(loading);
-      return section;
-    }
-
-    if (!weeks || weeks.length < 2) {
-      var empty = document.createElement('p');
-      empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Noch kein Verlauf verfügbar, braucht mindestens zwei Wochen mit ausgewerteten Läufen.';
-      section.appendChild(empty);
-      return section;
-    }
-
-    var xLabels = weeks.map(function (w) { return formatShortDate(w.week); });
-    var mentionedRate = weeks.map(function (w) { return w.total ? Math.round((w.mentioned / w.total) * 100) : null; });
-    var citedRate = weeks.map(function (w) { return w.total ? Math.round((w.cited / w.total) * 100) : null; });
-    var recommendedRate = weeks.map(function (w) { return w.total ? Math.round((w.recommended / w.total) * 100) : null; });
-    var weekLabelsOnly = weeks.map(function (w) { return w.week; });
-    var markers = mapChangelogToMarkers(changelogEntries, weekLabelsOnly);
-
-    var card = document.createElement('div');
-    card.className = 'cvz-card';
-    card.innerHTML =
-      buildLineChartSvg([
-        { label: 'Erwähnt', values: mentionedRate, color: 'var(--cvz-amber)' },
-        { label: 'Zitiert', values: citedRate, color: 'var(--cvz-teal)' },
-        { label: 'Empfohlen', values: recommendedRate, color: 'var(--cvz-red)' },
-      ], xLabels, { maxY: 100, markers: markers, xKeys: weekLabelsOnly }) +
-      '<div class="cvz-chart-legend">' +
-        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-amber)"></span>Erwähnt</span>' +
-        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Zitiert</span>' +
-        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-red)"></span>Empfohlen</span>' +
-      '</div>' +
-      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-L\u00e4ufe pro Woche (0 bis 100\u202f%), in dem die eigene Domain erw\u00e4hnt, zitiert bzw. aktiv empfohlen wurde. Klickt auf einen Punkt f\u00fcr die Details dieser Woche (Kachel erscheint oben bei der Gesamtentwicklung).</p>';
-    section.appendChild(card);
     return section;
   }
 
@@ -12518,6 +12478,382 @@
   // ─── VERLAUF ──────────────────────────────────────────────────────────────
   // Monats-Timeline aus Timeseries-Daten + Content-Aenderungen als Marker.
   // Ziel: Marketer kann Aenderungen schnell mit Sichtbarkeits-Effekten korrelieren.
+  // ======================================================================
+  // NEU (Oktober 2026): Lesbarere Sichtbarkeits-Verlaeufe
+  // - gemeinsame, "schoene" Y-Skala (statt fix 0-100) mit Achsenwerten
+  // - fuehrende leere Wochen werden abgeschnitten
+  // - 4 kleine Diagramme (eins pro Phase) statt 8 Linien in einem
+  // - Kanal-Auswahl (Ø / ChatGPT / Gemini), aktueller Wert + Veraenderung
+  // - Tabelle mit absoluten Zahlen unter dem Detail-Verlauf
+  // ======================================================================
+
+  // Rundet den Maximalwert auf eine "runde" Achsenobergrenze auf (in %).
+  function niceChartMax(maxValue) {
+    var steps = [10, 20, 40, 60, 80, 100];
+    var v = maxValue || 0;
+    for (var i = 0; i < steps.length; i++) {
+      if (v <= steps[i]) return steps[i];
+    }
+    return 100;
+  }
+
+  function fmtPct(v) {
+    if (v == null || isNaN(v)) return '–';
+    var r = Math.round(v * 10) / 10;
+    return String(r).replace('.', ',') + ' %';
+  }
+
+  function weekKeyToLabel(wk) {
+    var m = String(wk).match(/^(\d{4})-W(\d{2})$/);
+    if (!m) return String(wk);
+    return 'KW ' + parseInt(m[2], 10);
+  }
+
+  // "2026-W41" -> Montag dieser Kalenderwoche als Millisekunden (UTC)
+  function weekKeyToMs(wk) {
+    var m = String(wk).match(/^(\d{4})-W(\d{2})$/);
+    if (!m) return NaN;
+    var jan4 = new Date(Date.UTC(parseInt(m[1], 10), 0, 4));
+    var dow = jan4.getUTCDay() || 7;
+    return jan4.getTime() + (parseInt(m[2], 10) - 1) * 7 * 86400000 - (dow - 1) * 86400000;
+  }
+
+  // Content-Aenderungen -> Marker auf dem Wochen-Raster. "offset" = Anzahl
+  // abgeschnittener Wochen vorne. Aenderungen ausserhalb des Zeitraums
+  // werden weggelassen (frueher klebten sie am Rand).
+  function buildWeekMarkers(contentChanges, weeks, offset) {
+    var out = [];
+    var first = weekKeyToMs(weeks[offset]);
+    var last = weekKeyToMs(weeks[weeks.length - 1]);
+    (contentChanges || []).forEach(function (ch) {
+      var t = new Date(ch.changed_at).getTime();
+      if (isNaN(t) || isNaN(first) || isNaN(last)) return;
+      if (t < first - 3.5 * 86400000 || t > last + 10.5 * 86400000) return;
+      var best = offset, bestDiff = Infinity;
+      for (var i = offset; i < weeks.length; i++) {
+        var diff = Math.abs(weekKeyToMs(weeks[i]) - t);
+        if (diff < bestDiff) { bestDiff = diff; best = i; }
+      }
+      out.push({
+        index: best - offset,
+        label: (CONTENT_CHANGE_TYPE_LABELS[ch.change_type] || ch.change_type || 'Änderung') + ': ' + (ch.description || ''),
+        date: ch.changed_at,
+      });
+    });
+    return out;
+  }
+
+  // Zeichnet ein Liniendiagramm als SVG-Text.
+  // series: [{label, color, values:[Zahl|null], dashed:bool}]
+  // xLabels: Beschriftung je Punkt; opts: {width,height,maxY,markers,xKeys,valueFmt}
+  function buildPhaseTrendSvg(series, xLabels, opts) {
+    opts = opts || {};
+    var W = opts.width || 360, H = opts.height || 170;
+    var padL = 38, padR = 12, padT = 14, padB = 24;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var n = xLabels.length;
+    var maxY = opts.maxY || 10;
+    var fmt = opts.valueFmt || fmtPct;
+    function xAt(i) { return padL + (n <= 1 ? plotW / 2 : (plotW * i) / (n - 1)); }
+    function yAt(v) { return padT + plotH - (Math.min(v, maxY) / maxY) * plotH; }
+
+    var p = [];
+    p.push('<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;max-width:100%;height:auto;" role="img">');
+
+    // Raster + Y-Achse (0, Mitte, Max)
+    [0, maxY / 2, maxY].forEach(function (tick) {
+      var y = yAt(tick);
+      p.push('<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="var(--cvz-border)" stroke-width="1" opacity="' + (tick === 0 ? '0.9' : '0.45') + '"/>');
+      p.push('<text x="' + (padL - 6) + '" y="' + (y + 3.5) + '" text-anchor="end" font-size="10" fill="var(--cvz-text-muted, #8b93a7)">' +
+        String(Math.round(tick * 10) / 10).replace('.', ',') + '%</text>');
+    });
+
+    // X-Achse: hoechstens ~6 Beschriftungen
+    var every = Math.max(1, Math.ceil(n / 6));
+    for (var xi = 0; xi < n; xi++) {
+      if (xi % every !== 0 && xi !== n - 1) continue;
+      if (xi !== n - 1 && n - 1 - xi < every / 2) continue;
+      p.push('<text x="' + xAt(xi) + '" y="' + (H - 7) + '" text-anchor="middle" font-size="10" fill="var(--cvz-text-muted, #8b93a7)">' + escapeHtml(String(xLabels[xi])) + '</text>');
+    }
+
+    // Marker (Content-Aenderungen)
+    (opts.markers || []).forEach(function (mk) {
+      if (mk.index < 0 || mk.index >= n) return;
+      var mx = xAt(mk.index);
+      p.push('<line x1="' + mx + '" y1="' + padT + '" x2="' + mx + '" y2="' + (padT + plotH) + '" stroke="var(--cvz-amber, #e0a030)" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"/>');
+      p.push('<path d="M' + mx + ' ' + (padT - 6) + ' l4 4 l-4 4 l-4 -4 z" fill="var(--cvz-amber, #e0a030)"><title>' + escapeHtml(mk.label || '') + '</title></path>');
+    });
+
+    // Linien + Punkte
+    series.forEach(function (s) {
+      var segs = [], cur = [];
+      s.values.forEach(function (v, i) {
+        if (v == null || isNaN(v)) { if (cur.length) { segs.push(cur); cur = []; } return; }
+        cur.push(i);
+      });
+      if (cur.length) segs.push(cur);
+      var dash = s.dashed ? ' stroke-dasharray="5 4"' : '';
+      var op = s.dashed ? '0.75' : '1';
+      segs.forEach(function (seg) {
+        if (seg.length < 2) return;
+        var pts = seg.map(function (i) { return xAt(i).toFixed(1) + ',' + yAt(s.values[i]).toFixed(1); }).join(' ');
+        p.push('<polyline points="' + pts + '" fill="none" stroke="' + s.color + '" stroke-width="' + (s.dashed ? 1.5 : 2) + '"' + dash + ' opacity="' + op + '" stroke-linejoin="round" stroke-linecap="round"/>');
+      });
+      s.values.forEach(function (v, i) {
+        if (v == null || isNaN(v)) return;
+        var cx = xAt(i).toFixed(1), cy = yAt(v).toFixed(1);
+        var tip = escapeHtml(s.label + ' – ' + xLabels[i] + ': ' + fmt(v));
+        if (!s.dashed) p.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + (n > 14 ? 2 : 3) + '" fill="' + s.color + '"/>');
+        var wk = opts.xKeys && opts.xKeys[i] ? ' data-cvz-week-detail="' + escapeHtml(opts.xKeys[i]) + '" class="cvz-chart-hit" style="cursor:pointer"' : '';
+        p.push('<circle cx="' + cx + '" cy="' + cy + '" r="8" fill="transparent"' + wk + '><title>' + tip + '</title></circle>');
+      });
+    });
+
+    p.push('</svg>');
+    return p.join('');
+  }
+
+  // Mittelwert bzw. Einzelkanal einer Phase je Woche (null = keine Messung)
+  function phaseValuesForChannel(seriesObj, phase, channel, nWeeks) {
+    var phaseSeries = (seriesObj || {})[phase] || {};
+    var channels = channel === 'avg' ? JOURNEY_PERCENT_CHANNELS : [channel];
+    var out = [];
+    for (var wi = 0; wi < nWeeks; wi++) {
+      var total = 0, count = 0;
+      channels.forEach(function (ch) {
+        var arr = phaseSeries[ch];
+        if (arr && arr[wi] != null) { total += arr[wi]; count++; }
+      });
+      out.push(count > 0 ? total / count : null);
+    }
+    return out;
+  }
+
+  function renderPhaseTrendSection(topicId, data, selectedWeeks, isLoading) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Sichtbarkeits-Verlauf pro Phase';
+    head.appendChild(heading);
+    head.appendChild(renderWeeksPresetPicker(topicId, selectedWeeks));
+    section.appendChild(head);
+
+    if (isLoading) {
+      var l = document.createElement('p');
+      l.className = 'cvz-card-placeholder-text';
+      l.innerHTML = '<span class="cvz-spinner"></span>Verlauf wird geladen…';
+      section.appendChild(l);
+      return section;
+    }
+    if (!data || !data.timeseries || !data.timeseries.weeks || data.timeseries.weeks.length < 2) {
+      var e = document.createElement('p');
+      e.className = 'cvz-card-placeholder-text';
+      e.textContent = 'Noch kein Verlauf verfügbar. Es werden mindestens zwei Wochen mit Analyse-Läufen benötigt.';
+      section.appendChild(e);
+      return section;
+    }
+
+    var ts = data.timeseries;
+    var weeks = ts.weeks;
+    var nW = weeks.length;
+    var channel = state.phaseTrendChannelByTopic[topicId] || 'avg';
+
+    // Kanal-Auswahl
+    var chipRow = document.createElement('div');
+    chipRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px;align-items:center;';
+    var chipLabel = document.createElement('span');
+    chipLabel.className = 'cvz-chart-caption';
+    chipLabel.style.margin = '0 4px 0 0';
+    chipLabel.textContent = 'Kanal:';
+    chipRow.appendChild(chipLabel);
+    [['avg', 'Ø ChatGPT + Gemini'], ['chat_gpt', CHANNEL_LABELS.chat_gpt || 'ChatGPT'], ['gemini', CHANNEL_LABELS.gemini || 'Gemini']].forEach(function (c) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cvz-weeks-preset-btn' + (channel === c[0] ? ' cvz-weeks-preset-btn-active' : '');
+      b.textContent = c[1];
+      b.setAttribute('data-cvz-phase-channel', c[0]);
+      b.setAttribute('data-cvz-phase-topic', topicId);
+      chipRow.appendChild(b);
+    });
+    section.appendChild(chipRow);
+
+    // Werte je Phase (gesamt + mit Link)
+    var all = {}, withUrl = {};
+    PHASE_ORDER.forEach(function (ph) {
+      all[ph] = phaseValuesForChannel(ts.series, ph, channel, nW);
+      withUrl[ph] = phaseValuesForChannel(ts.series_with_url, ph, channel, nW);
+    });
+
+    // Fuehrende Wochen ohne jede Messung abschneiden
+    var offset = 0;
+    while (offset < nW - 1) {
+      var any = PHASE_ORDER.some(function (ph) { return all[ph][offset] != null; });
+      if (any) break;
+      offset++;
+    }
+    var measuredWeeks = 0;
+    for (var wi = offset; wi < nW; wi++) {
+      if (PHASE_ORDER.some(function (ph) { return all[ph][wi] != null; })) measuredWeeks++;
+    }
+    if (measuredWeeks === 0) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = 'Für diesen Kanal gibt es im gewählten Zeitraum keine Messwerte.';
+      section.appendChild(none);
+      return section;
+    }
+
+    var usedWeeks = weeks.slice(offset);
+    var xLabels = usedWeeks.map(weekKeyToLabel);
+    var maxVal = 0;
+    PHASE_ORDER.forEach(function (ph) {
+      all[ph] = all[ph].slice(offset);
+      withUrl[ph] = withUrl[ph].slice(offset);
+      all[ph].concat(withUrl[ph]).forEach(function (v) { if (v != null && v > maxVal) maxVal = v; });
+    });
+    var maxY = niceChartMax(maxVal);
+    var markers = buildWeekMarkers(state.contentChangesCache[topicId] || [], weeks, offset);
+
+    var grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:8px;';
+
+    PHASE_ORDER.forEach(function (ph) {
+      var vals = all[ph], link = withUrl[ph];
+      var lastIdx = -1, prevIdx = -1;
+      for (var i = vals.length - 1; i >= 0; i--) {
+        if (vals[i] != null) { if (lastIdx === -1) lastIdx = i; else { prevIdx = i; break; } }
+      }
+      var cur = lastIdx >= 0 ? vals[lastIdx] : null;
+      var curLink = lastIdx >= 0 ? link[lastIdx] : null;
+      var deltaHtml = '';
+      if (lastIdx >= 0 && prevIdx >= 0) {
+        var d = Math.round((vals[lastIdx] - vals[prevIdx]) * 10) / 10;
+        var col = d > 0 ? 'var(--cvz-teal)' : (d < 0 ? 'var(--cvz-red)' : 'var(--cvz-text-muted, #8b93a7)');
+        var arrow = d > 0 ? '▲' : (d < 0 ? '▼' : '–');
+        deltaHtml = '<span style="color:' + col + ';font-size:12px;margin-left:8px;">' + arrow + ' ' +
+          String(Math.abs(d)).replace('.', ',') + ' Pkt. ggü. ' + escapeHtml(xLabels[prevIdx]) + '</span>';
+      }
+      var card = document.createElement('div');
+      card.className = 'cvz-card';
+      card.innerHTML =
+        '<div style="display:flex;align-items:baseline;flex-wrap:wrap;gap:2px;margin-bottom:4px;">' +
+          '<span class="cvz-legend-dot" style="background:' + PHASE_COLORS[ph] + ';margin-right:6px;"></span>' +
+          '<strong style="margin-right:8px;">' + escapeHtml(PHASE_LABELS[ph] || ph) + '</strong>' +
+          '<span style="font-size:20px;font-weight:600;">' + fmtPct(cur) + '</span>' + deltaHtml +
+        '</div>' +
+        '<div class="cvz-chart-caption" style="margin:0 0 6px;">davon mit Link: ' + fmtPct(curLink) + '</div>' +
+        buildPhaseTrendSvg([
+          { label: PHASE_LABELS[ph] || ph, values: vals, color: PHASE_COLORS[ph] },
+          { label: (PHASE_LABELS[ph] || ph) + ' (mit Link)', values: link, color: PHASE_COLORS[ph], dashed: true },
+        ], xLabels, { maxY: maxY, markers: markers });
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+
+    var legend = document.createElement('div');
+    legend.className = 'cvz-chart-legend';
+    legend.innerHTML =
+      '<span class="cvz-chart-legend-item">— Domain wird als Quelle genannt</span>' +
+      '<span class="cvz-chart-legend-item">- - davon mit echtem Link zitiert</span>' +
+      (markers.length ? '<span class="cvz-chart-legend-item"><span style="color:var(--cvz-amber, #e0a030)">◆</span> Content-Änderung</span>' : '');
+    section.appendChild(legend);
+
+    var cap = document.createElement('p');
+    cap.className = 'cvz-chart-caption';
+    cap.textContent = 'Anteil der Antworten in Prozent, alle vier Diagramme haben dieselbe Skala (0 bis ' + maxY + ' %), damit die Phasen vergleichbar bleiben. ' +
+      (channel === 'avg' ? 'Ø = Mittelwert aus ChatGPT und Gemini (Google AI liefert keine Werte pro Phase). ' : '') +
+      'Messdaten ab ' + weekKeyToLabel(usedWeeks[0]) + '.' +
+      (measuredWeeks < 4 ? ' Achtung: bisher nur ' + measuredWeeks + ' Messwochen, Ausschläge sind noch mit Vorsicht zu lesen.' : '');
+    section.appendChild(cap);
+    return section;
+  }
+
+  function renderVisibilityTrendSection(weeks, isLoading, changelogEntries) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Sichtbarkeits-Verlauf im Detail';
+    section.appendChild(heading);
+
+    if (isLoading) {
+      var loading = document.createElement('p');
+      loading.className = 'cvz-card-placeholder-text';
+      loading.textContent = 'Lädt...';
+      section.appendChild(loading);
+      return section;
+    }
+
+    // Wochen ohne ausgewertete Antworten ausblenden (leere Linie)
+    var used = (weeks || []).filter(function (w) { return w && w.total > 0; });
+    if (used.length < 2) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Noch kein Verlauf verfügbar, braucht mindestens zwei Wochen mit ausgewerteten Läufen.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    function rate(num, tot) { return tot ? Math.round((num / tot) * 1000) / 10 : null; }
+    var xKeys = used.map(function (w) { return w.week; });
+    var xLabels = used.map(function (w) { return formatShortDate(w.week) || String(w.week); }).map(function (s) { return s.slice(0, 5); });
+    var mentioned = used.map(function (w) { return rate(w.mentioned, w.total); });
+    var cited = used.map(function (w) { return rate(w.cited, w.total); });
+    var recommended = used.map(function (w) { return rate(w.recommended, w.total); });
+    var maxVal = 0;
+    mentioned.concat(cited, recommended).forEach(function (v) { if (v != null && v > maxVal) maxVal = v; });
+    var maxY = niceChartMax(maxVal);
+    var markers = mapChangelogToMarkers(changelogEntries, xKeys);
+
+    var card = document.createElement('div');
+    card.className = 'cvz-card';
+    card.innerHTML =
+      buildPhaseTrendSvg([
+        { label: 'Erwähnt', values: mentioned, color: 'var(--cvz-amber)' },
+        { label: 'Zitiert', values: cited, color: 'var(--cvz-teal)' },
+        { label: 'Empfohlen', values: recommended, color: 'var(--cvz-red)' },
+      ], xLabels, { width: 720, height: 220, maxY: maxY, markers: markers, xKeys: xKeys }) +
+      '<div class="cvz-chart-legend">' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-amber)"></span>Erwähnt</span>' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Zitiert</span>' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-red)"></span>Empfohlen</span>' +
+      '</div>' +
+      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-Antworten pro Woche (Skala 0 bis ' + maxY + ' %), in dem die eigene Domain erwähnt, zitiert bzw. aktiv empfohlen wurde. Klickt auf einen Punkt oder eine Tabellenzeile für die Details dieser Woche.</p>';
+
+    // Tabelle mit absoluten Zahlen
+    var rows = used.slice().reverse().map(function (w) {
+      var sel = state.selectedWeekDetailKey === state.activeTopicId + '|' + w.week;
+      return '<tr data-cvz-week-detail="' + escapeHtml(w.week) + '" style="cursor:pointer;' + (sel ? 'background:rgba(255,255,255,0.05);' : '') + '">' +
+        '<td style="padding:5px 8px;">' + escapeHtml(formatShortDate(w.week) || String(w.week)) + '</td>' +
+        '<td style="padding:5px 8px;text-align:right;">' + w.total + '</td>' +
+        '<td style="padding:5px 8px;text-align:right;">' + w.mentioned + ' (' + fmtPct(rate(w.mentioned, w.total)) + ')</td>' +
+        '<td style="padding:5px 8px;text-align:right;">' + w.cited + ' (' + fmtPct(rate(w.cited, w.total)) + ')</td>' +
+        '<td style="padding:5px 8px;text-align:right;">' + w.recommended + ' (' + fmtPct(rate(w.recommended, w.total)) + ')</td>' +
+      '</tr>';
+    }).join('');
+    card.innerHTML +=
+      '<div style="overflow-x:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;font-size:12px;">' +
+        '<thead><tr style="text-align:right;color:var(--cvz-text-muted, #8b93a7);">' +
+          '<th style="padding:5px 8px;text-align:left;font-weight:500;">Woche vom</th>' +
+          '<th style="padding:5px 8px;font-weight:500;">Ausgewertete Antworten</th>' +
+          '<th style="padding:5px 8px;font-weight:500;">Erwähnt</th>' +
+          '<th style="padding:5px 8px;font-weight:500;">Zitiert</th>' +
+          '<th style="padding:5px 8px;font-weight:500;">Empfohlen</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    section.appendChild(card);
+
+    if (state.selectedWeekDetailKey && state.selectedWeekDetailKey.indexOf(state.activeTopicId + '|') === 0) {
+      section.appendChild(renderWeekDetailPanel(state.activeTopicId, state.selectedWeekDetailKey.split('|')[1]));
+    }
+    return section;
+  }
+
   function renderVerlaufTab(topicId, detail) {
     var wrap = document.createElement('div');
 
@@ -12549,128 +12885,14 @@
     var changeAssessmentSection = renderChangeAssessmentSection(detail);
     if (changeAssessmentSection) wrap.appendChild(changeAssessmentSection);
 
-    // Chart section
-    // GEÄNDERT (25.09.2026, Kundenwunsch): Zeitraum wählbar (4/12/26
-    // Wochen). Bei 12 (Default) weiterhin dashboardDataCache -- keine
-    // Doppel-Anfrage für den häufigsten Fall, siehe Kommentar am State-
-    // Feld phaseTrendWeeksByTopic oben in der state-Definition.
+    // Chart section (neu aufgebaut im Oktober 2026, siehe renderPhaseTrendSection)
     var selectedWeeks = state.phaseTrendWeeksByTopic[topicId] || 12;
     var isDefaultWeeks = selectedWeeks === 12;
     var phaseTrendKey = topicId + ':' + selectedWeeks;
     var data = isDefaultWeeks ? state.dashboardDataCache[topicId] : state.phaseTrendCache[phaseTrendKey];
-    var isLoading = isDefaultWeeks ? state.isLoadingDashboard : !!state.isLoadingPhaseTrend[phaseTrendKey];
-
-    var chartSection = document.createElement('div');
-    chartSection.className = 'cvz-section';
-    var chartHeadRow = document.createElement('div');
-    chartHeadRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;';
-    var chartHeading = document.createElement('p');
-    chartHeading.className = 'cvz-section-label';
-    chartHeading.style.margin = '0';
-    chartHeading.textContent = 'Sichtbarkeits-Verlauf pro Phase';
-    chartHeadRow.appendChild(chartHeading);
-    chartHeadRow.appendChild(renderWeeksPresetPicker(topicId, selectedWeeks));
-    chartSection.appendChild(chartHeadRow);
-
-    if (isLoading) {
-      var loadEl = document.createElement('p');
-      loadEl.className = 'cvz-card-placeholder-text';
-      loadEl.innerHTML = '<span class="cvz-spinner"></span>Verlauf wird geladen…';
-      chartSection.appendChild(loadEl);
-    } else if (!data && !isDefaultWeeks) {
-      // Preset gewählt, aber noch nicht geladen (z.B. direkt nach einem
-      // Preset-Klick, bevor der erste render() im Ladezustand landet) --
-      // Ladezustand statt "kein Verlauf" zeigen, sonst blitzt kurz die
-      // falsche Leermeldung auf.
-      var pendingEl = document.createElement('p');
-      pendingEl.className = 'cvz-card-placeholder-text';
-      pendingEl.innerHTML = '<span class="cvz-spinner"></span>Verlauf wird geladen…';
-      chartSection.appendChild(pendingEl);
-    } else if (!data || !data.timeseries || !data.timeseries.weeks || data.timeseries.weeks.length < 2) {
-      var emptyEl = document.createElement('p');
-      emptyEl.className = 'cvz-card-placeholder-text';
-      emptyEl.textContent = 'Noch kein Verlauf verfügbar. Es werden mindestens zwei Wochen mit Analyse-Läufen benötigt.';
-      chartSection.appendChild(emptyEl);
-    } else {
-      var ts = data.timeseries;
-      var weeks = ts.weeks; // ["2026-W28", ...]
-      // Convert week keys to short display labels
-      var xLabels = weeks.map(function (w) {
-        var m = w.match(/^(\d{4})-W(\d{2})$/);
-        if (!m) return w;
-        return 'KW' + m[2];
-      });
-
-      // Build series: per phase, average across channels for that week
-      var series = PHASE_ORDER.map(function (phase) {
-        var phaseSeries = (ts.series || {})[phase] || {};
-        var values = weeks.map(function (w, wi) {
-          var total = 0, count = 0;
-          CHANNEL_ORDER.forEach(function (ch) {
-            var arr = phaseSeries[ch];
-            if (arr && arr[wi] != null) { total += arr[wi]; count++; }
-          });
-          return count > 0 ? Math.round(total / count) : null;
-        });
-        return { label: PHASE_LABELS[phase] || phase, values: values, color: PHASE_COLORS[phase] };
-      });
-
-      // NEU (18.09.2026): zweite, gestrichelte Linie pro Phase: die engere
-      // Definition own_domain_cited_with_url ("mit echtem Link zitiert"),
-      // aus ts.series_with_url (dashboard.py: _compute_weekly_timeseries).
-      // Gleiche Farbe wie die durchgezogene Linie derselben Phase, damit die
-      // Zuordnung klar bleibt; dashed:true wird von buildLineChartSvg direkt
-      // unterstützt (Strichelung + reduzierte Deckkraft).
-      var seriesWithUrl = PHASE_ORDER.map(function (phase) {
-        var phaseSeries = (ts.series_with_url || {})[phase] || {};
-        var values = weeks.map(function (w, wi) {
-          var total = 0, count = 0;
-          CHANNEL_ORDER.forEach(function (ch) {
-            var arr = phaseSeries[ch];
-            if (arr && arr[wi] != null) { total += arr[wi]; count++; }
-          });
-          return count > 0 ? Math.round(total / count) : null;
-        });
-        return { label: (PHASE_LABELS[phase] || phase) + ' (mit Link zitiert)', values: values, color: PHASE_COLORS[phase], dashed: true };
-      });
-
-      // Markers from content changes
-      var contentChanges = state.contentChangesCache[topicId] || [];
-      var markers = contentChanges.map(function (ch) {
-        var chDate = ch.changed_at;
-        var chTime = new Date(chDate).getTime();
-        var closestIndex = 0, closestDiff = Infinity;
-        weeks.forEach(function (wk, i) {
-          // Convert "2026-W28" to a comparable date
-          var m2 = wk.match(/^(\d{4})-W(\d{2})$/);
-          if (!m2) return;
-          var year2 = parseInt(m2[1]), week2 = parseInt(m2[2]);
-          var jan4 = new Date(Date.UTC(year2, 0, 4));
-          var dow = jan4.getUTCDay() || 7;
-          var weekMs = jan4.getTime() + (week2 - 1) * 7 * 86400000 - (dow - 1) * 86400000;
-          var diff = Math.abs(weekMs - chTime);
-          if (diff < closestDiff) { closestDiff = diff; closestIndex = i; }
-        });
-        return {
-          index: closestIndex,
-          label: (CONTENT_CHANGE_TYPE_LABELS[ch.change_type] || ch.change_type) + ': ' + ch.description,
-          date: chDate,
-        };
-      });
-
-      var chartCard = document.createElement('div');
-      chartCard.className = 'cvz-card';
-      chartCard.innerHTML =
-        buildLineChartSvg(series.concat(seriesWithUrl), xLabels, { maxY: 100, markers: markers }) +
-        '<div class="cvz-chart-legend">' +
-          PHASE_ORDER.map(function (phase) {
-            return '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background:' + PHASE_COLORS[phase] + '"></span>' + escapeHtml(PHASE_LABELS[phase] || phase) + '</span>';
-          }).join('') +
-        '</div>' +
-        '<p class="cvz-chart-caption">Durchgezogene Linie: eure Domain wird als Quelle genannt. Gestrichelte Linie: davon mit echtem Link zitiert. Beides in Prozent (0 bis 100) je Journey-Phase und Woche, gemittelt über alle KI-Kanäle. Senkrechte Linien markieren eingetragene Content-Änderungen.</p>';
-      chartSection.appendChild(chartCard);
-    }
-    wrap.appendChild(chartSection);
+    var isLoading = (isDefaultWeeks ? state.isLoadingDashboard : !!state.isLoadingPhaseTrend[phaseTrendKey]) ||
+      (!isDefaultWeeks && !data);
+    wrap.appendChild(renderPhaseTrendSection(topicId, data, selectedWeeks, isLoading));
 
     // Timeline: Content-Änderungen (user-logged) + detail.changelog (system)
     // GEAENDERT (18.09.2026): Eintraege mit change_type 'aktionsplan'
