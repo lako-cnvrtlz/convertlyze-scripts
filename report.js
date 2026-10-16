@@ -1,8 +1,30 @@
 /**
- * Convertlyze – Report Script v8
+ * Convertlyze – Report Script v9
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
  *
- * ÄNDERUNGEN ggü. v7 (Executive Summary läuft auf Mobile rechts raus):
+ * ÄNDERUNGEN ggü. v8 (Report ist sehr lang -> Bereiche aufklappbar, nach dem
+ * Muster des Visibility Trackers):
+ *   - Jede Deep-Dive-Kategorie (Hero bis AI Sichtbarkeit) ist jetzt ein
+ *     Aufklapp-Bereich. Im zugeklappten Zustand sieht man Name, Score
+ *     (mit farbigem Balken links) und "3 Empfehlungen · 1 kritisch".
+ *   - Innerhalb einer Kategorie: "Stärken" ist eingeklappt, Zusammenfassung
+ *     und die Liste der Handlungsempfehlungen bleiben sichtbar.
+ *   - Jede Handlungsempfehlung zeigt zuerst Schweregrad + Problem. Die Lösung
+ *     klappt per Klick auf. Empfehlungen mit Schweregrad CRITICAL sind
+ *     standardmäßig offen, damit die dringendsten Lösungen nie verborgen sind.
+ *   - Roadmap: "Sofort umsetzen" ist offen, die anderen Gruppen sind zu
+ *     (mit Anzahl im Titel).
+ *   - Neuer Button "Alle aufklappen / Alle zuklappen" unter der Überschrift
+ *     "Deep Dive".
+ *   - Ein Klick in der Anker-Navigation öffnet die Kategorie automatisch.
+ *   - Beim Drucken (Strg+P) werden alle Bereiche vorübergehend geöffnet.
+ *   - Executive Summary bleibt bewusst unverändert und offen: sie ist die
+ *     Kurzfassung des Reports.
+ *   - WICHTIG: Die Daten-Logik (Dedup, Fallbacks, Sanitizing) ist unverändert.
+ *     Die Aufklapp-Hüllen werden erst NACH dem Rendern per enhanceCollapsibles()
+ *     um die fertigen Teile gelegt.
+ *
+ * ÄNDERUNGEN v8 (Executive Summary läuft auf Mobile rechts raus):
  *   - Flex-Kinder (.cvz-bars, .cvz-badge, .cvz-card, Badge-Text) bekommen
  *     min-width:0. WHY: Flex-Elemente sind standardmäßig mindestens so breit
  *     wie ihr längstes unteilbares Wort. Lange deutsche Komposita oder URLs
@@ -465,12 +487,14 @@
       .cvz-pr-high{border-left-color:#f59e0b;}
       .cvz-pr-med{border-left-color:#10b981;}
       .cvz-pr-badge{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
-      .cvz-pr-crit .cvz-pr-badge{color:#ef4444;}
-      .cvz-pr-high .cvz-pr-badge{color:#f59e0b;}
-      .cvz-pr-med .cvz-pr-badge{color:#10b981;}
+      .cvz-pr-item .cvz-pr-badge{color:#a3b5c4;}
       .cvz-pr-problem{font-size:14px;font-weight:600;color:#e8edf5;line-height:1.5;}
       .cvz-pr-loesung{font-size:13px;color:#c4cdd6;line-height:1.6;margin-top:6px;}
       .cvz-pr-aufwand{color:#718096;font-weight:600;}
+      .cvz-pr-loesung-label{
+        display:inline-block;margin-right:6px;font-size:10px;font-weight:700;
+        letter-spacing:.1em;text-transform:uppercase;color:#4fd1c5;
+      }
 
       /* === NEU: Cross-Reference-Verweis und Cross-Category-Badge === */
       .cvz-pr-crossref{
@@ -513,6 +537,89 @@
       }
       @media(max-width:768px){
         .cvz-ki-disclaimer{padding:16px 16px 32px;}
+      }
+
+      /* ══════════════════════════════════════════════════════════════════════
+         AUFKLAPPBARE BEREICHE (v9)
+         Optik wie im Visibility Tracker: teal Pfeil (▸ zu, ▾ offen), Hover mit
+         leichtem Teal-Hintergrund, Inhalt mit Linie am Rand.
+         Alles basiert auf dem HTML-Element <details>/<summary>. Das ist
+         tastaturbedienbar (Enter/Leertaste) und braucht kein eigenes JS fürs
+         Auf- und Zuklappen.
+         ══════════════════════════════════════════════════════════════════════ */
+      .cvz-fold > summary{list-style:none;cursor:pointer;}
+      .cvz-fold > summary::-webkit-details-marker{display:none;}
+      .cvz-fold > summary::before{
+        content:'▸';display:inline-block;width:16px;flex-shrink:0;
+        color:#4fd1c5;font-size:14px;font-weight:700;line-height:1;
+      }
+      .cvz-fold[open] > summary::before{content:'▾';}
+      .cvz-fold > summary:focus-visible{outline:2px solid #4fd1c5;outline-offset:2px;}
+
+      /* Ebene 1: Kategorie */
+      .cvz-acc{
+        background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:0;
+      }
+      .cvz-acc > summary.cvz-acc-head{
+        display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+        padding:16px 20px;border-left:3px solid rgba(255,255,255,.12);
+        transition:background .15s;
+      }
+      .cvz-acc > summary.cvz-acc-head:hover{background:rgba(79,209,197,.06);}
+      .cvz-acc[open] > summary.cvz-acc-head{border-bottom:1px solid rgba(255,255,255,.08);border-left-color:#4fd1c5;}
+      .cvz-acc-teaser{
+        order:3;flex:1 1 100%;padding-left:26px;font-size:13px;color:#a3b5c4;line-height:1.5;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+      }
+      .cvz-acc[open] .cvz-acc-teaser{display:none;}
+      .cvz-acc-head .cvz-cat-name{flex:0 1 auto;min-width:0;overflow-wrap:anywhere;}
+      .cvz-acc-meta{flex:1 1 auto;min-width:0;font-size:12px;color:#718096;}
+      .cvz-acc-head .cvz-cat-score{margin-left:auto;flex-shrink:0;}
+      .cvz-acc-body{padding:20px;}
+      .cvz-acc-body .cvz-cards{margin-bottom:0;}
+
+      /* Ebene 2a: Stärken (eingeklappte Karte) */
+      details.cvz-fold-card > summary{display:flex;align-items:center;gap:8px;}
+      details.cvz-fold-card > summary .cvz-card-label{margin-bottom:0;}
+      details.cvz-fold-card[open] > summary .cvz-card-label{margin-bottom:10px;}
+      details.cvz-fold-card > summary:hover .cvz-card-label{filter:brightness(1.2);}
+
+      /* Ebene 2b: einzelne Handlungsempfehlung (Problem sichtbar, Lösung aufklappbar) */
+      details.cvz-fold-item > summary{display:flex;align-items:flex-start;gap:8px;}
+      details.cvz-fold-item > summary::before{margin-top:3px;}
+      .cvz-pr-sumtext{flex:1 1 auto;min-width:0;}
+      details.cvz-fold-item > summary .cvz-pr-badge{margin-bottom:2px;}
+      details.cvz-fold-item > summary:hover .cvz-pr-problem{color:#ffffff;}
+      .cvz-pr-body{padding-left:24px;}
+      .cvz-pr-body .cvz-pr-loesung{margin-top:2px;}
+
+      /* Roadmap-Gruppen */
+      details.cvz-fold-rm > summary.cvz-rm-head{
+        display:flex;align-items:center;gap:8px;border-bottom:none;
+        transition:filter .15s;
+      }
+      details.cvz-fold-rm > summary.cvz-rm-head::before{color:currentColor;}
+      details.cvz-fold-rm > summary.cvz-rm-head:hover{filter:brightness(1.2);}
+      details.cvz-fold-rm[open] > summary.cvz-rm-head{border-bottom:1px solid rgba(255,255,255,.06);}
+
+      /* Button "Alle aufklappen / zuklappen" */
+      .cvz-expand-bar{
+        max-width:1200px;margin:0 auto;padding:0 24px 12px;
+        display:flex;justify-content:flex-end;
+      }
+      .cvz-expand-btn{
+        font-family:'Geist','DM Sans',sans-serif;font-size:12px;padding:7px 14px;
+        background:none;color:#4fd1c5;border:1px solid #4fd1c5;border-radius:0;cursor:pointer;
+        transition:background .15s;
+      }
+      .cvz-expand-btn:hover{background:rgba(79,209,197,.1);}
+      .cvz-expand-btn:focus-visible{outline:2px solid #4fd1c5;outline-offset:2px;}
+
+      @media(max-width:768px){
+        .cvz-acc > summary.cvz-acc-head{padding:14px 14px;gap:8px 10px;}
+        .cvz-acc-meta{order:2;flex:1 1 100%;padding-left:26px;}
+        .cvz-acc-body{padding:14px;}
+        .cvz-expand-bar{padding:0 16px 12px;}
       }
     `;
     document.head.appendChild(s);
@@ -645,9 +752,9 @@
   }
 
   const CVZ_SEV = {
-    critical: { label: 'CRITICAL', cls: 'crit' },
-    high:     { label: 'HIGH',     cls: 'high' },
-    medium:   { label: 'MEDIUM',   cls: 'med'  },
+    critical: { label: 'Kritisch', cls: 'crit' },
+    high:     { label: 'Hoch',     cls: 'high' },
+    medium:   { label: 'Mittel',   cls: 'med'  },
   };
   function cvzAufwand(s) {
     const m = { gering:'Gering', mittel:'Mittel', hoch:'Hoch' };
@@ -674,7 +781,7 @@
     let inner = '';
     for (const it of items) {
       const sevKey = String(it.severity || '').toLowerCase();
-      const sev = CVZ_SEV[sevKey] || { label: String(it.severity||'').toUpperCase(), cls: 'med' };
+      const sev = CVZ_SEV[sevKey] || { label: String(it.severity||''), cls: 'med' };
       const problem = sanitize(String(it.problem || it.issue || ''));
       const loesung = sanitize(String(it.loesung || ''));
       const aufwand = it.aufwand ? cvzAufwand(it.aufwand) : '';
@@ -682,7 +789,7 @@
         + `<div class="cvz-pr-badge">${sev.label}</div>`
         + `<div class="cvz-pr-problem">${problem}</div>`
         + (loesung
-            ? `<div class="cvz-pr-loesung">💡 ${loesung}`
+            ? `<div class="cvz-pr-loesung"><span class="cvz-pr-loesung-label">Lösung</span> ${loesung}`
               + (aufwand ? ` <span class="cvz-pr-aufwand">Aufwand: ${aufwand}</span>` : '')
               + `</div>`
             : '')
@@ -742,7 +849,7 @@
     let inner = '';
     for (const it of items) {
       const sevKey = String(it.severity || '').toLowerCase();
-      const sev = CVZ_SEV[sevKey] || { label: String(it.severity||'').toUpperCase(), cls: 'med' };
+      const sev = CVZ_SEV[sevKey] || { label: String(it.severity||''), cls: 'med' };
       const problem = sanitize(String(it.problem || ''));
       const loesung = sanitize(String(it.loesung || ''));
       const aufwand = it.aufwand ? cvzAufwand(it.aufwand) : '';
@@ -759,7 +866,7 @@
         + `<div class="cvz-pr-badge">${sev.label}${crossBadge}</div>`
         + `<div class="cvz-pr-problem">${problem}</div>`
         + (loesung
-            ? `<div class="cvz-pr-loesung">💡 ${loesung}`
+            ? `<div class="cvz-pr-loesung"><span class="cvz-pr-loesung-label">Lösung</span> ${loesung}`
               + (aufwand ? ` <span class="cvz-pr-aufwand">Aufwand: ${aufwand}</span>` : '')
               + `</div>`
             : '')
@@ -797,6 +904,224 @@
   }
 
   function txt(v) { return v ? `<p>${sanitize(String(v))}</p>` : ''; }
+
+  // ── Aufklappbare Bereiche (v9) ──────────────────────────────────────────────
+  // WHY nachträglich per DOM statt in den Builder-Funktionen oben: buildCatSection,
+  // buildPrioCard, buildPrioCardFromDedup und buildRoadmap bleiben unverändert,
+  // damit an der Dedup-/Fallback-/Sanitizing-Logik nichts kaputtgehen kann. Wir
+  // legen erst NACH dem Rendern <details>-Hüllen um die fertigen Teile. Jedes
+  // Teil wird dabei nur verschoben, nie neu aus Text gebaut (XSS-sicher). Jede
+  // Funktion prüft vorher, ob die erwartete Struktur da ist, und tut sonst
+  // nichts. Dadurch kann ein unerwartetes Format den Report nie leer machen.
+
+  const CVZ_CATEGORY_HOSTS = [
+    '.section-deep-dive-hero',
+    '.section-deep-dive-content',
+    '.section-deep-dive-zielgruppe',
+    '.section-deep-dive-conversion',
+    '.section-deep-dive-struktur',
+    '.section-deep-dive-searchintent',
+    '.section-deep-dive-differenzierung',
+    '.section-deep-dive-performance',
+    '.section-deep-dive-ai',
+  ];
+
+  // Erzeugt ein <details>-Element. Alle Aufklapp-Elemente tragen die Klasse
+  // "cvz-fold", darüber findet auch der Button "Alle aufklappen" sie wieder.
+  function makeFold(extraClasses, open) {
+    const d = document.createElement('details');
+    d.className = 'cvz-fold ' + extraClasses;
+    if (open) d.open = true;
+    return d;
+  }
+
+  // Einzelne Handlungsempfehlung: Schweregrad + Problem sichtbar, Lösung klappt auf.
+  // CRITICAL ist standardmäßig offen, damit die dringendsten Lösungen nie verborgen sind.
+  function foldPrioItems() {
+    document.querySelectorAll('.cvz-pr-item').forEach(item => {
+      if (item.tagName === 'DETAILS') return;
+      const badge   = item.querySelector('.cvz-pr-badge');
+      const problem = item.querySelector('.cvz-pr-problem');
+      const loesung = item.querySelector('.cvz-pr-loesung');
+      if (!badge || !problem || !loesung) return; // ohne Lösung gibt es nichts zu verbergen
+
+      const det = makeFold('cvz-fold-item ' + item.className, item.classList.contains('cvz-pr-crit'));
+      const sum = document.createElement('summary');
+      const sumText = document.createElement('div');
+      sumText.className = 'cvz-pr-sumtext';
+      sumText.appendChild(badge);
+      sumText.appendChild(problem);
+      sum.appendChild(sumText);
+
+      const body = document.createElement('div');
+      body.className = 'cvz-pr-body';
+      body.appendChild(loesung);
+
+      det.appendChild(sum);
+      det.appendChild(body);
+      item.replaceWith(det);
+    });
+  }
+
+  // "Stärken"-Karten in den Kategorien einklappen (Executive Summary bleibt unberührt,
+  // dort gibt es keine .cvz-card-label und die Funktion überspringt sie).
+  function foldStrengths() {
+    CVZ_CATEGORY_HOSTS.forEach(sel => {
+      const host = document.querySelector(sel);
+      if (!host) return;
+      host.querySelectorAll('.cvz-card-staerken').forEach(cardEl => {
+        if (cardEl.tagName === 'DETAILS') return;
+        const label = cardEl.querySelector('.cvz-card-label');
+        const body  = cardEl.querySelector('.cvz-card-body');
+        if (!label || !body) return;
+
+        const det = makeFold('cvz-fold-card ' + cardEl.className, false);
+        const sum = document.createElement('summary');
+        sum.appendChild(label);
+        det.appendChild(sum);
+        det.appendChild(body);
+        cardEl.replaceWith(det);
+      });
+    });
+  }
+
+  // Ganze Kategorie: Kopfzeile (Name, Kurzinfo, Score) bleibt sichtbar, der Rest klappt auf.
+  function foldCategories() {
+    CVZ_CATEGORY_HOSTS.forEach(sel => {
+      const host = document.querySelector(sel);
+      if (!host) return;
+      const section = host.querySelector('.cvz-section');
+      if (!section || section.querySelector('details.cvz-acc')) return;
+
+      const head   = section.querySelector('.cvz-cat-header');
+      const cards  = section.querySelector('.cvz-cards');
+      const nameEl = head && head.querySelector('.cvz-cat-name');
+      const scoreEl = head && head.querySelector('.cvz-cat-score');
+      if (!head || !cards || !nameEl || !scoreEl) return;
+
+      // Kurzinfo für die zugeklappte Zeile: "3 Empfehlungen · 1 kritisch"
+      const total = cards.querySelectorAll('.cvz-pr-item').length;
+      const crit  = cards.querySelectorAll('.cvz-pr-crit').length;
+      let metaText = '';
+      if (total > 0) {
+        metaText = total + (total === 1 ? ' Empfehlung' : ' Empfehlungen');
+        if (crit > 0) metaText += ' · ' + crit + ' kritisch';
+      }
+
+      const det = makeFold('cvz-acc', false);
+      const sum = document.createElement('summary');
+      sum.className = 'cvz-acc-head';
+      // Farbiger Balken links = Score auf einen Blick (gleiche Farben wie im Gesamt-Ring)
+      sum.appendChild(nameEl);
+      if (metaText) {
+        const meta = document.createElement('span');
+        meta.className = 'cvz-acc-meta';
+        meta.textContent = metaText;
+        sum.appendChild(meta);
+      }
+      sum.appendChild(scoreEl);
+      // Einzeiler aus der Zusammenfassung, damit die zugeklappte Zeile eine Aussage hat
+      const sumBody = cards.querySelector('.cvz-card-summary .cvz-card-body');
+      const teaserTxt = sumBody ? sumBody.textContent.replace(/\s+/g, ' ').trim() : '';
+      if (teaserTxt) {
+        const teaser = document.createElement('div');
+        teaser.className = 'cvz-acc-teaser';
+        teaser.textContent = teaserTxt;
+        sum.appendChild(teaser);
+      }
+
+      const body = document.createElement('div');
+      body.className = 'cvz-acc-body';
+      body.appendChild(cards);
+
+      det.appendChild(sum);
+      det.appendChild(body);
+      section.textContent = '';
+      section.appendChild(det);
+    });
+  }
+
+  // Roadmap-Gruppen: "Sofort umsetzen" offen, der Rest zu (mit Anzahl im Titel).
+  function foldRoadmapGroups() {
+    document.querySelectorAll('.section-roadmap .cvz-rm-group').forEach(group => {
+      if (group.tagName === 'DETAILS') return;
+      const head  = group.querySelector('.cvz-rm-head');
+      const items = group.querySelector('.cvz-rm-items');
+      if (!head || !items) return;
+
+      const det = makeFold('cvz-fold-rm ' + group.className, group.classList.contains('cvz-rm-sofort'));
+      const sum = document.createElement('summary');
+      sum.className = 'cvz-rm-head';
+      sum.textContent = head.textContent + ' (' + items.children.length + ')';
+      det.appendChild(sum);
+      det.appendChild(items);
+      group.replaceWith(det);
+    });
+  }
+
+  // Button "Alle aufklappen / Alle zuklappen" direkt unter der Überschrift "Deep Dive".
+  // WICHTIG: Muss VOR injectHeadings() laufen, damit die Überschrift danach OBERHALB
+  // des Buttons eingefügt wird.
+  function injectExpandToggle() {
+    const host = document.querySelector('.section-deep-dive-hero');
+    if (!host || document.querySelector('.cvz-expand-bar')) return;
+    if (!document.querySelector('details.cvz-fold')) return; // nichts zum Aufklappen da
+
+    const bar = document.createElement('div');
+    bar.className = 'cvz-expand-bar';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cvz-expand-btn';
+    bar.appendChild(btn);
+
+    function allFolds() { return Array.from(document.querySelectorAll('details.cvz-fold')); }
+    function refreshLabel() {
+      btn.textContent = allFolds().some(d => !d.open) ? 'Alle aufklappen' : 'Alle zuklappen';
+    }
+    btn.addEventListener('click', () => {
+      const shouldOpen = allFolds().some(d => !d.open);
+      allFolds().forEach(d => { d.open = shouldOpen; });
+      refreshLabel();
+    });
+    // Das "toggle"-Ereignis steigt nicht auf (bubbelt nicht), deshalb in der Capture-Phase lauschen.
+    // So passt sich die Beschriftung an, wenn jemand einzelne Bereiche selbst auf- oder zuklappt.
+    document.addEventListener('toggle', refreshLabel, true);
+
+    host.insertBefore(bar, host.firstChild);
+    refreshLabel();
+  }
+
+  // Öffnet die Kategorie, zu der ein Anker-Link springt (sonst landet man auf einer zugeklappten Zeile).
+  function openFoldFor(target) {
+    const acc = target && target.querySelector ? target.querySelector('details.cvz-acc') : null;
+    if (acc) acc.open = true;
+  }
+
+  // Reihenfolge ist wichtig: erst die inneren Teile, dann die äußeren Hüllen.
+  function enhanceCollapsibles() {
+    try {
+      foldStrengths();
+      foldCategories();
+      foldRoadmapGroups();
+      injectExpandToggle();
+    } catch (err) {
+      // Aufklappen ist ein Komfort. Geht etwas schief, bleibt der Report voll sichtbar.
+      console.error('[CVZ] Aufklappbare Bereiche konnten nicht gebaut werden:', err);
+    }
+  }
+
+  // Beim Drucken (Strg+P) alles öffnen und danach den alten Zustand wiederherstellen.
+  window.addEventListener('beforeprint', () => {
+    document.querySelectorAll('details.cvz-fold').forEach(d => {
+      d.dataset.cvzWasOpen = d.open ? '1' : '0';
+      d.open = true;
+    });
+  });
+  window.addEventListener('afterprint', () => {
+    document.querySelectorAll('details.cvz-fold').forEach(d => {
+      d.open = d.dataset.cvzWasOpen === '1';
+    });
+  });
 
   // ── DOM Helpers ─────────────────────────────────────────────────────────────
   function setText(sel, val, fb = '-') {
@@ -1199,6 +1524,9 @@
           const target = document.getElementById(id);
           if (!target) return;
           e.preventDefault();
+          // v9: Kategorie vor dem Scrollen öffnen, sonst landet man auf einer zugeklappten Zeile.
+          // Erst öffnen, dann messen, denn das Öffnen verändert die Seitenhöhe.
+          openFoldFor(target);
           const offset = nav.offsetHeight + getNavHeight() + 16;
           const top = target.getBoundingClientRect().top + window.scrollY - offset;
           window.scrollTo({top, behavior:'smooth'});
@@ -1432,6 +1760,10 @@
       const el = document.querySelector(selector);
       if (el) el.innerHTML = builder();
     });
+
+    // v9: Aufklappbare Bereiche. Muss NACH dem Rendern der Sektionen und VOR
+    // injectHeadings() laufen (siehe Kommentar an injectExpandToggle).
+    enhanceCollapsibles();
 
     // ── KI-Agent Buttons ──────────────────────────────────────────────────────
     // KI-Agent-Button NUR fuer den Ersteller. Team-Mitglieder sehen
