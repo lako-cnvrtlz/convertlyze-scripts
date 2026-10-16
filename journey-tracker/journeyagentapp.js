@@ -268,7 +268,10 @@
   // Lädt die Zusatzdaten für den gerade offenen Tab. Steckte vorher direkt in
   // openTopicDetail und wird jetzt auch nach einer Neu-Analyse gebraucht.
   function loadTabData(topicId) {
-    if (state.activeSubTab === 'situation' || state.activeSubTab === 'daten') {
+    // GEÄNDERT (16.10.2026): Journey (Sichtbarkeit je Rolle) und Wettbewerb
+    // (Quellen je Rolle) brauchen das Buying Center ebenfalls.
+    if (state.activeSubTab === 'situation' || state.activeSubTab === 'daten' ||
+        state.activeSubTab === 'journey' || state.activeSubTab === 'wettbewerb') {
       maybeLoadBuyingCenter(topicId);
     }
     if (state.activeSubTab === 'situation') {
@@ -278,7 +281,7 @@
       maybeLoadDashboardData(topicId);
       maybeLoadContentChanges(topicId);
     }
-    if (state.activeSubTab === 'journey' || state.activeSubTab === 'verlauf') {
+    if (state.activeSubTab === 'journey' || state.activeSubTab === 'wettbewerb' || state.activeSubTab === 'verlauf') {
       maybeLoadDashboardData(topicId);
       maybeLoadContentChanges(topicId);
     }
@@ -1595,9 +1598,16 @@
   // GEÄNDERT (16.09.2026): 7 Tabs → 5 fokussierte Views (Kundenwunsch:
   // Marketer-freundliches Frontend mit klarer Struktur; "Daten"-Tab
   // bewahrt den Zugang zu Keywords, Prompts und GSC).
+  // GEÄNDERT (16.10.2026): "Journey Map & Wettbewerb" aufgeteilt. Jeder Tab
+  // beantwortet genau eine Frage, jede Auswertung steht genau einmal:
+  //   Situation  = Wo stehen wir, was ist zu tun? (Kennzahlen + Links)
+  //   Journey    = Finden uns die Käufer, und wann? (Phasen, Rollen, Formate)
+  //   Wettbewerb = Wer wird stattdessen genannt, und warum?
+  // Die ID 'journey' bleibt, damit alte Links mit cvz_tab=journey weiter gehen.
   var TOPIC_TABS = [
     { id: 'situation', label: 'Situation' },
-    { id: 'journey', label: 'Journey Map & Wettbewerb' },
+    { id: 'journey', label: 'Journey' },
+    { id: 'wettbewerb', label: 'Wettbewerb' },
     { id: 'aktionsplan', label: 'Aktionsplan' },
     { id: 'verlauf', label: 'Verlauf & Änderungen' },
     { id: 'daten', label: 'Daten' },
@@ -2072,7 +2082,7 @@
       if (newTab === 'daten' && state.activeDataView === 'fanout' && state.activeView === 'topic-detail') {
         maybeLoadFanOut(state.activeTopicId);
       }
-      if ((newTab === 'situation' || newTab === 'daten' || newTab === 'journey') && state.activeView === 'topic-detail') {
+      if ((newTab === 'situation' || newTab === 'daten' || newTab === 'journey' || newTab === 'wettbewerb') && state.activeView === 'topic-detail') {
         maybeLoadBuyingCenter(state.activeTopicId);
       }
       if (newTab === 'situation' && state.activeView === 'topic-detail') {
@@ -2082,7 +2092,7 @@
         maybeLoadDashboardData(state.activeTopicId);
         maybeLoadContentChanges(state.activeTopicId);
       }
-      if ((newTab === 'journey' || newTab === 'verlauf') && state.activeView === 'topic-detail') {
+      if ((newTab === 'journey' || newTab === 'wettbewerb' || newTab === 'verlauf') && state.activeView === 'topic-detail') {
         maybeLoadDashboardData(state.activeTopicId);
         maybeLoadContentChanges(state.activeTopicId);
       }
@@ -2294,18 +2304,58 @@
     else byTopic[domain] = true;
   }
 
+  // GEÄNDERT (16.10.2026): Tab-Leiste scrollt auf schmalen Bildschirmen
+  // seitlich statt umzubrechen. Weil render() die Leiste bei jedem Klick neu
+  // baut, merken wir die Scroll-Position und holen den aktiven Tab ins Bild.
+  var _tabNavScrollLeft = 0;
+
+  function updateTabNavFade(wrapEl, nav) {
+    var max = nav.scrollWidth - nav.clientWidth;
+    wrapEl.classList.toggle('cvz-tab-nav-more-left', nav.scrollLeft > 2);
+    wrapEl.classList.toggle('cvz-tab-nav-more-right', max > 2 && nav.scrollLeft < max - 2);
+  }
+
   function renderTabNav(tabs, activeTabId) {
+    var wrapEl = document.createElement('div');
+    wrapEl.className = 'cvz-tab-nav-wrap';
     var nav = document.createElement('div');
     nav.className = 'cvz-tab-nav';
+    nav.setAttribute('role', 'tablist');
+    var activeBtn = null;
     tabs.forEach(function (tab) {
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'cvz-tab-btn' + (tab.id === activeTabId ? ' cvz-tab-btn-active' : '');
       btn.setAttribute('data-cvz-tab', tab.id);
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-selected', tab.id === activeTabId ? 'true' : 'false');
       btn.textContent = tab.label;
+      if (tab.id === activeTabId) activeBtn = btn;
       nav.appendChild(btn);
     });
-    return nav;
+    wrapEl.appendChild(nav);
+
+    nav.addEventListener('scroll', function () {
+      _tabNavScrollLeft = nav.scrollLeft;
+      updateTabNavFade(wrapEl, nav);
+    }, { passive: true });
+
+    // Erst nach dem Einhängen ins DOM sind Breiten bekannt.
+    var raf = window.requestAnimationFrame || function (fn) { return setTimeout(fn, 0); };
+    raf(function () {
+      if (!nav.isConnected) return;
+      nav.scrollLeft = _tabNavScrollLeft;
+      if (activeBtn) {
+        var left = activeBtn.offsetLeft - nav.offsetLeft;
+        var right = left + activeBtn.offsetWidth;
+        // Aktiven Tab ganz sichtbar machen, mit etwas Luft für den Verlauf.
+        if (left < nav.scrollLeft + 8) nav.scrollLeft = Math.max(0, left - 24);
+        else if (right > nav.scrollLeft + nav.clientWidth - 8) nav.scrollLeft = right - nav.clientWidth + 24;
+      }
+      _tabNavScrollLeft = nav.scrollLeft;
+      updateTabNavFade(wrapEl, nav);
+    });
+    return wrapEl;
   }
 
   // NEU (25.09.2026, Kundenwunsch): Zeitraum-Preset-Auswahl ("wie bei GA4",
@@ -4601,6 +4651,9 @@
       case 'journey':
         tabContent.appendChild(renderJourneyMapTab(state.activeTopicId, detail));
         break;
+      case 'wettbewerb':
+        tabContent.appendChild(renderWettbewerbTab(state.activeTopicId, detail));
+        break;
       case 'aktionsplan':
         tabContent.appendChild(renderAktionsplanTab(detail));
         break;
@@ -5566,7 +5619,7 @@
     } else if (maturity.keine_bestaetigten_wettbewerber) {
       html += '<div class="cvz-summary-subsection">' +
         '<p class="cvz-section-label cvz-section-label-sm">St\u00e4rkster Wettbewerber</p>' +
-        '<p class="cvz-summary-text">Noch keine Wettbewerber best\u00e4tigt. Legt sie im Tab \u201eJourney Map & Wettbewerb\u201c unter ' +
+        '<p class="cvz-summary-text">Noch keine Wettbewerber best\u00e4tigt. Legt sie im Tab \u201eWettbewerb\u201c unter ' +
         '\u201eBeobachtete Wettbewerber\u201c fest, dann bewerten wir sie hier gezielt.</p>' +
         '</div>';
     } else if (strength && strength.reasoning) {
@@ -5947,7 +6000,7 @@
     toggleBtn.textContent = (isOpen ? '\u2212 ' : '+ ') + 'Wettbewerber bearbeiten (' + activeDomains.length + ' aktiv)';
     competitorToggleRow.appendChild(toggleBtn);
     competitorToggleRow.appendChild(makeTip(
-      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden f\u00fcr den hochpriorit\u00e4ren Alert \u201eWettbewerber \u00fcberholt euch\u201c genutzt und in der Journey Map als Share of Voice analysiert. Die Grafik \u201eSichtbarkeit im Wettbewerbsvergleich\u201c zeigt dagegen ALLE Domains, die KI-Systeme tats\u00e4chlich zitiert haben, auch bisher nicht best\u00e4tigte. Bereits zitierte Domains werden als Vorschl\u00e4ge angezeigt.'
+      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden f\u00fcr den hochpriorit\u00e4ren Alert \u201eWettbewerber \u00fcberholt euch\u201c genutzt und in den Quellen im Tab \u201eWettbewerb\u201c als Wettbewerber markiert. Die Grafik \u201eSichtbarkeit im Wettbewerbsvergleich\u201c zeigt dagegen ALLE Domains, die KI-Systeme tats\u00e4chlich zitiert haben, auch bisher nicht best\u00e4tigte. Bereits zitierte Domains werden als Vorschl\u00e4ge angezeigt.'
     ));
     section.appendChild(competitorToggleRow);
 
@@ -8811,13 +8864,13 @@
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
       'Pro Rolle und Journey-Phase die zwei Domains, die in den KI-Antworten der letzten 12 Wochen bei den meisten Fragen als Quelle genannt wurden. ' +
-      '"2/3" heißt: bei 2 von 3 Fragen. Die vollständige Liste mit den Fragen dahinter steht im Tab Journey Map.'
+      '"2/3" heißt: bei 2 von 3 Fragen. Die vollständige Liste mit den Fragen dahinter steht im Tab Wettbewerb.'
     ));
     var link = document.createElement('button');
     link.type = 'button';
     link.className = 'cvz-create-toggle-btn';
     link.style.marginLeft = 'auto';
-    link.setAttribute('data-cvz-tab', 'journey');
+    link.setAttribute('data-cvz-tab', 'wettbewerb');
     link.textContent = 'Alle Quellen und Fragen ansehen';
     headRow.appendChild(link);
     section.appendChild(headRow);
@@ -9882,7 +9935,38 @@
       '.cvz-card-eyebrow { font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
       '.cvz-domain-header { margin-bottom: 24px; }' +
 
-      '.cvz-tab-nav { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--cvz-border); margin-bottom: 20px; background: var(--cvz-navy); padding-top: 8px; }' +
+      // GEÄNDERT (16.10.2026): Tabs brechen nicht mehr in zwei Zeilen um,
+      // sondern scrollen seitlich (Handy). Die Scrollbar ist ausgeblendet; ein
+      // Verlauf am Rand zeigt, dass es in diese Richtung weitergeht
+      // (Klassen cvz-tab-nav-more-left/-right, gesetzt in updateTabNavFade).
+      // Die Linie unter den Tabs ist ein inset-Schatten der Leiste, damit die
+      // Unterstreichung des aktiven Tabs trotz overflow darauf liegt.
+      '.cvz-tab-nav-wrap { position: relative; margin-bottom: 20px; background: var(--cvz-navy); }' +
+      '.cvz-tab-nav { display: flex; gap: 4px; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;' +
+        'scrollbar-width: none; overscroll-behavior-x: contain; padding-top: 8px; box-shadow: inset 0 -1px 0 var(--cvz-border); }' +
+      '.cvz-tab-nav .cvz-tab-btn { margin-bottom: 0; }' +
+      '.cvz-tab-nav::-webkit-scrollbar { display: none; }' +
+      '.cvz-tab-nav .cvz-tab-btn { flex: 0 0 auto; white-space: nowrap; }' +
+      '.cvz-tab-nav-wrap::before, .cvz-tab-nav-wrap::after { content: ""; position: absolute; top: 0; bottom: 1px; width: 28px;' +
+        'pointer-events: none; opacity: 0; transition: opacity .15s ease; z-index: 1; }' +
+      '.cvz-tab-nav-wrap::before { left: 0; background: linear-gradient(to right, var(--cvz-navy), transparent); }' +
+      '.cvz-tab-nav-wrap::after { right: 0; background: linear-gradient(to left, var(--cvz-navy), transparent); }' +
+      '.cvz-tab-nav-wrap.cvz-tab-nav-more-left::before, .cvz-tab-nav-wrap.cvz-tab-nav-more-right::after { opacity: 1; }' +
+      '@media (max-width: 600px) { .cvz-tab-btn { padding: 10px 12px; } }' +
+      // NEU (16.10.2026): Situation-Tab, Phasen-Kacheln + KI-Wissen-Einzeiler
+      '.cvz-sit-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }' +
+      '@media (max-width: 720px) { .cvz-sit-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }' +
+      '.cvz-sit-tile { background: var(--cvz-navy-raised); border: 1px solid var(--cvz-border); border-top: 3px solid; padding: 14px 16px; min-width: 0; }' +
+      '.cvz-sit-tile-name { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 8px; }' +
+      '.cvz-sit-tile-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }' +
+      '.cvz-sit-tile-value { font-size: 28px; font-weight: 600; line-height: 1.1; color: var(--cvz-text); font-variant-numeric: tabular-nums; }' +
+      '.cvz-sit-tile-value.cvz-journey-nodata { font-size: 18px; color: var(--cvz-text-muted); }' +
+      '.cvz-sit-tile-row .cvz-journey-channel-delta { margin-left: 0; cursor: default; }' +
+      '.cvz-sit-tile-meta { margin: 6px 0 0; font-size: 11px; color: var(--cvz-text-muted); }' +
+      '.cvz-sit-knowledge { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; padding: 14px 16px; }' +
+      '.cvz-sit-knowledge-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--cvz-text-muted); }' +
+      '.cvz-sit-knowledge-text { font-size: 14px; color: var(--cvz-text); }' +
+      '.cvz-sit-knowledge .cvz-journey-hint-link { margin: 0 0 0 auto; }' +
       '@media (max-width: 600px) { .cvz-opp-rec-col { display: none; } .cvz-opp-rec-header { display: none; } }' +
       '.cvz-tab-btn {' +
         'font-family: "Geist", sans-serif; font-size: 14px; padding: 10px 16px; margin-bottom: -1px;' +
@@ -10643,11 +10727,144 @@
     return section;
   }
 
+  // NEU (16.10.2026): Gesamtwert der eigenen Sichtbarkeit pro Phase (ChatGPT +
+  // Gemini gepoolt, 28 Tage). Kommt fertig vom Backend (journey_comparison.
+  // phase_totals, inkl. Trend). Ältere API ohne phase_totals: gleich gerechnet
+  // aus den Kanalwerten, dann ohne Trend. Ohne journey_comparison: 12 Wochen.
+  function ownPhaseTotal(dashData, phase) {
+    var jc = dashData && dashData.journey_comparison;
+    if (jc && jc.phase_totals && jc.phase_totals[phase]) return jc.phase_totals[phase];
+    var scores = ((jc ? jc.phase_scores : dashData && dashData.phase_scores) || {})[phase] || {};
+    var cited = 0, total = 0;
+    JOURNEY_PERCENT_CHANNELS.forEach(function (ch) {
+      var s = scores[ch];
+      if (s && s.total > 0) { cited += s.cited || 0; total += s.total; }
+    });
+    return { score: total > 0 ? Math.round(cited / total * 1000) / 10 : null, cited: cited, total: total, trend: null };
+  }
+
+  // NEU (16.10.2026): Situation-Tab, 4 Phasen-Kacheln: eine Zahl + Trend je
+  // Phase, ohne Diagramm. Details (Kanäle, Quellen) stehen im Tab Journey.
+  function renderSituationPhaseTiles(dashData) {
+    var jc = dashData.journey_comparison || null;
+    var cfg = {
+      windowDays: jc ? jc.window_days : 28,
+      minAnswers: jc ? jc.min_answers : 15,
+      minDeltaPp: jc ? jc.min_delta_pp : 10,
+    };
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'KI-Sichtbarkeit nach Kaufphase';
+    head.appendChild(heading);
+    head.appendChild(makeTip(
+      'Anteil der Antworten von ChatGPT und Gemini, die eure Domain als Quelle nennen, je Kaufphase' +
+      (jc ? ', letzte ' + cfg.windowDays + ' Tage. Ein Pfeil erscheint erst bei einer Veränderung, die größer ist als die normale Schwankung von KI-Antworten.' : '.') +
+      ' Die Aufschlüsselung nach Kanal und Rolle steht im Tab Journey.'
+    ));
+    var link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'cvz-create-toggle-btn';
+    link.style.marginLeft = 'auto';
+    link.setAttribute('data-cvz-tab', 'journey');
+    link.textContent = 'Details in Journey →';
+    head.appendChild(link);
+    section.appendChild(head);
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-sit-tiles';
+    PHASE_ORDER.forEach(function (phase) {
+      var t = ownPhaseTotal(dashData, phase);
+      var color = PHASE_COLORS[phase] || '#8b98a5';
+      var tile = document.createElement('div');
+      tile.className = 'cvz-sit-tile';
+      tile.style.borderTopColor = color;
+
+      var name = document.createElement('p');
+      name.className = 'cvz-sit-tile-name';
+      name.style.color = color;
+      name.textContent = PHASE_LABELS[phase] || phase;
+      tile.appendChild(name);
+
+      var valRow = document.createElement('div');
+      valRow.className = 'cvz-sit-tile-row';
+      var val = document.createElement('span');
+      val.className = 'cvz-sit-tile-value' + (t.score == null ? ' cvz-journey-nodata' : '');
+      val.textContent = t.score == null ? 'k. A.' : Math.round(t.score) + ' %';
+      valRow.appendChild(val);
+      var badge = jc && t.trend ? renderJourneyTrendBadge(t, 'own', cfg) : null;
+      if (badge) valRow.appendChild(badge);
+      tile.appendChild(valRow);
+
+      var meta = document.createElement('p');
+      meta.className = 'cvz-sit-tile-meta';
+      meta.textContent = t.total > 0
+        ? t.cited + ' von ' + t.total + ' Antworten'
+        : 'noch keine Messung';
+      tile.appendChild(meta);
+      grid.appendChild(tile);
+    });
+    section.appendChild(grid);
+    return section;
+  }
+
+  // NEU (16.10.2026): KI-Wissens-Check als Einzeiler für den Tab Situation.
+  // Der vollständige Check steht im Tab Wettbewerb.
+  function renderKnowledgeOneLiner(detail) {
+    var k = detail.ai_knowledge;
+    if (!k) return null;
+    var cov = k.coverage || {};
+    var parts = [];
+    if (cov.chatgpt != null) parts.push('ChatGPT ' + cov.chatgpt + ' %');
+    if (cov.gemini != null) parts.push('Gemini ' + cov.gemini + ' %');
+    var conflicts = (k.dimensions || []).filter(function (d) { return d && d.conflict; }).length;
+    var wrong = (k.wrong_or_outdated || []).length;
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    var card = document.createElement('div');
+    card.className = 'cvz-card cvz-sit-knowledge';
+    var label = document.createElement('span');
+    label.className = 'cvz-sit-knowledge-label';
+    label.textContent = 'Was die KI über euch weiß';
+    card.appendChild(label);
+    var text = document.createElement('span');
+    text.className = 'cvz-sit-knowledge-text';
+    var facts = parts.length ? 'Abdeckung ' + parts.join(', ') : 'Abdeckung noch nicht gemessen';
+    if (conflicts) facts += ' · ' + conflicts + (conflicts === 1 ? ' Widerspruch' : ' Widersprüche');
+    if (wrong) facts += ' · ' + wrong + ' falsch oder veraltet';
+    text.textContent = facts;
+    text.title = 'Geprüft am ' + (formatShortDate(k.checked_at) || '') + '. Abdeckung: wie vollständig die Modelle eure wichtigsten Wissensbereiche kennen.';
+    card.appendChild(text);
+    var link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'cvz-journey-hint-link';
+    link.setAttribute('data-cvz-tab', 'wettbewerb');
+    link.textContent = 'Details im Tab Wettbewerb →';
+    card.appendChild(link);
+    section.appendChild(card);
+    return section;
+  }
+
   function renderVisibilityComparisonChart(topicId, detail) {
     var dashData = state.dashboardDataCache[topicId];
     if (!dashData || dashData._error || !dashData.phase_scores) return null;
 
-    var sov = dashData.share_of_voice || {};
+    // GEÄNDERT (16.10.2026): Chart nutzt dasselbe 28-Tage-Fenster wie die
+    // Journey-Karten (journey_comparison). Vorher 12 Wochen (phase_scores /
+    // share_of_voice), dadurch zeigte dieselbe Phase im Chart und in der
+    // Karte unterschiedliche Prozentwerte. Fallback auf 12 Wochen nur, wenn
+    // das Backend den Vergleichsblock nicht liefert (Fehler, alte API).
+    var _cjc = dashData.journey_comparison || null;
+    var windowLabel = _cjc ? 'letzte ' + _cjc.window_days + ' Tage' : 'letzte 12 Wochen';
+    var sov = _cjc ? (_cjc.sources || {}) : (dashData.share_of_voice || {});
+    var ownPhaseScores = _cjc ? (_cjc.phase_scores || {}) : dashData.phase_scores;
 
     // Top-5-Wettbewerber: Summe der citation_rate ueber alle Phasen
     var compTotals = {};
@@ -10685,7 +10902,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Wer wird in welcher Journey-Phase von KI-Systemen zitiert? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %). Diese Grafik zeigt alle zitierten Domains, auch nicht best\u00e4tigte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck. Ein Klick auf einen Namen in der Legende blendet die Linie aus bzw. wieder ein.';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von ChatGPT und Gemini zitiert (' + windowLabel + ')? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %, gleiche Werte wie im Tab \u201eJourney\u201c). Diese Grafik zeigt alle zitierten Domains, auch nicht best\u00e4tigte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck. Ein Klick auf einen Namen in der Legende blendet die Linie aus bzw. wieder ein.';
     section.appendChild(sub);
 
     // Favicon-Hilfsfunktion
@@ -10762,7 +10979,7 @@
     // Phasen ohne Läufe (total=0 fuer alle Kanaele UND kein Wettbewerber) werden ausgeblendet.
     var PHASE_LABEL_MAP = { exploration: 'Erforschung', evaluation: 'Bewertung', comparison: 'Vergleich', decision: 'Entscheidung' };
     var activePhases = PHASE_ORDER.filter(function (phase) {
-      var scores = dashData.phase_scores[phase] || {};
+      var scores = ownPhaseScores[phase] || {};
       var hasOwnData = CHANNEL_ORDER.some(function (ch) { var s = scores[ch]; return s && s.total > 0; });
       var hasCompData = (sov[phase] || []).length > 0;
       return hasOwnData || hasCompData;
@@ -10780,15 +10997,12 @@
 
     var xLabels = activePhases.map(function (p) { return PHASE_LABEL_MAP[p] || p; });
 
-    // Eigene Zitierrate: Durchschnitt ueber Kanaele mit Daten (null fuer inaktive Phasen)
+    // GEÄNDERT (16.10.2026): Eigene Zitierrate = Gesamtwert pro Phase aus
+    // dem Backend (phase_totals, ChatGPT + Gemini gepoolt). Dieselbe Zahl
+    // steht in den Phasen-Kacheln im Tab Situation.
     var ownValues = activePhases.map(function (phase) {
-      var scores = dashData.phase_scores[phase] || {};
-      var total = 0, count = 0;
-      CHANNEL_ORDER.forEach(function (ch) {
-        var s = scores[ch];
-        if (s && s.total > 0) { total += (s.score || 0); count++; }
-      });
-      return count > 0 ? Math.round(total / count) : 0;
+      var pooled = ownPhaseTotal(dashData, phase);
+      return pooled.score != null ? Math.round(pooled.score) : 0;
     });
 
     var seriesList = [];
@@ -11056,7 +11270,9 @@
     // NEU (20.09.2026): Hinweis + Retry-Button für Schritte, die hier auf
     // dieser Seite auftauchen (Zusammenfassung, Handlungsfelder,
     // KI-Wissens-Check) und fehlgeschlagen sind, fehlen oder gerade laufen.
-    var situationStepNotice = renderStepNotice(detail, ['summary', 'opportunities', 'ai_knowledge']);
+    // GEÄNDERT (16.10.2026): ai_knowledge zeigt seinen Hinweis jetzt im Tab
+    // Wettbewerb, wo der vollständige Check steht.
+    var situationStepNotice = renderStepNotice(detail, ['summary', 'opportunities']);
     if (situationStepNotice) wrap.appendChild(situationStepNotice);
 
     // Phase-Score-Übersicht (Dashboard-Daten, falls geladen)
@@ -11091,28 +11307,19 @@
     // zweite Version bleibt dort (inkl. Kanal-Aufschlüsselung), hier reicht
     // der Chart als einzige Quelle für "Zitierrate pro Phase".
 
-    // Wettbewerbs-Sichtbarkeitsvergleich (Chart)
-    var compChart = renderVisibilityComparisonChart(topicId, detail);
-    if (compChart) wrap.appendChild(compChart);
+    // GEÄNDERT (16.10.2026): Situation ist der 30-Sekunden-Check. Hier stehen
+    // nur noch Kennzahlen mit Link zur Stelle, wo die Details stehen. Jede
+    // Auswertung gibt es genau einmal:
+    //   Wettbewerbs-Chart, Quellen ("Wer wird stattdessen zitiert?"),
+    //   KI-Wissens-Check vollständig  → Tab Wettbewerb
+    //   Sichtbarkeit je Rolle, Content-Typen pro Phase → Tab Journey
+    if (dashData && !dashError && !state.isLoadingDashboard) {
+      wrap.appendChild(renderSituationPhaseTiles(dashData));
+    }
 
-    // NEU: Content-Typen pro Phase
-    var ctChart = renderContentTypeByPhase(dashData);
-    if (ctChart) wrap.appendChild(ctChart);
-
-    // NEU (23.09.2026): Sichtbarkeit je Rolle, inkl. Rollen bearbeiten
-    wrap.appendChild(renderRoleVisibilitySection(topicId, detail));
-
-    // VERSCHOBEN (20.09.2026): Die Wettbewerber-Tabelle mit Differenzierungs-
-    // Tipps pro Phase stand bisher nur im Journey-Map-Tab, war dort aber
-    // eingeklappt und stand hinter mehreren anderen Abschnitten, für eine
-    // so wichtige Analyse zu gut versteckt. Sie steht jetzt direkt hier,
-    // gleich hinter dem Wettbewerbsvergleich, im ersten Tab.
-    // GEÄNDERT (14.10.2026): Kurzfassung (Rolle x Phase, meistzitierte Domains)
-    // statt der vollen Tabelle, die identisch im Journey-Map-Tab steht. Fällt
-    // auf die bisherige Tabelle zurück, solange das Backend noch keine
-    // prompt_source_matrix liefert.
-    var _smCompact = (dashData && !dashError) ? renderSourceMatrixCompact(topicId, dashData, detail) : null;
-    wrap.appendChild(_smCompact || renderJourneyShareOfVoice(dashData && dashData.share_of_voice));
+    // KI-Wissens-Check als Einzeiler (vollständig im Tab Wettbewerb)
+    var knowledgeLine = renderKnowledgeOneLiner(detail);
+    if (knowledgeLine) wrap.appendChild(knowledgeLine);
 
     // Beste Content-Chancen
     var bestChances = SHOW_LEGACY_RECOMMENDATIONS ? renderBestContentChancesSection(detail.best_content_chances, detail.topic) : null;
@@ -11397,11 +11604,8 @@
       wrap.appendChild(oppSection);
     }
 
-    // NEU (20.09.2026): KI-Wissens-Check: was ChatGPT/Gemini über euch
-    // wissen. War bisher nur als Funktion vorhanden, wurde aber in keinem
-    // Tab tatsächlich angezeigt.
-    var knowledgeSection = renderKnowledgeSection(detail);
-    if (knowledgeSection) wrap.appendChild(knowledgeSection);
+    // VERSCHOBEN (16.10.2026): Der vollständige KI-Wissens-Check steht im Tab
+    // Wettbewerb (renderWettbewerbTab), hier nur der Einzeiler oben.
 
     // NEU (02.10.2026): Statt eigener Empfehlungslisten ein kurzer Verweis
     // auf die wichtigsten offenen Maßnahmen im Aktionsplan.
@@ -11737,7 +11941,7 @@
             var compBadge = document.createElement('span');
             compBadge.className = 'cvz-journey-comp-badge';
             compBadge.textContent = 'Wettbewerber';
-            compBadge.title = 'Steht in eurer Liste beobachteter Wettbewerber (unten in diesem Tab).';
+            compBadge.title = 'Steht in eurer Liste beobachteter Wettbewerber (Tab „Wettbewerb“).';
             meta.appendChild(compBadge);
           }
           if (src.content_type) {
@@ -11779,7 +11983,9 @@
     // NEU (20.09.2026): Retry-Hinweis für die Schritte, die in diesem Tab
     // dargestellt werden (Content-Lücken, Quellen-Analyse, SERP-Check,
     // Wettbewerber-Vorschläge).
-    var journeyStepNotice = renderStepNotice(detail, ['gap_analysis', 'source_analysis', 'serp_check', 'competitor_suggestions']);
+    // GEÄNDERT (16.10.2026): source_analysis und competitor_suggestions
+    // gehören jetzt zum Tab Wettbewerb.
+    var journeyStepNotice = renderStepNotice(detail, ['gap_analysis', 'serp_check']);
     if (journeyStepNotice) wrap.appendChild(journeyStepNotice);
 
     if (state.isLoadingDashboard) {
@@ -11812,23 +12018,75 @@
     var _jc = data.journey_comparison || null;
     wrap.appendChild(renderDataFreshnessNote(_jc && _jc.last_run_at, 'Zitationen zuletzt gemessen'));
     wrap.appendChild(renderNextRunNote(detail.topic, 'prompts', 'Nächster Durchlauf (Zitationen)'));
-    wrap.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at, 'Content-Lücken und Quellen zuletzt analysiert'));
-    wrap.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Content-Lücken, Quellen)'));
 
     // GEÄNDERT (02.10.2026): Phasen-Karten mit 28-Tage-Vergleich, Tooltips
     // und Handlungshinweis, siehe renderJourneyPhaseSection.
     wrap.appendChild(renderJourneyPhaseSection(data, detail));
 
-    // VERSCHOBEN (20.09.2026): Die detaillierte Wettbewerber-Tabelle pro
-    // Phase (mit Differenzierungs-Tipps) steht jetzt im Situation-Tab, gleich
-    // hinter dem Wettbewerbsvergleichs-Chart, dort ist sie sofort sichtbar
-    // statt hier hinter mehreren anderen Abschnitten versteckt.
+    // VERSCHOBEN (16.10.2026) aus Situation: Rolle x Phase ist der Kern der
+    // Buying Journey und gehört direkt unter die Phasen-Karten.
+    wrap.appendChild(renderRoleVisibilitySection(topicId, detail));
+
+    // VERSCHOBEN (16.10.2026) aus Situation: welches Format je Phase gebraucht wird.
+    var ctChart = renderContentTypeByPhase(data);
+    if (ctChart) wrap.appendChild(ctChart);
 
     // Content-Lücken aus Gap-Analyse (GEAENDERT 17.09.2026: topicId + Phase-Filter)
     // GEÄNDERT (02.10.2026): Content-Lücken fließen in den Aktionsplan ein.
     if (SHOW_LEGACY_RECOMMENDATIONS) wrap.appendChild(renderContentGapsSection(detail.content_gaps, topicId));
 
-    // Quellen-Analyse (GEAENDERT 17.09.2026: phase-gruppiert via share_of_voice)
+    // VERSCHOBEN (16.10.2026): Quellen-Ansicht und Wettbewerber-Verwaltung
+    // stehen jetzt im Tab Wettbewerb (renderWettbewerbTab).
+    return wrap;
+  }
+
+  // ─── WETTBEWERB ───────────────────────────────────────────────────────────
+  // NEU (16.10.2026): Eigener Tab für die Frage "Wer wird stattdessen
+  // genannt, und warum?". Vorher verteilt auf Situation (Chart, Kurzfassung
+  // der Quellen, KI-Wissens-Check) und Journey Map (Quellen-Ansicht,
+  // Wettbewerber-Verwaltung).
+  function renderWettbewerbTab(topicId, detail) {
+    var wrap = document.createElement('div');
+
+    var stepNotice = renderStepNotice(detail, ['source_analysis', 'competitor_suggestions', 'ai_knowledge']);
+    if (stepNotice) wrap.appendChild(stepNotice);
+
+    if (state.isLoadingDashboard) {
+      var loadEl = document.createElement('p');
+      loadEl.className = 'cvz-card-placeholder-text';
+      loadEl.innerHTML = '<span class="cvz-spinner"></span>Wettbewerbsdaten werden geladen…';
+      wrap.appendChild(loadEl);
+      return wrap;
+    }
+
+    var data = state.dashboardDataCache[topicId];
+    if (!data || data._error) {
+      var errEl = document.createElement('div');
+      errEl.className = 'cvz-card cvz-card-placeholder';
+      var errMsg = data && data._error
+        ? 'Wettbewerbsdaten konnten nicht geladen werden.'
+        : 'Noch keine Wettbewerbsdaten vorhanden. Diese entstehen nach dem ersten vollständigen Analyse-Lauf.';
+      errEl.innerHTML = '<p class="cvz-card-placeholder-text">' + escapeHtml(errMsg) + '</p>' +
+        '<p style="margin-top:8px;"><button type="button" ' +
+        'style="padding:6px 14px;font-size:13px;border-radius:0;border:1px solid var(--cvz-border,#e5e7eb);' +
+        'background:transparent;color:var(--cvz-text,#374151);cursor:pointer;" ' +
+        'data-cvz-journey-retry="' + escapeHtml(topicId) + '">Erneut laden</button></p>';
+      wrap.appendChild(errEl);
+      // Wettbewerber-Verwaltung bleibt auch ohne Dashboard-Daten erreichbar.
+      wrap.appendChild(renderCompetitorManageBlock(detail, topicId));
+      return wrap;
+    }
+
+    var _jc = data.journey_comparison || null;
+    wrap.appendChild(renderDataFreshnessNote(_jc && _jc.last_run_at, 'Zitationen zuletzt gemessen'));
+    wrap.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at, 'Quellen und KI-Wissen zuletzt analysiert'));
+    wrap.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Quellen, KI-Wissen)'));
+
+    // 1. Wer liegt vorne? Chart, 28 Tage, gleiche Werte wie die Journey-Karten.
+    var compChart = renderVisibilityComparisonChart(topicId, detail);
+    if (compChart) wrap.appendChild(compChart);
+
+    // 2. Wer wird bei welchen Fragen zitiert? (Phase x Rolle x Frage)
     var _sov = data.share_of_voice || {};
     var _hasSov = PHASE_ORDER.some(function (p) { return _sov[p] && _sov[p].length; });
     // GEÄNDERT (14.10.2026): neue Ansicht "Wer wird zitiert?" (Phase x Rolle x Frage),
@@ -11841,9 +12099,20 @@
       wrap.appendChild(renderSourceProfilesSection(detail.source_profiles, topicId, _sov));
     }
 
-    // VERSCHOBEN (17.09.2026): Wettbewerber-Verwaltung gehoert zur Journey Map,
-    // weil die bestaetigten Domains den Alert „Wettbewerber ueberholt euch" und
-    // die Share-of-Voice-Analyse in diesem Tab steuern.
+    // 3. Warum? Was die Modelle über euch wissen, und was für einen
+    // vollständigen Vergleich mit Wettbewerbern fehlt.
+    var knowledgeSection = renderKnowledgeSection(detail);
+    if (knowledgeSection) wrap.appendChild(knowledgeSection);
+
+    // 4. Welche Domains als Wettbewerber gelten.
+    wrap.appendChild(renderCompetitorManageBlock(detail, topicId));
+
+    return wrap;
+  }
+
+  // Wettbewerber-Verwaltung mit Überschrift. Steuert den Alert „Wettbewerber
+  // überholt euch“ und die Markierung in den Quellen.
+  function renderCompetitorManageBlock(detail, topicId) {
     var compManageWrap = document.createElement('div');
     compManageWrap.style.cssText = 'margin-top:28px;padding-top:20px;border-top:1px solid var(--cvz-border,#30363d);';
     var compManageHeading = document.createElement('p');
@@ -11855,13 +12124,11 @@
     compManageSub.style.marginBottom = '10px';
     compManageSub.textContent =
       'Diese Domains steuern den Alert „Wettbewerber überholt euch“ ' +
-      'und werden in der Share-of-Voice-Analyse oben gesondert hervorgehoben. ' +
-      'Der Vergleichs-Chart im Überblick zeigt davon unabhängig alle KI-zitierten Domains.';
+      'und werden in den Quellen oben als Wettbewerber markiert. ' +
+      'Der Wettbewerbsvergleich oben zeigt davon unabhängig alle KI-zitierten Domains.';
     compManageWrap.appendChild(compManageSub);
     compManageWrap.appendChild(renderCompetitorManageSection(detail, topicId));
-    wrap.appendChild(compManageWrap);
-
-    return wrap;
+    return compManageWrap;
   }
 
   // ─── SUPPORTING DATA TABLE ────────────────────────────────────────────────
