@@ -354,7 +354,7 @@
       .cvz-badge-tx{font-size:14px;color:#718096;line-height:1.55;}
 
       /* Sektions-Überschriften */
-      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:56px 24px 24px;text-align:center;}
+      .cvz-heading-wrap{max-width:1200px;margin:0 auto;padding:40px 24px 24px;text-align:center;}
       .cvz-heading-wrap.cvz-heading-top{border-top:none!important;}
       .cvz-heading-title{
         font-family:'Syne',sans-serif;
