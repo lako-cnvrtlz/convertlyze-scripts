@@ -5402,7 +5402,7 @@
     var html = headerHtml;
 
     if (detail.prompts && detail.prompts.length) {
-      html += '<p class="cvz-section-label" style="margin-top:12px;">Prompts</p>';
+      html += '<p class="cvz-section-label cvz-section-label-sm" style="margin-top:12px;">Prompts</p>';
       detail.prompts.forEach(function (p) {
         // GEÄNDERT: Ein Prompt wird pro Woche und Modell mehrfach abgefragt,
         // das Backend liefert je (Prompt, Modell) EINE Zeile mit Anzahl der Läufe.
@@ -5425,7 +5425,7 @@
     }
 
     if (detail.keywords && detail.keywords.length) {
-      html += '<p class="cvz-section-label" style="margin-top:12px;">Keywords</p>';
+      html += '<p class="cvz-section-label cvz-section-label-sm" style="margin-top:12px;">Keywords</p>';
       detail.keywords.forEach(function (k) {
         var current = k.organic_rank != null ? k.organic_rank : k.gsc_position;
         var previous = k.previous_organic_rank != null ? k.previous_organic_rank : k.previous_gsc_position;
@@ -5446,7 +5446,7 @@
     }
 
     if (detail.changelog && detail.changelog.length) {
-      html += '<p class="cvz-section-label" style="margin-top:12px;">Eure Eintr\u00e4ge</p>';
+      html += '<p class="cvz-section-label cvz-section-label-sm" style="margin-top:12px;">Eure Eintr\u00e4ge</p>';
       detail.changelog.forEach(function (entry) {
         html += '<p class="cvz-week-detail-row">' + escapeHtml(entry.entry_text) + '</p>';
       });
@@ -5532,7 +5532,7 @@
     if (sources.length) {
       var periodLabel = detail.meistzitierte_quellen_zeitraum === 'aktueller_monat' ? 'letzte 30 Tage' : 'seit Start des Themas';
       html += '<div class="cvz-summary-subsection">' +
-        '<p class="cvz-section-label">Meistzitierte Quellen (' + periodLabel + ')</p>' +
+        '<p class="cvz-section-label cvz-section-label-sm">Meistzitierte Quellen (' + periodLabel + ')</p>' +
         '<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">' +
         sources.map(function (q) {
           var pct = q.von_fragen ? Math.round((q.anzahl_fragen / q.von_fragen) * 100) : 0;
@@ -5557,7 +5557,7 @@
     var strength = detail.competitor_strength;
     if (strength && strength.strongest_domain) {
       html += '<div class="cvz-summary-subsection">' +
-        '<p class="cvz-section-label">St\u00e4rkster Wettbewerber</p>' +
+        '<p class="cvz-section-label cvz-section-label-sm">St\u00e4rkster Wettbewerber</p>' +
         '<p class="cvz-summary-text"><strong>' + escapeHtml(strength.strongest_domain) + '</strong>' +
         (strength.reasoning ? ': ' + escapeHtml(strength.reasoning) : '') +
         '</p>' +
@@ -5565,13 +5565,13 @@
         '</div>';
     } else if (maturity.keine_bestaetigten_wettbewerber) {
       html += '<div class="cvz-summary-subsection">' +
-        '<p class="cvz-section-label">St\u00e4rkster Wettbewerber</p>' +
+        '<p class="cvz-section-label cvz-section-label-sm">St\u00e4rkster Wettbewerber</p>' +
         '<p class="cvz-summary-text">Noch keine Wettbewerber best\u00e4tigt. Legt sie im Tab \u201eJourney Map & Wettbewerb\u201c unter ' +
         '\u201eBeobachtete Wettbewerber\u201c fest, dann bewerten wir sie hier gezielt.</p>' +
         '</div>';
     } else if (strength && strength.reasoning) {
       html += '<div class="cvz-summary-subsection">' +
-        '<p class="cvz-section-label">St\u00e4rkster Wettbewerber</p>' +
+        '<p class="cvz-section-label cvz-section-label-sm">St\u00e4rkster Wettbewerber</p>' +
         '<p class="cvz-summary-text">' + escapeHtml(strength.reasoning) + '</p>' +
         '</div>';
     }
@@ -5603,7 +5603,7 @@
       }).join('');
       if (phaseRowsHtml) {
         html += '<div class="cvz-summary-subsection">' +
-          '<p class="cvz-section-label">Je Phase</p>' +
+          '<p class="cvz-section-label cvz-section-label-sm">Je Phase</p>' +
           '<div>' + phaseRowsHtml + '</div>' +
           (maturity.content_luecken_duenn ? THIN_DATA_NOTE : '') +
           '</div>';
@@ -5612,7 +5612,7 @@
 
     if (detail.keyword_opportunities) {
       html += '<div class="cvz-summary-subsection">' +
-        '<p class="cvz-section-label">Keyword-Chancen &amp; -Schw\u00e4chen</p>' +
+        '<p class="cvz-section-label cvz-section-label-sm">Keyword-Chancen &amp; -Schw\u00e4chen</p>' +
         '<p class="cvz-summary-text">' + escapeHtml(detail.keyword_opportunities) + '</p>' +
         (maturity.keyword_chancen_duenn ? THIN_DATA_NOTE : '') +
         '</div>';
@@ -7261,7 +7261,7 @@
     wrap.appendChild(answerBlock);
 
     var sourcesHeading = document.createElement('p');
-    sourcesHeading.className = 'cvz-section-label';
+    sourcesHeading.className = 'cvz-section-label cvz-section-label-sm';
     sourcesHeading.textContent = 'Zitierte Quellen (' + run.sources.length + ')';
     wrap.appendChild(sourcesHeading);
 
@@ -7421,7 +7421,7 @@
     var kwLabelRow = document.createElement('div');
     kwLabelRow.style.cssText = 'display:flex;align-items:center;margin-bottom:6px;';
     var kwLabel = document.createElement('span');
-    kwLabel.className = 'cvz-section-label';
+    kwLabel.className = 'cvz-section-label cvz-section-label-sm';
     kwLabel.style.margin = '0';
     kwLabel.textContent = 'Eigenes Keyword hinzuf\u00fcgen';
     kwLabelRow.appendChild(kwLabel);
@@ -7492,7 +7492,7 @@
     var promptLabelRow = document.createElement('div');
     promptLabelRow.style.cssText = 'display:flex;align-items:center;margin-bottom:6px;';
     var promptLabel = document.createElement('span');
-    promptLabel.className = 'cvz-section-label';
+    promptLabel.className = 'cvz-section-label cvz-section-label-sm';
     promptLabel.style.margin = '0';
     promptLabel.textContent = 'Eigenen Prompt hinzuf\u00fcgen';
     promptLabelRow.appendChild(promptLabel);
@@ -7510,7 +7510,7 @@
     var phaseLabelRow = document.createElement('div');
     phaseLabelRow.style.cssText = 'display:flex;align-items:center;margin-bottom:6px;';
     var phaseLabel = document.createElement('span');
-    phaseLabel.className = 'cvz-section-label';
+    phaseLabel.className = 'cvz-section-label cvz-section-label-sm';
     phaseLabel.style.margin = '0';
     phaseLabel.textContent = 'Journey-Phase';
     phaseLabelRow.appendChild(phaseLabel);
@@ -9993,7 +9993,9 @@
       // Abstand stattdessen.
       '.cvz-charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }' +
       '.cvz-charts-grid > .cvz-section { margin-bottom: 0; }' +
-      '.cvz-section-label { font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
+      '.cvz-section-label { font-family: "Syne", sans-serif; font-size: 18px; font-weight: 600; line-height: 1.25; letter-spacing: -0.01em; color: var(--cvz-text); margin: 0 0 10px; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
+      '.cvz-section-label.cvz-section-label-sm { font-family: "Geist", sans-serif; font-size: 12px; font-weight: 400; letter-spacing: 0; color: var(--cvz-text-muted); margin: 0 0 8px; }' +
+      '@media (max-width: 600px) { .cvz-section-label { font-size: 16px; } .cvz-section-label.cvz-section-label-sm { font-size: 12px; } }' +
       '.cvz-section-title { margin: 0 0 4px; font-size: 22px; hyphens: auto; -webkit-hyphens: auto; -ms-hyphens: auto; overflow-wrap: break-word; }' +
 
       '.cvz-summary-card { margin-bottom: 24px; }' +
