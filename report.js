@@ -361,7 +361,7 @@
         /* Schriftgröße so gewählt, dass das längste Wort (PERFORMANCE, ca. 13,5em
            breit in Syne 800) immer in eine Zeile passt: verfügbare Breite / 14.
            Auf Desktop greift weiterhin 6vw, weil das dort kleiner ist. */
-        font-size:clamp(20px,min(6vw,calc((100vw - 48px) / 14)),80px);
+        font-size:clamp(20px,min(6vw,calc((100vw - 56px) / 14)),60px);
         font-weight:800;letter-spacing:-.02em;overflow-wrap:anywhere;
         color:rgba(148,163,184,.25);text-transform:uppercase;line-height:1!important;margin-bottom:12px;
       }
@@ -526,7 +526,7 @@
       }
       @media(max-width:480px){
         .cvz-heading-wrap{padding-left:16px;padding-right:16px;}
-        .cvz-heading-title{font-size:clamp(20px,calc((100vw - 32px) / 14),36px);}
+        .cvz-heading-title{font-size:clamp(20px,calc((100vw - 32px) / 14),28px);}
       }
 
       /* KI-Disclaimer */
