@@ -408,8 +408,11 @@
       var th = tip.offsetHeight;
       var left = rect.left + rect.width / 2 - tw / 2;
       left = Math.max(8, Math.min(left, vw - tw - 8));
+      var vh = document.documentElement.clientHeight;
       var top = rect.top - th - 8;
       if (top < 8) top = rect.bottom + 8;
+      // GEÄNDERT (16.10.2026): auch unten im Bild halten (lange Texte auf dem Handy).
+      top = Math.max(8, Math.min(top, vh - th - 8));
       tip.style.left = left + 'px';
       tip.style.top = top + 'px';
     }
@@ -417,8 +420,15 @@
     // GEÄNDERT (02.10.2026): gleiche Logik für mouseover UND focusin, damit
     // Tooltips auch per Tastatur und Antippen (fokussierbare Elemente) aufgehen.
     function onEnter(e) {
-      var el = e.target && e.target.closest ? e.target.closest('[title],[data-cvz-title]') : null;
+      // GEÄNDERT (16.10.2026): auch die [?]-Icons (data-cvz-tip, siehe makeTip)
+      // laufen über dieses Popup. Vorher zeigten sie ein reines CSS-Popup, das
+      // mittig über dem Icon stand und auf dem Handy links oder rechts aus dem
+      // Bildschirm lief. Dieses Popup ist position:fixed und bleibt im Bild.
+      var el = e.target && e.target.closest ? e.target.closest('[title],[data-cvz-title],[data-cvz-tip]') : null;
       if (!el || !el.closest('#cvz-visibility-app, .cvz-modal-overlay')) {
+        // Touch: künstliche mouseover-Events nach dem Antippen schließen das
+        // Popup nicht (siehe touchOnly unten), das macht dort nur mousedown.
+        if (e.type === 'mouseover' && (touchOnly || Date.now() - lastTouch < 1000)) return;
         if (current) hide();
         return;
       }
@@ -430,7 +440,7 @@
           if (!el.getAttribute('aria-label') && !el.textContent.trim()) el.setAttribute('aria-label', native);
         }
       }
-      var text = el.getAttribute('data-cvz-title');
+      var text = el.getAttribute('data-cvz-title') || el.getAttribute('data-cvz-tip');
       if (!text) { hide(); return; }
       if (el === current) return;
       current = el;
@@ -443,7 +453,15 @@
     document.addEventListener('focusin', onEnter);
     document.addEventListener('focusout', function () { if (current) hide(); });
 
+    // GEÄNDERT (16.10.2026): Auf Touch-Geräten schickt der Browser nach dem
+    // Antippen sofort ein mouseout, das Popup ging dadurch gleich wieder zu.
+    // Dort schließt es jetzt nur beim Antippen einer anderen Stelle
+    // (mousedown) oder beim Scrollen.
+    var touchOnly = !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
+    var lastTouch = 0;
+    document.addEventListener('touchstart', function () { lastTouch = Date.now(); }, { passive: true, capture: true });
     document.addEventListener('mouseout', function (e) {
+      if (touchOnly || Date.now() - lastTouch < 1000) return;
       if (current && !current.contains(e.relatedTarget)) hide();
     });
     document.addEventListener('mousedown', hide);
@@ -10533,10 +10551,13 @@
       /* Tooltip-Popup f\u00fcr alle title-Attribute (siehe initCvzTooltips) */
       '.cvz-float-tip {' +
         'position:fixed;left:0;top:0;z-index:100000;' +
-        'min-width:0;max-width:280px;box-sizing:border-box;' +
+        'min-width:0;max-width:min(300px, calc(100vw - 16px));box-sizing:border-box;' +
         'padding:8px 10px;' +
         'background:#1e2a36;border:1px solid #232b36;border-radius:0;' +
-        'font-family:inherit;font-size:12px;font-weight:400;line-height:1.5;' +
+        // GEÄNDERT (16.10.2026): feste Schrift statt inherit, sonst übernimmt
+        // das Popup die Display-Schrift der Überschrift, neben der das Icon steht.
+        'font-family:"Geist", sans-serif;font-size:13px;font-weight:400;line-height:1.5;' +
+        'letter-spacing:normal;text-transform:none;' +
         'color:#e6edf3;text-align:left;white-space:normal;' +
         'box-shadow:0 4px 16px rgba(0,0,0,.4);' +
         'pointer-events:none;opacity:0;transition:opacity .15s ease;' +
@@ -10565,7 +10586,13 @@
         'pointer-events:none;opacity:0;transition:opacity .15s ease;' +
         'z-index:1000;' +
       '}' +
-      '.cvz-tip:hover::after, .cvz-tip:focus::after { opacity:1; }' +
+      // GEÄNDERT (16.10.2026): Das CSS-Popup bleibt aus, angezeigt wird der
+      // Text über das gemeinsame Popup (initCvzTooltips).
+      '.cvz-tip::after, .cvz-tip::before { display:none !important; }' +
+      '.cvz-tip { cursor:pointer; }' +
+      // Größere Tippfläche auf Touch-Geräten (Icon selbst bleibt 16 px).
+      '@media (pointer: coarse) { .cvz-tip::before { display:block !important; content:""; position:absolute;' +
+        'top:-12px; right:-12px; bottom:-12px; left:-12px; transform:none; border:0; background:transparent; opacity:1; pointer-events:auto; } }' +
       '.cvz-tip:focus { outline:1px solid var(--cvz-teal,#4fd1c5); outline-offset:1px; }' +
       /* Pfeil nach unten zeigend */
       '.cvz-tip::before {' +
@@ -10574,7 +10601,7 @@
         'border:5px solid transparent;border-top:5px solid var(--cvz-border,#232b36);' +
         'pointer-events:none;opacity:0;transition:opacity .15s ease;z-index:1001;' +
       '}' +
-      '.cvz-tip:hover::before, .cvz-tip:focus::before { opacity:1; }' +
+
       /* Variante: Tooltip öffnet sich nach rechts (für Elemente am linken Rand) */
       '.cvz-tip-right::after {' +
         'left:calc(100% + 8px);bottom:auto;top:50%;transform:translateY(-50%);' +
