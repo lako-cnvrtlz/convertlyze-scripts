@@ -623,17 +623,152 @@
     options = options || {};
     var headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
     if (state.memberstackToken) headers.Authorization = 'Bearer ' + state.memberstackToken;
-    return fetch(CONFIG.apiBaseUrl + path, Object.assign({}, options, { headers: headers })).then(function (res) {
-      return res.json().catch(function () { return {}; }).then(function (body) {
-        if (!res.ok) {
-          var err = new Error(body.error || 'API-Fehler (' + res.status + ')');
-          err.status = res.status;
-          err.body = body;
-          throw err;
-        }
-        return body;
+    return fetch(CONFIG.apiBaseUrl + path, Object.assign({}, options, { headers: headers }))
+      .catch(function (fetchErr) {
+        // NEU (siehe Chat-Verlauf, "Load failed" beim Deployment): fetch scheitert ohne Antwort, wenn die Verbindung
+        // abreißt (Safari: "Load failed", Chrome: "Failed to fetch"). Das wird als Netzwerkfehler markiert, damit
+        // der Assistent es wiederholen und die Eingaben behalten kann. Eine eigene Zeitüberschreitung (AbortError)
+        // bleibt, wie sie ist.
+        if (fetchErr && fetchErr.name === 'AbortError') throw fetchErr;
+        var netErr = new Error('Die Verbindung zum Server wurde unterbrochen.');
+        netErr.network = true;
+        netErr.original = fetchErr;
+        throw netErr;
+      })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          if (!res.ok) {
+            var err = new Error(body.error || 'API-Fehler (' + res.status + ')');
+            err.status = res.status;
+            err.body = body;
+            // NEU: 502 bis 504 kommen vom Hosting, wenn der Server gerade neu startet. Gleiche Behandlung wie ein Abbruch.
+            if (res.status >= 502 && res.status <= 504) err.network = true;
+            throw err;
+          }
+          return body;
+        });
+      });
+  }
+
+  // NEU: wiederholt eine Anfrage nach einem Netzwerkfehler (Server startet z.B. gerade neu). attempt() muss bei jedem
+  // Versuch eine NEUE Anfrage starten. Nur für Schritte, die sich gefahrlos wiederholen lassen (kein Kontingent-Verbrauch):
+  // Themen-Prüfung, Zielgruppen-Vorschlag, Prompt-Plan. NICHT für /generate, dort könnte ein Lauf doppelt starten.
+  var NETWORK_RETRY_DELAY_MS = 5000;
+  function withNetworkRetry(attempt, retries, onRetry) {
+    return attempt().catch(function (err) {
+      if (!err || !err.network || retries <= 0) throw err;
+      if (onRetry) onRetry();
+      return new Promise(function (resolve) { setTimeout(resolve, NETWORK_RETRY_DELAY_MS); }).then(function () {
+        return withNetworkRetry(attempt, retries - 1, onRetry);
       });
     });
+  }
+
+  // ==================== NEU: ENTWURF IM BROWSER ====================
+  // Speichert den Stand des Assistenten (Themen-Prüfung, Zielgruppe, Fragen) im Browser, damit ein Verbindungsabbruch
+  // oder ein Neuladen der Seite die Eingaben nicht löscht. localStorage statt sessionStorage, damit der Entwurf auch
+  // nach dem Schließen des Tabs da ist. Gebunden an die User-ID und 24 Stunden gültig. Speicher kann im privaten
+  // Modus fehlen oder blockiert sein, deshalb läuft jeder Zugriff in try/catch und der Assistent funktioniert auch ohne.
+  var DRAFT_KEY = 'cvz-cs-wizard-draft-v1';
+  var DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+  var DRAFT_STEP_LABELS = { validation: 'Thema bestätigen', audience: 'Zielgruppe bestätigen', promptplan: 'Fragen auswählen' };
+
+  function saveDraft(step, data) {
+    if (!state.userId) return;
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ v: 1, userId: state.userId, savedAt: Date.now(), step: step, data: data }));
+    } catch (e) { /* Speicher voll oder blockiert: ohne Entwurf weiter */ }
+  }
+
+  function loadDraft() {
+    try {
+      var raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return null;
+      var draft = JSON.parse(raw);
+      if (!draft || draft.v !== 1 || draft.userId !== state.userId || !DRAFT_STEP_LABELS[draft.step] || !draft.data) return null;
+      if (Date.now() - draft.savedAt > DRAFT_MAX_AGE_MS) { clearDraft(); return null; }
+      return draft;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function clearDraft() {
+    try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* egal */ }
+  }
+
+  function draftTopic(draft) {
+    var d = draft.data || {};
+    return d.topic || (d.result && d.result.seed_topic) || d.originalTopic || '';
+  }
+
+  // Öffnet den gespeicherten Schritt wieder, mit allen Eingaben.
+  function resumeDraft(draft) {
+    var d = draft.data;
+    if (draft.step === 'validation') {
+      state.wizardSteps = d.trackerTopicId ? STEPS_TRACKER : STEPS_FULL;
+      renderTopicValidationResult(d.result, d.domain, d.originalTopic, d.trackerTopicId);
+    } else if (draft.step === 'audience') {
+      state.wizardSteps = STEPS_FULL;
+      renderAudienceStep(d.audience, d.topic, d.domain, d.validationId, d.originalTopic);
+    } else if (draft.step === 'promptplan') {
+      state.wizardSteps = STEPS_FULL;
+      renderPromptPlanStep(d.res, d.topic, d.domain, d.validationId, d.audience, d.originalTopic, d.deselected);
+    }
+  }
+
+  function renderDraftBanner(draft) {
+    var topic = draftTopic(draft);
+    var minutes = Math.max(1, Math.round((Date.now() - draft.savedAt) / 60000));
+    var age = minutes < 60 ? 'vor ' + minutes + ' Min.' : 'vor ' + Math.round(minutes / 60) + ' Std.';
+    var banner = el('div', { class: 'cvz-cs-callout' });
+    banner.appendChild(el('p', {}, [
+      el('strong', {}, ['Angefangene Strategie gefunden: ']),
+      '"' + topic + '", zuletzt bei Schritt "' + DRAFT_STEP_LABELS[draft.step] + '" (' + age + '). Deine Eingaben sind noch da.',
+    ]));
+    var resumeBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Dort weitermachen']);
+    resumeBtn.addEventListener('click', function () { resumeDraft(draft); });
+    var discardBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Verwerfen']);
+    discardBtn.addEventListener('click', function () {
+      clearDraft();
+      if (banner.parentNode) banner.parentNode.removeChild(banner);
+    });
+    banner.appendChild(el('div', { class: 'cvz-cs-topic-check-actions' }, [discardBtn, resumeBtn]));
+    return banner;
+  }
+
+  // NEU: Fehleranzeige innerhalb des Assistenten. Anders als renderError springt sie nicht zum leeren Formular, sondern
+  // bietet "Erneut versuchen" mit denselben Daten und einen Weg zurück zum letzten Schritt, mit allen Eingaben.
+  function renderStepError(err, label, options) {
+    state.wizardActive = true;
+    clear(state.root);
+    var text = err && err.network
+      ? label + ': Die Verbindung zum Server wurde unterbrochen, vermutlich durch ein kurzes Update. Deine Eingaben sind gespeichert. Bitte versuche es in ein paar Sekunden erneut.'
+      : err && err.name === 'AbortError'
+        ? label + ': Zeitüberschreitung. Deine Eingaben sind gespeichert. Bitte versuche es erneut.'
+        : label + ' fehlgeschlagen: ' + (err && err.message ? err.message : 'unbekannter Fehler') + '. Deine Eingaben sind gespeichert.';
+    var box = el('div', { class: 'cvz-cs-error' }, [el('p', {}, [text])]);
+    var actions = [];
+    if (options.back) {
+      var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, [options.backLabel || 'Zurück']);
+      backBtn.addEventListener('click', options.back);
+      actions.push(backBtn);
+    }
+    if (options.retry) {
+      var retryBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Erneut versuchen']);
+      retryBtn.addEventListener('click', options.retry);
+      actions.push(retryBtn);
+    }
+    box.appendChild(el('div', { class: 'cvz-cs-topic-check-actions' }, actions));
+    state.root.appendChild(renderQuotaBanner());
+    if (state.wizardSteps) state.root.appendChild(renderStepper(state.wizardSteps, options.stepIndex || 0, true));
+    state.root.appendChild(box);
+  }
+
+  // Fortschritts-Hinweis während der automatischen Wiederholung.
+  function noteRetrying() {
+    var p = state.root && state.root.querySelector('.cvz-cs-progress-text');
+    if (p) p.textContent = 'Verbindung unterbrochen, ich versuche es gleich noch einmal …';
   }
 
   // ==================== MEMBERSTACK-IDENTITÄT ====================
@@ -977,32 +1112,42 @@
   function startTopicValidation(topic, domain, trackerTopicId) {
     state.wizardSteps = trackerTopicId ? STEPS_TRACKER : STEPS_FULL;
     renderValidating(topic);
-    var controller = new AbortController();
-    var timeoutId = setTimeout(function () {
-      controller.abort();
-    }, 70 * 1000);
-    apiFetch('/api/content-strategy/validate-topic', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain }),
-      signal: controller.signal,
-    })
+    // GEÄNDERT: jeder Versuch hat ein eigenes Zeitlimit von 70 Sekunden. Nach einem Verbindungsabbruch wird einmal
+    // automatisch wiederholt. Scheitert es endgültig, bleiben Thema und Domain erhalten.
+    function attempt() {
+      var controller = new AbortController();
+      var timeoutId = setTimeout(function () { controller.abort(); }, 70 * 1000);
+      return apiFetch('/api/content-strategy/validate-topic', {
+        method: 'POST',
+        body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain }),
+        signal: controller.signal,
+      }).then(
+        function (result) { clearTimeout(timeoutId); return result; },
+        function (err) { clearTimeout(timeoutId); throw err; }
+      );
+    }
+    withNetworkRetry(attempt, 1, noteRetrying)
       .then(function (result) {
-        clearTimeout(timeoutId);
         renderTopicValidationResult(result, domain, topic, trackerTopicId);
       })
       .catch(function (err) {
-        clearTimeout(timeoutId);
-        var message =
-          err.name === 'AbortError'
-            ? 'Zeitüberschreitung bei der Themen-Prüfung. Bitte erneut versuchen.'
-            : 'Themen-Prüfung fehlgeschlagen: ' + err.message;
-        renderError(message);
+        renderStepError(err, 'Themen-Prüfung', {
+          stepIndex: 0,
+          retry: function () { startTopicValidation(topic, domain, trackerTopicId); },
+          back: function () {
+            clear(state.root);
+            state.root.appendChild(renderQuotaBanner());
+            state.root.appendChild(renderForm({ topic: topic, domain: domain, trackerTopicId: trackerTopicId }));
+          },
+          backLabel: 'Zurück, Thema/Domain ändern',
+        });
       });
   }
 
   function renderTopicValidationResult(result, domain, originalTopic, trackerTopicId) {
     state.wizardActive = true;
     clear(state.root);
+    saveDraft('validation', { result: result, domain: domain, originalTopic: originalTopic, trackerTopicId: trackerTopicId || null });
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
     wrap.appendChild(renderStepper(state.wizardSteps || STEPS_FULL, 0, true));
     wrap.appendChild(el('p', { class: 'cvz-cs-callout' }, [
@@ -1132,12 +1277,29 @@
 
   function startAudienceStep(topic, domain, validationId, originalTopic) {
     renderBusy('Ich überlege, wer bei deinem Thema mitentscheidet …', 'Dauert meist unter einer Minute.', 1);
-    apiFetch('/api/content-strategy/suggest-audience', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain }),
-    })
+    // GEÄNDERT: einmal automatisch wiederholen, bei endgültigem Fehler zurück zur Themen-Auswahl statt zum leeren Formular.
+    var draft = loadDraft();
+    withNetworkRetry(function () {
+      return apiFetch('/api/content-strategy/suggest-audience', {
+        method: 'POST',
+        body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain }),
+      });
+    }, 1, noteRetrying)
       .then(function (res) { renderAudienceStep(res.audience, topic, domain, validationId, originalTopic); })
-      .catch(function (err) { renderError('Zielgruppen-Vorschlag fehlgeschlagen: ' + err.message); });
+      .catch(function (err) {
+        renderStepError(err, 'Zielgruppen-Vorschlag', {
+          stepIndex: 1,
+          retry: function () { startAudienceStep(topic, domain, validationId, originalTopic); },
+          back: draft && draft.step === 'validation'
+            ? function () { resumeDraft(draft); }
+            : function () {
+                clear(state.root);
+                state.root.appendChild(renderQuotaBanner());
+                state.root.appendChild(renderForm({ topic: originalTopic, domain: domain }));
+              },
+          backLabel: 'Zurück zur Themen-Auswahl',
+        });
+      });
   }
 
   // Ein beschriftetes Feld: Beschriftung links über dem Feld, nie zentriert.
@@ -1279,7 +1441,7 @@
       var championLabel = el('label', { class: 'cvz-cs-champion' }, [champion, ' Champion']);
       var removeBtn = el('button', { type: 'button', class: 'cvz-cs-link-btn' }, ['Diese Rolle entfernen']);
       var card = el('div', { class: 'cvz-cs-role-card' });
-      var row = { card: card, title: title, championLabel: championLabel, removeBtn: removeBtn, name: nameInput, phase: phaseSelect, motivation: motivation, objection: objection, champion: champion };
+      var row = { card: card, title: title, championLabel: championLabel, removeBtn: removeBtn, name: nameInput, phase: phaseSelect, motivation: motivation, objection: objection, champion: champion, begruendung: role.begruendung || null };
       removeBtn.addEventListener('click', function () {
         rows = rows.filter(function (r) { return r !== row; });
         rolesBox.removeChild(card);
@@ -1330,7 +1492,41 @@
     multiRadio.addEventListener('change', refresh);
     soloRadio.addEventListener('change', refresh);
 
+    // NEU: aktueller Stand aller Eingaben, ohne Prüfung. Für den Entwurf im Browser (bei jeder Änderung) und als Basis
+    // für "weiter". Die Begründung von Claude je Rolle bleibt erhalten, damit sie nach dem Wiederherstellen noch dasteht.
+    function collectAudience() {
+      return {
+        ist_solo_zielgruppe: soloRadio.checked,
+        rollen: rows.map(function (r) {
+          return {
+            rolle: r.name.value,
+            ist_champion: r.champion.checked,
+            einstiegsphase: r.phase.value,
+            motivation: r.motivation.value,
+            einwand: r.objection.value,
+            begruendung: r.begruendung || undefined,
+          };
+        }),
+        zielgruppe: groupInput.value,
+        annahmen: audience.annahmen || [],
+        kundenfragen: questionsInput.value.split(/\r?\n/),
+      };
+    }
+    var draftTimer = null;
+    function saveAudienceDraft() {
+      saveDraft('audience', { audience: collectAudience(), topic: topic, domain: domain, validationId: validationId, originalTopic: originalTopic });
+    }
+    function scheduleAudienceDraft() {
+      clearTimeout(draftTimer);
+      draftTimer = setTimeout(saveAudienceDraft, 400);
+    }
+    wrap.addEventListener('input', scheduleAudienceDraft);
+    wrap.addEventListener('change', scheduleAudienceDraft);
+    wrap.addEventListener('click', scheduleAudienceDraft); // Rolle hinzufügen/entfernen ändert nichts an Feldern
+
     nextBtn.addEventListener('click', function () {
+      clearTimeout(draftTimer);
+      saveAudienceDraft();
       var solo = soloRadio.checked;
       var roles = solo ? [] : rows.map(function (r) {
         return {
@@ -1339,6 +1535,9 @@
           einstiegsphase: r.phase.value,
           motivation: r.motivation.value.trim(),
           einwand: r.objection.value.trim(),
+          // NEU: Claudes Begründung mitschicken (das Backend erlaubt sie optional), damit sie beim Zurückspringen
+          // aus den Fragen oder nach einem Fehler weiter angezeigt wird.
+          begruendung: r.begruendung ? String(r.begruendung).slice(0, 400) : undefined,
         };
       });
       if (!solo && roles.length === 0) { errorLine.textContent = 'Bitte mindestens eine Rolle angeben oder oben "Eine Person allein" wählen.'; return; }
@@ -1360,22 +1559,43 @@
     state.root.appendChild(wrap);
     refresh();
     growAllLater(growAreas);
+    saveAudienceDraft();
   }
 
   function startPromptPlan(audience, topic, domain, validationId, originalTopic) {
     renderBusy('Ich stelle die Fragen deiner Zielgruppe zusammen …', 'Dafür werden echte Suchdaten abgefragt. Das dauert bis zu einer Minute.', 2);
-    apiFetch('/api/content-strategy/prompt-plan', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain, audience: audience }),
-    })
+    // GEÄNDERT (siehe Chat-Verlauf, "Prompt-Plan fehlgeschlagen: Load failed"): einmal automatisch wiederholen. Scheitert
+    // es endgültig, führt "Zurück" zur Zielgruppe MIT allen bearbeiteten Rollen und Kundenfragen, statt zum leeren Formular.
+    withNetworkRetry(function () {
+      return apiFetch('/api/content-strategy/prompt-plan', {
+        method: 'POST',
+        body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain, audience: audience }),
+      });
+    }, 1, noteRetrying)
       .then(function (res) { renderPromptPlanStep(res, topic, domain, validationId, audience, originalTopic); })
-      .catch(function (err) { renderError('Prompt-Plan fehlgeschlagen: ' + err.message); });
+      .catch(function (err) {
+        renderStepError(err, 'Prompt-Plan', {
+          stepIndex: 2,
+          retry: function () { startPromptPlan(audience, topic, domain, validationId, originalTopic); },
+          back: function () { renderAudienceStep(audience, topic, domain, validationId, originalTopic); },
+          backLabel: 'Zurück zur Zielgruppe',
+        });
+      });
   }
 
-  function renderPromptPlanStep(res, topic, domain, validationId, audience, originalTopic) {
+  // GEÄNDERT: deselected (optional) = Fragen, die der Kunde abgewählt hatte, z.B. aus einem wiederhergestellten Entwurf.
+  function renderPromptPlanStep(res, topic, domain, validationId, audience, originalTopic, deselected) {
     state.wizardActive = true;
     clear(state.root);
     var plan = res.plan;
+    var deselectedMap = {};
+    (deselected || []).forEach(function (p) { deselectedMap[p] = true; });
+    function savePlanDraft() {
+      saveDraft('promptplan', {
+        res: res, topic: topic, domain: domain, validationId: validationId, audience: audience, originalTopic: originalTopic,
+        deselected: checks.filter(function (c) { return !c.box.checked; }).map(function (c) { return c.prompt; }),
+      });
+    }
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
     wrap.appendChild(renderStepper(STEPS_FULL, 2, true));
     wrap.appendChild(el('h3', {}, ['Diese Fragen messen wir bei ChatGPT und Gemini']));
@@ -1395,8 +1615,9 @@
       wrap.appendChild(el('h4', {}, [ph.label]));
       inPhase.forEach(function (p) {
         var box = el('input', { type: 'checkbox' });
-        box.checked = true;
+        box.checked = !deselectedMap[p.prompt];
         box.addEventListener('change', updateCount);
+        box.addEventListener('change', savePlanDraft);
         checks.push({ box: box, prompt: p.prompt });
         var meta = ORIGIN_LABEL_MAP[p.origin] || p.origin;
         if (p.role) meta += ' · ' + p.role;
@@ -1426,6 +1647,7 @@
     wrap.appendChild(el('div', { class: 'cvz-cs-topic-check-actions' }, [backBtn, startBtn]));
     state.root.appendChild(renderQuotaBanner());
     state.root.appendChild(wrap);
+    savePlanDraft();
   }
 
   function startGeneration(topic, domain, validationId, trackerTopicId, planExtra, customerQuestions) {
@@ -1446,6 +1668,8 @@
       }),
     })
       .then(function (res) {
+        // NEU: der Lauf ist gestartet und auf dem Server gespeichert, der Entwurf wird nicht mehr gebraucht.
+        clearDraft();
         var url = new URL(window.location.href);
         url.searchParams.set('session_id', res.session_id);
         // Vorbelegung aus dem Tracker-Link wird nach dem Start nicht mehr gebraucht.
@@ -1454,6 +1678,17 @@
         pollSession(res.session_id);
       })
       .catch(function (err) {
+        // NEU: bei einem Verbindungsabbruch kann der Lauf auf dem Server trotzdem gestartet sein (und Kontingent
+        // verbraucht haben). Deshalb KEINE automatische Wiederholung, sondern ein ehrlicher Hinweis. Der Entwurf
+        // bleibt erhalten, damit der Kunde notfalls von den Fragen aus neu starten kann.
+        if (err && err.network) {
+          renderError(
+            'Die Verbindung wurde beim Start unterbrochen. Möglicherweise läuft die Strategie trotzdem schon. ' +
+            'Bitte schau in ein paar Minuten in deinen gespeicherten Strategien nach, bevor du neu startest, damit kein Kontingent doppelt verbraucht wird. ' +
+            'Deine Eingaben sind gespeichert und lassen sich über das Formular wieder öffnen.'
+          );
+          return;
+        }
         renderError('Start fehlgeschlagen: ' + err.message, err.body);
       });
   }
@@ -3456,7 +3691,11 @@
       .then(function () {
         clear(state.root);
         state.root.appendChild(renderQuotaBanner());
-        state.root.appendChild(renderForm(getPrefillFromUrl()));
+        // NEU: angefangene Strategie aus dem Browser anbieten (nicht, wenn ein Tracker-Link ein neues Thema vorgibt).
+        var prefill = getPrefillFromUrl();
+        var draft = prefill.topic ? null : loadDraft();
+        if (draft) state.root.appendChild(renderDraftBanner(draft));
+        state.root.appendChild(renderForm(prefill));
       })
       .catch(function (err) {
         renderError('Konnte nicht geladen werden: ' + err.message);
