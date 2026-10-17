@@ -1946,7 +1946,7 @@
       el('div', { class: 'cvz-cs-spinner' }),
       el('p', { class: 'cvz-cs-progress-text' }, [baseText]),
       el('p', { class: 'cvz-cs-hint' }, ['Lehn dich gerne einen Augenblick zurück. Die Entwicklung der Strategie dauert aktuell ca. 15 Minuten.']),
-      el('p', { class: 'cvz-cs-callout' }, ['Du kannst diese Seite jetzt schließen. Die Strategie läuft im Hintergrund weiter und liegt danach in deinen gespeicherten Strategien.']),
+      el('p', { class: 'cvz-cs-callout' }, ['Du kannst diese Seite jetzt schließen. Die Strategie läuft im Hintergrund weiter und liegt danach in deinen gespeicherten Strategien. Sobald die Erstellung abgeschlossen ist, wirst du außerdem per E-Mail benachrichtigt.']),
     ]);
     state.root.appendChild(renderQuotaBanner());
     if (state.wizardSteps) state.root.appendChild(renderStepper(state.wizardSteps, state.wizardSteps.length - 1, false));
