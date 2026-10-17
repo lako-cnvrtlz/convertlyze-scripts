@@ -1277,15 +1277,17 @@ async function cvzPollTurnStatus(turnId) {
 // Format: { at: Sekunden-Schwelle, text: Anzeigetext }
 // Die Liste MUSS nach "at" aufsteigend sortiert sein.
 const CVZ_KICKOFF_MESSAGES = [
+  // Seit dem direkten Bau laufen Analyse UND erster Entwurf in einem Durchgang.
   { at: 8,   text: 'Hier wird die nächsten Minuten malocht. Hol dir in der Zeit gerne einen Kaffee' },
   { at: 30,  text: 'Keyword-Daten und Suchintent werden geprüft' },
   { at: 70,  text: 'Kaffee schon geholt? Wir wühlen noch in Wettbewerber-Seiten' },
-  { at: 120, text: 'Buying-Center-Rollen werden einsortiert' },
-  { at: 180, text: 'Content-Gap-Analyse läuft' },
-  { at: 250, text: 'Letzte Erkenntnisse werden zusammengetragen' },
-  { at: 320, text: 'Fast durch, gleich ist die Analyse fertig' },
-  { at: 420, text: 'Läuft noch - bei umfangreichen Briefings kann das schon mal 6-7 Minuten dauern' },
-  { at: 600, text: 'Braucht in diesem Fall spürbar länger als sonst, bitte noch etwas Geduld' }
+  { at: 120, text: 'Suchintent, Funnel-Stage und Ziel werden abgeglichen' },
+  { at: 180, text: 'Die Landingpage wird aufgebaut' },
+  { at: 260, text: 'Headlines, Belege und FAQ werden ausformuliert' },
+  { at: 340, text: 'Headline-Varianten und Messplan entstehen' },
+  { at: 420, text: 'Letzte Prüfung von Zahlen und Belegen' },
+  { at: 540, text: 'Läuft noch: Bei umfangreichen Briefings kann das 8 bis 10 Minuten dauern' },
+  { at: 700, text: 'Braucht in diesem Fall spürbar länger als sonst, bitte noch etwas Geduld' }
 ];
 // Struktur-Turns sind erfahrungsgemäß deutlich kürzer (2-3 Minuten) als der
 // Kickoff, deshalb eigene, engere Schwellen.
