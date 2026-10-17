@@ -1,6 +1,14 @@
 /**
- * Convertlyze – Report Script v9
+ * Convertlyze – Report Script v10
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
+ *
+ * ÄNDERUNGEN ggü. v9 (Anker-Navigation, drei Fehler beim Abgleich mit dem Content-Strategie-Widget gefunden):
+ *   - Aktiver Abschnitt war unsichtbar: .cvz-nav-active hatte dieselbe graue Farbe wie ein inaktiver Link und keine
+ *     Unterstreichung. Jetzt teal mit teal Unterstreichung.
+ *   - scrollIntoView() für den aktiven Link konnte die ganze Seite vertikal verschieben (Ruckeln beim Scrollen, je nach
+ *     Browser). Jetzt wird nur die Leiste horizontal verschoben (scrollLeft), nie die Seite.
+ *   - Die Leiste wurde fixiert, sobald der Sentinel nicht sichtbar war, also auch, wenn er noch UNTERHALB des
+ *     Bildschirms lag (z.B. beim Laden, wenn der Report weiter unten beginnt). Jetzt nur, wenn er oberhalb liegt.
  *
  * ÄNDERUNGEN ggü. v8 (Report ist sehr lang -> Bereiche aufklappbar, nach dem
  * Muster des Visibility Trackers):
@@ -237,7 +245,8 @@
         position:relative;
       }
       .cvz-anchor-nav a:hover{color:#e6edf3;border-bottom-color:rgba(79,209,197,.4);}
-      .cvz-anchor-nav a.cvz-nav-active{color:#6e7681;border-bottom-color:transparent;}
+      /* v10: aktiver Abschnitt sichtbar (vorher identisch mit inaktiv) */
+      .cvz-anchor-nav a.cvz-nav-active{color:#4fd1c5;border-bottom-color:#4fd1c5;}
       .cvz-anchor-nav a+a::before{
         content:'';position:absolute;left:0;top:25%;
         height:50%;width:1px;background:rgba(255,255,255,.06);
@@ -1583,7 +1592,9 @@
       // IntersectionObserver statt scroll-Listener: läuft unabhängig davon,
       // ob GSAP/ScrollTrigger das native Scroll-Event überhaupt noch feuert.
       const stickyObserver = new IntersectionObserver(
-        entries => { entries.forEach(entry => applyFixed(!entry.isIntersecting)); },
+        // v10: nur fixieren, wenn der Sentinel OBERHALB des Bildschirms liegt. Ist er unterhalb (Report beginnt weiter
+        // unten), ist er ebenfalls "nicht sichtbar", die Leiste darf dann aber nicht fixiert werden.
+        entries => { entries.forEach(entry => applyFixed(!entry.isIntersecting && entry.boundingClientRect.top < 0)); },
         { rootMargin: `-${getNavHeight()}px 0px 0px 0px`, threshold: 0 }
       );
       stickyObserver.observe(sentinel);
@@ -1608,15 +1619,28 @@
       // Active-State beim Scrollen
       const sectionIds = ['cvz-exec','cvz-hero','cvz-content','cvz-zielgruppe',
         'cvz-conversion','cvz-struktur','cvz-search','cvz-diff','cvz-perf','cvz-roadmap'];
+      // v10: merkt sich alle Abschnitte im Erkennungsbereich und markiert den hintersten (in Seitenreihenfolge). Vorher gewann
+      // bei zwei gleichzeitig sichtbaren Abschnitten zufällig einer, und beim Verlassen wurde nicht neu berechnet.
+      const visibleIds = new Set();
       const observer = new IntersectionObserver(entries => {
         entries.forEach(entry => {
-          if (entry.isIntersecting) {
+          if (entry.isIntersecting) visibleIds.add(entry.target.id); else visibleIds.delete(entry.target.id);
+        });
+        const currentId = sectionIds.filter(id => visibleIds.has(id)).pop();
+        [currentId].filter(Boolean).forEach(id => {
+          {
             nav.querySelectorAll('a').forEach(a => a.classList.remove('cvz-nav-active'));
-            const activeLink = nav.querySelector(`a[href="#${entry.target.id}"]`);
+            const activeLink = nav.querySelector(`a[href="#${id}"]`);
             if (activeLink) {
               activeLink.classList.add('cvz-nav-active');
-              // Nav horizontal zum aktiven Link scrollen
-              activeLink.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
+              // v10: nur die Leiste horizontal zum aktiven Link schieben. scrollIntoView() konnte dabei auch die Seite
+              // vertikal bewegen.
+              const inner = nav.querySelector('.cvz-anchor-nav-inner');
+              if (inner) {
+                const left = Math.max(0, activeLink.offsetLeft - (inner.clientWidth - activeLink.offsetWidth) / 2);
+                if (typeof inner.scrollTo === 'function') inner.scrollTo({ left, behavior: 'smooth' });
+                else inner.scrollLeft = left;
+              }
             }
           }
         });
