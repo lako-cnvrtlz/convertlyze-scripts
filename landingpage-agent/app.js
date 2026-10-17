@@ -1017,12 +1017,14 @@ function cvzValidateLpStep(key) {
   return null;
 }
 
+// Doppelklick-Schutz für den Launch: Jeder Launch legt ein eigenes Projekt an
+// und bucht eine eigene Session ab. Die Sperre im Backend greift nur pro
+// Projekt, deshalb muss das Frontend den zweiten Klick abfangen.
+let cvzLaunching = false;
 async function cvzGoNext() {
-  // GEÄNDERT: Sperre jetzt anhand von canStart (Plan-Kontingent ODER
-  // gekaufte Aufbau-PPU-Credits), nicht mehr allein anhand von remaining -
-  // sonst waere ein Kunde mit aufgebrauchtem Plan-Kontingent, aber noch
-  // vorhandenen PPU-Credits, hier faelschlich blockiert worden, obwohl
-  // /start-session seinen Kauf laengst als Fallback akzeptiert.
+  if (cvzLaunching) return;
+  // Sperre anhand von canStart (Plan-Kontingent ODER gekaufte
+  // Aufbau-PPU-Credits), nicht allein anhand von remaining.
   if (cvzQuota.canStart === false) {
     cvzShowError('Kein Sessions-Kontingent mehr verfügbar in diesem Monat.');
     return;
@@ -1033,8 +1035,16 @@ async function cvzGoNext() {
   if (cvzState.step < cvzStepKeys().length - 1) {
     cvzState.step++;
     cvzRenderStep();
-  } else {
+    return;
+  }
+  cvzLaunching = true;
+  const btn = document.getElementById('cvz-btn-next');
+  if (btn) btn.disabled = true;
+  try {
     await cvzLaunch();
+  } finally {
+    cvzLaunching = false;
+    cvzUpdateNextButtonState();
   }
 }
 function cvzGoBack() {
@@ -1472,15 +1482,39 @@ async function cvzLaunch() {
   }
 }
 // ==================== SESSION-WIEDERAUFNAHME ====================
+// Startet eine abgebrochene Analyse neu (z.B. nach einem Server-Neustart
+// mitten im Kickoff). Das Backend erkennt die Session ohne Antwort und
+// startet die Analyse, ohne erneut abzubuchen. Läuft sie noch, bekommen wir
+// denselben Turn zurück und warten einfach weiter.
+// Liefert true, wenn der Chat geöffnet wurde.
+async function cvzRecoverKickoff(pageProjectId) {
+  try {
+    cvzShowLoading(cvzState.page_type === 'pillar'
+      ? 'Die Recherche wurde unterbrochen und startet neu …'
+      : 'Die Analyse wurde unterbrochen und startet neu …');
+    const res = await fetch(`${API_BASE}/api/page-agent/start-session`, {
+      method: 'POST', headers: cvzAuthHeaders(),
+      body: JSON.stringify({ user_id: cvzUserId(), page_project_id: pageProjectId })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.turn_id) throw new Error(data.error || `HTTP ${res.status}`);
+    cvzState.session_id = data.session_id || cvzState.session_id;
+    const finalData = await cvzPollTurnStatus(data.turn_id);
+    cvzOpenChat(finalData);
+    return true;
+  } catch (e) {
+    console.error('Neustart der Analyse fehlgeschlagen:', e.message);
+    if (cvzLoadingStopTicker) { cvzLoadingStopTicker(); cvzLoadingStopTicker = null; }
+    return false;
+  }
+}
 async function cvzTryResume() {
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('new')) {
-    // FIX: ?new=1 bleibt bewusst in der URL stehen, solange noch KEIN
-    // echtes Projekt existiert (cvzState.page_project_id wird erst in
-    // cvzLaunch() gesetzt). Vorher wurde der Parameter hier sofort per
-    // replaceState entfernt - ein Reload waehrend des Formular-Ausfuellens
-    // hatte dann weder ?new=1 noch ?project=..., landete also im
-    // Resume-Aufruf ohne ID und lud faelschlich das letzte fertige Projekt.
+    // ?new=1 bleibt bewusst in der URL stehen, solange noch KEIN echtes
+    // Projekt existiert (cvzState.page_project_id wird erst in cvzLaunch()
+    // gesetzt). Sonst lädt ein Reload während des Ausfüllens fälschlich das
+    // letzte fertige Projekt.
     return false;
   }
   const explicitProjectId = urlParams.get('project');
@@ -1495,6 +1529,15 @@ async function cvzTryResume() {
     cvzState.session_id = data.session_id;
     cvzState.page_project_id = data.page_project_id;
     cvzState.page_type = data.page_type === 'pillar' ? 'pillar' : 'landingpage';
+    // NEU: Session ohne eine einzige Antwort des Assistenten bedeutet, dass
+    // die Analyse abgebrochen ist (Server-Neustart, Deploy) oder noch läuft.
+    // Statt eines leeren Chats wird sie neu gestartet bzw. weiter abgewartet.
+    const hasAnswer = (data.messages || []).some(m => m.role === 'assistant');
+    let recoveryFailed = false;
+    if (!hasAnswer && data.page_project_id) {
+      if (await cvzRecoverKickoff(data.page_project_id)) return true;
+      recoveryFailed = true;
+    }
     document.getElementById('cvz-form-app').style.display = 'none';
     document.getElementById('cvz-workspace').style.display = 'flex';
     cvzUpdateQuota(data.sessions_remaining, data.sessions_limit);
@@ -1513,6 +1556,9 @@ async function cvzTryResume() {
       if (i === 0 && m.role === 'user') return;
       lastBubble = cvzAppendMessage(m.role, m.content, null, null, { scroll: 'none' });
     });
+    if (recoveryFailed) {
+      lastBubble = cvzAppendMessage('assistant', 'Die Analyse wurde unterbrochen und konnte nicht automatisch neu gestartet werden. Bitte lade die Seite in ein paar Minuten neu. Deine Session wurde dafür nicht erneut abgebucht.', null, null, { scroll: 'none' });
+    }
     if (data.structure_html_document) {
       cvzUpdatePreviewPanel(data.structure_html_document, data.structure_version);
     }
