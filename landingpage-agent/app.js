@@ -1230,10 +1230,10 @@ function cvzValidateStep() {
 // cvzPollTurnStatus() kapselt das Warten: fragt in Intervallen nach, bis
 // status "done" (liefert das Ergebnis) oder "error" (wirft) zurückkommt.
 const CVZ_POLL_INTERVAL_MS = 2500;
-// 15 Minuten - synchron zum serverseitigen Sicherheitsnetz
-// BACKGROUND_TURN_TIMEOUT_MS in pageAgent.js. Laenger warten hat keinen
-// Sinn, der Server hätte den Turn bis dahin ohnehin selbst abgebrochen.
-const CVZ_POLL_MAX_MS = 15 * 60 * 1000;
+// 21 Minuten: das serverseitige Sicherheitsnetz BACKGROUND_TURN_TIMEOUT_MS in
+// pageAgent.ts liegt bei 20 Minuten. Eine Minute Puffer, damit das Frontend die
+// Fehlermeldung des Servers noch abholt, statt selbst vorher aufzugeben.
+const CVZ_POLL_MAX_MS = 21 * 60 * 1000;
 async function cvzPollTurnStatus(turnId) {
   const headers = cvzAuthHeaders();
   const start = Date.now();
