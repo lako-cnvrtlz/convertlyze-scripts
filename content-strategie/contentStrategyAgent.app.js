@@ -1535,7 +1535,7 @@
     wrap.appendChild(el('h3', {}, ['Stimmt diese Zielgruppe?']));
     wrap.appendChild(el('div', { class: 'cvz-cs-callout' }, [
       el('strong', {}, ['Das ist jetzt zu tun: ']),
-      'Prüfe den Vorschlag von Claude und ändere, was nicht stimmt. Lege genau eine Rolle als Champion fest. Aus diesen Rollen werden danach die Fragen für die Messung abgeleitet.',
+      'Prüfe den Vorschlag und ändere, was nicht stimmt. Lege genau eine Rolle als Champion fest. Aus diesen Rollen werden danach die Fragen für die Messung abgeleitet.',
     ]));
 
     // 1. Zielgruppe
