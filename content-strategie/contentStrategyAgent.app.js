@@ -1203,18 +1203,14 @@
 
   // Suchvolumen mit Status: "unter der Messgrenze" (Google Ads weist keinen Wert aus) und "Messung fehlgeschlagen"
   // sind verschiedene Dinge. Ältere Prüfungen haben keinen Status, dort bleibt es neutral bei "kein Messwert".
-  // NEU (siehe Chat-Verlauf, PDF-Feedback "Behandle Volumen als Spannen"): Google Ads liefert gerundete Jahresdurchschnitte,
-  // die zwischen zwei Läufen springen können (z.B. 140 im ersten Lauf, später ein anderer Wert). Angezeigt wird deshalb eine
-  // Spanne statt einer scheinbar exakten Zahl. Die Grenzen entsprechen grob den Rundungsstufen von Google Ads.
-  var VOLUME_BANDS = [[10, 'unter 10'], [50, '10 bis 50'], [100, '50 bis 100'], [250, '100 bis 250'], [500, '250 bis 500'],
-    [1000, '500 bis 1.000'], [2500, '1.000 bis 2.500'], [5000, '2.500 bis 5.000'], [10000, '5.000 bis 10.000']];
+  // GEÄNDERT (siehe Chat-Verlauf): zuerst Spannen ("250 bis 500"), jetzt wieder die Zahl. Spannen waren zu grob zum Priorisieren
+  // (260 und 480 landeten in derselben Spanne). Die Unschärfe der Google-Ads-Werte erklärt stattdessen EIN Hinweis im
+  // Cluster-Abschnitt (VOLUME_NOTE). Funktionsname bleibt, damit alle Aufrufer unverändert funktionieren.
+  var VOLUME_NOTE = 'Suchvolumen von Google Ads: gerundete Jahresdurchschnitte. Zwischen zwei Analysen können sie um eine Stufe schwanken (z.B. 480 auf 390). Für die Reihenfolge zählt das Verhältnis, nicht die genaue Zahl.';
   function volumeRangeText(v) {
     var n = Number(v);
     if (!isFinite(n) || n <= 0) return 'unter der Messgrenze';
-    for (var i = 0; i < VOLUME_BANDS.length; i++) {
-      if (n < VOLUME_BANDS[i][0]) return VOLUME_BANDS[i][1] + ' Suchanfragen/Monat';
-    }
-    return 'über 10.000 Suchanfragen/Monat';
+    return 'ca. ' + n.toLocaleString('de-DE') + ' Suchanfragen/Monat';
   }
 
   function topicVolumeText(volume, status) {
@@ -1440,7 +1436,7 @@
     withNetworkRetry(function () {
       return apiFetch('/api/content-strategy/suggest-audience', {
         method: 'POST',
-        body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain }),
+        body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain, strategy_goal: state.strategyGoal || undefined }),
       });
     }, 1, noteRetrying)
       .then(function (res) { renderAudienceStep(res.audience, topic, domain, validationId, originalTopic); })
@@ -1535,7 +1531,7 @@
     wrap.appendChild(el('h3', {}, ['Stimmt diese Zielgruppe?']));
     wrap.appendChild(el('div', { class: 'cvz-cs-callout' }, [
       el('strong', {}, ['Das ist jetzt zu tun: ']),
-      'Prüfe den Vorschlag und ändere, was nicht stimmt. Lege genau eine Rolle als Champion fest. Aus diesen Rollen werden danach die Fragen für die Messung abgeleitet.',
+      'Prüfe den Vorschlag von Claude und ändere, was nicht stimmt. Lege genau eine Rolle als Champion fest. Aus diesen Rollen werden danach die Fragen für die Messung abgeleitet.',
     ]));
 
     // 1. Zielgruppe
@@ -1608,7 +1604,7 @@
       champion.addEventListener('change', refresh);
       nameInput.addEventListener('input', refresh);
       card.appendChild(el('div', { class: 'cvz-cs-role-head' }, [title, championLabel]));
-      if (role.begruendung) card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Warum diese Rolle vorgeschlagen wird: ' + role.begruendung]));
+      if (role.begruendung) card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Warum Claude diese Rolle vorschlägt: ' + role.begruendung]));
       card.appendChild(el('div', { class: 'cvz-cs-role-grid' }, [field('Name der Rolle', nameInput), field('Steigt ein in Phase', phaseSelect)]));
       card.appendChild(field('Motivation: Was will diese Rolle erreichen?', motivation));
       card.appendChild(field('Einwand: Was hält diese Rolle zurück?', objection));
@@ -1727,7 +1723,7 @@
     withNetworkRetry(function () {
       return apiFetch('/api/content-strategy/prompt-plan', {
         method: 'POST',
-        body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain, audience: audience }),
+        body: JSON.stringify({ user_id: state.userId, topic: topic, domain: domain, audience: audience, strategy_goal: state.strategyGoal || undefined }),
       });
     }, 1, noteRetrying)
       .then(function (res) { renderPromptPlanStep(res, topic, domain, validationId, audience, originalTopic); })
@@ -1946,7 +1942,7 @@
       el('div', { class: 'cvz-cs-spinner' }),
       el('p', { class: 'cvz-cs-progress-text' }, [baseText]),
       el('p', { class: 'cvz-cs-hint' }, ['Lehn dich gerne einen Augenblick zurück. Die Entwicklung der Strategie dauert aktuell ca. 15 Minuten.']),
-      el('p', { class: 'cvz-cs-callout' }, ['Du kannst diese Seite jetzt schließen. Die Strategie läuft im Hintergrund weiter und liegt danach in deinen gespeicherten Strategien. Sobald die Erstellung abgeschlossen ist, wirst du außerdem per E-Mail benachrichtigt.']),
+      el('p', { class: 'cvz-cs-callout' }, ['Du kannst diese Seite jetzt schließen. Die Strategie läuft im Hintergrund weiter und liegt danach in deinen gespeicherten Strategien.']),
     ]);
     state.root.appendChild(renderQuotaBanner());
     if (state.wizardSteps) state.root.appendChild(renderStepper(state.wizardSteps, state.wizardSteps.length - 1, false));
@@ -3392,6 +3388,7 @@
     var toolbar = el('div', { class: 'cvz-cs-cluster-toolbar' }, [
       el('p', { class: 'cvz-cs-hint' }, [
         'Tippe auf eine Seite für Begründung, Content-Brief und Status. Den Bearbeitungsstatus setzt du selbst: Er dient deiner Übersicht, wird gespeichert und steht im Export.',
+        el('br'), VOLUME_NOTE,
       ]),
       toggleAllBtn,
     ]);
