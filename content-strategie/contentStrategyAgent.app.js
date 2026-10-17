@@ -355,6 +355,13 @@
       '#cvz-content-strategy-agent .cvz-flow-edge-line.is-hierarchy{stroke:rgba(226,232,240,.6);}',
       '#cvz-content-strategy-agent .cvz-flow-edge-line.is-link{stroke:rgba(79,209,197,.6);stroke-dasharray:6 5;}',
       '#cvz-content-strategy-agent .cvz-flow-edge.is-selected .cvz-flow-edge-line{stroke:#f0f4f8;stroke-width:2.6;}',
+      /* NEU: Off-Site-Maßnahmen im Content Flow (außerhalb der Website) */
+      '#cvz-content-strategy-agent .cvz-flow-node.is-offsite .cvz-flow-node-box{stroke-dasharray:3 3;fill:#1d1520;}',
+      '#cvz-content-strategy-agent .cvz-flow-edge-line.is-offsite{stroke:rgba(244,114,182,.75);stroke-dasharray:2 5;}',
+      '#cvz-content-strategy-agent .cvz-flow-zone{fill:rgba(244,114,182,.04);stroke:rgba(244,114,182,.35);stroke-dasharray:4 4;pointer-events:none;}',
+      '#cvz-content-strategy-agent .cvz-flow-zone-label{font-size:10px;letter-spacing:.06em;text-transform:uppercase;fill:#f472b6;font-family:inherit;pointer-events:none;}',
+      '#cvz-content-strategy-agent .cvz-cs-offsite-target{font-size:13px;color:var(--cvz-teal);margin:6px 0 0;overflow-wrap:anywhere;}',
+      '#cvz-content-strategy-agent .cvz-cs-offsite-examples a{color:var(--cvz-teal);overflow-wrap:anywhere;}',
       '#cvz-content-strategy-agent .cvz-flow-panel{flex:0 0 280px;max-width:100%;padding:14px;border-left:1px solid var(--cvz-border);overflow:auto;}',
       '@media (max-width:820px){#cvz-content-strategy-agent .cvz-flow-panel{flex:1 1 100%;border-left:0;border-top:1px solid var(--cvz-border);}#cvz-content-strategy-agent .cvz-flow-canvas-wrap{flex-basis:100%;height:420px;}}',
       '@media (max-width:820px){#cvz-content-strategy-agent .cvz-flow.is-fullscreen .cvz-flow-stage{flex-direction:column;flex-wrap:nowrap;}#cvz-content-strategy-agent .cvz-flow.is-fullscreen .cvz-flow-canvas-wrap{flex:1 1 55%;min-height:0;height:auto;}#cvz-content-strategy-agent .cvz-flow.is-fullscreen .cvz-flow-panel{flex:0 0 auto;max-height:45%;overflow:auto;border-left:0;border-top:1px solid var(--cvz-border);}}',
@@ -2042,6 +2049,7 @@
   var FLOW_LIMITS = { nodes: 60, edges: 150, label: 120, note: 600, coord: 5000 };
   var FLOW_VERSION = 2;
   var FLOW_TOPIC_COLOR = '#e2e8f0';
+  var FLOW_OFFSITE_COLOR = '#f472b6';
   var FLOW_PHASE_COLORS = {
     exploration: '#3b82f6',
     evaluation: '#f59e0b',
@@ -2099,6 +2107,84 @@
     return parents;
   }
 
+  // ---------- Off-Site-Maßnahmen im Diagramm ----------
+  // NEU: Off-Site-Maßnahmen (result.offsite_measures) stehen als eigene Knoten kind "offsite" in einer
+  // Spalte rechts neben dem Themen-Baum, in der Zone "Außerhalb deiner Website". Sie gehören nie in den
+  // Baum, sondern verweisen per Verbindung auf eine eigene Seite. Die Zielseite rechnet der Server aus
+  // (link_target). Fehlt die Zielseite im Diagramm (vom Nutzer entfernt), entsteht keine Verbindung.
+  function offsiteKindLabel(m) {
+    return (m && (m.kind_label || OFFSITE_KIND_LABELS[m.kind] || m.kind)) || 'Off-Site';
+  }
+  function flowOffsiteLabel(m) {
+    var name = (m.portal && m.portal.label) || (m.platform && m.platform.label) || m.domain || 'Off-Site';
+    return String(name).slice(0, FLOW_LIMITS.label);
+  }
+  function flowMeasureOf(result, node) {
+    var list = (result && result.offsite_measures) || [];
+    return node && node.kind === 'offsite' && node.offsite_ref != null ? list[node.offsite_ref] || null : null;
+  }
+  // Ordnet alle Off-Site-Knoten als Spalte rechts neben den übrigen Knoten an.
+  function flowLayoutOffsite(diagram) {
+    var maxX = -Infinity, minY = Infinity;
+    var off = [];
+    diagram.nodes.forEach(function (n) {
+      if (n.kind === 'offsite') { off.push(n); return; }
+      maxX = Math.max(maxX, n.x + FLOW_NODE_W);
+      minY = Math.min(minY, n.y);
+    });
+    if (!off.length) return;
+    if (maxX === -Infinity) { maxX = 0; minY = 0; }
+    off.sort(function (a, b) { return (a.offsite_ref || 0) - (b.offsite_ref || 0); });
+    off.forEach(function (n, i) {
+      n.x = flowClamp(Math.round(maxX + FLOW_GAP_X * 3));
+      n.y = flowClamp(Math.round(minY + i * (FLOW_NODE_H + FLOW_GAP_Y / 2)));
+    });
+  }
+  // Übernimmt Maßnahmen, die noch keinen Knoten haben. Bestehende Knoten werden nicht verschoben, neue
+  // kommen unter die vorhandenen Off-Site-Knoten bzw. in eine neue Spalte rechts. offsite_seeded merkt sich,
+  // dass das schon passiert ist, damit vom Nutzer entfernte Knoten nicht wieder auftauchen.
+  function flowAddOffsite(diagram, result) {
+    var measures = (result && result.offsite_measures) || [];
+    diagram.offsite_seeded = true;
+    if (!measures.length) return;
+    var taken = {};
+    var convId = null;
+    var pageNodeByRef = {};
+    var existing = {};
+    var maxX = -Infinity, minY = Infinity, offMaxY = -Infinity, offX = null;
+    diagram.nodes.forEach(function (n) {
+      taken[n.id] = true;
+      if (n.kind === 'conversion') convId = n.id;
+      if (n.kind === 'page' && n.page_ref != null && pageNodeByRef[n.page_ref] == null) pageNodeByRef[n.page_ref] = n.id;
+      if (n.kind === 'offsite') {
+        if (n.offsite_ref != null) existing[n.offsite_ref] = true;
+        offMaxY = Math.max(offMaxY, n.y);
+        if (offX === null) offX = n.x;
+        return;
+      }
+      maxX = Math.max(maxX, n.x + FLOW_NODE_W);
+      minY = Math.min(minY, n.y);
+    });
+    diagram.edges.forEach(function (e) { taken[e.id] = true; });
+    if (maxX === -Infinity) { maxX = 0; minY = 0; }
+    var x = offX !== null ? offX : flowClamp(Math.round(maxX + FLOW_GAP_X * 3));
+    var y = offMaxY !== -Infinity ? offMaxY + FLOW_NODE_H + FLOW_GAP_Y / 2 : minY;
+    measures.forEach(function (m, i) {
+      if (!m || existing[i] || diagram.nodes.length >= FLOW_LIMITS.nodes) return;
+      var id = taken['o' + i] ? flowNewId('o', taken) : 'o' + i;
+      taken[id] = true;
+      diagram.nodes.push({ id: id, kind: 'offsite', offsite_ref: i, label: flowOffsiteLabel(m), x: flowClamp(Math.round(x)), y: flowClamp(Math.round(y)) });
+      y += FLOW_NODE_H + FLOW_GAP_Y / 2;
+      var t = m.link_target;
+      var targetId = t ? (t.page_ref === -1 ? convId : pageNodeByRef[t.page_ref]) : null;
+      if (targetId && diagram.edges.length < FLOW_LIMITS.edges) {
+        var edgeId = taken['x' + i] ? flowNewId('x', taken) : 'x' + i;
+        taken[edgeId] = true;
+        diagram.edges.push({ id: edgeId, from: id, to: targetId, type: 'link' });
+      }
+    });
+  }
+
   function flowBuildFromResult(result) {
     var pages = result.supporting_pages || [];
     var nodes = [];
@@ -2138,6 +2224,7 @@
       edges.push({ id: 'l' + k, from: from, to: to, type: 'link' });
     });
     var diagram = { version: FLOW_VERSION, nodes: nodes, edges: edges };
+    flowAddOffsite(diagram, result);
     flowAutoLayout(diagram);
     return diagram;
   }
@@ -2164,7 +2251,7 @@
       return (na.page_ref == null ? 999 : na.page_ref) - (nb.page_ref == null ? 999 : nb.page_ref);
     };
     Object.keys(children).forEach(function (k) { children[k].sort(order); });
-    var roots = diagram.nodes.filter(function (n) { return !hasParent[n.id]; }).map(function (n) { return n.id; });
+    var roots = diagram.nodes.filter(function (n) { return !hasParent[n.id] && n.kind !== 'offsite'; }).map(function (n) { return n.id; });
     roots.sort(order);
     var cursor = 0;
     var unit = FLOW_NODE_W + FLOW_GAP_X;
@@ -2183,13 +2270,26 @@
       return x;
     }
     roots.forEach(function (id) { place(id, 0); });
+    flowLayoutOffsite(diagram);
   }
 
   function flowSanitizeStored(stored, result) {
     if (!stored || (stored.version !== 1 && stored.version !== 2) || !Array.isArray(stored.nodes) || !Array.isArray(stored.edges)) return null;
-    var diagram = { version: FLOW_VERSION, nodes: flowClone(stored.nodes), edges: flowClone(stored.edges) };
+    var diagram = { version: FLOW_VERSION, offsite_seeded: stored.offsite_seeded === true, nodes: flowClone(stored.nodes), edges: flowClone(stored.edges) };
     var hasTopic = diagram.nodes.some(function (n) { return n.kind === 'topic'; });
     if (!hasTopic) flowAddTopic(diagram, result);
+    // Off-Site-Knoten ohne passende Maßnahme im Bericht (z.B. beschädigte Daten) samt Verbindungen entfernen
+    var measures = (result && result.offsite_measures) || [];
+    var dropped = {};
+    diagram.nodes = diagram.nodes.filter(function (n) {
+      if (n.kind !== 'offsite') return true;
+      if (n.offsite_ref != null && measures[n.offsite_ref]) return true;
+      dropped[n.id] = true;
+      return false;
+    });
+    diagram.edges = diagram.edges.filter(function (e) { return !dropped[e.from] && !dropped[e.to]; });
+    // Gespeicherte Diagramme von vor den Off-Site-Knoten: Maßnahmen einmalig ergänzen
+    if (!diagram.offsite_seeded) flowAddOffsite(diagram, result);
     return diagram;
   }
 
@@ -2301,7 +2401,7 @@
     var byPosition = function (a, b) { return (byId[a].x - byId[b].x) || (byId[a].y - byId[b].y); };
     Object.keys(childrenOf).forEach(function (k) { childrenOf[k].sort(byPosition); });
     var roots = diagram.nodes.filter(function (n) { return !hasParent[n.id]; }).map(function (n) { return n.id; });
-    var rank = function (id) { return byId[id].kind === 'topic' ? 0 : (byId[id].kind === 'conversion' ? 1 : 2); };
+    var rank = function (id) { var k = byId[id].kind; return k === 'topic' ? 0 : (k === 'conversion' ? 1 : (k === 'offsite' ? 3 : 2)); };
     roots.sort(function (a, b) { return (rank(a) - rank(b)) || byPosition(a, b); });
     Object.keys(childrenOf).forEach(function (k) { childrenOf[k].sort(function (a, b) { return (rank(a) - rank(b)) || byPosition(a, b); }); });
     var ordered = [];
@@ -2333,11 +2433,13 @@
     });
     var linkTargets = {};
     diagram.edges.forEach(function (e) {
-      if (e.type === 'link' && byId[e.from] && byId[e.to]) (linkTargets[e.from] = linkTargets[e.from] || []).push(titleOf[e.to]);
+      // Verweise einer eigenen Seite auf eine Off-Site-Maßnahme sind keine internen Links
+      if (e.type === 'link' && byId[e.from] && byId[e.to] && byId[e.to].kind !== 'offsite') (linkTargets[e.from] = linkTargets[e.from] || []).push(titleOf[e.to]);
     });
 
     return ordered.map(function (item, index) {
       var n = byId[item.id];
+      if (n.kind === 'offsite') return flowExportOffsiteRow(n, item, index, titleOf, linkTargets, result);
       var page = n.kind === 'conversion' ? result.conversion_page : (n.kind === 'page' && n.page_ref != null ? pages[n.page_ref] : null);
       var phaseText = n.kind === 'conversion' ? 'Conversion' : (phaseName(n.phase) || '');
       var typeText = n.kind === 'conversion' ? 'Conversion-Seite' : (n.page_type ? pageTypeLabel(n.page_type) : '');
@@ -2375,6 +2477,31 @@
     });
   }
 
+  // NEU: Zeile für eine Off-Site-Maßnahme (gleiches Format wie die Seiten-Zeilen)
+  function flowExportOffsiteRow(n, item, index, titleOf, linkTargets, result) {
+    var m = flowMeasureOf(result, n) || {};
+    var typeText = 'Off-Site: ' + offsiteKindLabel(m);
+    var targets = (linkTargets[n.id] || []).join(', ');
+    var description = [];
+    if (m.domain) description.push('Wo: ' + m.domain);
+    if (m.action) description.push('Aufgabe: ' + m.action);
+    if (m.effort) description.push('Aufwand: ' + m.effort);
+    if (m.basis) description.push('Beleg: ' + m.basis);
+    if (m.hypothesis) description.push('Vermutung: ' + m.hypothesis);
+    if (m.content_points && m.content_points.length) description.push('Das sollte der Inhalt beantworten:\n' + m.content_points.map(function (b) { return '- ' + b; }).join('\n'));
+    if (m.cited_examples && m.cited_examples.length) description.push('Dort heute zitiert:\n' + m.cited_examples.map(function (e) { return '- ' + (e.title ? e.title + ' (' + e.url + ')' : e.url); }).join('\n'));
+    if (targets) description.push('Verweist auf: ' + targets + (m.link_target && m.link_target.embed ? ' (dort auch einbinden)' : ''));
+    if (n.note) description.push('Notiz: ' + n.note);
+    return {
+      index: index + 1, id: item.id, level: item.level, parentId: null, parentTitle: '',
+      title: titleOf[item.id], typeText: typeText, phaseText: '', keyword: '', volume: '', status: '',
+      // Tabelle hat keine Beschreibungsspalte: Aufgabe und Inhaltspunkte stehen deshalb im Content-Brief
+      source: 'Off-Site-Maßnahme', note: n.note || '',
+      brief: [m.action || ''].concat((m.content_points || []).map(function (b) { return '- ' + b; })).filter(Boolean).join('\n'),
+      description: description.join('\n'), linkTargets: targets, taskId: 'CF' + (index + 1),
+    };
+  }
+
   function flowBuildExport(kind, diagram, result) {
     var rows = flowExportRows(diagram, result);
     var idOf = {};
@@ -2407,6 +2534,7 @@
       selected: null,          // { type: 'node' | 'edge', id }
       mode: null,              // null | 'connect-hierarchy' | 'connect-link'
       showLinks: true,
+      showOffsite: true,
       view: { x: 40, y: 40, k: 1 },
       undo: [],
       drag: null,
@@ -2431,6 +2559,9 @@
       svgEl('marker', { id: 'cvz-flow-arrow-link', viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '6', markerHeight: '6', orient: 'auto-start-reverse' }, [
         svgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'rgba(79,209,197,.85)' }),
       ]),
+      svgEl('marker', { id: 'cvz-flow-arrow-offsite', viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '6', markerHeight: '6', orient: 'auto-start-reverse' }, [
+        svgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'rgba(244,114,182,.9)' }),
+      ]),
     ]);
     var viewport = svgEl('g', { class: 'cvz-flow-viewport' });
     var edgeLayer = svgEl('g', {});
@@ -2452,6 +2583,9 @@
       return null;
     }
     function isTopic(id) { var n = nodeById(id); return !!(n && n.kind === 'topic'); }
+    function isOffsite(id) { var n = nodeById(id); return !!(n && n.kind === 'offsite'); }
+    function isVisible(n) { return !!n && (n.kind !== 'offsite' || ui.showOffsite); }
+    function hasOffsite() { return diagram.nodes.some(function (n) { return n.kind === 'offsite'; }); }
     function isFixedEdge(edge) {
       // Cluster-Thema -> Conversion-Seite ist fest: die verkaufende Seite hängt immer direkt am Thema
       var a = nodeById(edge.from), b = nodeById(edge.to);
@@ -2510,9 +2644,10 @@
       ui.mode = mode;
       canvasWrap.className = 'cvz-flow-canvas-wrap' + (mode ? ' cvz-flow-connecting' : '');
       if (mode) {
+        var fromOffsite = ui.selected && ui.selected.type === 'node' && isOffsite(ui.selected.id);
         banner.textContent = (mode === 'connect-hierarchy'
           ? 'Klicke die Seite, die unter „' + (nodeById(ui.selected && ui.selected.id) || {}).label + '“ hängen soll. '
-          : 'Klicke die Seite, auf die verlinkt werden soll. ') + 'Esc bricht ab.';
+          : (fromOffsite ? 'Klicke die eigene Seite, auf die die Maßnahme verweisen soll. ' : 'Klicke die Seite, auf die verlinkt werden soll. ')) + 'Esc bricht ab.';
         banner.style.display = 'block';
       } else {
         banner.style.display = 'none';
@@ -2532,7 +2667,7 @@
       clearTimeout(ui.saveTimer);
       ui.saveState = 'saving';
       renderToolbar();
-      var body = JSON.stringify({ version: FLOW_VERSION, nodes: diagram.nodes, edges: diagram.edges });
+      var body = JSON.stringify({ version: FLOW_VERSION, offsite_seeded: diagram.offsite_seeded === true ? true : undefined, nodes: diagram.nodes, edges: diagram.edges });
       var options = { method: 'PUT', body: body };
       if (keepalive === true) options.keepalive = true;
       return apiFetch('/api/content-strategy/' + sessionId + '/flow', options)
@@ -2578,25 +2713,44 @@
       var sign = down ? 1 : -1;
       return 'M' + fx + ',' + fy + ' C' + fx + ',' + (fy + sign * dy) + ' ' + tx + ',' + (ty - sign * dy) + ' ' + tx + ',' + ty;
     }
+    // NEU: Zone "Außerhalb deiner Website" hinter den Off-Site-Knoten (fängt keine Klicks ab)
+    function renderOffsiteZone() {
+      if (!ui.showOffsite) return;
+      var off = diagram.nodes.filter(function (n) { return n.kind === 'offsite'; });
+      if (!off.length) return;
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      off.forEach(function (n) {
+        minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x + FLOW_NODE_W); maxY = Math.max(maxY, n.y + FLOW_NODE_H);
+      });
+      var pad = 16;
+      edgeLayer.appendChild(svgEl('rect', { class: 'cvz-flow-zone', x: minX - pad, y: minY - pad - 16, width: maxX - minX + pad * 2, height: maxY - minY + pad * 2 + 16 }));
+      edgeLayer.appendChild(svgEl('text', { class: 'cvz-flow-zone-label', x: minX - pad + 8, y: minY - pad - 4 }, ['Außerhalb deiner Website']));
+    }
     function renderCanvas() {
       clear(edgeLayer);
       clear(nodeLayer);
+      renderOffsiteZone();
       diagram.edges.forEach(function (e) {
-        if (e.type === 'link' && !ui.showLinks) return;
         var a = nodeById(e.from), b = nodeById(e.to);
-        if (!a || !b) return;
+        if (!a || !b || !isVisible(a) || !isVisible(b)) return;
+        var outward = a.kind === 'offsite' || b.kind === 'offsite';
+        // Off-Site-Verbindungen hängen am Off-Site-Schalter, nicht an "Interne Links"
+        if (e.type === 'link' && !outward && !ui.showLinks) return;
         var d = edgePath(a, b);
         var isSel = ui.selected && ui.selected.type === 'edge' && ui.selected.id === e.id;
         var g = svgEl('g', { 'data-edge-id': e.id, class: 'cvz-flow-edge' + (isSel ? ' is-selected' : '') });
         g.appendChild(svgEl('path', { d: d, class: 'cvz-flow-edge-hit', fill: 'none' }));
         g.appendChild(svgEl('path', {
           d: d, fill: 'none',
-          class: 'cvz-flow-edge-line ' + (e.type === 'link' ? 'is-link' : 'is-hierarchy'),
-          'marker-end': e.type === 'link' ? 'url(#cvz-flow-arrow-link)' : 'url(#cvz-flow-arrow)',
+          class: 'cvz-flow-edge-line ' + (outward ? 'is-offsite' : (e.type === 'link' ? 'is-link' : 'is-hierarchy')),
+          'marker-end': outward ? 'url(#cvz-flow-arrow-offsite)' : (e.type === 'link' ? 'url(#cvz-flow-arrow-link)' : 'url(#cvz-flow-arrow)'),
         }));
         edgeLayer.appendChild(g);
       });
       diagram.nodes.forEach(function (n) {
+        if (!isVisible(n)) return;
+        if (n.kind === 'offsite') { nodeLayer.appendChild(renderOffsiteNode(n)); return; }
         var color = n.kind === 'topic' ? FLOW_TOPIC_COLOR : (n.kind === 'conversion' ? '#4fd1c5' : (FLOW_PHASE_COLORS[n.phase] || '#6e7681'));
         var isSel = ui.selected && ui.selected.type === 'node' && ui.selected.id === n.id;
         var g = svgEl('g', {
@@ -2632,6 +2786,26 @@
       });
       applyView();
     }
+    // NEU: Off-Site-Knoten: gestrichelter Rahmen, eigene Farbe, kein "+" für Unterseiten
+    function renderOffsiteNode(n) {
+      var m = flowMeasureOf(result, n) || {};
+      var isSel = ui.selected && ui.selected.type === 'node' && ui.selected.id === n.id;
+      var g = svgEl('g', {
+        'data-node-id': n.id,
+        class: 'cvz-flow-node is-offsite' + (isSel ? ' is-selected' : ''),
+        transform: 'translate(' + n.x + ',' + n.y + ')',
+      });
+      g.appendChild(svgEl('rect', { class: 'cvz-flow-node-box', width: FLOW_NODE_W, height: FLOW_NODE_H, style: 'stroke:' + (isSel ? '#f0f4f8' : 'rgba(244,114,182,.55)') }));
+      g.appendChild(svgEl('rect', { width: 5, height: FLOW_NODE_H, fill: FLOW_OFFSITE_COLOR }));
+      // Kurz halten: die Kopfzeile ist knapp 30 Zeichen breit
+      g.appendChild(svgEl('text', { class: 'cvz-flow-node-tag', x: 16, y: 17 }, [offsiteKindLabel(m).slice(0, 30)]));
+      flowWrapText(n.label, 28, 2).forEach(function (line, i) {
+        g.appendChild(svgEl('text', { class: 'cvz-flow-node-label', x: 16, y: 38 + i * 16 }, [line]));
+      });
+      g.appendChild(svgEl('text', { class: 'cvz-flow-node-phase', x: 16, y: FLOW_NODE_H - 9, fill: FLOW_OFFSITE_COLOR }, ['Off-Site' + (m.effort ? ' · Aufwand ' + m.effort : '')]));
+      if (n.note) g.appendChild(svgEl('text', { class: 'cvz-flow-node-note', x: FLOW_NODE_W - 14, y: FLOW_NODE_H - 9, 'text-anchor': 'end' }, ['✎']));
+      return g;
+    }
 
     // ---------- Toolbar ----------
     function tbButton(label, title, onClick, extraClass) {
@@ -2644,6 +2818,17 @@
       toolbar.appendChild(tbButton('+ Seite', 'Neue Seite im Diagramm anlegen', function () { addNode(null); }));
       toolbar.appendChild(tbButton('Rückgängig', 'Letzte Änderung zurücknehmen (Strg/Cmd+Z)', undo, ui.undo.length ? '' : 'is-disabled'));
       toolbar.appendChild(tbButton('Interne Links: ' + (ui.showLinks ? 'an' : 'aus'), 'Gestrichelte Verlinkungen ein- oder ausblenden', function () { ui.showLinks = !ui.showLinks; renderCanvas(); renderToolbar(); }));
+      if (hasOffsite()) {
+        toolbar.appendChild(tbButton('Off-Site: ' + (ui.showOffsite ? 'an' : 'aus'), 'Maßnahmen außerhalb der Website ein- oder ausblenden', function () {
+          ui.showOffsite = !ui.showOffsite;
+          if (!ui.showOffsite && ui.selected) {
+            var selNode = ui.selected.type === 'node' ? nodeById(ui.selected.id) : null;
+            var selEdge = ui.selected.type === 'edge' ? edgeById(ui.selected.id) : null;
+            if ((selNode && selNode.kind === 'offsite') || (selEdge && (isOffsite(selEdge.from) || isOffsite(selEdge.to)))) ui.selected = null;
+          }
+          renderCanvas(); renderPanel(); renderToolbar();
+        }));
+      }
       toolbar.appendChild(tbButton('Automatisch ordnen', 'Alle Knoten neu als Baum anordnen', function () { pushUndo(); flowAutoLayout(diagram); changed(); fitView(); }));
       toolbar.appendChild(tbButton('Aus Bericht neu aufbauen', 'Verwirft alle Änderungen am Diagramm', function () {
         if (!window.confirm('Alle Änderungen am Diagramm verwerfen und neu aus dem Bericht aufbauen?')) return;
@@ -2724,6 +2909,9 @@
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Klicke eine Seite oder Verbindung an, um sie zu bearbeiten. Ziehe Seiten mit der Maus, um sie zu verschieben; ziehe den Hintergrund, um den Ausschnitt zu bewegen. Strg/Cmd + Mausrad zoomt.']));
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Ganz oben steht das Cluster-Thema. Es ist keine eigene Seite, sondern fasst den Cluster zusammen. Darunter stehen nebeneinander die Conversion-Seite (verkauft) und Pillar Pages (bündeln Teilthemen).']));
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Durchgezogene Pfeile zeigen den Themen-Baum (Oberseite → Unterseite), gestrichelte sind interne Links, also der Weg zur Conversion-Seite. Die Farbe zeigt die Phase, der Punkt oben rechts den Status aus dem Bericht. Der Baum beschreibt Themen und Verlinkung, nicht die URL-Struktur.']));
+        if (hasOffsite()) {
+          panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Rechts in der rosa Zone stehen die Off-Site-Maßnahmen: Inhalte und Einträge außerhalb deiner Website, zum Beispiel ein Video oder ein Profil auf einem Bewertungsportal. Die gepunktete Linie zeigt, auf welche eigene Seite die Maßnahme verweisen soll.']));
+        }
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Änderungen am Diagramm werden gespeichert, verändern aber den Bericht nicht.']));
         var legend = el('div', { class: 'cvz-flow-legend' });
         MESSY_MIDDLE_PHASES.forEach(function (ph) {
@@ -2732,6 +2920,7 @@
             el('i', { style: 'background:' + FLOW_PHASE_COLORS[ph.value] }), ph.label,
           ]));
         });
+        if (hasOffsite()) legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [el('i', { style: 'background:' + FLOW_OFFSITE_COLOR }), 'Off-Site']));
         panel.appendChild(legend);
         return;
       }
@@ -2739,8 +2928,27 @@
         var edge = edgeById(sel.id);
         if (!edge) return;
         var a = nodeById(edge.from), b = nodeById(edge.to);
-        panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [edge.type === 'hierarchy' ? 'Themen-Baum-Verbindung' : 'Interner Link']));
+        var outward = (a && a.kind === 'offsite') || (b && b.kind === 'offsite');
+        panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [outward ? 'Verbindung nach außen' : (edge.type === 'hierarchy' ? 'Themen-Baum-Verbindung' : 'Interner Link')]));
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [(a ? a.label : '?') + ' → ' + (b ? b.label : '?')]));
+        if (outward) {
+          var om = flowMeasureOf(result, a && a.kind === 'offsite' ? a : b) || {};
+          panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [a && a.kind === 'offsite'
+            ? 'Die Off-Site-Maßnahme verweist auf diese eigene Seite.' + (om.link_target && om.link_target.embed ? ' Das Video oder die Folge zusätzlich auf der Seite einbinden.' : '')
+            : 'Die eigene Seite verweist auf den Inhalt außerhalb der Website.']));
+          panel.appendChild(tbButton('Umkehren', 'Richtung der Verbindung tauschen', function () {
+            pushUndo();
+            var t0 = edge.from; edge.from = edge.to; edge.to = t0;
+            changed();
+          }));
+          panel.appendChild(tbButton('Verbindung löschen', '', function () {
+            pushUndo();
+            diagram.edges = diagram.edges.filter(function (x) { return x.id !== edge.id; });
+            ui.selected = null;
+            changed();
+          }, 'cvz-flow-btn-danger'));
+          return;
+        }
         if (isFixedEdge(edge)) {
           panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Feste Verbindung: Die Conversion-Seite hängt immer direkt am Cluster-Thema.']));
           return;
@@ -2779,6 +2987,7 @@
       }
       var node = nodeById(sel.id);
       if (!node) return;
+      if (node.kind === 'offsite') { renderOffsitePanel(node); return; }
       panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [node.kind === 'topic' ? 'Cluster-Thema' : (node.kind === 'conversion' ? 'Conversion-Seite' : (node.kind === 'custom' ? 'Eigene Seite' : 'Seite aus dem Bericht'))]));
       if (node.kind === 'topic') {
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine eigene Seite und keine URL. Das Thema hält Conversion-Seite, Pillar Pages und informationelle Seiten ohne passende Pillar Page zusammen. Es kann nicht verlinkt werden.']));
@@ -2828,7 +3037,7 @@
         parentSelect.appendChild(el('option', { value: '' }, ['Keine (oberste Ebene)']));
         var currentParent = parentEdgeOf(node.id);
         diagram.nodes.forEach(function (other) {
-          if (other.id === node.id || isDescendant(other.id, node.id)) return;
+          if (other.id === node.id || other.kind === 'offsite' || isDescendant(other.id, node.id)) return;
           var o = el('option', { value: other.id }, [other.label]);
           if (currentParent && currentParent.from === other.id) o.setAttribute('selected', 'selected');
           parentSelect.appendChild(o);
@@ -2864,6 +3073,46 @@
       if (node.kind !== 'conversion' && node.kind !== 'topic') {
         actions.appendChild(tbButton('Aus Diagramm entfernen', 'Entfernt nur den Knoten im Diagramm, nicht die Seite im Bericht', function () { removeNode(node.id); }, 'cvz-flow-btn-danger'));
       }
+      panel.appendChild(actions);
+    }
+    // NEU: Seitenleiste für eine Off-Site-Maßnahme
+    function renderOffsitePanel(node) {
+      var m = flowMeasureOf(result, node) || {};
+      panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, ['Off-Site-Maßnahme']));
+      panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [offsiteKindLabel(m) + (m.domain ? ' · ' + m.domain : '') + (m.effort ? ' · Aufwand ' + m.effort : '')]));
+      if (m.action) panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, [m.action]));
+      if (m.basis) panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Beleg: ' + m.basis]));
+      var targetEdge = null;
+      diagram.edges.forEach(function (e) { if (!targetEdge && e.from === node.id && !isOffsite(e.to)) targetEdge = e; });
+      var targetNode = targetEdge ? nodeById(targetEdge.to) : null;
+      if (targetNode) {
+        panel.appendChild(el('p', { class: 'cvz-cs-offsite-target' }, ['Verweist auf: ' + targetNode.label + (m.link_target && m.link_target.embed ? ' (dort auch einbinden)' : '')]));
+      } else {
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Noch keine eigene Zielseite. Ohne Verweis auf eine passende Seite bringt die Maßnahme dir kaum Besucher.']));
+      }
+      panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Details und Belege stehen im Bericht unter GEO-Strategie.']));
+      var labelInput = el('input', { type: 'text', class: 'cvz-flow-input', maxlength: String(FLOW_LIMITS.label), value: node.label });
+      labelInput.addEventListener('focus', pushUndoOnce(node.id + ':label'));
+      labelInput.addEventListener('input', function () {
+        var v = labelInput.value.trim();
+        if (!v) return;
+        node.label = v.slice(0, FLOW_LIMITS.label);
+        renderCanvas();
+        scheduleSave();
+      });
+      panel.appendChild(field('Titel', labelInput));
+      var noteInput = el('textarea', { class: 'cvz-flow-input', rows: '3', maxlength: String(FLOW_LIMITS.note), placeholder: 'Eigene Notiz, z.B. Verantwortliche Person, Deadline' });
+      noteInput.value = node.note || '';
+      noteInput.addEventListener('focus', pushUndoOnce(node.id + ':note'));
+      noteInput.addEventListener('input', function () {
+        node.note = noteInput.value.slice(0, FLOW_LIMITS.note) || undefined;
+        renderCanvas();
+        scheduleSave();
+      });
+      panel.appendChild(field('Notiz', noteInput));
+      var actions = el('div', { class: 'cvz-flow-actions' });
+      actions.appendChild(tbButton('Verweist auf …', 'Eigene Seite wählen, auf die die Maßnahme verweisen soll', function () { setMode('connect-link'); }));
+      actions.appendChild(tbButton('Aus Diagramm entfernen', 'Entfernt nur den Knoten im Diagramm, nicht die Maßnahme im Bericht', function () { removeNode(node.id); }, 'cvz-flow-btn-danger'));
       panel.appendChild(actions);
     }
     // Ein Undo-Schritt pro Feld-Fokus statt pro Tastendruck
@@ -2908,6 +3157,8 @@
       if (diagram.edges.length >= FLOW_LIMITS.edges && type === 'link') { notice('Maximal ' + FLOW_LIMITS.edges + ' Verbindungen im Diagramm.'); return; }
       var toNode = nodeById(toId);
       if (type === 'link' && (isTopic(fromId) || isTopic(toId))) { notice('Das Cluster-Thema ist keine Seite und kann nicht verlinkt werden.'); return; }
+      if (type === 'hierarchy' && (isOffsite(fromId) || isOffsite(toId))) { notice('Off-Site-Maßnahmen liegen außerhalb der Website und gehören nicht in den Themen-Baum. Nutze „Verweist auf …“.'); return; }
+      if (type === 'link' && isOffsite(fromId) && isOffsite(toId)) { notice('Zwei Off-Site-Maßnahmen lassen sich nicht verbinden. Wähle eine eigene Seite.'); return; }
       if (type === 'hierarchy') {
         if (toNode && toNode.kind === 'topic') { notice('Das Cluster-Thema steht immer ganz oben.'); return; }
         if (toNode && toNode.kind === 'conversion') { notice('Die Conversion-Seite hängt immer direkt am Cluster-Thema.'); return; }
@@ -2941,9 +3192,10 @@
     }
     function fitView() {
       var rect = svg.getBoundingClientRect();
-      if (!rect.width || !rect.height || diagram.nodes.length === 0) return;
+      var shown = diagram.nodes.filter(isVisible);
+      if (!rect.width || !rect.height || shown.length === 0) return;
       var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      diagram.nodes.forEach(function (n) {
+      shown.forEach(function (n) {
         minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
         maxX = Math.max(maxX, n.x + FLOW_NODE_W); maxY = Math.max(maxY, n.y + FLOW_NODE_H);
       });
@@ -3757,7 +4009,23 @@
 
   var OFFSITE_KIND_LABELS = {
     listing: 'Eintrag', gastbeitrag: 'Gastbeitrag', pr_erwaehnung: 'PR / Erwähnung',
-    bewertungsportal: 'Bewertungsportal', vergleichsportal: 'Vergleichsportal', sonstiges: 'Prüfen',
+    bewertungsportal: 'Bewertungen', vergleichsportal: 'Vergleichsportal', sonstiges: 'Prüfen',
+    // NEU: eigene Inhalte auf Plattformen (Backend liefert zusätzlich kind_label)
+    video: 'Eigenes Video', community_beitrag: 'Beitrag in der Community', social_beitrag: 'Beitrag im eigenen Profil',
+    podcast: 'Podcast', plattform_artikel: 'Artikel auf der Plattform',
+  };
+  // NEU: Nur http(s)-Links aus den Messdaten verlinken (Schutz vor javascript:-Links o. ä.)
+  function safeHttpUrl(u) {
+    try {
+      var x = new URL(String(u));
+      return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : null;
+    } catch (e) { return null; }
+  }
+  // NEU: Hinweise, die zur Art der Maßnahme gehören (Kennzeichnung, echte Bewertungen)
+  var OFFSITE_KIND_NOTES = {
+    community_beitrag: 'Gib dich als Anbieter zu erkennen und halte die Regeln der Community ein. Verdeckte Werbung ist unzulässig.',
+    bewertungsportal: 'Nur echte Bewertungen echter Kunden. Gekaufte oder selbst geschriebene Bewertungen sind unzulässig, Anreize nur offen und wenn das Portal sie erlaubt.',
+    vergleichsportal: 'Nur echte Bewertungen echter Kunden. Gekaufte oder selbst geschriebene Bewertungen sind unzulässig.',
   };
 
   // Off-Site-Maßnahmen aus der eigenen, parallelen KI-Abfrage. Domains und Zahlen stammen aus der
@@ -3766,7 +4034,7 @@
     wettbewerber: 'Wettbewerber', vergleichs_bewertungsportal: 'Vergleichs- oder Bewertungsportal',
     fachmedium: 'Fachmedium oder Branchenportal', verzeichnis: 'Verzeichnis oder Marktplatz',
     ratgeber_blog: 'Ratgeber oder Blog', enzyklopaedie_behoerde: 'Nachschlagewerk oder Behörde',
-    unklar: 'Art nicht sicher erkennbar',
+    plattform: 'Plattform für eigene Inhalte', unklar: 'Art nicht sicher erkennbar',
   };
 
   function renderOffsiteSources(sources) {
@@ -3805,14 +4073,39 @@
     (measures || []).forEach(function (m) {
       var card = el('div', { class: 'cvz-cs-page-card' });
       card.appendChild(el('div', { class: 'cvz-cs-page-card-badges' }, [
-        el('span', { class: 'cvz-cs-badge' }, [OFFSITE_KIND_LABELS[m.kind] || m.kind]),
+        el('span', { class: 'cvz-cs-badge' }, [offsiteKindLabel(m)]),
         m.domain_type ? el('span', { class: 'cvz-cs-badge' }, [DOMAIN_TYPE_LABELS[m.domain_type] || m.domain_type]) : null,
         el('span', { class: 'cvz-cs-badge' }, ['Aufwand ' + m.effort]),
       ]));
-      card.appendChild(el('h4', { class: 'cvz-cs-page-card-topic' }, [m.domain]));
+      var named = (m.portal && m.portal.label) || (m.platform && m.platform.label);
+      card.appendChild(el('h4', { class: 'cvz-cs-page-card-topic' }, [named && named.toLowerCase() !== String(m.domain).toLowerCase() ? named + ' (' + m.domain + ')' : m.domain]));
       card.appendChild(el('p', {}, [m.action]));
+      if (m.content_points && m.content_points.length > 0) {
+        var cp = el('ul', { class: 'cvz-cs-brief-list' });
+        m.content_points.forEach(function (pt) { cp.appendChild(el('li', {}, [pt])); });
+        card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Das sollte der Inhalt beantworten:']));
+        card.appendChild(cp);
+      }
+      if (m.link_target && m.link_target.page_topic) {
+        card.appendChild(el('p', { class: 'cvz-cs-offsite-target' }, [
+          'Verweist auf deine Seite: ' + m.link_target.page_topic +
+          (m.link_target.embed ? ' (dort auch einbinden)' : '') +
+          (m.link_target.matched_prompts === 0 ? ' · keine Seite beantwortet dieselben Fragen, deshalb die Conversion-Seite' : ''),
+        ]));
+      }
       card.appendChild(el('p', { class: 'cvz-cs-evidence' }, ['Beleg: ' + m.basis]));
       if (m.hypothesis) card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Vermutung: ' + m.hypothesis]));
+      if (OFFSITE_KIND_NOTES[m.kind]) card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Wichtig: ' + OFFSITE_KIND_NOTES[m.kind]]));
+      if (m.cited_examples && m.cited_examples.length > 0) {
+        var ex = el('ul', { class: 'cvz-cs-brief-list cvz-cs-offsite-examples' });
+        m.cited_examples.forEach(function (e) {
+          var href = safeHttpUrl(e.url);
+          var text = e.title || e.url;
+          var count = e.runs ? ' (in ' + e.runs + (e.runs === 1 ? ' Antwort' : ' Antworten') + ' zitiert)' : '';
+          ex.appendChild(el('li', {}, [href ? el('a', { href: href, target: '_blank', rel: 'noopener noreferrer nofollow' }, [text]) : text, count]));
+        });
+        card.appendChild(el('details', { class: 'cvz-cs-expand' }, [el('summary', {}, ['Aufklappen: dort heute zitiert (' + m.cited_examples.length + ')']), ex]));
+      }
       if (m.prompts && m.prompts.length > 0) {
         var l = el('ul', { class: 'cvz-cs-brief-list' });
         m.prompts.forEach(function (pr) { l.appendChild(el('li', {}, ['"' + pr + '"'])); });
