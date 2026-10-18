@@ -109,7 +109,7 @@
         'line-height:1.7',
         'background:#F9FAFB',
         'border:1px solid #E5E7EB',
-        'border-radius:12px',
+        'border-radius:0px',
         'margin:24px 0'
       ].join(';');
       notice.innerHTML =
@@ -985,7 +985,7 @@
         if (data.existing && data.history && Array.isArray(data.history) && data.history.length > 0) {
           messagesDiv.innerHTML = '';
           const infoDiv         = document.createElement('div');
-          infoDiv.style.cssText = 'text-align: center; color: #6B7280; font-size: 14px; margin: 10px 0; padding: 10px; background: #F3F4F6; border-radius: 8px;';
+          infoDiv.style.cssText = 'text-align: center; color: #6B7280; font-size: 14px; margin: 10px 0; padding: 10px; background: #F3F4F6; border-radius: 0px;';
           const date            = new Date(data.history[0].created_at).toLocaleDateString('de-DE', {
             day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
           });
