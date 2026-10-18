@@ -5,7 +5,7 @@
   }
   window.convertlyzeAgentInit = true;
 
-  console.log('Convertlyze Agent V2.34 - Badge Position via ID');
+  console.log('Convertlyze Agent V2.35 - JWT Auth');
 
   // ==================== MARKED.JS KONFIGURATION ====================
 
@@ -538,7 +538,7 @@
             segments.push({ type: 'numbered', text: stripped.replace(/^\d+[.:] /, '').trim(), num: m[1] });
           }
           else if (line.trim() === '')             segments.push({ type: 'spacer' });
-          else if (/^[\u2193\u2195vV]$/.test(line.trim()))  segments.push({ type: 'arrow' });
+          else if (/^[↓↕vV]$/.test(line.trim()))  segments.push({ type: 'arrow' });
           else                                     segments.push({ type: 'para',    text: line });
         }
         return segments;
@@ -547,17 +547,17 @@
       function sanitize(text) {
         return text
           .replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1')
-          .replace(/\u2192/g, '>').replace(/\u2190/g, '<').replace(/\u2191/g, '^').replace(/\u2193/g, 'v')
-          .replace(/\u2197/g, '>').replace(/\u2198/g, '>').replace(/\u21d2/g, '=>')
-          .replace(/\u2022/g, '-').replace(/\u00b7/g, '-').replace(/\u2026/g, '...')
-          .replace(/\u201e/g, '"').replace(/\u201c/g, '"').replace(/\u201d/g, '"')
-          .replace(/\u201a/g, "'").replace(/\u2018/g, "'").replace(/\u2019/g, "'")
-          .replace(/\u2013/g, '-').replace(/\u2014/g, '-')
-          .replace(/[\u2713\u2714\u2611]/g, '+').replace(/[\u2717\u2718\u2612]/g, 'x').replace(/[\u2605\u2606]/g, '*')
+          .replace(/→/g, '>').replace(/←/g, '<').replace(/↑/g, '^').replace(/↓/g, 'v')
+          .replace(/↗/g, '>').replace(/↘/g, '>').replace(/⇒/g, '=>')
+          .replace(/•/g, '-').replace(/·/g, '-').replace(/…/g, '...')
+          .replace(/„/g, '"').replace(/“/g, '"').replace(/”/g, '"')
+          .replace(/‚/g, "'").replace(/‘/g, "'").replace(/’/g, "'")
+          .replace(/–/g, '-').replace(/—/g, '-')
+          .replace(/[✓✔☑]/g, '+').replace(/[✗✘☒]/g, 'x').replace(/[★☆]/g, '*')
           // Umlaute & ß für jsPDF-Helvetica sicher transliterieren (konsistent statt kaputt)
-          .replace(/\u00e4/g, 'ae').replace(/\u00f6/g, 'oe').replace(/\u00fc/g, 'ue')
-          .replace(/\u00c4/g, 'Ae').replace(/\u00d6/g, 'Oe').replace(/\u00dc/g, 'Ue')
-          .replace(/\u00df/g, 'ss')
+          .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue')
+          .replace(/Ä/g, 'Ae').replace(/Ö/g, 'Oe').replace(/Ü/g, 'Ue')
+          .replace(/ß/g, 'ss')
           .replace(/[^\x00-\x7E]/g, '');
       }
 
@@ -860,10 +860,33 @@
       return new URLSearchParams(window.location.search).get('analysis_id');
     }
 
+    // ==================== AUTH: MEMBERSTACK-JWT ====================
+    // Das Backend erwartet das signierte Memberstack-Token (JWT), NICHT die Member-ID.
+    // Memberstack legt es als "_ms-mid" ab (Cookie oder, je nach Einstellung, localStorage).
+    function getAuthToken() {
+      try {
+        if (window.$memberstackDom && typeof window.$memberstackDom.getMemberCookie === 'function') {
+          const t = window.$memberstackDom.getMemberCookie();
+          if (t && typeof t === 'string') return t;
+        }
+      } catch (e) {
+        console.warn('getMemberCookie fehlgeschlagen:', e);
+      }
+      const match = document.cookie.match(/(?:^|;\s*)_ms-mid=([^;]+)/);
+      if (match) return decodeURIComponent(match[1]);
+      try {
+        const ls = window.localStorage.getItem('_ms-mid');
+        if (ls) return ls;
+      } catch (e) { /* localStorage gesperrt, ignorieren */ }
+      return null;
+    }
+
+    // Holt das Token bei JEDEM Request frisch, damit ein erneuertes Token sofort greift.
     function authHeaders() {
+      const token = getAuthToken() || authToken;
       return {
         'Content-Type':  'application/json',
-        'Authorization': 'Bearer ' + authToken
+        'Authorization': 'Bearer ' + token
       };
     }
 
@@ -882,29 +905,32 @@
       try {
         const response = await fetch(API_URL + '/api/user/get-by-memberstack', {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders(),
           body:    JSON.stringify({ memberstack_id: memberstackUser.id })
         });
         if (response.ok) {
           const data = await response.json();
           if (data.user_id) return data.user_id;
+        } else if (response.status === 401) {
+          throw new Error('Token ungueltig: Server hat das Login-Token abgelehnt');
         }
+
+        // Plan, Preis und Credits setzt das Backend selbst (Beta-Standardwerte).
+        // Der Client schickt nur noch Name und E-Mail.
         const createResponse = await fetch(API_URL + '/api/user/create', {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders(),
           body:    JSON.stringify({
             memberstack_id: memberstackUser.id,
             email:          memberstackUser.email,
-            full_name:      memberstackUser.name,
-            plan_type:      'starter',
-            credits_limit:  100,
-            plan_price:     97.00,
-            license_type:   'professional',
-            license_status: 'active'
+            full_name:      memberstackUser.name
           })
         });
         if (!createResponse.ok) {
-          const error = await createResponse.json();
+          const error = await createResponse.json().catch(() => ({}));
+          if (createResponse.status === 401) {
+            throw new Error('Token ungueltig: Server hat das Login-Token abgelehnt');
+          }
           throw new Error('User creation failed: ' + (error.error || 'Unknown error'));
         }
         const createData = await createResponse.json();
@@ -923,8 +949,11 @@
         if (!analysisId) throw new Error('Keine Analysis ID in URL - bitte öffne den Agent über die Analyse-Seite');
 
         const memberstackUser = await getMemberstackUser();
-        authToken             = memberstackUser.id;
-        userId                = await ensureUserExists(memberstackUser);
+
+        authToken = getAuthToken();
+        if (!authToken) throw new Error('Kein Login-Token gefunden');
+
+        userId = await ensureUserExists(memberstackUser);
 
         const response = await fetch(API_URL + '/api/agent/start-session', {
           method:  'POST',
@@ -943,8 +972,8 @@
         }
 
         if (!response.ok) {
-          const error = await response.json();
-          if (response.status === 401) throw new Error('Authentifizierung fehlgeschlagen - bitte neu einloggen');
+          const error = await response.json().catch(() => ({}));
+          if (response.status === 401) throw new Error('Token ungueltig: Server hat das Login-Token abgelehnt');
           throw new Error(error.error || 'Session start failed');
         }
 
@@ -984,9 +1013,15 @@
         console.error('Start session error:', error);
         hideLoading();
         let errorMessage = 'Fehler beim Starten des Agents';
-        if (error.message.includes('Not logged in') || error.message.includes('Authentifizierung')) {
+
+        if (error.message.includes('Not logged in')) {
+          // Nur wenn Memberstack wirklich keinen Member kennt, zum Login schicken.
           errorMessage = 'Bitte melde dich an um den AI-Agent zu nutzen';
           setTimeout(() => { window.location.href = '/login'; }, 2000);
+        } else if (error.message.includes('Kein Login-Token') || error.message.includes('Token ungueltig')) {
+          // Eingeloggt, aber Token fehlt oder wird abgelehnt: KEIN Auto-Redirect,
+          // sonst entsteht eine Login-Schleife.
+          errorMessage = 'Deine Anmeldung konnte nicht bestätigt werden. Bitte lade die Seite neu. Falls das nicht hilft, melde dich einmal ab und wieder an.';
         } else if (error.message.includes('Analysis ID')) {
           errorMessage = error.message;
         } else if (error.message.includes('User creation failed')) {
@@ -1007,7 +1042,7 @@
         addMessage('Session nicht aktiv - bitte Seite neu laden', 'assistant');
         return;
       }
-      if (!authToken) {
+      if (!authToken && !getAuthToken()) {
         addMessage('Nicht authentifiziert - bitte Seite neu laden', 'assistant');
         return;
       }
@@ -1036,7 +1071,7 @@
         }
 
         if (!response.ok) {
-          const error = await response.json();
+          const error = await response.json().catch(() => ({}));
           if (response.status === 401) throw new Error('Sitzung abgelaufen - bitte Seite neu laden');
           if (error.error && (error.error.includes('limit') || error.error.includes('Credits'))) {
             throw new Error('Dein Nachrichten-Limit ist erreicht. Bitte upgrade deinen Plan.');
