@@ -513,6 +513,8 @@
     var paramTab = new URLSearchParams(window.location.search).get('cvz_tab');
     if (paramTab) state.activeSubTab = paramTab;
     // NEU (06.10.2026): Unterbereich im Tab "Daten" aus der URL (cvz_view).
+    // NEU (21.10.2026): Deep-Link auf die Antwort-Ansicht eines Prompts
+    state.pendingPromptViewerId = new URLSearchParams(window.location.search).get('cvz_prompt');
     // NEU (21.10.2026): Kanal aus der URL (cvz_channel).
     var paramChannel = new URLSearchParams(window.location.search).get('cvz_channel');
     if (paramChannel === 'chat_gpt' || paramChannel === 'gemini') state.activeChannel = paramChannel;
@@ -1674,6 +1676,48 @@
     { id: 'gsc', label: 'Search Console' },
   ];
 
+  // NEU (21.10.2026): Jeder Tab beginnt mit einer Frage. Der Tab-Name bleibt
+  // kurz (Navigation), die Frage sagt neuen Nutzern, wozu der Bereich da ist.
+  // Schlüssel: Tab-ID, beim Tab "Daten" 'daten:' + Unterbereich.
+  var TAB_QUESTIONS = {
+    'situation':     { eyebrow: 'Situation', q: 'Wie sichtbar seid ihr gerade in KI-Antworten?',
+                       lead: 'Wie oft ChatGPT und Gemini eure Domain in den letzten 28 Tagen als Quelle nennen, und wo die größten Chancen liegen.' },
+    'journey':       { eyebrow: 'Journey', q: 'In welcher Phase der Kaufentscheidung fehlt ihr?',
+                       lead: 'Eure Zielgruppe fragt in jeder Phase anders. Hier seht ihr, wo ihr in den Antworten vorkommt und wo andere den Platz haben.' },
+    'wettbewerb':    { eyebrow: 'Wettbewerb', q: 'Wer besetzt euren Platz in den Antworten?',
+                       lead: 'Welche Anbieter und Quellen ChatGPT und Gemini statt euch nennen, wie oft und bei welchen Fragen.' },
+    'aktionsplan':   { eyebrow: 'Aktionsplan', q: 'Wie kommt ihr in die Antworten, in denen ihr fehlt?',
+                       lead: 'Konkrete Maßnahmen, jeweils an eine Lücke geknüpft und nach Phase sortiert. Weiter unten: was ihr schon umgesetzt habt und was es gebracht hat.' },
+    'verlauf':       { eyebrow: 'Verlauf & Änderungen', q: 'Hat sich etwas bewegt, und woran lag es?',
+                       lead: 'Die Entwicklung über die gesamte Laufzeit, in KI-Antworten und in der Google-Suche, mit euren Änderungen im Zeitverlauf.' },
+    'daten:keywords':{ eyebrow: 'Daten · Keywords', q: 'Wonach sucht eure Zielgruppe bei Google?',
+                       lead: 'Suchbegriffe rund ums Thema mit Suchvolumen, eurer Position und ob Google eine KI-Übersicht zeigt.' },
+    'daten:fragen':  { eyebrow: 'Daten · Fragen', q: 'Welche Fragen stellt eure Zielgruppe rund ums Thema?',
+                       lead: 'Fragen aus Googles „Ähnliche Fragen“ und KI-Vorschläge. Gute Kandidaten für FAQ-Abschnitte und neue Inhalte.' },
+    'daten:prompts': { eyebrow: 'Daten · Prompts', q: 'Welche Fragen führen zu euch, welche nicht?',
+                       lead: 'Die Fragen, die der Tracker regelmäßig an ChatGPT und Gemini stellt. Klickt auf eine Frage, um die Antworten zu sehen.' },
+    'daten:fanout':  { eyebrow: 'Daten · Fan-out', q: 'Wonach suchen die KIs im Hintergrund?',
+                       lead: 'Die Suchanfragen, die ChatGPT stellt, bevor es antwortet. Wer dafür gut rankt, wird eher zitiert.' },
+    'daten:gsc':     { eyebrow: 'Daten · Search Console', q: 'Über welche Suchen findet man euch heute?',
+                       lead: 'Echte Suchanfragen aus eurer Google Search Console, mit Klicks, Impressionen und Position.' },
+    'domain:uebersicht': { eyebrow: 'Domain · Übersicht', q: 'Wie sichtbar ist die Domain über alle Themen?',
+                       lead: 'Der Durchschnitt aller aktiven Themen, jedes Thema zählt gleich. Darunter der Vergleich der Themen.' },
+    'domain:themen': { eyebrow: 'Domain · Themen', q: 'Welche Themen laufen gut, welche nicht?',
+                       lead: 'Alle Themen dieser Domain mit ihrem aktuellen Stand. Ein Klick öffnet das Thema.' },
+  };
+
+  function renderTabIntro(key) {
+    var cfg = TAB_QUESTIONS[key];
+    if (!cfg) return null;
+    var el = document.createElement('div');
+    el.className = 'cvz-tab-intro';
+    el.innerHTML =
+      '<p class="cvz-tab-intro-eyebrow">' + escapeHtml(cfg.eyebrow) + '</p>' +
+      '<h2 class="cvz-tab-intro-q">' + escapeHtml(cfg.q) + '</h2>' +
+      (cfg.lead ? '<p class="cvz-tab-intro-lead">' + escapeHtml(cfg.lead) + '</p>' : '');
+    return el;
+  }
+
   function isValidDataView(view) {
     return DATA_VIEWS.some(function (v) { return v.id === view; });
   }
@@ -1718,6 +1762,19 @@
     container.onclick = handleContainerClick;
     makeTablesScrollable(container);
     stabilizeAppHeight(container, heightBefore);
+    if (state.activeView !== 'topic-detail') state.promptViewer = null;
+    renderPromptViewer();
+    // Deep-Link ?cvz_prompt=..., sobald die Prompts des Themas geladen sind
+    if (state.pendingPromptViewerId && state.activeView === 'topic-detail') {
+      var pendingDetail = state.topicDetailCache[state.activeTopicId];
+      if (pendingDetail && pendingDetail.prompts) {
+        var pendingId = state.pendingPromptViewerId;
+        state.pendingPromptViewerId = null;
+        if (pendingDetail.prompts.some(function (p) { return p.id === pendingId; })) {
+          setTimeout(function () { openPromptViewer(pendingId); }, 0);
+        }
+      }
+    }
 
     if (focusedId) {
       var toRefocus = document.getElementById(focusedId);
@@ -1819,6 +1876,51 @@
     // zusätzlich die Themen-Detailansicht öffnen. Die Navigation selbst macht
     // der Browser (normaler Link), deshalb kein preventDefault.
     if (event.target.closest('[data-cvz-strategy-link]')) return;
+
+    // NEU (21.10.2026): Antwort-Ansicht
+    if (event.target.closest('[data-cvz-pv-close]') || event.target.getAttribute('data-cvz-pv-backdrop')) {
+      closePromptViewer();
+      return;
+    }
+    var pvGoto = event.target.closest('[data-cvz-pv-goto]');
+    if (pvGoto) {
+      var gotoId = pvGoto.getAttribute('data-cvz-pv-goto');
+      if (gotoId) openPromptViewer(gotoId);
+      return;
+    }
+    var pvEngine = event.target.closest('[data-cvz-pv-engine]');
+    if (pvEngine && state.promptViewer) {
+      state.promptViewer.engine = pvEngine.getAttribute('data-cvz-pv-engine');
+      state.promptViewer.runId = null;
+      render();
+      return;
+    }
+    var pvRun = event.target.closest('[data-cvz-pv-run]');
+    if (pvRun && state.promptViewer) {
+      state.promptViewer.runId = pvRun.getAttribute('data-cvz-pv-run');
+      render();
+      return;
+    }
+
+    // NEU (21.10.2026): "Hinzufügen"-Formulare auf- und zuklappen
+    var addToggle = event.target.closest('[data-cvz-add-toggle]');
+    if (addToggle) {
+      var addKey = addToggle.getAttribute('data-cvz-add-toggle');
+      if (!state.openAddForms) state.openAddForms = {};
+      var wasOpen = addToggle.getAttribute('aria-expanded') === 'true';
+      state.openAddForms[addKey] = !wasOpen;
+      if (wasOpen) {
+        // Schließen verwirft den Entwurf, sonst hielte er das Formular offen
+        if (addKey === 'keyword') state.manualKeywordDraftText = '';
+        if (addKey === 'prompt') state.manualPromptDraftText = '';
+      }
+      render();
+      if (!wasOpen) {
+        var addInput = document.getElementById(addKey === 'keyword' ? 'cvz-manual-keyword-input' : 'cvz-manual-prompt-input');
+        if (addInput) addInput.focus();
+      }
+      return;
+    }
     var createToggle = event.target.closest('[data-cvz-create-toggle]');
     if (createToggle) {
       state.showCreateForm = !state.showCreateForm;
@@ -1979,7 +2081,8 @@
     }
     var promptToggle = event.target.closest('[data-cvz-prompt-toggle]');
     if (promptToggle) {
-      togglePromptExpansion(promptToggle.getAttribute('data-cvz-prompt-toggle'));
+      // GEÄNDERT (21.10.2026): öffnet die Antwort-Ansicht statt die Zeile aufzuklappen
+      openPromptViewer(promptToggle.getAttribute('data-cvz-prompt-toggle'));
       return;
     }
     var personaFilter = event.target.closest('[data-cvz-persona-filter]');
@@ -4378,6 +4481,8 @@
     wrap.appendChild(header);
 
     wrap.appendChild(renderTabNav(DOMAIN_TABS, state.activeSubTab));
+    var domainIntro = renderTabIntro('domain:' + (state.activeSubTab === 'themen' ? 'themen' : 'uebersicht'));
+    if (domainIntro) wrap.appendChild(domainIntro);
 
     var tabContent = document.createElement('div');
     tabContent.className = 'cvz-tab-content';
@@ -4954,6 +5059,13 @@
     }
 
     wrap.appendChild(renderTabNav(TOPIC_TABS, state.activeSubTab));
+
+    // NEU (21.10.2026): Frage als Einstieg in jeden Tab
+    var introKey = state.activeSubTab === 'daten'
+      ? 'daten:' + (isValidDataView(state.activeDataView) ? state.activeDataView : 'keywords')
+      : (state.activeSubTab || 'situation');
+    var tabIntro = renderTabIntro(introKey);
+    if (tabIntro) wrap.appendChild(tabIntro);
 
     // NEU (21.10.2026): Kanal-Umschalter nur in den Tabs, in denen er wirkt.
     if (CHANNEL_SWITCH_TABS.indexOf(state.activeSubTab) !== -1 ||
@@ -7028,13 +7140,11 @@
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
-    var heading = document.createElement('p');
-    heading.className = 'cvz-section-label';
-    heading.textContent = opts.heading || 'Thematisch passende Keywords';
-    section.appendChild(heading);
-
-    // NEU (16.09.2026): manuelles Keyword-Formular, analog zu renderManualPromptForm
-    if (state.activeTopicId && opts.showManualForm !== false) {
+    // GEÄNDERT (21.10.2026): Formular eingeklappt hinter einem Button in der Überschrift
+    var showKwForm = !!state.activeTopicId && opts.showManualForm !== false;
+    section.appendChild(buildSectionHead(opts.heading || 'Thematisch passende Keywords',
+      showKwForm ? { key: 'keyword', label: 'Eigenes Keyword', draft: state.manualKeywordDraftText } : null));
+    if (showKwForm && isAddFormOpen('keyword', state.manualKeywordDraftText)) {
       section.appendChild(renderManualKeywordForm(keywords, state.activeTopicId));
     }
 
@@ -7683,6 +7793,384 @@
     return wrap;
   }
 
+  // =========================================================================
+  // NEU (21.10.2026): Antwort-Ansicht für Prompts (ersetzt die aufklappende
+  // Tabellenzeile). Öffnet sich als großes Fenster über der Seite:
+  //   links:  die gespeicherte KI-Antwort als Chat, eure Marke und
+  //           Wettbewerber im Text markiert, darunter alle Antworten der
+  //           letzten 28 Tage als Punktleiste (ausgefüllt = zitiert)
+  //   rechts: KI-Umschalter mit Trefferquote, Quellen dieser Antwort,
+  //           häufigste Quellen über 28 Tage, Suchanfragen von ChatGPT,
+  //           Rolle und verknüpfte Änderungen
+  // Tastatur: ← / → ältere/neuere Antwort, Esc schließt.
+  // Das Fenster hängt an document.body (nicht im App-Container), damit es
+  // auch über Webflow-Elementen mit transform sauber fixiert bleibt.
+  // =========================================================================
+
+  var PV_WINDOW_DAYS = 28;
+  var PV_ENGINE_ICONS = { chat_gpt: 'chatgpt.com', gemini: 'gemini.google.com' };
+
+  function pvFavicon(domain, size) {
+    return '<img src="https://www.google.com/s2/favicons?sz=64&domain=' + encodeURIComponent(domain || '') +
+      '" alt="" width="' + (size || 16) + '" height="' + (size || 16) + '" onerror="this.style.visibility=\'hidden\'">';
+  }
+
+  function pvBareDomain(d) {
+    return String(d || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+  }
+
+  // Markenname aus der Domain: "fellowmind.de" -> "fellowmind". Unter 4 Zeichen
+  // zu unspezifisch für eine Markierung im Text.
+  function pvBrandFromDomain(d) {
+    var bare = pvBareDomain(d);
+    var parts = bare.split('.');
+    var brand = parts.length > 1 ? parts[parts.length - 2] : parts[0];
+    if (parts.length > 2 && /^(co|com|org|net)$/.test(brand)) brand = parts[parts.length - 3];
+    return brand && brand.length >= 4 ? brand : null;
+  }
+
+  function visiblePromptOrder() {
+    var detail = state.topicDetailCache[state.activeTopicId];
+    var prompts = (detail && detail.prompts) || [];
+    if (state.activePersonaFilter) prompts = prompts.filter(function (p) { return p.persona === state.activePersonaFilter; });
+    var out = [];
+    PHASE_ORDER.forEach(function (phase) {
+      prompts.forEach(function (p) { if (p.phase === phase && p.is_active !== false) out.push(p); });
+    });
+    return out;
+  }
+
+  async function openPromptViewer(promptId) {
+    state.promptViewer = { promptId: promptId, engine: null, runId: null };
+    updateUrlParams({ cvz_prompt: promptId });
+    if (!(promptId in state.promptCitationsCache)) {
+      state.loadingPromptCitations[promptId] = true;
+      render();
+      try {
+        state.promptCitationsCache[promptId] = await loadPromptCitations(state.activeTopicId, promptId);
+      } catch (e) {
+        console.error('[CVZ Visibility] Antworten konnten nicht geladen werden:', e);
+        state.promptCitationsCache[promptId] = null;
+      }
+      state.loadingPromptCitations[promptId] = false;
+    }
+    render();
+    var closeBtn = document.querySelector('.cvz-pv [data-cvz-pv-close]');
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function closePromptViewer() {
+    state.promptViewer = null;
+    updateUrlParams({ cvz_prompt: null });
+    render();
+  }
+
+  function pvRunsFor(data, engine) {
+    var runs = ((data && data[engine]) || []).filter(function (r) { return !isNaN(new Date(r.collected_at).getTime()); });
+    runs.sort(function (a, b) { return new Date(a.collected_at) - new Date(b.collected_at); }); // alt -> neu
+    var cutoff = Date.now() - PV_WINDOW_DAYS * 86400000;
+    var recent = runs.filter(function (r) { return new Date(r.collected_at).getTime() >= cutoff; });
+    return recent.length ? recent : runs.slice(-1);
+  }
+
+  function pvRunStatus(run) {
+    if (run.own_domain_cited) return { key: 'cited', label: 'Zitiert' + (run.own_domain_citation_position ? ' · Quelle ' + run.own_domain_citation_position : '') };
+    if (run.own_domain_mentioned) return { key: 'mentioned', label: 'Erwähnt, nicht zitiert' };
+    return { key: 'none', label: 'Nicht genannt' };
+  }
+
+  function pvHighlight(root, terms) {
+    if (!terms.length) return;
+    var pattern = new RegExp('(' + terms.map(function (t) {
+      return t.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }).join('|') + ')', 'gi');
+    var classByTerm = {};
+    terms.forEach(function (t) { classByTerm[t.term.toLowerCase()] = t.cls; });
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (node) {
+      var text = node.nodeValue;
+      pattern.lastIndex = 0;
+      if (!pattern.test(text)) return;
+      var frag = document.createDocumentFragment();
+      var last = 0;
+      text.replace(pattern, function (match, _g, offset) {
+        if (offset > last) frag.appendChild(document.createTextNode(text.slice(last, offset)));
+        var mark = document.createElement('mark');
+        mark.className = classByTerm[match.toLowerCase()] || 'cvz-pv-mark-comp';
+        mark.textContent = match;
+        frag.appendChild(mark);
+        last = offset + match.length;
+        return match;
+      });
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+    });
+  }
+
+  function renderPromptViewer() {
+    var root = document.getElementById('cvz-pv-root');
+    if (!state.promptViewer) {
+      if (root) root.innerHTML = '';
+      document.documentElement.classList.remove('cvz-pv-open');
+      return;
+    }
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'cvz-pv-root';
+      document.body.appendChild(root);
+      root.onclick = handleContainerClick;
+    }
+    document.documentElement.classList.add('cvz-pv-open');
+
+    var detail = state.topicDetailCache[state.activeTopicId] || {};
+    var pv = state.promptViewer;
+    var prompt = (detail.prompts || []).filter(function (p) { return p.id === pv.promptId; })[0] || { id: pv.promptId, prompt_text: '' };
+    var data = state.promptCitationsCache[pv.promptId];
+    var loading = state.loadingPromptCitations[pv.promptId];
+
+    var order = visiblePromptOrder();
+    var pos = order.map(function (p) { return p.id; }).indexOf(pv.promptId);
+    var prevP = pos > 0 ? order[pos - 1] : null;
+    var nextP = pos >= 0 && pos < order.length - 1 ? order[pos + 1] : null;
+
+    var backdrop = document.createElement('div');
+    backdrop.className = 'cvz-pv-backdrop';
+    backdrop.setAttribute('data-cvz-pv-backdrop', '1');
+    var box = document.createElement('div');
+    box.className = 'cvz-pv';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-label', 'KI-Antworten zum Prompt');
+    backdrop.appendChild(box);
+
+    // ---- Kopf
+    var phaseLabel = PHASE_LABELS[prompt.phase || prompt.messymiddle_phase] || '';
+    var head = document.createElement('div');
+    head.className = 'cvz-pv-head';
+    head.innerHTML =
+      '<div class="cvz-pv-head-text">' +
+        '<p class="cvz-pv-eyebrow">Gespeicherte KI-Antworten' + (phaseLabel ? ' · ' + escapeHtml(phaseLabel) : '') +
+          (prompt.persona ? ' · ' + escapeHtml(prompt.persona) : '') + '</p>' +
+        '<h3 class="cvz-pv-title">' + escapeHtml(prompt.prompt_text || (data && data.prompt_text) || '') + '</h3>' +
+      '</div>' +
+      '<div class="cvz-pv-head-nav">' +
+        (order.length > 1 && pos >= 0
+          ? '<button type="button" class="cvz-pv-iconbtn" data-cvz-pv-goto="' + (prevP ? prevP.id : '') + '"' + (prevP ? '' : ' disabled') + ' aria-label="Vorheriger Prompt">‹</button>' +
+            '<span class="cvz-pv-count">' + (pos + 1) + ' / ' + order.length + '</span>' +
+            '<button type="button" class="cvz-pv-iconbtn" data-cvz-pv-goto="' + (nextP ? nextP.id : '') + '"' + (nextP ? '' : ' disabled') + ' aria-label="Nächster Prompt">›</button>'
+          : '') +
+        '<button type="button" class="cvz-pv-iconbtn cvz-pv-close" data-cvz-pv-close aria-label="Schließen">×</button>' +
+      '</div>';
+    box.appendChild(head);
+
+    if (loading || !data) {
+      var ph = document.createElement('div');
+      ph.className = 'cvz-pv-empty';
+      ph.innerHTML = loading
+        ? '<span class="cvz-spinner"></span>Antworten werden geladen …'
+        : 'Für diesen Prompt liegen noch keine Antworten vor. Sie erscheinen nach dem nächsten Messlauf.';
+      box.appendChild(ph);
+      root.innerHTML = '';
+      root.appendChild(backdrop);
+      return;
+    }
+
+    // ---- Daten je KI
+    var engines = ['chat_gpt', 'gemini'].map(function (id) {
+      var runs = pvRunsFor(data, id);
+      var cited = runs.filter(function (r) { return r.own_domain_cited; }).length;
+      return { id: id, label: MODEL_LABELS[id], runs: runs, cited: cited };
+    });
+    if (!pv.engine) {
+      var pref = state.activeChannel !== 'all' ? state.activeChannel : null;
+      var withRuns = engines.filter(function (e) { return e.runs.length; });
+      pv.engine = (pref && engines.filter(function (e) { return e.id === pref && e.runs.length; })[0] ? pref : (withRuns[0] || engines[0]).id);
+    }
+    var eng = engines.filter(function (e) { return e.id === pv.engine; })[0];
+    var run = eng.runs.filter(function (r) { return r.run_id === pv.runId; })[0] || eng.runs[eng.runs.length - 1];
+    var totalRuns = engines.reduce(function (n, e) { return n + e.runs.length; }, 0);
+    var totalCited = engines.reduce(function (n, e) { return n + e.cited; }, 0);
+
+    var summary = document.createElement('div');
+    summary.className = 'cvz-pv-summary';
+    summary.innerHTML =
+      '<span class="cvz-pv-summary-main' + (totalCited ? ' cvz-pv-ok' : '') + '">' +
+        (totalCited ? 'Zitiert in ' + totalCited + ' von ' + totalRuns + ' Antworten' : 'In keiner von ' + totalRuns + ' Antworten zitiert') +
+      '</span><span class="cvz-pv-summary-sub">letzte ' + PV_WINDOW_DAYS + ' Tage, ChatGPT und Gemini</span>';
+    box.appendChild(summary);
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-pv-grid';
+    box.appendChild(grid);
+
+    // ---- Links: Antwort
+    var stage = document.createElement('div');
+    stage.className = 'cvz-pv-stage';
+    grid.appendChild(stage);
+    if (!run) {
+      stage.innerHTML = '<div class="cvz-pv-empty">Für ' + escapeHtml(eng.label) + ' liegt noch keine Antwort vor.</div>';
+    } else {
+      var st = pvRunStatus(run);
+      var when = new Date(run.collected_at);
+      stage.innerHTML =
+        '<div class="cvz-pv-stage-bar">' +
+          '<span class="cvz-pv-engine-icon">' + pvFavicon(PV_ENGINE_ICONS[eng.id], 18) + '</span>' +
+          '<span class="cvz-pv-stage-name">' + escapeHtml(eng.label) + '</span>' +
+          '<span class="cvz-pv-stage-date">' + when.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
+            ', ' + when.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + '</span>' +
+          '<span class="cvz-pv-status cvz-pv-status-' + st.key + '">' + escapeHtml(st.label) +
+            (run.own_domain_recommended ? ' · empfohlen' : '') + '</span>' +
+        '</div>' +
+        '<div class="cvz-pv-chat">' +
+          '<div class="cvz-pv-bubble-user">' + escapeHtml(prompt.prompt_text || data.prompt_text || '') + '</div>' +
+          '<div class="cvz-pv-answer cvz-prompt-answer"></div>' +
+        '</div>';
+      var answerEl = stage.querySelector('.cvz-pv-answer');
+      answerEl.innerHTML = renderMarkdownLite(run.answer_markdown) || '<p class="cvz-card-placeholder-text">Kein Antworttext gespeichert.</p>';
+
+      // Markierungen: eigene Marke (türkis), Wettbewerber (gelb)
+      var ownDomain = (detail.topic && detail.topic.own_domain) || '';
+      var terms = [];
+      var seen = {};
+      function addTerm(t, cls) {
+        if (!t) return;
+        var k = t.toLowerCase();
+        if (seen[k]) return;
+        seen[k] = 1;
+        terms.push({ term: t, cls: cls });
+      }
+      addTerm(pvBareDomain(ownDomain), 'cvz-pv-mark-own');
+      addTerm(pvBrandFromDomain(ownDomain), 'cvz-pv-mark-own');
+      var compDomains = (detail.competitor_domains || []).slice();
+      engines.forEach(function (e) {
+        e.runs.forEach(function (r) { (r.sources || []).forEach(function (s) { if (s.is_competitor) compDomains.push(s.domain); }); });
+      });
+      compDomains.forEach(function (d) { addTerm(pvBareDomain(d), 'cvz-pv-mark-comp'); addTerm(pvBrandFromDomain(d), 'cvz-pv-mark-comp'); });
+      terms.sort(function (a, b) { return b.term.length - a.term.length; }); // "fellowmind.de" vor "fellowmind"
+      pvHighlight(answerEl, terms);
+
+      // Punktleiste
+      var strip = document.createElement('div');
+      strip.className = 'cvz-pv-strip';
+      strip.innerHTML =
+        '<span class="cvz-pv-strip-label">' + escapeHtml(eng.label) + ', ' + eng.runs.length + ' Antworten in ' + PV_WINDOW_DAYS + ' Tagen</span>' +
+        '<div class="cvz-pv-dots">' + eng.runs.map(function (r) {
+          var s = pvRunStatus(r);
+          var d = new Date(r.collected_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+          return '<button type="button" class="cvz-pv-dot cvz-pv-dot-' + s.key + (r === run ? ' cvz-pv-dot-active' : '') + '" ' +
+            'data-cvz-pv-run="' + escapeHtml(r.run_id) + '" title="' + escapeHtml(d + ': ' + s.label) + '" aria-label="' + escapeHtml(d + ': ' + s.label) + '"></button>';
+        }).join('') + '</div>' +
+        '<span class="cvz-pv-legend"><i class="cvz-pv-dot cvz-pv-dot-cited"></i>zitiert <i class="cvz-pv-dot cvz-pv-dot-mentioned"></i>erwähnt <i class="cvz-pv-dot cvz-pv-dot-none"></i>nicht genannt · ← → blättern</span>';
+      stage.appendChild(strip);
+    }
+
+    // ---- Rechts
+    var side = document.createElement('div');
+    side.className = 'cvz-pv-side';
+    grid.appendChild(side);
+
+    function card(title, html) {
+      var c = document.createElement('div');
+      c.className = 'cvz-pv-card';
+      c.innerHTML = '<p class="cvz-pv-card-title">' + title + '</p>' + html;
+      side.appendChild(c);
+      return c;
+    }
+
+    card('KI-Systeme', engines.map(function (e) {
+      return '<button type="button" class="cvz-pv-engine' + (e.id === eng.id ? ' cvz-pv-engine-active' : '') + '" data-cvz-pv-engine="' + e.id + '"' + (e.runs.length ? '' : ' disabled') + '>' +
+        '<span class="cvz-pv-engine-icon">' + pvFavicon(PV_ENGINE_ICONS[e.id], 18) + '</span>' +
+        '<span class="cvz-pv-engine-text"><strong>' + escapeHtml(e.label) + '</strong><small>' +
+          (e.runs.length ? e.cited + ' von ' + e.runs.length + ' zitiert' : 'noch keine Antwort') + '</small></span>' +
+        '<span class="cvz-pv-engine-bar"><i style="width:' + (e.runs.length ? Math.round(e.cited / e.runs.length * 100) : 0) + '%"></i></span>' +
+      '</button>';
+    }).join(''));
+
+    if (run) {
+      var ownBare = pvBareDomain((detail.topic && detail.topic.own_domain) || '');
+      var chip = function (domain, extra, url) {
+        var bare = pvBareDomain(domain);
+        var cls = bare === ownBare ? ' cvz-pv-chip-own' : (extra && extra.comp ? ' cvz-pv-chip-comp' : '');
+        var inner = pvFavicon(bare, 14) + '<span>' + escapeHtml(bare) + '</span>' + (extra && extra.count ? '<b>×' + extra.count + '</b>' : '');
+        return url
+          ? '<a class="cvz-pv-chip' + cls + '" href="' + escapeHtml(url) + '" target="_blank" rel="noopener" title="' + escapeHtml(url) + '">' + inner + '</a>'
+          : '<span class="cvz-pv-chip' + cls + '">' + inner + '</span>';
+      };
+
+      var srcs = (run.sources || []).filter(function (s) { return s.cited !== false; });
+      card('Quellen dieser Antwort (' + srcs.length + ')', srcs.length
+        ? '<div class="cvz-pv-chips">' + srcs.map(function (s) { return chip(s.domain, { comp: s.is_competitor }, s.url); }).join('') + '</div>'
+        : '<p class="cvz-pv-muted">Keine Quellen in dieser Antwort.</p>');
+
+      var mentionedOnly = (run.competitor_mentioned_only || []);
+      if (mentionedOnly.length) {
+        card('Im Text genannt, ohne Quelle', '<div class="cvz-pv-chips">' + mentionedOnly.map(function (m) {
+          return '<span class="cvz-pv-chip cvz-pv-chip-comp"><span>' + escapeHtml(m) + '</span></span>';
+        }).join('') + '</div>');
+      }
+
+      // Häufigste Quellen über alle Antworten dieser KI im Zeitraum
+      var counts = {}, isComp = {};
+      eng.runs.forEach(function (r) {
+        var inRun = {};
+        (r.sources || []).forEach(function (s) {
+          var b = pvBareDomain(s.domain);
+          if (!b || inRun[b] || s.cited === false) return;
+          inRun[b] = 1;
+          counts[b] = (counts[b] || 0) + 1;
+          if (s.is_competitor) isComp[b] = true;
+        });
+      });
+      var top = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 10);
+      var ownRank = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).indexOf(ownBare);
+      card('Häufigste Quellen · ' + escapeHtml(eng.label) + ', ' + PV_WINDOW_DAYS + ' Tage',
+        top.length
+          ? '<div class="cvz-pv-chips">' + top.map(function (b) { return chip(b, { count: counts[b], comp: isComp[b] }); }).join('') + '</div>' +
+            '<p class="cvz-pv-muted">' + (ownRank === -1
+              ? 'Eure Domain war in keiner dieser ' + eng.runs.length + ' Antworten Quelle.'
+              : 'Eure Domain: Platz ' + (ownRank + 1) + ' von ' + Object.keys(counts).length + ' Quellen.') + '</p>'
+          : '<p class="cvz-pv-muted">Noch keine Quellen.</p>');
+
+      if (eng.id === 'chat_gpt' && Array.isArray(run.fan_out_queries) && run.fan_out_queries.length) {
+        card('Wonach ChatGPT gesucht hat', '<div class="cvz-pv-chips">' + run.fan_out_queries.map(function (q) {
+          return '<span class="cvz-pv-chip cvz-pv-chip-query"><span>' + escapeHtml(q) + '</span></span>';
+        }).join('') + '</div>');
+      }
+    }
+
+    var roleHtml = renderPromptRoleChipsHtml(prompt);
+    var linked = (detail.changelog || []).filter(function (e) { return (e.linked_prompt_ids || []).indexOf(prompt.id) !== -1; });
+    if (roleHtml || linked.length) {
+      card('Rolle und Änderungen', roleHtml + linked.map(function (e) {
+        return '<p class="cvz-pv-muted">' + escapeHtml(formatRelativeTime(e.created_at)) + ': ' + escapeHtml(e.entry_text) + '</p>';
+      }).join(''));
+    }
+
+    root.innerHTML = '';
+    root.appendChild(backdrop);
+  }
+
+  // Tastatur: einmal registriert, wirkt nur bei offener Ansicht
+  document.addEventListener('keydown', function (e) {
+    if (!state.promptViewer) return;
+    var tag = (e.target && e.target.tagName) || '';
+    if (/INPUT|TEXTAREA|SELECT/.test(tag)) return;
+    if (e.key === 'Escape') { e.preventDefault(); closePromptViewer(); return; }
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    var data = state.promptCitationsCache[state.promptViewer.promptId];
+    if (!data) return;
+    var runs = pvRunsFor(data, state.promptViewer.engine || 'chat_gpt');
+    if (!runs.length) return;
+    var idx = runs.map(function (r) { return r.run_id; }).indexOf(state.promptViewer.runId);
+    if (idx === -1) idx = runs.length - 1;
+    idx = Math.max(0, Math.min(runs.length - 1, idx + (e.key === 'ArrowLeft' ? -1 : 1)));
+    state.promptViewer.runId = runs[idx].run_id;
+    e.preventDefault();
+    render();
+  });
+
   function computePhaseRollup(prompts) {
     return PHASE_ORDER.map(function (phase) {
       var inPhase = prompts.filter(function (p) { return (p.messymiddle_phase || p.phase) === phase; });
@@ -7791,60 +8279,124 @@
 
   var MAX_MANUAL_KEYWORDS = 10;
 
-  function renderManualKeywordForm(keywords, topicId) {
-    var manualCount = (keywords || []).filter(function (k) { return k.source === 'manual'; }).length;
-    var wrap = document.createElement('div');
-    wrap.className = 'cvz-changelog-form';
-    wrap.style.marginBottom = '16px';
+  // =========================================================================
+  // NEU (21.10.2026): einheitliches "Hinzufügen"-Formular
+  // =========================================================================
+  // Vorher lagen Beschriftung, Slot-Zähler, Tooltip, Eingabe, Button und
+  // Zeichenhinweis als Geschwister in .cvz-changelog-form (display:flex mit
+  // Umbruch) und landeten je nach Breite irgendwie nebeneinander. Jetzt:
+  //   Kopf:   Titel + Tooltip links, Zähler rechts
+  //   Felder: Eingabe (wächst), Auswahlfelder, Button in einer Zeile
+  //   Fuß:    ein Hinweis, Zeichenzahl erst kurz vor dem Limit
+  // Das Formular ist eingeklappt und wird über einen Button in der
+  // Abschnittsüberschrift geöffnet (buildSectionHead), damit die Tabelle
+  // darunter im Vordergrund steht. Mit Entwurfstext bleibt es offen.
 
-    if (manualCount >= MAX_MANUAL_KEYWORDS) {
-      wrap.innerHTML =
-        '<p class="cvz-card-placeholder-text">Maximal ' + MAX_MANUAL_KEYWORDS + ' manuell hinzugef\u00fcgte Keywords erreicht ' +
-        '(' + manualCount + '/' + MAX_MANUAL_KEYWORDS + '). Erst ein bestehendes manuelles Keyword deaktivieren.</p>';
+  function isAddFormOpen(key, draft) {
+    return !!(state.openAddForms && state.openAddForms[key]) || !!(draft && String(draft).trim());
+  }
+
+  function buildSectionHead(title, toggle) {
+    var head = document.createElement('div');
+    head.className = 'cvz-section-head';
+    var h = document.createElement('p');
+    h.className = 'cvz-section-label';
+    h.textContent = title;
+    head.appendChild(h);
+    if (toggle) {
+      var open = isAddFormOpen(toggle.key, toggle.draft);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cvz-add-toggle' + (open ? ' cvz-add-toggle-open' : '');
+      btn.setAttribute('data-cvz-add-toggle', toggle.key);
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      btn.textContent = open ? 'Schließen' : '+ ' + toggle.label;
+      head.appendChild(btn);
+    }
+    return head;
+  }
+
+  function buildAddForm(cfg) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-add-form';
+    var head = document.createElement('div');
+    head.className = 'cvz-add-form-head';
+    var title = document.createElement('div');
+    title.className = 'cvz-add-form-title';
+    var t = document.createElement('span');
+    t.textContent = cfg.title;
+    title.appendChild(t);
+    if (cfg.tip) title.appendChild(makeTip(cfg.tip));
+    head.appendChild(title);
+    if (cfg.meta) {
+      var meta = document.createElement('span');
+      meta.className = 'cvz-add-form-meta';
+      meta.textContent = cfg.meta;
+      if (cfg.metaTitle) meta.title = cfg.metaTitle;
+      head.appendChild(meta);
+    }
+    wrap.appendChild(head);
+    if (cfg.blockedText) {
+      var blocked = document.createElement('p');
+      blocked.className = 'cvz-card-placeholder-text';
+      blocked.style.margin = '0';
+      blocked.textContent = cfg.blockedText;
+      wrap.appendChild(blocked);
       return wrap;
     }
-
-    // Label mit Tooltip
-    var kwLabelRow = document.createElement('div');
-    kwLabelRow.style.cssText = 'display:flex;align-items:center;margin-bottom:6px;';
-    var kwLabel = document.createElement('span');
-    kwLabel.className = 'cvz-section-label cvz-section-label-sm';
-    kwLabel.style.margin = '0';
-    kwLabel.textContent = 'Eigenes Keyword hinzuf\u00fcgen';
-    kwLabelRow.appendChild(kwLabel);
-    var kwSlotBadge = document.createElement('span');
-    kwSlotBadge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);font-weight:400;';
-    kwSlotBadge.textContent = manualCount + '\u202fvon\u202f' + MAX_MANUAL_KEYWORDS + ' Slots';
-    kwLabelRow.appendChild(kwSlotBadge);
-    kwLabelRow.appendChild(makeTip(
-      'Keywords, die du hier hinzuf\u00fcgst, werden beim n\u00e4chsten Datenlauf in die GSC-Abfrage einbezogen und mit KI-Pr\u00e4senz verglichen. Sie erscheinen sofort in der Liste, bekommen aber erst Daten, wenn der n\u00e4chste Lauf abgeschlossen ist.'
-    ));
-    wrap.appendChild(kwLabelRow);
-
-    var KW_MAX_CHARS = 80;
-    var kwInputRow = document.createElement('div');
-    kwInputRow.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
-    kwInputRow.innerHTML =
-      '<input type="text" id="cvz-manual-keyword-input" class="cvz-changelog-custom-input" style="flex:1;min-width:140px;" ' +
-        'maxlength="' + KW_MAX_CHARS + '" ' +
-        'placeholder="z.B. landingpage optimierung" ' +
-        'value="' + escapeHtml(state.manualKeywordDraftText || '') + '">' +
-      '<button type="button" class="cvz-changelog-submit-btn" data-cvz-manual-keyword-submit="' + topicId + '" ' +
-        (state.isSubmittingManualKeyword ? 'disabled' : '') + '>' +
-        (state.isSubmittingManualKeyword ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
-      '</button>';
-    wrap.appendChild(kwInputRow);
-    var kwHint = document.createElement('p');
-    kwHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
-    kwHint.textContent = 'max. ' + KW_MAX_CHARS + ' Zeichen';
-    wrap.appendChild(kwHint);
-
-    var inputEl = wrap.querySelector('#cvz-manual-keyword-input');
-    inputEl.addEventListener('input', function () {
-      state.manualKeywordDraftText = inputEl.value;
-    });
-
+    var fields = document.createElement('div');
+    fields.className = 'cvz-add-form-fields' + (cfg.stacked ? ' cvz-add-form-fields-stacked' : '');
+    fields.innerHTML = cfg.fieldsHtml;
+    wrap.appendChild(fields);
+    var foot = document.createElement('div');
+    foot.className = 'cvz-add-form-foot';
+    var hint = document.createElement('span');
+    hint.textContent = cfg.hint || '';
+    var counter = document.createElement('span');
+    counter.className = 'cvz-add-form-counter';
+    foot.appendChild(hint);
+    foot.appendChild(counter);
+    wrap.appendChild(foot);
+    // Zeichenzähler: erst in den letzten 20 % sichtbar
+    var field = cfg.inputId ? fields.querySelector('#' + cfg.inputId) : null;
+    if (field && cfg.maxChars) {
+      var update = function () {
+        var remaining = cfg.maxChars - field.value.length;
+        counter.textContent = remaining <= cfg.maxChars * 0.2 ? remaining + ' Zeichen übrig' : '';
+        counter.style.color = remaining < 10 ? 'var(--cvz-red,#de5b50)' : '';
+        if (cfg.onInput) cfg.onInput(field.value);
+      };
+      field.addEventListener('input', update);
+      update();
+    }
     return wrap;
+  }
+
+  function renderManualKeywordForm(keywords, topicId) {
+    var manualCount = (keywords || []).filter(function (k) { return k.source === 'manual'; }).length;
+    var KW_MAX_CHARS = 80;
+    var full = manualCount >= MAX_MANUAL_KEYWORDS;
+    return buildAddForm({
+      title: 'Eigenes Keyword hinzuf\u00fcgen',
+      tip: 'Keywords, die du hier hinzuf\u00fcgst, werden beim n\u00e4chsten Datenlauf in die GSC-Abfrage einbezogen und mit KI-Pr\u00e4senz verglichen. Sie erscheinen sofort in der Liste, bekommen aber erst Daten, wenn der n\u00e4chste Lauf abgeschlossen ist.',
+      meta: manualCount + '\u202fvon\u202f' + MAX_MANUAL_KEYWORDS + ' eigenen genutzt',
+      blockedText: full
+        ? 'Alle ' + MAX_MANUAL_KEYWORDS + ' Pl\u00e4tze f\u00fcr eigene Keywords sind belegt. Entfernt ein eigenes Keyword (\u00d7 in der Tabelle), um ein neues hinzuzuf\u00fcgen.'
+        : null,
+      fieldsHtml:
+        '<input type="text" id="cvz-manual-keyword-input" class="cvz-changelog-custom-input" ' +
+          'maxlength="' + KW_MAX_CHARS + '" aria-label="Keyword" ' +
+          'placeholder="z.B. landingpage optimierung" ' +
+          'value="' + escapeHtml(state.manualKeywordDraftText || '') + '">' +
+        '<button type="button" class="cvz-changelog-submit-btn" data-cvz-manual-keyword-submit="' + topicId + '" ' +
+          (state.isSubmittingManualKeyword ? 'disabled' : '') + '>' +
+          (state.isSubmittingManualKeyword ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
+        '</button>',
+      hint: 'Daten gibt es ab dem n\u00e4chsten Lauf.',
+      inputId: 'cvz-manual-keyword-input',
+      maxChars: KW_MAX_CHARS,
+      onInput: function (v) { state.manualKeywordDraftText = v; },
+    });
   }
 
   // ENTFERNT (23.09.2026): MAX_MANUAL_PROMPTS, siehe getPromptBudget.
@@ -7864,111 +8416,61 @@
 
   function renderManualPromptForm(prompts, topicId) {
     var budget = getPromptBudget(prompts, topicId);
-    var wrap = document.createElement('div');
-    wrap.className = 'cvz-changelog-form';
-    wrap.style.marginBottom = '16px';
-
-    if (budget.frei_eigene <= 0) {
-      wrap.innerHTML =
-        '<p class="cvz-card-placeholder-text">Alle ' + budget.max_gesamt + ' Prompt-Pl\u00e4tze sind belegt. ' +
-        'Deaktiviert einen Prompt, den ihr nicht braucht, dann k\u00f6nnt ihr hier einen eigenen hinzuf\u00fcgen.</p>';
-      return wrap;
-    }
-
-    // Zwei Zeilen: Label+Tooltip oben, Eingabe unten
-    var promptLabelRow = document.createElement('div');
-    promptLabelRow.style.cssText = 'display:flex;align-items:center;margin-bottom:6px;';
-    var promptLabel = document.createElement('span');
-    promptLabel.className = 'cvz-section-label cvz-section-label-sm';
-    promptLabel.style.margin = '0';
-    promptLabel.textContent = 'Eigenen Prompt hinzuf\u00fcgen';
-    promptLabelRow.appendChild(promptLabel);
-    var promptSlotBadge = document.createElement('span');
-    promptSlotBadge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);font-weight:400;';
-    promptSlotBadge.textContent = budget.aktiv_gesamt + '\u202fvon\u202f' + budget.max_gesamt + ' Prompts aktiv, noch\u202f' + budget.frei_eigene + '\u202ffrei';
-    promptSlotBadge.title = 'Bis zu 20 Prompts erstellt das System, insgesamt sind 24 m\u00f6glich. ' +
-      'Deaktivierte Prompts machen Platz f\u00fcr eigene.';
-    promptLabelRow.appendChild(promptSlotBadge);
-    promptLabelRow.appendChild(makeTip(
-      'Prompts sind die konkreten Fragen, die potenzielle Kunden bei ChatGPT, Gemini & Co. stellen. Das System sendet sie in regelm\u00e4\u00dfigen Abst\u00e4nden an die KI-Systeme und pr\u00fcft, ob deine Domain in der Antwort vorkommt. Neue Prompts bekommen erst Daten nach dem n\u00e4chsten Lauf.'
-    ));
-    wrap.appendChild(promptLabelRow);
-
-    var phaseLabelRow = document.createElement('div');
-    phaseLabelRow.style.cssText = 'display:flex;align-items:center;margin-bottom:6px;';
-    var phaseLabel = document.createElement('span');
-    phaseLabel.className = 'cvz-section-label cvz-section-label-sm';
-    phaseLabel.style.margin = '0';
-    phaseLabel.textContent = 'Journey-Phase';
-    phaseLabelRow.appendChild(phaseLabel);
-    phaseLabelRow.appendChild(makeTip(
-      'Erforschung: breite, informationelle Fragen ("Was ist..."). Bewertung: konkrete Anbieter- oder Produktfragen. Vergleich: Alternativen gegeneinander. Entscheidung: kaufbereit, sucht letzten Anstoss. Die Phase bestimmt, wo dein Prompt im Dashboard angezeigt wird.'
-    ));
-    wrap.appendChild(phaseLabelRow);
-
+    var PROMPT_MAX_CHARS = 400;
+    var manualBc = state.buyingCenterCache[topicId];
+    var manualRoles = (manualBc && manualBc.rollen) || [];
     var phaseOptionsHtml = PHASE_ORDER.map(function (phase) {
       return '<option value="' + phase + '"' + (state.manualPromptDraftPhase === phase ? ' selected' : '') + '>' +
         escapeHtml(PHASE_LABELS[phase] || phase) + '</option>';
     }).join('');
 
-    var PROMPT_MAX_CHARS = 400;
-    var manualBc = state.buyingCenterCache[topicId];
-    var manualRoles = (manualBc && manualBc.rollen) || [];
-    var promptInputRow = document.createElement('div');
-    promptInputRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;';
-    promptInputRow.innerHTML =
-      '<textarea id="cvz-manual-prompt-input" class="cvz-changelog-input" rows="1" ' +
-        'maxlength="' + PROMPT_MAX_CHARS + '" ' +
-        'placeholder="z.B. Welches CRO-Tool lohnt sich f\u00fcr B2B-SaaS?">' +
-        escapeHtml(state.manualPromptDraftText || '') +
-      '</textarea>' +
-      '<select id="cvz-manual-prompt-phase" class="cvz-changelog-custom-input" style="max-width:160px;">' +
-        phaseOptionsHtml +
-      '</select>' +
-      // NEU (23.09.2026): optionale Rolle, nur wenn das Thema Rollen hat
-      (manualRoles.length
-        ? '<select id="cvz-manual-prompt-role" class="cvz-changelog-custom-input" style="max-width:180px;">' +
-            '<option value="">Ohne Rolle</option>' +
-            manualRoles.map(function (r) {
-              return '<option value="' + escapeHtml(r.role_id) + '"' + (state.manualPromptDraftRoleId === r.role_id ? ' selected' : '') + '>' +
-                escapeHtml(r.rolle) + '</option>';
-            }).join('') +
-          '</select>'
-        : '') +
-      '<button type="button" class="cvz-changelog-submit-btn" data-cvz-manual-prompt-submit="' + topicId + '" ' +
-        (state.isSubmittingManualPrompt ? 'disabled' : '') + '>' +
-        (state.isSubmittingManualPrompt ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
-      '</button>';
-    wrap.appendChild(promptInputRow);
-
-    var promptCharHint = document.createElement('p');
-    promptCharHint.id = 'cvz-prompt-char-hint';
-    promptCharHint.style.cssText = 'margin:4px 0 0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
-    promptCharHint.textContent = 'max. ' + PROMPT_MAX_CHARS + ' Zeichen';
-    wrap.appendChild(promptCharHint);
-
-    var textareaEl = wrap.querySelector('#cvz-manual-prompt-input');
-    textareaEl.addEventListener('input', function () {
-      state.manualPromptDraftText = textareaEl.value;
-      var remaining = PROMPT_MAX_CHARS - textareaEl.value.length;
-      promptCharHint.textContent = remaining < 50
-        ? remaining + ' Zeichen \u00fcbrig'
-        : 'max. ' + PROMPT_MAX_CHARS + ' Zeichen';
-      promptCharHint.style.color = remaining < 20
-        ? 'var(--cvz-red,#de5b50)'
-        : 'var(--cvz-text-muted,#8b98a5)';
+    var wrap = buildAddForm({
+      title: 'Eigenen Prompt hinzuf\u00fcgen',
+      tip: 'Prompts sind die konkreten Fragen, die potenzielle Kunden bei ChatGPT, Gemini & Co. stellen. Das System sendet sie regelm\u00e4\u00dfig an die KI-Systeme und pr\u00fcft, ob eure Domain in der Antwort vorkommt. ' +
+        'Journey-Phase: Erforschung = breite Fragen ("Was ist ..."), Bewertung = konkrete Anbieter- oder Produktfragen, Vergleich = Alternativen gegeneinander, Entscheidung = kaufbereit. ' +
+        'Neue Prompts bekommen erst Daten nach dem n\u00e4chsten Lauf.',
+      meta: budget.aktiv_gesamt + '\u202fvon\u202f' + budget.max_gesamt + ' aktiv \u00b7 ' + budget.frei_eigene + '\u202ffrei',
+      metaTitle: 'Bis zu 20 Prompts erstellt das System, insgesamt sind ' + budget.max_gesamt + ' m\u00f6glich. Deaktivierte Prompts machen Platz f\u00fcr eigene.',
+      blockedText: budget.frei_eigene <= 0
+        ? 'Alle ' + budget.max_gesamt + ' Prompt-Pl\u00e4tze sind belegt. Deaktiviert einen Prompt, den ihr nicht braucht (\u00d7 in der Tabelle), dann k\u00f6nnt ihr hier einen eigenen hinzuf\u00fcgen.'
+        : null,
+      fieldsHtml:
+        '<textarea id="cvz-manual-prompt-input" class="cvz-changelog-input" rows="2" aria-label="Prompt" ' +
+          'maxlength="' + PROMPT_MAX_CHARS + '" ' +
+          'placeholder="z.B. Welches CRO-Tool lohnt sich f\u00fcr B2B-SaaS?">' +
+          escapeHtml(state.manualPromptDraftText || '') +
+        '</textarea>' +
+        '<select id="cvz-manual-prompt-phase" class="cvz-changelog-custom-input" aria-label="Journey-Phase" title="Journey-Phase">' +
+          phaseOptionsHtml +
+        '</select>' +
+        (manualRoles.length
+          ? '<select id="cvz-manual-prompt-role" class="cvz-changelog-custom-input" aria-label="Rolle" title="Rolle">' +
+              '<option value="">Ohne Rolle</option>' +
+              manualRoles.map(function (r) {
+                return '<option value="' + escapeHtml(r.role_id) + '"' + (state.manualPromptDraftRoleId === r.role_id ? ' selected' : '') + '>' +
+                  escapeHtml(r.rolle) + '</option>';
+              }).join('') +
+            '</select>'
+          : '') +
+        '<button type="button" class="cvz-changelog-submit-btn" data-cvz-manual-prompt-submit="' + topicId + '" ' +
+          (state.isSubmittingManualPrompt ? 'disabled' : '') + '>' +
+          (state.isSubmittingManualPrompt ? 'Wird gespeichert \u2026' : 'Hinzuf\u00fcgen') +
+        '</button>',
+      hint: 'Formuliert die Frage so, wie eure Zielgruppe sie stellen w\u00fcrde. Daten gibt es ab dem n\u00e4chsten Lauf.',
+      inputId: 'cvz-manual-prompt-input',
+      maxChars: PROMPT_MAX_CHARS,
+      stacked: true, // Frage in eigener Zeile, Phase/Rolle/Button darunter
+      onInput: function (v) { state.manualPromptDraftText = v; },
     });
+
     var selectEl = wrap.querySelector('#cvz-manual-prompt-phase');
-    selectEl.addEventListener('change', function () {
-      state.manualPromptDraftPhase = selectEl.value;
-    });
+    if (selectEl) {
+      selectEl.addEventListener('change', function () { state.manualPromptDraftPhase = selectEl.value; });
+    }
     var roleSelectEl = wrap.querySelector('#cvz-manual-prompt-role');
     if (roleSelectEl) {
-      roleSelectEl.addEventListener('change', function () {
-        state.manualPromptDraftRoleId = roleSelectEl.value;
-      });
+      roleSelectEl.addEventListener('change', function () { state.manualPromptDraftRoleId = roleSelectEl.value; });
     }
-
     return wrap;
   }
 
@@ -7979,10 +8481,12 @@
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
-    var heading = document.createElement('p');
-    heading.className = 'cvz-section-label';
-    heading.textContent = 'Prompts nach Phase';
-    section.appendChild(heading);
+    // GEÄNDERT (21.10.2026): Formular eingeklappt hinter einem Button in der Überschrift
+    section.appendChild(buildSectionHead('Prompts nach Phase',
+      { key: 'prompt', label: 'Eigener Prompt', draft: state.manualPromptDraftText }));
+    if (isAddFormOpen('prompt', state.manualPromptDraftText)) {
+      section.appendChild(renderManualPromptForm(prompts, state.activeTopicId));
+    }
 
     var personaChips = renderPersonaFilterChips(prompts);
     if (personaChips) section.appendChild(personaChips);
@@ -7993,8 +8497,6 @@
 
     var rollup = renderPhaseRollup(filteredPrompts);
     if (rollup) section.appendChild(rollup);
-
-    section.appendChild(renderManualPromptForm(prompts, state.activeTopicId));
 
     PHASE_ORDER.forEach(function (phase) {
       var promptsInPhase = filteredPrompts.filter(function (p) { return p.phase === phase; });
@@ -10713,6 +11215,140 @@
       '}' +
       '.cvz-week-detail-row { font-size: 13px; margin: 4px 0; color: var(--cvz-text-muted); }' +
 
+      // NEU (21.10.2026): Antwort-Ansicht (renderPromptViewer). Liegt außerhalb von
+      // #cvz-visibility-app, deshalb eigene Farbwerte statt der Container-Variablen.
+      'html.cvz-pv-open, html.cvz-pv-open body { overflow: hidden; }' +
+      '#cvz-pv-root { --cvz-navy: #0d1117; --cvz-navy-raised: #141b24; --cvz-teal: #4fd1c5; --cvz-text: #e6edf3; --cvz-text-muted: #8b98a5; --cvz-border: #232b36; --pv-bg: #0d1117; --pv-raised: #141b24; --pv-card: #18212c; --pv-border: #232b36; --pv-text: #e6edf3; --pv-muted: #8b98a5; --pv-teal: #4fd1c5; --pv-amber: #e0a458; font-family: "Geist", sans-serif; color: var(--pv-text); }' +
+      '.cvz-pv-backdrop { position: fixed; inset: 0; z-index: 2147483000; background: rgba(5,8,12,.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; align-items: flex-start; justify-content: center; padding: 32px 16px; overflow-y: auto; animation: cvzPvFade .15s ease-out; }' +
+      '@keyframes cvzPvFade { from { opacity: 0; } to { opacity: 1; } }' +
+      '@keyframes cvzPvRise { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }' +
+      '.cvz-pv { width: 100%; max-width: 1180px; background: var(--pv-bg); border: 1px solid var(--pv-border); padding: 24px 28px 28px; box-sizing: border-box; animation: cvzPvRise .2s ease-out; }' +
+      '@media (prefers-reduced-motion: reduce) { .cvz-pv, .cvz-pv-backdrop { animation: none; } }' +
+      '.cvz-pv-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }' +
+      '.cvz-pv-eyebrow { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--pv-muted); }' +
+      '.cvz-pv-title { margin: 0; font-family: "Syne", sans-serif; font-size: 22px; line-height: 1.3; color: var(--pv-text); }' +
+      '.cvz-pv-head-nav { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }' +
+      '.cvz-pv-count { font-size: 12px; color: var(--pv-muted); min-width: 44px; text-align: center; }' +
+      '.cvz-pv-iconbtn { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; background: var(--pv-raised); color: var(--pv-text); border: 1px solid var(--pv-border); font-size: 20px; line-height: 1; cursor: pointer; padding: 0; }' +
+      '.cvz-pv-iconbtn:hover:not(:disabled) { border-color: var(--pv-teal); }' +
+      '.cvz-pv-iconbtn:disabled { opacity: .35; cursor: default; }' +
+      '.cvz-pv-close { margin-left: 8px; }' +
+      '.cvz-pv-summary { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 14px 0 18px; }' +
+      '.cvz-pv-summary-main { font-size: 14px; font-weight: 600; padding: 4px 10px; border: 1px solid var(--pv-border); background: var(--pv-raised); }' +
+      '.cvz-pv-summary-main.cvz-pv-ok { border-color: var(--pv-teal); color: var(--pv-teal); }' +
+      '.cvz-pv-summary-sub { font-size: 12px; color: var(--pv-muted); }' +
+      '.cvz-pv-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 16px; align-items: start; }' +
+      '.cvz-pv-stage { background: var(--pv-raised); border: 1px solid var(--pv-border); display: flex; flex-direction: column; min-width: 0; }' +
+      '.cvz-pv-stage-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--pv-border); }' +
+      '.cvz-pv-stage-name { font-weight: 600; }' +
+      '.cvz-pv-stage-date { font-size: 12px; color: var(--pv-muted); }' +
+      '.cvz-pv-status { margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border: 1px solid var(--pv-border); color: var(--pv-muted); }' +
+      '.cvz-pv-status-cited { color: var(--pv-teal); border-color: var(--pv-teal); }' +
+      '.cvz-pv-status-mentioned { color: var(--pv-amber); border-color: var(--pv-amber); }' +
+      '.cvz-pv-engine-icon { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; background: #fff; flex-shrink: 0; }' +
+      '.cvz-pv-chat { padding: 18px 18px 8px; max-height: 58vh; overflow-y: auto; }' +
+      '.cvz-pv-bubble-user { margin: 0 0 16px auto; max-width: 78%; width: fit-content; background: var(--pv-card); border: 1px solid var(--pv-border); padding: 10px 14px; font-size: 14px; line-height: 1.45; }' +
+      '.cvz-pv-answer { font-size: 15px; line-height: 1.65; }' +
+      '.cvz-pv-answer a { color: var(--pv-teal); }' +
+      'mark.cvz-pv-mark-own { background: rgba(79,209,197,.22); color: inherit; box-shadow: inset 0 -2px 0 var(--pv-teal); padding: 0 2px; }' +
+      'mark.cvz-pv-mark-comp { background: rgba(224,164,88,.18); color: inherit; box-shadow: inset 0 -2px 0 var(--pv-amber); padding: 0 2px; }' +
+      '.cvz-pv-strip { border-top: 1px solid var(--pv-border); padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 8px; }' +
+      '.cvz-pv-strip-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--pv-muted); }' +
+      '.cvz-pv-dots { display: flex; gap: 6px; flex-wrap: wrap; }' +
+      '.cvz-pv-dot { width: 18px; height: 18px; padding: 0; border: 2px solid var(--pv-border); background: transparent; cursor: pointer; display: inline-block; box-sizing: border-box; }' +
+      '.cvz-pv-dot-cited { background: var(--pv-teal); border-color: var(--pv-teal); }' +
+      '.cvz-pv-dot-mentioned { border-color: var(--pv-amber); }' +
+      '.cvz-pv-dot-active { outline: 2px solid var(--pv-text); outline-offset: 2px; }' +
+      '.cvz-pv-legend { font-size: 11px; color: var(--pv-muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }' +
+      '.cvz-pv-legend .cvz-pv-dot { width: 10px; height: 10px; cursor: default; border-width: 2px; }' +
+      '.cvz-pv-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }' +
+      '.cvz-pv-card { background: var(--pv-raised); border: 1px solid var(--pv-border); padding: 14px; }' +
+      '.cvz-pv-card-title { margin: 0 0 10px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--pv-muted); }' +
+      '.cvz-pv-engine { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px; margin-bottom: 8px; background: var(--pv-card); border: 1px solid var(--pv-border); color: var(--pv-text); cursor: pointer; text-align: left; font-family: inherit; }' +
+      '.cvz-pv-engine:last-child { margin-bottom: 0; }' +
+      '.cvz-pv-engine:disabled { opacity: .45; cursor: default; }' +
+      '.cvz-pv-engine-active { border-color: var(--pv-teal); box-shadow: inset 3px 0 0 var(--pv-teal); }' +
+      '.cvz-pv-engine-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }' +
+      '.cvz-pv-engine-text small { font-size: 12px; color: var(--pv-muted); }' +
+      '.cvz-pv-engine-bar { width: 64px; height: 6px; background: var(--pv-border); flex-shrink: 0; }' +
+      '.cvz-pv-engine-bar i { display: block; height: 100%; background: var(--pv-teal); }' +
+      '.cvz-pv-chips { display: flex; flex-wrap: wrap; gap: 6px; }' +
+      '.cvz-pv-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; background: var(--pv-card); border: 1px solid var(--pv-border); font-size: 12px; color: var(--pv-text); text-decoration: none; max-width: 100%; }' +
+      '.cvz-pv-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }' +
+      '.cvz-pv-chip b { color: var(--pv-muted); font-weight: 600; }' +
+      'a.cvz-pv-chip:hover { border-color: var(--pv-text); }' +
+      '.cvz-pv-chip-own { border-color: var(--pv-teal); color: var(--pv-teal); }' +
+      '.cvz-pv-chip-comp { border-color: rgba(224,164,88,.6); }' +
+      '.cvz-pv-chip-query span { white-space: normal; }' +
+      '.cvz-pv-chip img { flex-shrink: 0; }' +
+      '.cvz-pv-muted { margin: 8px 0 0; font-size: 12px; color: var(--pv-muted); line-height: 1.45; }' +
+      '.cvz-pv-empty { padding: 40px 16px; text-align: center; color: var(--pv-muted); }' +
+      '@media (max-width: 860px) {' +
+        '.cvz-pv-backdrop { padding: 0; }' +
+        '.cvz-pv { min-height: 100%; border: 0; padding: 16px; }' +
+        '.cvz-pv-grid { grid-template-columns: 1fr; }' +
+        '.cvz-pv-title { font-size: 18px; }' +
+        '.cvz-pv-chat { max-height: none; }' +
+        '.cvz-pv-count { display: none; }' +
+      '}' +
+      // NEU (21.10.2026): Frage am Anfang jedes Tabs
+      '.cvz-tab-intro { margin: 4px 0 20px; max-width: 760px; }' +
+      '.cvz-tab-intro-eyebrow { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--cvz-text-muted); }' +
+      '.cvz-tab-intro-q { margin: 0; font-family: "Syne", sans-serif; font-size: 26px; line-height: 1.25; font-weight: 700; color: var(--cvz-text); }' +
+      '.cvz-tab-intro-lead { margin: 8px 0 0; font-size: 14px; line-height: 1.5; color: var(--cvz-text-muted); }' +
+      '@media (max-width: 600px) { .cvz-tab-intro-q { font-size: 21px; } }' +
+      // NEU (21.10.2026): Sichtbarkeitsfeld (Wettbewerb)
+      '.cvz-vf { margin-top: 8px; }' +
+      '.cvz-vf-own { border: 1px solid var(--cvz-border); background: var(--cvz-navy-raised); padding: 16px 18px; margin-bottom: 18px; }' +
+      '.cvz-vf-own.cvz-vf-own-hit { border-color: var(--cvz-teal); }' +
+      '.cvz-vf-row-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }' +
+      '.cvz-vf-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }' +
+      '.cvz-vf-count { font-size: 13px; color: var(--cvz-text-muted); white-space: nowrap; }' +
+      '.cvz-vf-count b { font-size: 22px; color: var(--cvz-text); font-weight: 700; margin-right: 2px; }' +
+      '.cvz-vf-bar { display: flex; gap: 2px; height: 14px; }' +
+      '.cvz-vf-bar i { flex: 1; background: var(--cvz-border); }' +
+      '.cvz-vf-bar i.on { background: var(--cvz-text); }' +
+      '.cvz-vf-own .cvz-vf-bar i.on { background: var(--cvz-teal); }' +
+      '.cvz-vf-bar i.on.comp { background: #e0a458; }' +
+      '.cvz-vf-own-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-vf-engines { display: inline-flex; gap: 6px; }' +
+      '.cvz-vf-engine { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; background: #fff; }' +
+      '.cvz-vf-engine.off { opacity: .2; }' +
+      '.cvz-vf-list-head { display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--cvz-text-muted); margin: 0 0 6px; }' +
+      '.cvz-vf-row { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) auto auto; gap: 14px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--cvz-border); }' +
+      '.cvz-vf-row .cvz-vf-name { display: flex; align-items: center; gap: 8px; font-weight: 500; }' +
+      '.cvz-vf-row .cvz-vf-count b { font-size: 14px; }' +
+      '.cvz-vf-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #e0a458; border: 1px solid rgba(224,164,88,.5); padding: 1px 5px; }' +
+      '@media (max-width: 640px) { .cvz-vf-row { grid-template-columns: 1fr auto; } .cvz-vf-row .cvz-vf-bar { grid-column: 1 / -1; grid-row: 2; } .cvz-vf-row .cvz-vf-engines { display: none; } }' +
+      // NEU (21.10.2026): erledigte Maßnahmen im Aktionsplan
+      '.cvz-done-section { margin-top: 36px; padding-top: 22px; border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-done-q { margin: 0 0 6px; font-family: "Syne", sans-serif; font-size: 20px; font-weight: 700; color: var(--cvz-text); }' +
+      '.cvz-done-item { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 14px 0; border-bottom: 1px solid var(--cvz-border); }' +
+      '.cvz-done-check { color: #4ec68a; font-size: 16px; line-height: 1.3; }' +
+      '.cvz-done-title { margin: 0; font-weight: 600; line-height: 1.4; }' +
+      '.cvz-done-meta { margin: 4px 0 0; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-done-verdict { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border: 1px solid; margin-top: 8px; }' +
+      '.cvz-done-evidence { margin: 6px 0 0; font-size: 12px; line-height: 1.5; color: var(--cvz-text-muted); }' +
+      '.cvz-done-undo { font-family: inherit; font-size: 11px; padding: 3px 9px; background: transparent; border: 1px solid var(--cvz-border); color: var(--cvz-text-muted); cursor: pointer; white-space: nowrap; }' +
+      // NEU (21.10.2026): Abschnittskopf mit Button, Hinzufügen-Formular
+      '.cvz-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }' +
+      '.cvz-section-head .cvz-section-label { margin: 0; }' +
+      '.cvz-add-toggle { font-family: "Geist", sans-serif; font-size: 13px; padding: 6px 12px; background: transparent; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer; white-space: nowrap; }' +
+      '.cvz-add-toggle:hover { background: rgba(79,209,197,.08); }' +
+      '.cvz-add-toggle-open { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
+      '.cvz-add-form { border: 1px solid var(--cvz-border); background: var(--cvz-navy-raised); padding: 14px 16px; margin: 0 0 20px; max-width: 820px; box-sizing: border-box; }' +
+      '.cvz-add-form-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }' +
+      '.cvz-add-form-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }' +
+      '.cvz-add-form-meta { font-size: 11px; color: var(--cvz-text-muted); border: 1px solid var(--cvz-border); padding: 2px 8px; white-space: nowrap; }' +
+      '.cvz-add-form-fields { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }' +
+      '.cvz-add-form-fields > input, .cvz-add-form-fields > textarea { flex: 1 1 280px; min-width: 0; margin: 0; box-sizing: border-box; }' +
+      '.cvz-add-form-fields > textarea { min-height: 38px; resize: vertical; }' +
+      '.cvz-add-form-fields > select { flex: 0 1 180px; min-width: 0; max-width: none !important; min-height: 38px; box-sizing: border-box; }' +
+      '.cvz-add-form-fields > button { min-height: 38px; }' +
+      '.cvz-add-form-fields > button { flex: 0 0 auto; }' +
+      '.cvz-add-form-fields-stacked > textarea, .cvz-add-form-fields-stacked > input { flex-basis: 100%; }' +
+      '.cvz-add-form-foot { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; font-size: 11px; color: var(--cvz-text-muted); }' +
+      '@media (max-width: 560px) { .cvz-add-form-fields > select, .cvz-add-form-fields > button { flex: 1 1 100%; } }' +
       '.cvz-changelog-form { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: flex-start; }' +
       '.cvz-changelog-input {' +
         'flex: 1; min-width: 240px; font-family: "Geist", sans-serif; font-size: 14px; padding: 8px 10px;' +
@@ -12606,9 +13242,18 @@
     wrap.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at, 'Quellen und KI-Wissen zuletzt analysiert'));
     wrap.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Quellen, KI-Wissen)'));
 
-    // 1. Wer liegt vorne? Chart, 28 Tage, gleiche Werte wie die Journey-Karten.
-    var compChart = renderVisibilityComparisonChart(topicId, detail);
-    if (compChart) wrap.appendChild(compChart);
+    // NEU (21.10.2026): Sichtbarkeitsfeld, beantwortet die Tab-Frage auf einen Blick
+    var vField = renderVisibilityField(_jc, detail);
+    if (vField) wrap.appendChild(vField);
+
+    // GEÄNDERT (21.10.2026): Das Liniendiagramm "Sichtbarkeit im Wettbewerbsvergleich"
+    // (Domains je Phase) entfällt, das Sichtbarkeitsfeld beantwortet dieselbe
+    // Frage, die Aufteilung nach Phase steht im Journey-Tab. Nur noch als
+    // Rückfall, solange ein altes Backend kein visibility_field liefert.
+    if (!vField) {
+      var compChart = renderVisibilityComparisonChart(topicId, detail);
+      if (compChart) wrap.appendChild(compChart);
+    }
 
     // 2. Wer wird bei welchen Fragen zitiert? (Phase x Rolle x Frage)
     var _sov = data.share_of_voice || {};
@@ -12632,6 +13277,100 @@
     wrap.appendChild(renderCompetitorManageBlock(detail, topicId));
 
     return wrap;
+  }
+
+  // NEU (21.10.2026): Sichtbarkeitsfeld. Pro Anbieter ein Balken aus Kästchen,
+  // ausgefüllt = in dieser Antwort als Quelle zitiert. Bis 40 Antworten steht
+  // ein Kästchen für eine Antwort, darüber wird auf 40 Kästchen skaliert (die
+  // Zahl rechts bleibt exakt). Folgt dem Kanal-Umschalter.
+  var VF_MAX_BOXES = 40;
+
+  function renderVisibilityField(jc, detail) {
+    var vf = jc && jc.visibility_field;
+    if (!vf || !vf.totals) return null;
+    var ch = activeChannel();
+    var total = vf.totals[ch] || 0;
+    var section = document.createElement('div');
+    section.className = 'cvz-section cvz-vf';
+    var label = document.createElement('p');
+    label.className = 'cvz-section-label';
+    label.textContent = 'Sichtbarkeitsfeld';
+    section.appendChild(label);
+    if (!total) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = 'In den letzten ' + vf.window_days + ' Tagen liegen für ' + activeChannelLabel() + ' noch keine Antworten vor.';
+      section.appendChild(none);
+      return section;
+    }
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '14px';
+    var boxes = Math.min(total, VF_MAX_BOXES);
+    sub.textContent = (boxes === total ? 'Ein Kästchen je Antwort' : 'Jedes Kästchen steht für etwa ' + fmtNum1(total / boxes) + ' Antworten') +
+      ' (' + total + ' Antworten, letzte ' + vf.window_days + ' Tage, ' + activeChannelLabel() + '). Ausgefüllt heißt: in dieser Antwort als Quelle zitiert. ' +
+      'Gelb: von euch beobachtete Wettbewerber.';
+    section.appendChild(sub);
+
+    function bar(n, isComp) {
+      var filled = Math.round(n / total * boxes);
+      if (n > 0 && filled === 0) filled = 1; // ein einzelner Treffer soll sichtbar bleiben
+      var h = '<div class="cvz-vf-bar" aria-hidden="true">';
+      for (var i = 0; i < boxes; i++) h += '<i class="' + (i < filled ? 'on' + (isComp ? ' comp' : '') : '') + '"></i>';
+      return h + '</div>';
+    }
+    function engines(entry) {
+      var list = ch === 'all' ? ['chat_gpt', 'gemini'] : [ch];
+      return '<span class="cvz-vf-engines">' + list.map(function (e) {
+        var n = entry[e] || 0;
+        return '<span class="cvz-vf-engine' + (n ? '' : ' off') + '" title="' + escapeHtml(MODEL_LABELS[e] + ': ' + n + ' von ' + (vf.totals[e] || 0)) + '">' +
+          '<img src="https://www.google.com/s2/favicons?sz=32&domain=' + (e === 'chat_gpt' ? 'chatgpt.com' : 'gemini.google.com') + '" width="16" height="16" alt="' + escapeHtml(MODEL_LABELS[e]) + '"></span>';
+      }).join('') + '</span>';
+    }
+    function fav(d) {
+      return '<img src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(d) + '" width="18" height="18" alt="" onerror="this.style.visibility=\'hidden\'">';
+    }
+
+    var ownDomain = (detail.topic && detail.topic.own_domain) || 'Eure Domain';
+    var ownN = vf.own[ch] || 0;
+    var own = document.createElement('div');
+    own.className = 'cvz-vf-own' + (ownN ? ' cvz-vf-own-hit' : '');
+    own.innerHTML =
+      '<div class="cvz-vf-row-head">' + fav(ownDomain) + '<span class="cvz-vf-name">' + escapeHtml(ownDomain) + '</span>' +
+        '<span class="cvz-vf-count"><b>' + ownN + '</b> von ' + total + '</span></div>' +
+      bar(ownN, false) +
+      '<div class="cvz-vf-own-foot">' + engines(vf.own) +
+        '<span>' + (ownN
+          ? 'In ' + fmtPct(ownN / total * 100) + ' der Antworten als Quelle zitiert.'
+          : 'In keiner der ' + total + ' Antworten als Quelle zitiert.') + '</span></div>';
+    section.appendChild(own);
+
+    var rows = (vf.domains || []).map(function (d) { return Object.assign({}, d, { n: d[ch] || 0 }); })
+      .filter(function (d) { return d.n > 0; })
+      .sort(function (a, b) { return b.n - a.n; });
+    if (rows.length) {
+      var head = document.createElement('div');
+      head.className = 'cvz-vf-list-head';
+      head.innerHTML = '<span>Am häufigsten zitiert</span><span>' + (ch === 'all' ? 'KI-Systeme' : '') + '</span>';
+      section.appendChild(head);
+      rows.forEach(function (d) {
+        var row = document.createElement('div');
+        row.className = 'cvz-vf-row';
+        row.innerHTML =
+          '<span class="cvz-vf-name"' + (d.is_competitor ? ' title="Beobachteter Wettbewerber"' : '') + '>' + fav(d.domain) +
+            '<span style="overflow:hidden;text-overflow:ellipsis;' + (d.is_competitor ? 'color:#e0a458;' : '') + '">' + escapeHtml(d.domain) + '</span></span>' +
+          bar(d.n, d.is_competitor) + engines(d) +
+          '<span class="cvz-vf-count"><b>' + d.n + '</b>/' + total + '</span>';
+        section.appendChild(row);
+      });
+    }
+    if (vf.other_count) {
+      var more = document.createElement('p');
+      more.className = 'cvz-chart-caption';
+      more.textContent = 'Daneben wurden ' + vf.other_count + ' weitere Domains zitiert. Details pro Frage weiter unten unter „Wer wird zitiert?“.';
+      section.appendChild(more);
+    }
+    return section;
   }
 
   // Wettbewerber-Verwaltung mit Überschrift. Steuert den Alert „Wettbewerber
@@ -12917,7 +13656,10 @@
         introEl.className = 'cvz-card-placeholder-text';
         introEl.style.cssText = 'margin-bottom:20px;font-size:12px;';
         var genDate = new Date(ap.generated_at);
-        introEl.textContent = 'Zuletzt generiert: ' + genDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ', ' + genDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr. ' + items.length + ' Maßnahmen priorisiert nach Phase und Impact. ';
+        introEl.textContent = 'Zuletzt generiert: ' + genDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ', ' + genDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr. ' + (function () {
+          var openN = items.length - completedIndices.filter(function (i) { return i < items.length; }).length;
+          return openN + (openN === 1 ? ' offene Maßnahme' : ' offene Maßnahmen') + ', priorisiert nach Phase und Impact. ';
+        })();
         // NEU (02.10.2026): Sprung zum Eintragen eigener Maßnahmen und Ereignisse.
         var jumpBtn = document.createElement('button');
         jumpBtn.type = 'button';
@@ -12936,6 +13678,17 @@
       var itemsWithIdx = items.map(function(item, idx) {
         return Object.assign({}, item, { _origIdx: idx });
       });
+      // GEÄNDERT (21.10.2026): Erledigte stehen nicht mehr ausgegraut zwischen den
+      // offenen, sondern im eigenen Abschnitt darunter (renderDoneActionItems).
+      var doneItems = itemsWithIdx.filter(function (it) { return completedIndices.indexOf(it._origIdx) !== -1; });
+      itemsWithIdx = itemsWithIdx.filter(function (it) { return completedIndices.indexOf(it._origIdx) === -1; });
+      if (itemsWithIdx.length === 0) {
+        var allDone = document.createElement('div');
+        allDone.className = 'cvz-card';
+        allDone.innerHTML = '<p class="cvz-card-placeholder-text" style="margin:0;">Alle ' + items.length +
+          ' Maßnahmen sind erledigt. Der nächste Aktionsplan entsteht mit dem nächsten Monatslauf, auf Basis der neuen Messwerte.</p>';
+        wrap.appendChild(allDone);
+      }
       var groups = {};
       itemsWithIdx.forEach(function (item) {
         var ph = item.phase || 'alle_phasen';
@@ -13017,59 +13770,7 @@
           doneBtn.title = isCompleted ? 'Erledigt-Markierung aufheben' : 'Item als erledigt markieren';
 
           // Closure: Klick-Handler mit aktuellem Kontext
-          (function(btn, topicId, itemOrigIdx, itemTitle, itemPhase, itemIsCompleted, apObj, itemKey) {
-            btn.addEventListener('click', function(e) {
-              e.stopPropagation();
-              btn.disabled = true;
-              btn.style.opacity = '0.5';
-              var newComplete = !itemIsCompleted;
-              apiFetch('/topics/' + topicId + '/action-plan/toggle-item', {
-                method: 'POST',
-                // apiFetch ruft selbst JSON.stringify(options.body) auf, kein manuelles Stringify hier!
-                body: {
-                  item_index: itemOrigIdx,
-                  item_title: itemTitle || ('Item #' + (itemOrigIdx + 1)),
-                  item_phase: itemPhase || 'alle_phasen',
-                  complete: newComplete,
-                  // NEU (02.10.2026): stabiler Schlüssel, siehe main.py ToggleActionPlanItemRequest
-                  item_key: itemKey || null,
-                },
-              }).then(function(resp) {
-                // Cache aktualisieren
-                var cached = state.topicDetailCache[topicId];
-                if (cached && cached.action_plan) {
-                  cached.action_plan.completed_item_indices = resp.completed_item_indices || [];
-                }
-                // Wenn ein content_change zurückkam, contentChangesCache updaten
-                if (resp.content_change && state.contentChangesCache) {
-                  if (!state.contentChangesCache[topicId]) {
-                    state.contentChangesCache[topicId] = [];
-                  }
-                  state.contentChangesCache[topicId].push(resp.content_change);
-                }
-                // NEU (18.09.2026): Beim Zurücksetzen entfernt das Backend die
-                // zugehörigen content_changes-/topic_changelog-Einträge wieder
-                // (siehe main.py toggle_action_plan_item_endpoint): Caches
-                // hier entsprechend bereinigen, sonst bleiben die Einträge bis
-                // zum nächsten vollständigen Neuladen sichtbar.
-                if (resp.removed_content_change_ids && resp.removed_content_change_ids.length && state.contentChangesCache[topicId]) {
-                  state.contentChangesCache[topicId] = state.contentChangesCache[topicId].filter(function (ch) {
-                    return resp.removed_content_change_ids.indexOf(ch.id) === -1;
-                  });
-                }
-                if (resp.removed_changelog_ids && resp.removed_changelog_ids.length && cached && cached.changelog) {
-                  cached.changelog = cached.changelog.filter(function (e) {
-                    return resp.removed_changelog_ids.indexOf(e.id) === -1;
-                  });
-                }
-                render();
-              }).catch(function(err) {
-                console.error('[CVZ] toggle-action-plan-item Fehler:', err);
-                btn.disabled = false;
-                btn.style.opacity = '1';
-              });
-            });
-          })(doneBtn, state.activeTopicId, origIdx, item.title, item.phase, isCompleted, ap, item.item_key);
+          bindActionPlanToggle(doneBtn, state.activeTopicId, origIdx, item.title, item.phase, isCompleted, item.item_key);
 
           hdr.appendChild(doneBtn);
           card.appendChild(hdr);
@@ -13236,6 +13937,8 @@
         phSection.appendChild(phList);
         wrap.appendChild(phSection);
       });
+
+      if (doneItems.length) wrap.appendChild(renderDoneActionItems(doneItems, detail));
     }
 
     // ENTFERNT (20.09.2026): "Plattformen mit Veröffentlichungs-Chance" stand
@@ -13258,6 +13961,106 @@
     wrap.appendChild(_renderAktionsplanChangesBlock(detail));
 
     return wrap;
+  }
+
+  // GEÄNDERT (21.10.2026): aus renderAktionsplanTab herausgelöst, damit auch die
+  // Liste der erledigten Maßnahmen die Markierung aufheben kann.
+  function bindActionPlanToggle(btn, topicId, itemOrigIdx, itemTitle, itemPhase, itemIsCompleted, itemKey) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      btn.disabled = true;
+      btn.style.opacity = '0.5';
+      var newComplete = !itemIsCompleted;
+      apiFetch('/topics/' + topicId + '/action-plan/toggle-item', {
+        method: 'POST',
+        // apiFetch ruft selbst JSON.stringify(options.body) auf, kein manuelles Stringify hier!
+        body: {
+          item_index: itemOrigIdx,
+          item_title: itemTitle || ('Item #' + (itemOrigIdx + 1)),
+          item_phase: itemPhase || 'alle_phasen',
+          complete: newComplete,
+          // NEU (02.10.2026): stabiler Schlüssel, siehe main.py ToggleActionPlanItemRequest
+          item_key: itemKey || null,
+        },
+      }).then(function(resp) {
+        // Cache aktualisieren
+        var cached = state.topicDetailCache[topicId];
+        if (cached && cached.action_plan) {
+          cached.action_plan.completed_item_indices = resp.completed_item_indices || [];
+        }
+        // Wenn ein content_change zurückkam, contentChangesCache updaten
+        if (resp.content_change && state.contentChangesCache) {
+          if (!state.contentChangesCache[topicId]) {
+            state.contentChangesCache[topicId] = [];
+          }
+          state.contentChangesCache[topicId].push(resp.content_change);
+        }
+        // NEU (18.09.2026): Beim Zurücksetzen entfernt das Backend die
+        // zugehörigen content_changes-/topic_changelog-Einträge wieder
+        // (siehe main.py toggle_action_plan_item_endpoint): Caches
+        // hier entsprechend bereinigen, sonst bleiben die Einträge bis
+        // zum nächsten vollständigen Neuladen sichtbar.
+        if (resp.removed_content_change_ids && resp.removed_content_change_ids.length && state.contentChangesCache[topicId]) {
+          state.contentChangesCache[topicId] = state.contentChangesCache[topicId].filter(function (ch) {
+            return resp.removed_content_change_ids.indexOf(ch.id) === -1;
+          });
+        }
+        if (resp.removed_changelog_ids && resp.removed_changelog_ids.length && cached && cached.changelog) {
+          cached.changelog = cached.changelog.filter(function (e) {
+            return resp.removed_changelog_ids.indexOf(e.id) === -1;
+          });
+        }
+        render();
+      }).catch(function(err) {
+        console.error('[CVZ] toggle-action-plan-item Fehler:', err);
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      });
+    });
+  }
+
+  // NEU (21.10.2026): "Was ihr schon umgesetzt habt und was es gebracht hat".
+  // Die Wirkung kommt aus der Wirkungsmessung (change_history.py), zugeordnet
+  // über den Titel: Beim Abhaken legt das Backend eine Änderung mit genau
+  // diesem Titel an. Ohne Treffer steht dort ehrlich "noch nicht gemessen".
+  function renderDoneActionItems(doneItems, detail) {
+    var section = document.createElement('div');
+    section.className = 'cvz-done-section';
+    section.innerHTML =
+      '<p class="cvz-tab-intro-eyebrow">Umgesetzt (' + doneItems.length + ')</p>' +
+      '<h3 class="cvz-done-q">Was ihr schon umgesetzt habt und was es gebracht hat</h3>' +
+      '<p class="cvz-card-placeholder-text" style="margin:0 0 6px;">Die Wirkung wird frühestens 4 Wochen nach der Umsetzung bewertet. ' +
+        'Sie zeigt einen zeitlichen Zusammenhang, keinen Beweis.</p>';
+    var assessments = ((detail.change_assessment || {}).items || []);
+    function findAssessment(title) {
+      var t = String(title || '').trim().toLowerCase();
+      return assessments.filter(function (a) { return String(a.description || '').trim().toLowerCase() === t; })[0] || null;
+    }
+    doneItems.forEach(function (item) {
+      var a = findAssessment(item.title);
+      var row = document.createElement('div');
+      row.className = 'cvz-done-item';
+      var color = a ? (VERDICT_COLORS[a.verdict] || '#8b98a5') : '#8b98a5';
+      var meta = [PHASE_LABELS[item.phase] || '', a ? 'umgesetzt am ' + formatShortDate(a.date) : ''].filter(Boolean).join(' · ');
+      row.innerHTML =
+        '<span class="cvz-done-check">\u2713</span>' +
+        '<div>' +
+          '<p class="cvz-done-title">' + escapeHtml(item.title || 'Maßnahme') + '</p>' +
+          (meta ? '<p class="cvz-done-meta">' + escapeHtml(meta) + '</p>' : '') +
+          '<span class="cvz-done-verdict" style="color:' + color + ';border-color:' + color + ';">' +
+            escapeHtml(a ? a.verdict_label : 'Wirkung noch nicht gemessen') + '</span>' +
+          (a && a.evidence && a.evidence.length ? '<p class="cvz-done-evidence">' + escapeHtml(a.evidence[0]) + '</p>' : '') +
+        '</div>';
+      var undo = document.createElement('button');
+      undo.type = 'button';
+      undo.className = 'cvz-done-undo';
+      undo.textContent = 'Wieder öffnen';
+      undo.title = 'Erledigt-Markierung aufheben';
+      bindActionPlanToggle(undo, state.activeTopicId, item._origIdx, item.title, item.phase, true, item.item_key);
+      row.appendChild(undo);
+      section.appendChild(row);
+    });
+    return section;
   }
 
   function _renderAktionsplanChangesBlock(detail) {
