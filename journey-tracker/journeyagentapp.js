@@ -6980,6 +6980,20 @@
       return section;
     }
 
+    // NEU (21.10.2026): primäres Keyword (source seed_keyword) steht immer oben,
+    // unabhängig von seiner Phase, statt unter "Nicht zugeordnet".
+    var primary = keywords.filter(function (kw) { return kw.source === 'seed_keyword'; });
+    if (primary.length > 0) {
+      keywords = keywords.filter(function (kw) { return kw.source !== 'seed_keyword'; });
+      var primaryHeading = document.createElement('p');
+      primaryHeading.className = 'cvz-prompt-phase-heading';
+      primaryHeading.style.borderLeftColor = 'var(--cvz-teal)';
+      primaryHeading.textContent = 'Primäres Keyword';
+      section.appendChild(primaryHeading);
+      _appendKeywordGroup(section, primary, enableExpansion, changelogEntries, '__primary__');
+      if (keywords.length === 0) return section;
+    }
+
     // Group keywords by messymiddle_phase
     var grouped = {};
     PHASE_ORDER.forEach(function (p) { grouped[p] = []; });
@@ -8065,7 +8079,7 @@
         '<th>Prompt</th>' +
         '<th style="width:150px;">Zitierte Quellen</th>' +
         '<th style="width:150px;">Zitiert (28 Tage)</th>' +
-        '<th style="width:170px;">Typ / Rolle</th>' +
+        '<th style="width:190px;">Typ / Rolle</th>' +
         '<th style="width:50px;"></th>' +
       '</tr></thead>';
 
@@ -8096,12 +8110,15 @@
           '</span>'
         : '';
 
+      // GEÄNDERT (21.10.2026): kein führendes <br> mehr. Fehlte der Typ, stand
+      // die Rolle dadurch eine Zeile tiefer; lange Rollen liefen wegen
+      // nowrap bis ans Löschen-Kreuz. Jetzt untereinander in .cvz-pt-meta-stack.
       var personaBadge = prompt.persona
-        ? '<br><span class="cvz-prompt-persona">' + escapeHtml(prompt.persona) + '</span>'
+        ? '<span class="cvz-prompt-persona" title="' + escapeHtml(prompt.persona) + '">' + escapeHtml(prompt.persona) + '</span>'
         : '';
 
       var aiSearchVolumeBadge = prompt.ai_search_volume != null
-        ? '<br><span class="cvz-prompt-persona" title="Echte AI-Overview-Frage, wird ca. ' +
+        ? '<span class="cvz-prompt-persona" title="Echte AI-Overview-Frage, wird ca. ' +
             escapeHtml(prompt.ai_search_volume) + 'x/Monat gestellt">\u2713 ' +
             escapeHtml(prompt.ai_search_volume) + '/Monat</span>'
         : '';
@@ -8144,7 +8161,8 @@
         '</td>' +
         '<td class="cvz-pt-src" data-label="Zitierte Quellen">' + faviconHtml + '</td>' +
         '<td class="cvz-pt-cite" style="white-space:nowrap;">' + citationBadge + unlinkedBadge + '</td>' +
-        '<td class="cvz-pt-meta" style="white-space:nowrap;">' + contentTypeBadge + personaBadge + aiSearchVolumeBadge + '</td>' +
+        '<td class="cvz-pt-meta">' + ((contentTypeBadge || personaBadge || aiSearchVolumeBadge)
+          ? '<div class="cvz-pt-meta-stack">' + contentTypeBadge + personaBadge + aiSearchVolumeBadge + '</div>' : '') + '</td>' +
         '<td class="cvz-pt-del" style="white-space:nowrap;text-align:right;">' +
           '<button type="button" class="cvz-prompt-delete-btn" data-cvz-prompt-delete="' + prompt.id + '" aria-label="Prompt deaktivieren" title="Prompt deaktivieren">\u00d7</button>' +
         '</td>';
@@ -10455,6 +10473,7 @@
         '.cvz-prompt-table .cvz-pt-src:empty, .cvz-prompt-table .cvz-pt-cite:empty, .cvz-prompt-table .cvz-pt-meta:empty { display: none; }' +
         '.cvz-prompt-table .cvz-pt-src::before { content: attr(data-label) ": "; font-size: 11px; color: var(--cvz-text-muted); margin-right: 6px; }' +
         '.cvz-prompt-table .cvz-pt-meta br { display: none; }' +
+        '.cvz-prompt-table .cvz-pt-meta-stack { flex-direction: row; flex-wrap: wrap; gap: 4px 10px; }' +
         '.cvz-prompt-table .cvz-pt-meta > * { margin-right: 8px; }' +
         '.cvz-prompt-table > tbody > tr.cvz-pt-exp-row, .cvz-prompt-table > tbody > tr.cvz-pt-exp-row > td { display: block; width: 100%; }' +
         '.cvz-prompt-table > tbody > tr.cvz-pt-exp-row { padding: 0; }' +
@@ -10600,6 +10619,11 @@
       '.cvz-prompt-persona {' +
         'font-size: 11px; color: var(--cvz-text-muted); white-space: nowrap; border-left: 1px solid var(--cvz-border); padding-left: 8px;' +
       '}' +
+      // NEU (21.10.2026): Typ/Rolle-Spalte der Prompt-Tabelle
+      '.cvz-prompt-table td.cvz-pt-meta { padding-right: 16px; }' +
+      '.cvz-pt-meta-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }' +
+      '.cvz-pt-meta-stack > * { max-width: 100%; }' +
+      '.cvz-pt-meta-stack .cvz-prompt-persona { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; border-left: 0; padding-left: 0; }' +
 
       '.cvz-chart-svg { width: 100%; height: auto; display: block; }' +
       '.cvz-chart-axis { stroke: var(--cvz-border); stroke-width: 1; }' +
