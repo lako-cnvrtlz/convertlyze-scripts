@@ -1700,6 +1700,9 @@
       }
     }
 
+    // NEU (21.10.2026): Höhe vor dem Neuaufbau merken, siehe stabilizeAppHeight
+    var heightBefore = container.offsetHeight;
+
     container.innerHTML = '';
     if (state.activeView === 'topic-detail') {
       // GEAENDERT (18.09.2026): JS-basiertes sticky Tab-Nav (17.09.2026,
@@ -1714,6 +1717,7 @@
 
     container.onclick = handleContainerClick;
     makeTablesScrollable(container);
+    stabilizeAppHeight(container, heightBefore);
 
     if (focusedId) {
       var toRefocus = document.getElementById(focusedId);
@@ -1725,6 +1729,67 @@
       }
     }
   }
+
+  // =========================================================================
+  // NEU (21.10.2026): Footer springt nicht mehr hoch
+  // =========================================================================
+  // Zwei Ursachen, zwei Regeln:
+  // 1. Beim Nachladen zeigt ein Tab kurz nur "lädt …" und ist damit kurz. Die
+  //    Seite schrumpft, der Footer springt hoch und beim Eintreffen der Daten
+  //    wieder runter. Regel: Solange etwas lädt, wird die bisherige Höhe
+  //    gehalten. Erst wenn alles da ist, darf die Seite schrumpfen.
+  // 2. Ein kurzer Tab (z. B. Aktionsplan mit wenigen Einträgen) zieht den
+  //    Footer direkt unter den Inhalt. Regel: Unter der Tab-Leiste ist immer
+  //    mindestens eine Bildschirmhöhe Platz. Der Footer erscheint also erst,
+  //    wenn man unter den Inhalt scrollt, nie mitten im Bild.
+  // Vereinfachung: "lädt" erkennt die Funktion an den isLoading…-/loading…-
+  // Flags im state und an Spinnern im neuen Inhalt. Ein Ladezustand, der
+  // nichts davon setzt, hält die Höhe nicht.
+  function isAnythingLoading() {
+    var keys = Object.keys(state);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i], v = state[k];
+      if (/^isLoading/.test(k) && v === true) return true;
+      if (/^loading[A-Z]/.test(k) && v && typeof v === 'object') {
+        var inner = Object.keys(v);
+        for (var j = 0; j < inner.length; j++) if (v[inner[j]] === true) return true;
+      }
+    }
+    return false;
+  }
+
+  function stabilizeAppHeight(container, heightBefore) {
+    var floor = 0;
+    var nav = container.querySelector('.cvz-tab-nav-wrap');
+    if (nav) {
+      var navOffset = nav.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      floor = Math.max(0, Math.round(navOffset + window.innerHeight));
+    }
+    var loading = isAnythingLoading() || !!container.querySelector('.cvz-spinner, .cvz-spinner-lg, .cvz-initial-loading');
+    if (loading) {
+      state._heldAppHeight = Math.max(state._heldAppHeight || 0, heightBefore || 0);
+    } else {
+      state._heldAppHeight = 0;
+    }
+    var minHeight = Math.max(floor, state._heldAppHeight || 0);
+    container.style.minHeight = minHeight ? minHeight + 'px' : '';
+  }
+
+  // Tabwechsel weiter unten auf der Seite: zur Tab-Leiste springen, damit der
+  // neue Tab oben beginnt, statt mitten in ihm (oder im Leerraum) zu landen.
+  function scrollToTabNavIfBelow() {
+    var container = document.getElementById('cvz-visibility-app');
+    var nav = container && container.querySelector('.cvz-tab-nav-wrap');
+    if (!nav) return;
+    var top = nav.getBoundingClientRect().top;
+    if (top < 0) window.scrollTo({ top: window.pageYOffset + top - 16, behavior: 'auto' });
+  }
+
+  // Beim Ändern der Fenstergröße die Mindesthöhe nachziehen (ohne neu zu rendern).
+  window.addEventListener('resize', function () {
+    var c = document.getElementById('cvz-visibility-app');
+    if (c && c.firstChild) stabilizeAppHeight(c, c.offsetHeight);
+  });
 
   // NEU (08.10.2026): Jede <table> bekommt einen seitlich scrollbaren Wrapper, sofern sie
   // nicht schon in einem steckt. Läuft nach jedem render(), deshalb müssen neue Tabellen
@@ -2162,6 +2227,7 @@
         }
       }
       render();
+      scrollToTabNavIfBelow();
       return;
     }
 
