@@ -1766,6 +1766,7 @@
 
     container.onclick = handleContainerClick;
     makeTablesScrollable(container);
+    compactFreshnessNotes(container);
     stabilizeAppHeight(container, heightBefore);
     if (state.activeView !== 'topic-detail') { state.promptViewer = null; state.keywordViewer = null; }
     renderPromptViewer();
@@ -9800,6 +9801,12 @@
   function renderDataFreshnessNote(isoString, label) {
     var p = document.createElement('p');
     p.className = 'cvz-freshness-note';
+    // NEU (21.10.2026): für die Veraltet-Markierung (compactFreshnessNotes).
+    // Prompt-Messungen laufen alle paar Tage, alles andere monatlich.
+    if (isoString) {
+      p.setAttribute('data-iso', isoString);
+      p.setAttribute('data-cadence', /KI-Antworten|Zitationen|Prompt/i.test(label || '') ? 'prompts' : 'monthly');
+    }
     if (isoString) {
       var abs = formatShortDate(isoString);
       p.textContent = (label || 'Datenstand') + ': ' + formatRelativeTime(isoString) +
@@ -9809,6 +9816,65 @@
       p.textContent = (label || 'Datenstand') + ': noch kein abgeschlossener Analyse-Lauf.';
     }
     return p;
+  }
+
+  // NEU (21.10.2026): Hinweise zum Datenstand ("zuletzt gemessen", "nächster
+  // Durchlauf") stehen nicht mehr als eigene Zeilen über den Inhalten. Direkt
+  // aufeinanderfolgende Hinweise werden zu einer kurzen Zeile zusammengefasst,
+  // der volle Text steht im Tooltip. Läuft nach jedem render() und greift
+  // damit in allen Tabs, ohne die 18 Aufrufstellen anzufassen.
+  function compactFreshnessNotes(root) {
+    // Nur in Tab-Inhalten. Im Themen-Kopf gehört das Datum zur Zusammenfassung.
+    var notes = Array.prototype.slice.call(root.querySelectorAll('.cvz-tab-content .cvz-freshness-note'));
+    var groups = [];
+    notes.forEach(function (n) {
+      var last = groups[groups.length - 1];
+      if (last && last[last.length - 1].nextElementSibling === n) last.push(n);
+      else groups.push([n]);
+    });
+    // NEU (21.10.2026): Veraltet = älter als ein Messintervall plus ein Tag
+    // Puffer (Läufe starten nicht auf die Minute). Bei Themen, die gerade
+    // laufen, pausiert oder zur Deaktivierung vorgemerkt sind, ist Stillstand
+    // erwartbar, dort wird nicht markiert.
+    var detailT = state.topicDetailCache[state.activeTopicId];
+    var topicT = detailT && detailT.topic;
+    var expectStale = !topicT || /collecting|analyzing|queued|paused|archived|inactive/.test(topicT.status || '') ||
+      (topicT.archive_effective_at && new Date(topicT.archive_effective_at).getTime() - Date.now() < 31 * 86400000);
+    function staleInfo(n) {
+      var iso = n.getAttribute('data-iso');
+      if (!iso || expectStale) return null;
+      var t = new Date(iso).getTime();
+      if (isNaN(t)) return null;
+      var interval = n.getAttribute('data-cadence') === 'prompts'
+        ? ((topicT && topicT.prompt_interval_days) || DEFAULT_PROMPT_INTERVAL_DAYS) : 30;
+      var ageDays = (Date.now() - t) / 86400000;
+      return ageDays > interval + 1 ? { interval: interval, ageDays: ageDays } : null;
+    }
+    groups.forEach(function (group) {
+      var lines = group.map(function (n) { return n.textContent.trim(); }).filter(Boolean);
+      if (!lines.length) return;
+      var staleNotes = group.filter(function (n) { return staleInfo(n); });
+      // Kurzform: Zeitangabe der ersten (bzw. der veralteten) Zeile ("vor 19 Tagen"), ohne Datum in Klammern
+      var first = staleNotes.length ? staleNotes[0].textContent.trim() : lines[0];
+      var short = first.indexOf(': ') !== -1 ? first.split(': ').slice(1).join(': ') : first;
+      short = short.replace(/\s*\([^)]*\)\s*$/, '').replace(/\.$/, '');
+      if (short.length > 40) short = '';
+      var el = document.createElement('div');
+      el.className = 'cvz-freshness-compact' + (staleNotes.length ? ' cvz-freshness-stale' : '');
+      if (staleNotes.length) {
+        var si = staleInfo(staleNotes[0]);
+        lines.push('');
+        lines.push('Veraltet: Diese Daten sind älter als das Messintervall (' +
+          (si.interval === 30 ? 'monatlich' : 'alle ' + si.interval + ' Tage') + '). ' +
+          'Vermutlich ist ein Lauf ausgefallen. Fehlgeschlagene Schritte zeigt der Tracker als Hinweis mit Knopf zum Neustarten an.');
+        el.appendChild(document.createTextNode('\u26a0 Datenstand' + (short ? ': ' + short : '') + ' \u00b7 veraltet'));
+      } else {
+        el.appendChild(document.createTextNode('Datenstand' + (short ? ': ' + short : '')));
+      }
+      el.appendChild(makeTip(lines.join('\n')));
+      group[0].parentNode.insertBefore(el, group[0]);
+      group.forEach(function (n) { n.parentNode.removeChild(n); });
+    });
   }
 
   function escapeHtml(str) {
@@ -11907,8 +11973,12 @@
         '.cvz-pv-chat { max-height: none; }' +
         '.cvz-pv-count { display: none; }' +
       '}' +
+      '.cvz-freshness-compact { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 14px; }' +
+      '.cvz-freshness-stale { color: var(--cvz-amber, #c98e2a); font-weight: 600; }' +
+      '.cvz-float-tip { white-space: pre-line !important; }' +
       // NEU (21.10.2026): Frage am Anfang jedes Tabs
-      '.cvz-tab-intro { margin: 4px 0 20px; max-width: 760px; }' +
+      '.cvz-tab-intro { margin: 4px 0 20px; max-width: 760px; text-align: left !important; }' +
+      '.cvz-tab-intro > * { text-align: left !important; margin-left: 0 !important; margin-right: 0 !important; max-width: none !important; }' +
       '.cvz-tab-intro-eyebrow { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--cvz-text-muted); }' +
       '.cvz-tab-intro-q { margin: 0; font-family: "Syne", sans-serif; font-size: 26px; line-height: 1.25; font-weight: 700; color: var(--cvz-text); }' +
       '.cvz-tab-intro-lead { margin: 8px 0 0; font-size: 14px; line-height: 1.5; color: var(--cvz-text-muted); }' +
@@ -12677,6 +12747,13 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
+    if (activeChannel() !== 'all' && _cjc && !_cjc.sources_by_channel) {
+      var chNote = document.createElement('p');
+      chNote.className = 'cvz-card-placeholder-text';
+      chNote.style.cssText = 'margin:0 0 8px;color:var(--cvz-amber,#c98e2a);';
+      chNote.textContent = 'Hinweis: Für die anderen Domains liegt noch kein Wert je KI-System vor. Ihre Linien zeigen ChatGPT und Gemini zusammen, nur eure Linie ist nach ' + activeChannelLabel() + ' gefiltert.';
+      section.appendChild(chNote);
+    }
     sub.textContent = 'Wer wird in welcher Journey-Phase von ChatGPT und Gemini zitiert (' + windowLabel + ')? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %, gleiche Werte wie im Tab \u201eJourney\u201c). Diese Grafik zeigt alle zitierten Domains, auch nicht best\u00e4tigte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck. Ein Klick auf einen Namen in der Legende blendet die Linie aus bzw. wieder ein.';
     section.appendChild(sub);
 
