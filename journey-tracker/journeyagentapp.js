@@ -193,6 +193,10 @@
     // Schlüssel: topicId + '|' + Suchanfrage (leer = ganzes Thema)
     gscHistoryCache: {},
     loadingGscHistory: {},
+    // NEU (21.10.2026): Google-Ansicht für Keywords
+    keywordViewer: null,
+    keywordSerpCache: {},
+    loadingKeywordSerp: {},
     expandedGscRowId: null,
     expandedOppId: null,
     // NEU (16.09.2026): Journey-Map-Tab
@@ -515,6 +519,7 @@
     // NEU (06.10.2026): Unterbereich im Tab "Daten" aus der URL (cvz_view).
     // NEU (21.10.2026): Deep-Link auf die Antwort-Ansicht eines Prompts
     state.pendingPromptViewerId = new URLSearchParams(window.location.search).get('cvz_prompt');
+    state.pendingKeywordViewerId = new URLSearchParams(window.location.search).get('cvz_keyword');
     // NEU (21.10.2026): Kanal aus der URL (cvz_channel).
     var paramChannel = new URLSearchParams(window.location.search).get('cvz_channel');
     if (paramChannel === 'chat_gpt' || paramChannel === 'gemini') state.activeChannel = paramChannel;
@@ -1762,8 +1767,18 @@
     container.onclick = handleContainerClick;
     makeTablesScrollable(container);
     stabilizeAppHeight(container, heightBefore);
-    if (state.activeView !== 'topic-detail') state.promptViewer = null;
+    if (state.activeView !== 'topic-detail') { state.promptViewer = null; state.keywordViewer = null; }
     renderPromptViewer();
+    if (state.pendingKeywordViewerId && state.activeView === 'topic-detail') {
+      var pendingKwDetail = state.topicDetailCache[state.activeTopicId];
+      if (pendingKwDetail && pendingKwDetail.search_queries) {
+        var pendingKwId = state.pendingKeywordViewerId;
+        state.pendingKeywordViewerId = null;
+        if (pendingKwDetail.search_queries.some(function (q) { return q.id === pendingKwId; })) {
+          setTimeout(function () { openKeywordViewer(pendingKwId); }, 0);
+        }
+      }
+    }
     // Deep-Link ?cvz_prompt=..., sobald die Prompts des Themas geladen sind
     if (state.pendingPromptViewerId && state.activeView === 'topic-detail') {
       var pendingDetail = state.topicDetailCache[state.activeTopicId];
@@ -1879,7 +1894,21 @@
 
     // NEU (21.10.2026): Antwort-Ansicht
     if (event.target.closest('[data-cvz-pv-close]') || event.target.getAttribute('data-cvz-pv-backdrop')) {
-      closePromptViewer();
+      if (state.keywordViewer) closeKeywordViewer(); else closePromptViewer();
+      return;
+    }
+    var kvGoto = event.target.closest('[data-cvz-kv-goto]');
+    if (kvGoto) {
+      var kvGotoId = kvGoto.getAttribute('data-cvz-kv-goto');
+      if (kvGotoId) openKeywordViewer(kvGotoId);
+      return;
+    }
+    var kvBrand = event.target.closest('[data-cvz-kv-brand]');
+    if (kvBrand && state.keywordViewer) {
+      var kvKey = kvBrand.getAttribute('data-cvz-kv-brand');
+      state.keywordViewer.focus = state.keywordViewer.focus === kvKey ? null : kvKey;
+      state.keywordViewer.scrollToFocus = !!state.keywordViewer.focus;
+      render();
       return;
     }
     var pvGoto = event.target.closest('[data-cvz-pv-goto]');
@@ -1892,6 +1921,14 @@
     if (pvEngine && state.promptViewer) {
       state.promptViewer.engine = pvEngine.getAttribute('data-cvz-pv-engine');
       state.promptViewer.runId = null;
+      render();
+      return;
+    }
+    var pvBrand = event.target.closest('[data-cvz-pv-brand]');
+    if (pvBrand && state.promptViewer) {
+      var brandKey = pvBrand.getAttribute('data-cvz-pv-brand');
+      state.promptViewer.focus = state.promptViewer.focus === brandKey ? null : brandKey;
+      state.promptViewer.scrollToFocus = !!state.promptViewer.focus;
       render();
       return;
     }
@@ -2145,6 +2182,12 @@
       return;
     }
     var keywordToggle = event.target.closest('[data-cvz-keyword-toggle]');
+    // GEÄNDERT (21.10.2026): Zeilen mit echter ID öffnen die Google-Ansicht
+    if (keywordToggle && keywordToggle.getAttribute('data-cvz-kv-open')) {
+      openKeywordViewer(keywordToggle.getAttribute('data-cvz-kv-open'),
+        collectRowIds('data-cvz-kv-open', keywordToggle.closest('.cvz-section')));
+      return;
+    }
     if (keywordToggle) {
       toggleKeywordExpansion(
         state.activeTopicId,
@@ -2501,6 +2544,11 @@
     // NEU (15.09.2026): GSC-Zeilen im selben Auf-/Zuklapp-Stil wie Keywords,
     // siehe renderGscBlock/toggleGscRowExpansion.
     var gscToggle = event.target.closest('[data-cvz-gsc-toggle]');
+    if (gscToggle && gscToggle.getAttribute('data-cvz-kv-open')) {
+      openKeywordViewer(gscToggle.getAttribute('data-cvz-kv-open'),
+        collectRowIds('data-cvz-kv-open', gscToggle.closest('.cvz-section')));
+      return;
+    }
     if (gscToggle) {
       toggleGscRowExpansion(
         state.activeTopicId,
@@ -7296,12 +7344,13 @@
       var showStatus = !!kw.keyword_status_label && kw.source !== 'paa';
 
       var tr = document.createElement('tr');
-      if (canExpand) {
+      if (canExpand || kw.id) {
         tr.setAttribute('data-cvz-keyword-toggle', rowId);
         tr.setAttribute('data-cvz-keyword-text', kw.keyword);
+        if (kw.id) tr.setAttribute('data-cvz-kv-open', kw.id);
       }
       tr.innerHTML =
-        '<td class="cvz-prompt-expand-chevron">' + (canExpand ? (state.expandedKeywordId === rowId ? '\u25be' : '\u25b8') : '') + '</td>' +
+        '<td class="cvz-prompt-expand-chevron">' + ((canExpand || kw.id) ? '\u25b8' : '') + '</td>' +
         '<td>' + escapeHtml(kw.keyword) +
           (linkedCount > 0 ? ' <span class="cvz-changelog-linked-badge" title="' + linkedCount + ' verknüpfte Änderung(en)">✎</span>' : '') +
         '</td>' +
@@ -7819,14 +7868,127 @@
     return String(d || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
   }
 
-  // Markenname aus der Domain: "fellowmind.de" -> "fellowmind". Unter 4 Zeichen
-  // zu unspezifisch für eine Markierung im Text.
-  function pvBrandFromDomain(d) {
-    var bare = pvBareDomain(d);
-    var parts = bare.split('.');
-    var brand = parts.length > 1 ? parts[parts.length - 2] : parts[0];
-    if (parts.length > 2 && /^(co|com|org|net)$/.test(brand)) brand = parts[parts.length - 3];
-    return brand && brand.length >= 4 ? brand : null;
+  // NEU (21.10.2026): Anbieter im Text finden und markieren (Antwort-Ansicht
+  // und Google-Ansicht). Marken werden aus Domains abgeleitet: eigene Domain,
+  // beobachtete Wettbewerber und alle zitierten Quellen. "t-systems.com"
+  // findet "T-Systems", "sap.com" findet "SAP".
+  // Vereinfachung: Anbieter ohne Domain unter den Quellen werden nicht
+  // erkannt, ebenso Schreibweisen, die vom Domain-Namen abweichen
+  // ("spirit21.com" findet "SPIRIT/21" nicht).
+  function buildBrandIndex(ownDomain, competitorDomains, otherDomains) {
+    var byKey = {};
+    var order = [];
+    function add(domain, cls) {
+      var bare = pvBareDomain(domain);
+      if (!bare) return;
+      var parts = bare.split('.');
+      var brand = parts.length > 1 ? parts[parts.length - 2] : parts[0];
+      if (parts.length > 2 && /^(co|com|org|net|gv|ac)$/.test(brand)) brand = parts[parts.length - 3];
+      var key = (brand || bare).toLowerCase();
+      if (!byKey[key]) {
+        byKey[key] = { key: key, domain: bare, cls: cls, patterns: [] };
+        order.push(key);
+        var esc = function (t) { return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
+        var edge = '(?<![\\p{L}\\p{N}])', edgeEnd = '(?![\\p{L}\\p{N}])';
+        byKey[key].patterns.push(new RegExp(edge + esc(bare) + edgeEnd, 'giu'));
+        if (brand && brand.length >= 4) {
+          byKey[key].patterns.push(new RegExp(edge + esc(brand) + edgeEnd, 'giu'));
+        } else if (brand && brand.length === 3) {
+          // Kurze Marken nur in Großbuchstaben (SAP, IBM), sonst zu viele Zufallstreffer
+          byKey[key].patterns.push(new RegExp(edge + esc(brand.toUpperCase()) + edgeEnd, 'gu'));
+        }
+      } else if (cls === 'cvz-pv-mark-own' || (cls === 'cvz-pv-mark-comp' && byKey[key].cls === 'cvz-pv-mark-other')) {
+        byKey[key].cls = cls;
+      }
+    }
+    if (ownDomain) add(ownDomain, 'cvz-pv-mark-own');
+    (competitorDomains || []).forEach(function (d) { add(d, 'cvz-pv-mark-comp'); });
+    (otherDomains || []).forEach(function (d) { add(d, 'cvz-pv-mark-other'); });
+    return order.map(function (k) { return byKey[k]; });
+  }
+
+  function findBrandMatches(text, brands) {
+    var found = [];
+    brands.forEach(function (b) {
+      b.patterns.forEach(function (re) {
+        re.lastIndex = 0;
+        var m;
+        while ((m = re.exec(text)) !== null) {
+          found.push({ start: m.index, end: m.index + m[0].length, brand: b, text: m[0] });
+          if (m[0].length === 0) re.lastIndex++;
+        }
+      });
+    });
+    // Überlappungen: längerer Treffer gewinnt ("t-systems.com" vor "t-systems")
+    found.sort(function (a, b) { return a.start - b.start || (b.end - b.start) - (a.end - a.start); });
+    var out = [], lastEnd = -1;
+    found.forEach(function (f) { if (f.start >= lastEnd) { out.push(f); lastEnd = f.end; } });
+    return out;
+  }
+
+  // Markiert alle Treffer im DOM-Teilbaum und gibt {key: {count, label}} zurück.
+  function highlightBrands(root, brands, focusKey) {
+    var counts = {};
+    if (!root || !brands.length) return counts;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (node) {
+      var text = node.nodeValue;
+      var matches = findBrandMatches(text, brands);
+      if (!matches.length) return;
+      var frag = document.createDocumentFragment();
+      var pos = 0;
+      matches.forEach(function (m) {
+        if (m.start > pos) frag.appendChild(document.createTextNode(text.slice(pos, m.start)));
+        var mark = document.createElement('mark');
+        mark.className = m.brand.cls + (focusKey === m.brand.key ? ' cvz-pv-mark-focus' : '');
+        mark.setAttribute('data-brand', m.brand.key);
+        mark.textContent = m.text;
+        frag.appendChild(mark);
+        pos = m.end;
+        var c = counts[m.brand.key] || (counts[m.brand.key] = { count: 0, label: null });
+        c.count++;
+        // Anzeigename: die Schreibweise aus dem Text, ohne Domain-Endung
+        if (!c.label || (c.label.indexOf('.') !== -1 && m.text.indexOf('.') === -1)) c.label = m.text;
+      });
+      if (pos < text.length) frag.appendChild(document.createTextNode(text.slice(pos)));
+      node.parentNode.replaceChild(frag, node);
+    });
+    if (focusKey) root.classList.add('cvz-pv-focus-mode');
+    return counts;
+  }
+
+  function countBrandInText(text, brand) {
+    return findBrandMatches(String(text || ''), [brand]).length;
+  }
+
+  // Chips der genannten Anbieter. counts aus highlightBrands, perAnswer
+  // optional {key: Anzahl Antworten mit Nennung}.
+  function renderBrandChips(brands, counts, focusKey, attr, perAnswer, answersTotal, contextLabel) {
+    var list = brands.filter(function (b) { return counts[b.key] && counts[b.key].count; });
+    list.sort(function (a, b) {
+      var own = (b.cls === 'cvz-pv-mark-own') - (a.cls === 'cvz-pv-mark-own');
+      return own || counts[b.key].count - counts[a.key].count;
+    });
+    if (!list.length) return '<p class="cvz-pv-muted" style="margin-top:0;">Keine bekannten Anbieter im Text erkannt.</p>';
+    return '<div class="cvz-pv-chips">' + list.map(function (b) {
+      var c = counts[b.key];
+      var cls = b.cls === 'cvz-pv-mark-own' ? ' cvz-pv-chip-own' : (b.cls === 'cvz-pv-mark-comp' ? ' cvz-pv-chip-comp' : '');
+      var tip = c.count + (c.count === 1 ? ' Nennung' : ' Nennungen') + ' ' + contextLabel +
+        (perAnswer && answersTotal ? ', in ' + (perAnswer[b.key] || 0) + ' von ' + answersTotal + ' Antworten' : '') +
+        '. Klicken zeigt, wo.';
+      return '<button type="button" class="cvz-pv-chip cvz-pv-chip-btn' + cls + (focusKey === b.key ? ' cvz-pv-chip-focus' : '') + '" ' +
+        attr + '="' + escapeHtml(b.key) + '" title="' + escapeHtml(tip) + '" aria-pressed="' + (focusKey === b.key) + '">' +
+        pvFavicon(b.domain, 14) + '<span>' + escapeHtml(c.label || b.domain) + '</span><b>×' + c.count + '</b></button>';
+    }).join('') + '</div>' +
+    (focusKey ? '<p class="cvz-pv-muted">Markiert: alle Stellen dieses Anbieters. Nochmal klicken hebt die Auswahl auf.</p>' : '');
+  }
+
+  // Nach dem Rendern zur ersten markierten Stelle scrollen
+  function scrollToFocusedBrand(scope) {
+    var first = scope && scope.querySelector('.cvz-pv-mark-focus, .cvz-kv-result-focus');
+    if (first && first.scrollIntoView) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
   function visiblePromptOrder() {
@@ -7841,6 +8003,7 @@
   }
 
   async function openPromptViewer(promptId) {
+    state.keywordViewer = null;
     state.promptViewer = { promptId: promptId, engine: null, runId: null };
     updateUrlParams({ cvz_prompt: promptId });
     if (!(promptId in state.promptCitationsCache)) {
@@ -7879,38 +8042,9 @@
     return { key: 'none', label: 'Nicht genannt' };
   }
 
-  function pvHighlight(root, terms) {
-    if (!terms.length) return;
-    var pattern = new RegExp('(' + terms.map(function (t) {
-      return t.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }).join('|') + ')', 'gi');
-    var classByTerm = {};
-    terms.forEach(function (t) { classByTerm[t.term.toLowerCase()] = t.cls; });
-    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-    var nodes = [];
-    while (walker.nextNode()) nodes.push(walker.currentNode);
-    nodes.forEach(function (node) {
-      var text = node.nodeValue;
-      pattern.lastIndex = 0;
-      if (!pattern.test(text)) return;
-      var frag = document.createDocumentFragment();
-      var last = 0;
-      text.replace(pattern, function (match, _g, offset) {
-        if (offset > last) frag.appendChild(document.createTextNode(text.slice(last, offset)));
-        var mark = document.createElement('mark');
-        mark.className = classByTerm[match.toLowerCase()] || 'cvz-pv-mark-comp';
-        mark.textContent = match;
-        frag.appendChild(mark);
-        last = offset + match.length;
-        return match;
-      });
-      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
-      node.parentNode.replaceChild(frag, node);
-    });
-  }
-
   function renderPromptViewer() {
     var root = document.getElementById('cvz-pv-root');
+    if (!state.promptViewer && state.keywordViewer) return renderKeywordViewer();
     if (!state.promptViewer) {
       if (root) root.innerHTML = '';
       document.documentElement.classList.remove('cvz-pv-open');
@@ -7989,6 +8123,7 @@
       pv.engine = (pref && engines.filter(function (e) { return e.id === pref && e.runs.length; })[0] ? pref : (withRuns[0] || engines[0]).id);
     }
     var eng = engines.filter(function (e) { return e.id === pv.engine; })[0];
+    var brandIndex = [], brandCounts = {}, brandPerAnswer = {};
     var run = eng.runs.filter(function (r) { return r.run_id === pv.runId; })[0] || eng.runs[eng.runs.length - 1];
     var totalRuns = engines.reduce(function (n, e) { return n + e.runs.length; }, 0);
     var totalCited = engines.reduce(function (n, e) { return n + e.cited; }, 0);
@@ -8030,26 +8165,22 @@
       var answerEl = stage.querySelector('.cvz-pv-answer');
       answerEl.innerHTML = renderMarkdownLite(run.answer_markdown) || '<p class="cvz-card-placeholder-text">Kein Antworttext gespeichert.</p>';
 
-      // Markierungen: eigene Marke (türkis), Wettbewerber (gelb)
-      var ownDomain = (detail.topic && detail.topic.own_domain) || '';
-      var terms = [];
-      var seen = {};
-      function addTerm(t, cls) {
-        if (!t) return;
-        var k = t.toLowerCase();
-        if (seen[k]) return;
-        seen[k] = 1;
-        terms.push({ term: t, cls: cls });
-      }
-      addTerm(pvBareDomain(ownDomain), 'cvz-pv-mark-own');
-      addTerm(pvBrandFromDomain(ownDomain), 'cvz-pv-mark-own');
+      // GEÄNDERT (21.10.2026): alle Anbieter markieren (eigene türkis,
+      // Wettbewerber gelb, übrige dezent), anklickbar über "Genannte Anbieter".
+      var allSourceDomains = [];
+      engines.forEach(function (e) {
+        e.runs.forEach(function (r) { (r.sources || []).forEach(function (src) { if (src.domain) allSourceDomains.push(src.domain); }); });
+      });
       var compDomains = (detail.competitor_domains || []).slice();
       engines.forEach(function (e) {
-        e.runs.forEach(function (r) { (r.sources || []).forEach(function (s) { if (s.is_competitor) compDomains.push(s.domain); }); });
+        e.runs.forEach(function (r) { (r.sources || []).forEach(function (src) { if (src.is_competitor) compDomains.push(src.domain); }); });
       });
-      compDomains.forEach(function (d) { addTerm(pvBareDomain(d), 'cvz-pv-mark-comp'); addTerm(pvBrandFromDomain(d), 'cvz-pv-mark-comp'); });
-      terms.sort(function (a, b) { return b.term.length - a.term.length; }); // "fellowmind.de" vor "fellowmind"
-      pvHighlight(answerEl, terms);
+      brandIndex = buildBrandIndex((detail.topic && detail.topic.own_domain) || '', compDomains, allSourceDomains);
+      brandCounts = highlightBrands(answerEl, brandIndex, pv.focus || null);
+      brandPerAnswer = {};
+      brandIndex.forEach(function (b) {
+        brandPerAnswer[b.key] = eng.runs.filter(function (r) { return countBrandInText(r.answer_markdown, b) > 0; }).length;
+      });
 
       // Punktleiste
       var strip = document.createElement('div');
@@ -8087,6 +8218,11 @@
         '<span class="cvz-pv-engine-bar"><i style="width:' + (e.runs.length ? Math.round(e.cited / e.runs.length * 100) : 0) + '%"></i></span>' +
       '</button>';
     }).join(''));
+
+    if (run) {
+      card('Genannte Anbieter in dieser Antwort',
+        renderBrandChips(brandIndex, brandCounts, pv.focus || null, 'data-cvz-pv-brand', brandPerAnswer, eng.runs.length, 'in dieser Antwort'));
+    }
 
     if (run) {
       var ownBare = pvBareDomain((detail.topic && detail.topic.own_domain) || '');
@@ -8150,10 +8286,15 @@
 
     root.innerHTML = '';
     root.appendChild(backdrop);
+    if (pv.focus && pv.scrollToFocus) {
+      pv.scrollToFocus = false;
+      scrollToFocusedBrand(root);
+    }
   }
 
   // Tastatur: einmal registriert, wirkt nur bei offener Ansicht
   document.addEventListener('keydown', function (e) {
+    if (state.keywordViewer && e.key === 'Escape') { e.preventDefault(); closeKeywordViewer(); return; }
     if (!state.promptViewer) return;
     var tag = (e.target && e.target.tagName) || '';
     if (/INPUT|TEXTAREA|SELECT/.test(tag)) return;
@@ -8170,6 +8311,331 @@
     e.preventDefault();
     render();
   });
+
+  // =========================================================================
+  // NEU (21.10.2026): Google-Ansicht für Keywords, Fragen und GSC-Zeilen.
+  // Gleicher Rahmen wie die Antwort-Ansicht der Prompts:
+  //   links:  das gespeicherte Google-Ergebnis, KI-Übersicht (falls vorhanden)
+  //           mit markierten Anbietern, darunter die Top 10
+  //   rechts: wer hier steht (anklickbar, markiert Treffer links), SERP-
+  //           Merkmale, GSC-Verlauf, Journey-Phase, verknüpfte Änderungen
+  // Daten: /topics/{id}/keywords/{kid}/serp (lazy). Fehlt der Endpunkt,
+  // reichen die Top-Ergebnisse aus der Themen-Antwort.
+  // =========================================================================
+
+  async function openKeywordViewer(keywordId, orderIds) {
+    state.promptViewer = null;
+    state.keywordViewer = { keywordId: keywordId, focus: null, order: orderIds || (state.keywordViewer && state.keywordViewer.order) || [] };
+    updateUrlParams({ cvz_keyword: keywordId, cvz_prompt: null });
+    var detail = state.topicDetailCache[state.activeTopicId] || {};
+    var kw = (detail.search_queries || []).filter(function (q) { return q.id === keywordId; })[0];
+    if (kw && (kw.gsc_impressions != null || kw.source === 'gsc_near_miss')) maybeLoadGscHistory(state.activeTopicId, kw.keyword);
+    if (!(keywordId in state.keywordSerpCache)) {
+      state.loadingKeywordSerp[keywordId] = true;
+      render();
+      try {
+        state.keywordSerpCache[keywordId] = CONFIG.useMockData ? null
+          : await apiFetch('/topics/' + state.activeTopicId + '/keywords/' + encodeURIComponent(keywordId) + '/serp');
+      } catch (e) {
+        console.warn('[CVZ Visibility] SERP-Details nicht ladbar, nutze Daten aus der Themenliste:', e);
+        state.keywordSerpCache[keywordId] = null;
+      }
+      state.loadingKeywordSerp[keywordId] = false;
+    }
+    render();
+    var closeBtn = document.querySelector('.cvz-pv [data-cvz-pv-close]');
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function closeKeywordViewer() {
+    state.keywordViewer = null;
+    updateUrlParams({ cvz_keyword: null });
+    render();
+  }
+
+  function renderKeywordViewer() {
+    var root = document.getElementById('cvz-pv-root');
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'cvz-pv-root';
+      document.body.appendChild(root);
+      root.onclick = handleContainerClick;
+    }
+    document.documentElement.classList.add('cvz-pv-open');
+
+    var kvs = state.keywordViewer;
+    var detail = state.topicDetailCache[state.activeTopicId] || {};
+    var kw = (detail.search_queries || []).filter(function (q) { return q.id === kvs.keywordId; })[0] || { id: kvs.keywordId, keyword: '' };
+    var serp = state.keywordSerpCache[kvs.keywordId];
+    var loading = state.loadingKeywordSerp[kvs.keywordId];
+    var results = (serp && serp.top_serp_results && serp.top_serp_results.length ? serp.top_serp_results : kw.top_serp_results) || [];
+    var features = (serp && serp.serp_features) || kw.serp_features || [];
+    var aio = serp ? serp.ai_overview : null;
+    var checkedAt = (serp && serp.serp_checked_at) || kw.serp_checked_at;
+    var ownDomain = (detail.topic && detail.topic.own_domain) || '';
+    var ownBare = pvBareDomain(ownDomain);
+    var compDomains = detail.competitor_domains || [];
+    var compBare = compDomains.map(pvBareDomain);
+
+    var order = kvs.order || [];
+    var pos = order.indexOf(kvs.keywordId);
+    var prevId = pos > 0 ? order[pos - 1] : null;
+    var nextId = pos >= 0 && pos < order.length - 1 ? order[pos + 1] : null;
+
+    var backdrop = document.createElement('div');
+    backdrop.className = 'cvz-pv-backdrop';
+    backdrop.setAttribute('data-cvz-pv-backdrop', '1');
+    var box = document.createElement('div');
+    box.className = 'cvz-pv';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-label', 'Google-Ergebnis zum Keyword');
+    backdrop.appendChild(box);
+
+    var sourceLabel = KEYWORD_SOURCE_LABELS[kw.source] || '';
+    var phaseLabel = PHASE_LABELS[kw.messymiddle_phase] || '';
+    var head = document.createElement('div');
+    head.className = 'cvz-pv-head';
+    head.innerHTML =
+      '<div class="cvz-pv-head-text">' +
+        '<p class="cvz-pv-eyebrow">Google-Ergebnis' + (sourceLabel ? ' · ' + escapeHtml(sourceLabel) : '') +
+          (phaseLabel ? ' · ' + escapeHtml(phaseLabel) : '') + '</p>' +
+        '<h3 class="cvz-pv-title">' + escapeHtml(kw.keyword || (serp && serp.keyword) || '') + '</h3>' +
+      '</div>' +
+      '<div class="cvz-pv-head-nav">' +
+        (order.length > 1 && pos >= 0
+          ? '<button type="button" class="cvz-pv-iconbtn" data-cvz-kv-goto="' + (prevId || '') + '"' + (prevId ? '' : ' disabled') + ' aria-label="Vorheriges Keyword">‹</button>' +
+            '<span class="cvz-pv-count">' + (pos + 1) + ' / ' + order.length + '</span>' +
+            '<button type="button" class="cvz-pv-iconbtn" data-cvz-kv-goto="' + (nextId || '') + '"' + (nextId ? '' : ' disabled') + ' aria-label="Nächstes Keyword">›</button>'
+          : '') +
+        '<button type="button" class="cvz-pv-iconbtn cvz-pv-close" data-cvz-pv-close aria-label="Schließen">×</button>' +
+      '</div>';
+    box.appendChild(head);
+
+    // Kennzahlen
+    var ownResult = results.filter(function (r) { return pvBareDomain(r.domain) === ownBare; })[0];
+    var aioOwn = aio && (aio.references || []).some(function (r) { return pvBareDomain(r.domain) === ownBare; });
+    var posText = kw.organic_rank != null ? 'Platz ' + kw.organic_rank
+      : (ownResult && ownResult.rank ? 'Platz ' + ownResult.rank : (checkedAt ? 'nicht in den Top ' + Math.max(results.length, 10) : 'noch nicht geprüft'));
+    var pills = [
+      { t: 'Eure Position: ' + posText, ok: kw.organic_rank != null && kw.organic_rank <= 10 },
+      kw.search_volume != null ? { t: Number(kw.search_volume).toLocaleString('de-DE') + ' Suchen/Monat' } : null,
+      features.indexOf('ai_overview') !== -1 ? { t: aioOwn ? 'In der KI-Übersicht zitiert' : 'KI-Übersicht ohne euch', ok: aioOwn } : null,
+      kw.gsc_position != null ? { t: 'GSC: Ø Position ' + fmtNum1(Number(kw.gsc_position)) } : null,
+    ].filter(Boolean);
+    var summary = document.createElement('div');
+    summary.className = 'cvz-pv-summary';
+    summary.innerHTML = pills.map(function (p, i) {
+      return '<span class="' + (i === 0 ? 'cvz-pv-summary-main' : 'cvz-pv-pill') + (p.ok ? ' cvz-pv-ok' : '') + '">' + escapeHtml(p.t) + '</span>';
+    }).join('') + (checkedAt ? '<span class="cvz-pv-summary-sub">geprüft am ' + escapeHtml(formatShortDate(checkedAt)) + ', Google Deutschland</span>' : '');
+    box.appendChild(summary);
+
+    if (loading && !results.length) {
+      var ph = document.createElement('div');
+      ph.className = 'cvz-pv-empty';
+      ph.innerHTML = '<span class="cvz-spinner"></span>Google-Ergebnis wird geladen …';
+      box.appendChild(ph);
+      root.innerHTML = '';
+      root.appendChild(backdrop);
+      return;
+    }
+
+    var grid = document.createElement('div');
+    grid.className = 'cvz-pv-grid';
+    box.appendChild(grid);
+
+    // ---- Anbieter-Index: Ergebnis-Domains + Quellen der KI-Übersicht
+    var otherDomains = results.map(function (r) { return r.domain; })
+      .concat(aio ? (aio.references || []).map(function (r) { return r.domain; }) : []);
+    var brands = buildBrandIndex(ownDomain, compDomains, otherDomains);
+    function keyOfDomain(d) {
+      var bare = pvBareDomain(d);
+      var b = brands.filter(function (x) { return x.domain === bare; })[0];
+      if (b) return b.key;
+      var hit = brands.filter(function (x) { return countBrandInText(bare, x) > 0; })[0];
+      return hit ? hit.key : bare;
+    }
+    var focus = kvs.focus || null;
+
+    // ---- Links: Google-Ergebnis
+    var stage = document.createElement('div');
+    stage.className = 'cvz-pv-stage';
+    grid.appendChild(stage);
+    stage.innerHTML =
+      '<div class="cvz-pv-stage-bar">' +
+        '<span class="cvz-pv-engine-icon">' + pvFavicon('google.com', 18) + '</span>' +
+        '<span class="cvz-pv-stage-name">Google</span>' +
+        '<span class="cvz-kv-query">' + escapeHtml(kw.keyword || '') + '</span>' +
+      '</div>';
+    var body = document.createElement('div');
+    body.className = 'cvz-pv-chat cvz-kv-body' + (focus ? ' cvz-pv-focus-mode' : '');
+    stage.appendChild(body);
+
+    var brandCounts = {};
+    if (aio && (aio.markdown || (aio.references || []).length)) {
+      var aioBox = document.createElement('div');
+      aioBox.className = 'cvz-kv-aio';
+      aioBox.innerHTML = '<p class="cvz-kv-aio-label">✦ KI-Übersicht</p><div class="cvz-pv-answer cvz-prompt-answer"></div>' +
+        ((aio.references || []).length
+          ? '<p class="cvz-kv-aio-label" style="margin-top:12px;">Quellen der KI-Übersicht</p><div class="cvz-pv-chips">' +
+              aio.references.map(function (r) {
+                var bare = pvBareDomain(r.domain);
+                var k = keyOfDomain(bare);
+                var cls = bare === ownBare ? ' cvz-pv-chip-own' : (compBare.indexOf(bare) !== -1 ? ' cvz-pv-chip-comp' : '');
+                return '<a class="cvz-pv-chip' + cls + (focus === k ? ' cvz-pv-chip-focus' : '') + (focus && focus !== k ? ' cvz-kv-dim' : '') + '" href="' + escapeHtml(r.url || '#') + '" target="_blank" rel="noopener" title="' + escapeHtml(r.title || r.url || '') + '">' +
+                  pvFavicon(bare, 14) + '<span>' + escapeHtml(bare) + '</span></a>';
+              }).join('') + '</div>'
+          : '');
+      body.appendChild(aioBox);
+      var aioText = aioBox.querySelector('.cvz-pv-answer');
+      aioText.innerHTML = renderMarkdownLite(aio.markdown) || '';
+      brandCounts = highlightBrands(aioText, brands, focus);
+    } else if (features.indexOf('ai_overview') !== -1) {
+      var aioNote = document.createElement('div');
+      aioNote.className = 'cvz-kv-aio cvz-kv-aio-empty';
+      aioNote.innerHTML = '<p class="cvz-kv-aio-label">✦ KI-Übersicht</p><p class="cvz-pv-muted" style="margin:0;">Google zeigt hier eine KI-Übersicht. ' +
+        'Ihren Inhalt speichert der Tracker ab dem nächsten SERP-Check.</p>';
+      body.appendChild(aioNote);
+    }
+
+    if (results.length) {
+      var list = document.createElement('ol');
+      list.className = 'cvz-kv-results';
+      results.forEach(function (r, i) {
+        var bare = pvBareDomain(r.domain);
+        var k = keyOfDomain(bare);
+        var isOwn = bare === ownBare, isComp = compBare.indexOf(bare) !== -1;
+        var li = document.createElement('li');
+        li.className = 'cvz-kv-result' + (isOwn ? ' cvz-kv-result-own' : '') + (isComp ? ' cvz-kv-result-comp' : '') +
+          (focus === k ? ' cvz-kv-result-focus' : '') + (focus && focus !== k ? ' cvz-kv-dim' : '');
+        li.innerHTML =
+          '<span class="cvz-kv-rank">' + escapeHtml(r.rank || (i + 1)) + '</span>' +
+          '<div class="cvz-kv-result-main">' +
+            '<p class="cvz-kv-result-site">' + pvFavicon(bare, 16) + '<span>' + escapeHtml(bare) + '</span>' +
+              (isOwn ? '<em class="cvz-kv-tag cvz-kv-tag-own">Eure Seite</em>' : (isComp ? '<em class="cvz-kv-tag">Wettbewerber</em>' : '')) + '</p>' +
+            '<a class="cvz-kv-result-title" href="' + escapeHtml(r.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(r.title || r.url || bare) + '</a>' +
+            (r.description ? '<p class="cvz-kv-result-desc">' + escapeHtml(r.description) + '</p>' : '') +
+          '</div>';
+        list.appendChild(li);
+      });
+      body.appendChild(list);
+    } else {
+      var none = document.createElement('div');
+      none.className = 'cvz-pv-empty';
+      none.textContent = checkedAt ? 'Keine organischen Ergebnisse gespeichert.' : 'Dieses Keyword wurde noch nicht bei Google geprüft. Das passiert mit dem nächsten Monatslauf.';
+      body.appendChild(none);
+    }
+
+    // ---- Rechts
+    var side = document.createElement('div');
+    side.className = 'cvz-pv-side';
+    grid.appendChild(side);
+    function card(title, html) {
+      var c = document.createElement('div');
+      c.className = 'cvz-pv-card';
+      c.innerHTML = '<p class="cvz-pv-card-title">' + title + '</p>' + html;
+      side.appendChild(c);
+      return c;
+    }
+
+    // Wer steht hier: Domains aus Top 10 und KI-Übersicht, zusammengefasst je Anbieter
+    var who = {};
+    results.forEach(function (r, i) {
+      var k = keyOfDomain(r.domain);
+      var w = who[k] || (who[k] = { key: k, domain: pvBareDomain(r.domain), ranks: [], aio: false, aioText: 0 });
+      w.ranks.push(r.rank || (i + 1));
+    });
+    if (aio) (aio.references || []).forEach(function (r) {
+      var k = keyOfDomain(r.domain);
+      var w = who[k] || (who[k] = { key: k, domain: pvBareDomain(r.domain), ranks: [], aio: false, aioText: 0 });
+      w.aio = true;
+    });
+    Object.keys(brandCounts).forEach(function (k) {
+      var b = brands.filter(function (x) { return x.key === k; })[0];
+      var w = who[k] || (who[k] = { key: k, domain: b ? b.domain : k, ranks: [], aio: false, aioText: 0 });
+      w.aioText = brandCounts[k].count;
+    });
+    var whoList = Object.keys(who).map(function (k) { return who[k]; });
+    whoList.sort(function (a, b) {
+      var own = (pvBareDomain(b.domain) === ownBare) - (pvBareDomain(a.domain) === ownBare);
+      if (own) return own;
+      var ar = a.ranks.length ? Math.min.apply(null, a.ranks) : 99, br = b.ranks.length ? Math.min.apply(null, b.ranks) : 99;
+      return (b.aio - a.aio) || (ar - br);
+    });
+    card('Wer hier steht', whoList.length
+      ? '<div class="cvz-pv-chips">' + whoList.map(function (w) {
+          var cls = pvBareDomain(w.domain) === ownBare ? ' cvz-pv-chip-own' : (compBare.indexOf(pvBareDomain(w.domain)) !== -1 ? ' cvz-pv-chip-comp' : '');
+          var badges = [];
+          if (w.ranks.length) badges.push('#' + w.ranks.join(', #'));
+          if (w.aio || w.aioText) badges.push('✦');
+          var tip = [w.ranks.length ? 'Platz ' + w.ranks.join(' und ') + ' in den Ergebnissen' : '',
+            w.aio ? 'Quelle der KI-Übersicht' : '', w.aioText ? w.aioText + '× im Text der KI-Übersicht genannt' : '']
+            .filter(Boolean).join(', ') + '. Klicken markiert die Stellen.';
+          return '<button type="button" class="cvz-pv-chip cvz-pv-chip-btn' + cls + (focus === w.key ? ' cvz-pv-chip-focus' : '') + '" data-cvz-kv-brand="' + escapeHtml(w.key) + '" title="' + escapeHtml(tip) + '" aria-pressed="' + (focus === w.key) + '">' +
+            pvFavicon(w.domain, 14) + '<span>' + escapeHtml(w.domain) + '</span><b>' + escapeHtml(badges.join(' ')) + '</b></button>';
+        }).join('') + '</div>' +
+        '<p class="cvz-pv-muted"># = Platz in den Ergebnissen, ✦ = in der KI-Übersicht.' + (focus ? ' Nochmal klicken hebt die Markierung auf.' : '') + '</p>'
+      : '<p class="cvz-pv-muted" style="margin-top:0;">Noch keine Ergebnisse gespeichert.</p>');
+
+    if (features.length) {
+      card('Was Google sonst zeigt', '<div class="cvz-pv-chips">' + features.filter(function (f) { return f !== 'organic'; }).map(function (f) {
+        var risk = SERP_ZERO_CLICK_FEATURE_TYPES.indexOf(f) !== -1;
+        return '<span class="cvz-pv-chip' + (risk ? ' cvz-pv-chip-comp' : '') + '"' + (risk ? ' title="Beantwortet die Suche oft direkt, weniger Klicks auf Ergebnisse"' : '') + '><span>' +
+          escapeHtml(SERP_FEATURE_LABELS[f] || f) + '</span></span>';
+      }).join('') + '</div>' +
+      (features.some(function (f) { return SERP_ZERO_CLICK_FEATURE_TYPES.indexOf(f) !== -1; })
+        ? '<p class="cvz-pv-muted">Gelb: Elemente, die die Suche oft direkt beantworten. Weniger Klicks auf die Ergebnisse darunter.</p>' : ''));
+    }
+
+    // GSC-Verlauf (Tageswerte)
+    var gscKey = gscHistoryKey(state.activeTopicId, kw.keyword);
+    if (gscKey in state.gscHistoryCache || state.loadingGscHistory[gscKey]) {
+      var gscCard = card('Google Search Console', '');
+      var rolling = state.gscHistoryCache[gscKey];
+      if (rolling && rolling.points && rolling.points.length) {
+        gscCard.appendChild(renderGscRollingBlock(rolling, state.activeTopicId, { compact: true }));
+      } else {
+        gscCard.insertAdjacentHTML('beforeend', '<p class="cvz-pv-muted" style="margin-top:0;">' +
+          (state.loadingGscHistory[gscKey] ? 'Verlauf wird geladen …' : 'Noch keine Tageswerte für diese Suchanfrage.') + '</p>');
+      }
+    }
+
+    if (kw.id && kw.source !== 'gsc_near_miss') {
+      card('Journey-Phase' + (kw.phase_manually_set ? ' (von euch gesetzt)' : ''),
+        '<div class="cvz-pv-chips">' + PHASE_ORDER.map(function (phase) {
+          return '<button type="button" class="cvz-persona-chip' + (kw.messymiddle_phase === phase ? ' cvz-persona-chip-active' : '') + '" ' +
+            'data-cvz-keyword-phase-set="' + phase + '" data-cvz-keyword-phase-id="' + escapeHtml(kw.id) + '">' + escapeHtml(PHASE_LABELS[phase]) + '</button>';
+        }).join('') + '</div>');
+    }
+
+    var linked = (detail.changelog || []).filter(function (e) { return (e.linked_search_query_ids || []).indexOf(kw.id) !== -1; });
+    if (linked.length) {
+      card('Verknüpfte Änderungen', linked.map(function (e) {
+        var delta = (e.keyword_deltas || {})[kw.id];
+        var arrow = delta === 'up' ? ' ▲ besser' : (delta === 'down' ? ' ▼ schlechter' : '');
+        return '<p class="cvz-pv-muted">' + escapeHtml(formatRelativeTime(e.created_at)) + ': ' + escapeHtml(e.entry_text) + escapeHtml(arrow) + '</p>';
+      }).join(''));
+    }
+
+    root.innerHTML = '';
+    root.appendChild(backdrop);
+    if (kvs.scrollToFocus) {
+      kvs.scrollToFocus = false;
+      scrollToFocusedBrand(root);
+    }
+  }
+
+  // Liste der aktuell sichtbaren Zeilen, für ‹ › in der Ansicht
+  function collectRowIds(attr, scopeEl) {
+    var scope = scopeEl || document.getElementById('cvz-visibility-app');
+    if (!scope) return [];
+    var ids = [];
+    scope.querySelectorAll('[' + attr + ']').forEach(function (el) {
+      var id = el.getAttribute(attr);
+      if (id && ids.indexOf(id) === -1) ids.push(id);
+    });
+    return ids;
+  }
 
   function computePhaseRollup(prompts) {
     return PHASE_ORDER.map(function (phase) {
@@ -8911,6 +9377,7 @@
       tr.className = 'cvz-gsc-row-clickable';
       tr.setAttribute('data-cvz-gsc-toggle', rowId);
       tr.setAttribute('data-cvz-gsc-text', row.query);
+      if (row.id) tr.setAttribute('data-cvz-kv-open', row.id);
       var pageUrlHtml = row.page_url
         ? '<a href="' + escapeHtml(row.page_url) + '" target="_blank" rel="noopener" class="cvz-gsc-page-url" title="' + escapeHtml(row.page_url) + '">' +
             escapeHtml(row.page_url.replace(/^https?:\/\/[^\/]+/, '').slice(0, 40) || '/') + '</a>'
@@ -11251,6 +11718,13 @@
       '.cvz-pv-answer { font-size: 15px; line-height: 1.65; }' +
       '.cvz-pv-answer a { color: var(--pv-teal); }' +
       'mark.cvz-pv-mark-own { background: rgba(79,209,197,.22); color: inherit; box-shadow: inset 0 -2px 0 var(--pv-teal); padding: 0 2px; }' +
+      'mark.cvz-pv-mark-other { background: transparent; color: inherit; box-shadow: inset 0 -1px 0 rgba(139,152,165,.7); padding: 0 1px; }' +
+      '.cvz-pv-focus-mode mark:not(.cvz-pv-mark-focus) { background: transparent; box-shadow: none; }' +
+      'mark.cvz-pv-mark-focus { background: #e6edf3 !important; color: #0d1117 !important; box-shadow: none !important; padding: 0 3px; outline: 2px solid var(--pv-teal); }' +
+      '.cvz-pv-chip-btn { cursor: pointer; font-family: inherit; }' +
+      '.cvz-pv-chip-btn:hover { border-color: var(--pv-text); }' +
+      '.cvz-pv-chip-focus { background: #e6edf3; color: #0d1117; border-color: #e6edf3; }' +
+      '.cvz-pv-chip-focus b { color: #0d1117; }' +
       'mark.cvz-pv-mark-comp { background: rgba(224,164,88,.18); color: inherit; box-shadow: inset 0 -2px 0 var(--pv-amber); padding: 0 2px; }' +
       '.cvz-pv-strip { border-top: 1px solid var(--pv-border); padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 8px; }' +
       '.cvz-pv-strip-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--pv-muted); }' +
@@ -11281,6 +11755,27 @@
       '.cvz-pv-chip-comp { border-color: rgba(224,164,88,.6); }' +
       '.cvz-pv-chip-query span { white-space: normal; }' +
       '.cvz-pv-chip img { flex-shrink: 0; }' +
+      '.cvz-pv-pill { font-size: 13px; padding: 4px 10px; border: 1px solid var(--pv-border); background: var(--pv-raised); }' +
+      '.cvz-pv-pill.cvz-pv-ok { border-color: var(--pv-teal); color: var(--pv-teal); }' +
+      '.cvz-kv-query { flex: 1; min-width: 0; font-size: 13px; padding: 5px 10px; border: 1px solid var(--pv-border); background: var(--pv-bg); color: var(--pv-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }' +
+      '.cvz-kv-body { padding: 16px; }' +
+      '.cvz-kv-aio { border: 1px solid var(--pv-border); border-left: 3px solid #8878ca; background: var(--pv-card); padding: 14px 16px; margin-bottom: 18px; }' +
+      '.cvz-kv-aio-empty { border-left-color: var(--pv-border); }' +
+      '.cvz-kv-aio-label { margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #a99be0; }' +
+      '.cvz-kv-aio .cvz-pv-answer { font-size: 14px; }' +
+      '.cvz-kv-results { list-style: none; margin: 0; padding: 0; }' +
+      '.cvz-kv-result { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 12px 10px; border-bottom: 1px solid var(--pv-border); border-left: 3px solid transparent; transition: opacity .15s; }' +
+      '.cvz-kv-result-own { border-left-color: var(--pv-teal); background: rgba(79,209,197,.06); }' +
+      '.cvz-kv-result-comp { border-left-color: rgba(224,164,88,.7); }' +
+      '.cvz-kv-result-focus { background: rgba(230,237,243,.08); outline: 1px solid var(--pv-text); }' +
+      '.cvz-kv-dim { opacity: .35; }' +
+      '.cvz-kv-rank { font-family: "Syne", sans-serif; font-size: 18px; font-weight: 700; color: var(--pv-muted); text-align: center; line-height: 1.4; }' +
+      '.cvz-kv-result-site { display: flex; align-items: center; gap: 6px; margin: 0 0 3px; font-size: 12px; color: var(--pv-muted); }' +
+      '.cvz-kv-tag { font-style: normal; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border: 1px solid rgba(224,164,88,.6); color: var(--pv-amber); }' +
+      '.cvz-kv-tag-own { border-color: var(--pv-teal); color: var(--pv-teal); }' +
+      '.cvz-kv-result-title { display: block; font-size: 15px; font-weight: 600; color: var(--pv-text); text-decoration: none; line-height: 1.35; }' +
+      '.cvz-kv-result-title:hover { color: var(--pv-teal); }' +
+      '.cvz-kv-result-desc { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--pv-muted); }' +
       '.cvz-pv-muted { margin: 8px 0 0; font-size: 12px; color: var(--pv-muted); line-height: 1.45; }' +
       '.cvz-pv-empty { padding: 40px 16px; text-align: center; color: var(--pv-muted); }' +
       '@media (max-width: 860px) {' +
