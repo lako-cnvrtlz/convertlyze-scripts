@@ -104,6 +104,13 @@
     phaseTrendWeeksByTopic: {},
     phaseTrendCache: {},
     phaseTrendChannelByTopic: {},
+    // NEU (21.10.2026): Kanal-Umschalter oben im Thema ('all' | 'chat_gpt' | 'gemini').
+    // Gilt für Situation, Journey, Wettbewerb und Verlauf gleichzeitig.
+    activeChannel: 'all',
+    // NEU (21.10.2026): Verlauf-Tab, gewählte Phase ('total' = alle Phasen) und
+    // ob die Wochentabelle aufgeklappt ist.
+    rollingPhaseByTopic: {},
+    rollingTableOpen: {},
     isLoadingPhaseTrend: {},
     // NEU (25.09.2026, Kundenwunsch): welche Domains in der Wettbewerbs-
     // vergleichs-Grafik gerade ausgeblendet sind. Nur für die Sitzung (kein
@@ -182,6 +189,10 @@
     isLoadingVisibilityTrend: false,
     gscRankHistoryCache: {},
     loadingGscRankHistory: {},
+    // NEU (21.10.2026): GSC-Verlauf aus Tageswerten (main.py: /gsc-history),
+    // Schlüssel: topicId + '|' + Suchanfrage (leer = ganzes Thema)
+    gscHistoryCache: {},
+    loadingGscHistory: {},
     expandedGscRowId: null,
     expandedOppId: null,
     // NEU (16.09.2026): Journey-Map-Tab
@@ -253,6 +264,9 @@
     delete state.visibilityTrendCache[topicId];
     delete state.monthlyOverviewTrendCache[topicId];
     delete state.topicRankHistoryCache[topicId];
+    Object.keys(state.gscHistoryCache).forEach(function (k) {
+      if (k.indexOf(topicId + '|') === 0) delete state.gscHistoryCache[k];
+    });
     delete state.citationTrendCache[topicId];
     delete state.buyingCenterCache[topicId];
     // NEU (06.10.2026): Fan-out-Cache (Schlüssel topicId|weeks) und Fehler des Themas verwerfen.
@@ -274,19 +288,13 @@
         state.activeSubTab === 'journey' || state.activeSubTab === 'wettbewerb') {
       maybeLoadBuyingCenter(topicId);
     }
-    if (state.activeSubTab === 'situation') {
-      maybeLoadVisibilityTrend(topicId);
-      maybeLoadTopicRankHistory(topicId);
-      maybeLoadMonthlyOverviewTrend(topicId);
+    // GEÄNDERT (21.10.2026): visibility-trend, monthly-overview-trend und die
+    // Rang-Historie des Themas werden nicht mehr geladen. Die Grafiken dazu
+    // gibt es nicht mehr, die Abfragen liefen trotzdem bei jedem Aufruf.
+    if (state.activeSubTab === 'situation' || state.activeSubTab === 'journey' ||
+        state.activeSubTab === 'wettbewerb' || state.activeSubTab === 'verlauf') {
       maybeLoadDashboardData(topicId);
       maybeLoadContentChanges(topicId);
-    }
-    if (state.activeSubTab === 'journey' || state.activeSubTab === 'wettbewerb' || state.activeSubTab === 'verlauf') {
-      maybeLoadDashboardData(topicId);
-      maybeLoadContentChanges(topicId);
-    }
-    if (state.activeSubTab === 'verlauf') {
-      maybeLoadVisibilityTrend(topicId);
     }
     // NEU (06.10.2026): Fan-out-Queries nur laden, wenn der Unterbereich offen ist.
     if (state.activeSubTab === 'daten' && state.activeDataView === 'fanout') {
@@ -505,15 +513,15 @@
     var paramTab = new URLSearchParams(window.location.search).get('cvz_tab');
     if (paramTab) state.activeSubTab = paramTab;
     // NEU (06.10.2026): Unterbereich im Tab "Daten" aus der URL (cvz_view).
+    // NEU (21.10.2026): Kanal aus der URL (cvz_channel).
+    var paramChannel = new URLSearchParams(window.location.search).get('cvz_channel');
+    if (paramChannel === 'chat_gpt' || paramChannel === 'gemini') state.activeChannel = paramChannel;
     var paramView = new URLSearchParams(window.location.search).get('cvz_view');
     if (paramView && isValidDataView(paramView)) state.activeDataView = paramView;
 
     var paramTopicId = new URLSearchParams(window.location.search).get('cvz_topic');
     if (paramTopicId && getTopicById(paramTopicId)) {
       await openTopicDetail(paramTopicId, false);
-      if (state.activeSubTab === 'wettbewerber') {
-        maybeLoadCitationTrend(paramTopicId);
-      }
       return;
     }
 
@@ -722,6 +730,8 @@
     var data = await apiFetch('/projects/' + projectId + '/dashboard');
     return {
       trend: data.trend || [],
+      // NEU (21.10.2026): gleitender Verlauf und Tabelle pro Thema (main.py: _get_domain_rolling)
+      rolling: data.rolling || null,
       opportunities: data.opportunities || [],
       contentIdeas: data.content_ideas || [],
     };
@@ -965,6 +975,28 @@
     return data.snapshots || [];
   }
 
+  function gscHistoryKey(topicId, keyword) {
+    return topicId + '|' + (keyword || '').trim().toLowerCase();
+  }
+
+  async function maybeLoadGscHistory(topicId, keyword) {
+    if (!topicId || CONFIG.useMockData) return;
+    var key = gscHistoryKey(topicId, keyword);
+    if (key in state.gscHistoryCache || state.loadingGscHistory[key]) return;
+    state.loadingGscHistory[key] = true;
+    render();
+    try {
+      var data = await apiFetch('/topics/' + topicId + '/gsc-history' +
+        (keyword ? '?keyword=' + encodeURIComponent(keyword) : ''));
+      state.gscHistoryCache[key] = (data && data.rolling) || null;
+    } catch (e) {
+      console.error('[CVZ Visibility] GSC-Verlauf konnte nicht geladen werden:', e);
+      state.gscHistoryCache[key] = null;
+    }
+    state.loadingGscHistory[key] = false;
+    render();
+  }
+
   async function maybeLoadTopicRankHistory(topicId) {
     if (!topicId || state.topicRankHistoryCache[topicId]) return;
     state.isLoadingTopicRankHistory = true;
@@ -1040,6 +1072,7 @@
       return;
     }
     state.expandedGscRowId = rowId;
+    maybeLoadGscHistory(topicId, keywordText);
     if (!state.gscRankHistoryCache[rowId]) {
       state.loadingGscRankHistory[rowId] = true;
       render();
@@ -2103,19 +2136,10 @@
       if ((newTab === 'situation' || newTab === 'daten' || newTab === 'journey' || newTab === 'wettbewerb') && state.activeView === 'topic-detail') {
         maybeLoadBuyingCenter(state.activeTopicId);
       }
-      if (newTab === 'situation' && state.activeView === 'topic-detail') {
-        maybeLoadVisibilityTrend(state.activeTopicId);
-        maybeLoadTopicRankHistory(state.activeTopicId);
-        maybeLoadMonthlyOverviewTrend(state.activeTopicId);
+      if ((newTab === 'situation' || newTab === 'journey' || newTab === 'wettbewerb' || newTab === 'verlauf') &&
+          state.activeView === 'topic-detail') {
         maybeLoadDashboardData(state.activeTopicId);
         maybeLoadContentChanges(state.activeTopicId);
-      }
-      if ((newTab === 'journey' || newTab === 'wettbewerb' || newTab === 'verlauf') && state.activeView === 'topic-detail') {
-        maybeLoadDashboardData(state.activeTopicId);
-        maybeLoadContentChanges(state.activeTopicId);
-      }
-      if (newTab === 'verlauf' && state.activeView === 'topic-detail') {
-        maybeLoadVisibilityTrend(state.activeTopicId);
       }
       // NEU (02.10.2026): Änderungen und Events stehen jetzt im Aktionsplan.
       if (newTab === 'aktionsplan' && state.activeView === 'topic-detail') {
@@ -2153,6 +2177,25 @@
 
     // NEU (25.09.2026, Kundenwunsch): Zeitraum-Presets (4/12/26 Wochen) für
     // "Sichtbarkeits-Verlauf pro Phase".
+    // NEU (21.10.2026): Kanal-Umschalter (Gesamt / ChatGPT / Gemini).
+    var channelBtn = event.target.closest('[data-cvz-channel]');
+    if (channelBtn) {
+      var newChannel = channelBtn.getAttribute('data-cvz-channel');
+      state.activeChannel = newChannel;
+      updateUrlParams({ cvz_channel: newChannel === 'all' ? null : newChannel });
+      render();
+      return;
+    }
+
+    // NEU (21.10.2026): Phase im Verlauf-Tab.
+    var rollingPhaseBtn = event.target.closest('[data-cvz-rolling-phase]');
+    if (rollingPhaseBtn) {
+      state.rollingPhaseByTopic[rollingPhaseBtn.getAttribute('data-cvz-rolling-topic')] =
+        rollingPhaseBtn.getAttribute('data-cvz-rolling-phase');
+      render();
+      return;
+    }
+
     var weeksPresetBtn = event.target.closest('[data-cvz-phase-trend-weeks]');
     if (weeksPresetBtn) {
       var weeksTopicId = weeksPresetBtn.getAttribute('data-cvz-phase-trend-topic');
@@ -4041,7 +4084,7 @@
       // GEÄNDERT (02.10.2026): positiv formuliert (Zweck statt Einschränkung).
       // Die kleine Fragenzahl je Zelle bleibt über die Zählweise "x von y"
       // sichtbar, wird aber nicht mehr als Schwäche benannt.
-      'Jede Zelle zeigt, bei wie vielen Fragen dieser Rolle in dieser Phase eure Domain in mindestens einer KI-Antwort zitiert wurde, zum Beispiel 1 von 2. ' +
+      'Jede Zelle zeigt, bei wie vielen Fragen dieser Rolle in dieser Phase eure Domain in den letzten 28 Tagen in mindestens einer KI-Antwort zitiert wurde, zum Beispiel 1 von 2. ' +
       'So seht ihr auf einen Blick, für welche Rolle in welcher Phase passender Content fehlt: Zellen mit 0 sind die ersten Kandidaten für neue Inhalte. ' +
       'Rollen, die später in den Kaufprozess einsteigen, werden erst ab ihrer Einstiegsphase gemessen.'
     ));
@@ -4103,9 +4146,12 @@
         if ((p.role_id || null) !== roleKey) return;
         if (phase && (p.messymiddle_phase || p.phase) !== phase) return;
         n++;
-        if ((p.total_runs || 0) > 0) {
+        // GEÄNDERT (21.10.2026): letzte 28 Tage, gewählter Kanal. Vorher alle
+        // Läufe seit Start: Eine Zelle, die einmal grün war, blieb es für immer.
+        var ps = promptStats(p);
+        if (ps.total > 0) {
           measured++;
-          if ((p.cited_count || 0) > 0) cited++;
+          if (ps.cited > 0) cited++;
         }
       });
       return { n: n, measured: measured, cited: cited };
@@ -4174,8 +4220,8 @@
 
     var caption = document.createElement('p');
     caption.className = 'cvz-chart-caption';
-    caption.textContent = 'Anteil der Fragen, bei denen eure Domain in mindestens einer ChatGPT- oder Gemini-Antwort zitiert wurde, je Rolle und Journey-Phase. ' +
-      'Rot: bisher bei keiner Frage zitiert. „Steigt später ein“: Die Rolle recherchiert erst ab ihrer Einstiegsphase mit, änderbar unter „Rollen bearbeiten“. ' +
+    caption.textContent = 'Anteil der Fragen, bei denen eure Domain in den letzten 28 Tagen in mindestens einer Antwort (' + activeChannelLabel() + ') zitiert wurde, je Rolle und Journey-Phase. ' +
+      'Rot: in diesem Zeitraum bei keiner Frage zitiert. „Steigt später ein“: Die Rolle recherchiert erst ab ihrer Einstiegsphase mit, änderbar unter „Rollen bearbeiten“. ' +
       '„Nicht gemessen“: Der Prompt für diese Zelle fehlt noch (z. B. keine freien Plätze), über „+ Prompt“ legt ihr ihn selbst an.';
     section.appendChild(caption);
 
@@ -4231,9 +4277,10 @@
     var contentIdeas = live ? live.contentIdeas.slice() : [];
 
     var trend = live ? live.trend : null;
+    var rolling = live ? (live.rolling || null) : null;
 
     return {
-      topics: topics, opportunities: opportunities, contentIdeas: contentIdeas, trend: trend,
+      topics: topics, opportunities: opportunities, contentIdeas: contentIdeas, trend: trend, rolling: rolling,
     };
   }
 
@@ -4277,7 +4324,12 @@
       default:
         if (CONFIG.useMockData) {
           tabContent.appendChild(renderTrendChart(MOCK_DOMAIN_TREND[project.id]));
+        } else if (data.rolling || state.isLoadingDomainDashboard) {
+          // NEU (21.10.2026): gleitender 28-Tage-Verlauf mit Kanal-Umschalter und Tabelle pro Thema
+          tabContent.appendChild(renderChannelSwitch());
+          tabContent.appendChild(renderDomainRollingSection(data.rolling, state.isLoadingDomainDashboard));
         } else {
+          // Rückfall für ein Backend ohne "rolling"
           tabContent.appendChild(renderDomainTrendChart(data.trend, state.isLoadingDomainDashboard));
         }
         tabContent.appendChild(renderDomainOpportunitySection(data.opportunities));
@@ -4286,6 +4338,182 @@
     }
 
     wrap.appendChild(tabContent);
+    return wrap;
+  }
+
+  // =========================================================================
+  // NEU (21.10.2026): Domain-Übersicht, gleitender Verlauf + Tabelle pro Thema
+  // =========================================================================
+  // Der Domain-Wert ist der Mittelwert der Themen (jedes Thema zählt gleich),
+  // nicht aller Antworten zusammen. Sonst bestimmt das Thema mit den meisten
+  // Prompts die Linie. Details: main.py, _get_domain_rolling.
+  function renderDomainRollingSection(rolling, isLoading) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'KI-Sichtbarkeit der Domain';
+    head.appendChild(heading);
+    head.appendChild(makeTip(
+      'Durchschnitt der Zitierraten aller aktiven Themen dieser Domain, jedes Thema zählt gleich viel. ' +
+      'Jeder Punkt fasst die letzten 28 Tage zusammen, ein Punkt pro Woche. ' +
+      'Ein Thema fließt in einen Punkt nur ein, wenn es dort genug Antworten hat. ' +
+      'Das schattierte Band zeigt, wie weit der Wert allein durch Zufall schwanken kann.'
+    ));
+    section.appendChild(head);
+
+    if (isLoading && !rolling) {
+      var l = document.createElement('p');
+      l.className = 'cvz-card-placeholder-text';
+      l.innerHTML = '<span class="cvz-spinner"></span>Verlauf wird geladen …';
+      section.appendChild(l);
+      return section;
+    }
+    if (!rolling || !rolling.points || !rolling.points.length) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = 'Noch kein Verlauf verfügbar. Der erste Punkt erscheint eine Woche nach der ersten Messung.';
+      section.appendChild(none);
+      return section;
+    }
+
+    var ch = activeChannel();
+    var points = rolling.points;
+    var complete = points.map(function (pt) { return !!pt.complete; });
+    var xLabels = points.map(function (pt) { return (formatShortDate(pt.end) || pt.end).slice(0, 6); });
+
+    function lineFor(key, label, width, withBand) {
+      var s = (rolling.series || {})[key] || [];
+      return {
+        label: label,
+        color: CHANNEL_LINE_COLORS[key],
+        width: width,
+        values: s.map(function (p) { return p && p.rate != null ? p.rate : null; }),
+        band: withBand ? s.map(function (p) { return p && p.rate != null ? { low: p.low, high: p.high } : null; }) : null,
+        tips: s.map(function (p) { return p ? p.topics + (p.topics === 1 ? ' Thema' : ' Themen') : ''; }),
+      };
+    }
+    var lines = ch === 'all'
+      ? [lineFor('all', 'Gesamt', 3, true), lineFor('chat_gpt', 'ChatGPT', 1.5, false), lineFor('gemini', 'Gemini', 1.5, false)]
+      : [lineFor(ch, CHANNEL_LABELS[ch] || ch, 3, true)];
+
+    // Kopfzahl: letzter Punkt
+    var last = ((rolling.series || {})[ch] || [])[points.length - 1];
+    var summary = document.createElement('div');
+    summary.className = 'cvz-card cvz-rolling-summary';
+    var main = document.createElement('div');
+    main.className = 'cvz-rolling-summary-main';
+    var val = document.createElement('span');
+    val.className = 'cvz-sit-tile-value' + (!last || last.rate == null ? ' cvz-journey-nodata' : '');
+    val.textContent = last && last.rate != null ? fmtPct(last.rate) : 'k. A.';
+    main.appendChild(val);
+    summary.appendChild(main);
+    var meta = document.createElement('p');
+    meta.className = 'cvz-sit-tile-meta';
+    meta.textContent = last && last.rate != null
+      ? 'Durchschnitt über ' + last.topics + (last.topics === 1 ? ' Thema' : ' Themen') + ', letzte ' + rolling.window_days +
+        ' Tage (' + activeChannelLabel() + '). Schwankungsbereich ' + fmtPct(last.low) + ' bis ' + fmtPct(last.high) + '.'
+      : 'Für die letzten ' + rolling.window_days + ' Tage liegen noch zu wenige Antworten vor.';
+    summary.appendChild(meta);
+    section.appendChild(summary);
+
+    var hasAny = lines.some(function (ln) { return ln.values.some(function (v) { return v != null; }); });
+    if (hasAny) {
+      var maxVal = 0;
+      lines.forEach(function (ln) {
+        ln.values.forEach(function (v) { if (v != null && v > maxVal) maxVal = v; });
+        (ln.band || []).forEach(function (b) { if (b && b.high > maxVal) maxVal = b.high; });
+      });
+      var card = document.createElement('div');
+      card.className = 'cvz-card';
+      card.style.marginTop = '10px';
+      card.innerHTML = buildRollingSvg(lines, xLabels, complete, { maxY: niceChartMax(maxVal) });
+      section.appendChild(card);
+      var legend = document.createElement('div');
+      legend.className = 'cvz-chart-legend';
+      legend.innerHTML = lines.map(function (ln) {
+        return '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background:' + ln.color + '"></span>' + escapeHtml(ln.label) + '</span>';
+      }).join('') +
+        '<span class="cvz-chart-legend-item"><span style="display:inline-block;width:14px;height:8px;background:' + lines[0].color + ';opacity:.25;"></span>Schwankungsbereich</span>' +
+        (complete.indexOf(false) !== -1 ? '<span class="cvz-chart-legend-item">- - Aufbauphase</span>' : '');
+      section.appendChild(legend);
+    }
+
+    section.appendChild(renderDomainTopicTable(rolling, ch));
+    return section;
+  }
+
+  function renderDomainTopicTable(rolling, ch) {
+    var wrap = document.createElement('div');
+    wrap.style.marginTop = '18px';
+    var label = document.createElement('p');
+    label.className = 'cvz-changelog-guided-label';
+    label.textContent = 'Themen im Vergleich (letzte ' + rolling.window_days + ' Tage)';
+    wrap.appendChild(label);
+
+    var topics = rolling.topics || [];
+    if (!topics.length) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = 'Keine aktiven Themen.';
+      wrap.appendChild(none);
+      return wrap;
+    }
+
+    var cfg = { windowDays: rolling.window_days, minAnswers: 15, minDeltaPp: 3 };
+    var cols = [['all', 'Gesamt'], ['chat_gpt', 'ChatGPT'], ['gemini', 'Gemini']];
+    var table = document.createElement('table');
+    table.className = 'cvz-table cvz-table-clickable';
+    table.style.minWidth = '560px';
+    table.innerHTML = '<thead><tr><th>Thema</th>' + cols.map(function (c) {
+      return '<th style="width:150px;' + (ch === c[0] ? 'color:var(--cvz-teal);' : '') + '">' + c[1] + '</th>';
+    }).join('') + '</tr></thead>';
+    var tbody = document.createElement('tbody');
+    topics.forEach(function (t) {
+      var tr = document.createElement('tr');
+      tr.setAttribute('data-cvz-topic-id', t.topic_id);
+      var nameTd = document.createElement('td');
+      nameTd.textContent = t.name || '–';
+      tr.appendChild(nameTd);
+      cols.forEach(function (c) {
+        var e = (t.channels || {})[c[0]] || {};
+        var td = document.createElement('td');
+        if (ch === c[0]) td.style.background = 'rgba(79,209,197,.06)';
+        if (!e.total) {
+          td.innerHTML = '<span class="cvz-journey-nodata">k. A.</span>';
+        } else {
+          var row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;gap:6px;';
+          var v = document.createElement('strong');
+          v.textContent = fmtPct(e.score);
+          row.appendChild(v);
+          var badge = renderJourneyTrendBadge(e, 'own', cfg);
+          if (badge && e.trend !== 'insufficient') row.appendChild(badge);
+          td.appendChild(row);
+          var n = document.createElement('div');
+          n.className = 'cvz-rolling-split-n';
+          n.textContent = e.cited + ' von ' + e.total;
+          td.appendChild(n);
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    var scroll = document.createElement('div');
+    scroll.className = 'cvz-table-scroll';
+    scroll.appendChild(table);
+    wrap.appendChild(scroll);
+
+    var note = document.createElement('p');
+    note.className = 'cvz-chart-caption';
+    note.textContent = 'Anteil der Antworten, die eure Domain als Quelle nennen. Pfeile erscheinen nur bei Veränderungen gegenüber den ' +
+      rolling.window_days + ' Tagen davor, die größer sind als die normale Schwankung. Zeile anklicken öffnet das Thema.';
+    wrap.appendChild(note);
     return wrap;
   }
 
@@ -4660,6 +4888,12 @@
     }
 
     wrap.appendChild(renderTabNav(TOPIC_TABS, state.activeSubTab));
+
+    // NEU (21.10.2026): Kanal-Umschalter nur in den Tabs, in denen er wirkt.
+    if (CHANNEL_SWITCH_TABS.indexOf(state.activeSubTab) !== -1 ||
+        (state.activeSubTab === 'daten' && state.activeDataView === 'prompts')) {
+      wrap.appendChild(renderChannelSwitch());
+    }
 
     var tabContent = document.createElement('div');
     tabContent.className = 'cvz-tab-content';
@@ -7377,11 +7611,13 @@
         // GEÄNDERT: nutzt die Ampel des Backends (neueste Runde, alle Wiederholungen)
         // statt "jemals in einem Lauf zitiert". Letzteres wird mit mehreren Läufen
         // pro Prompt immer leichter erfüllt und überzeichnet die Sichtbarkeit.
-        var key = (p.total_runs == null || p.total_runs === 0)
+        // GEÄNDERT (21.10.2026): Ampel aus den letzten 28 Tagen, je gewähltem Kanal.
+        var ps = promptStats(p);
+        var key = ps.total === 0
           ? 'unknown'
-          : (p.visibility_status === 'green' || p.visibility_status === 'yellow' || p.visibility_status === 'red'
-              ? p.visibility_status
-              : (p.cited_count > 0 ? 'green' : 'red'));
+          : (ps.status === 'green' || ps.status === 'yellow' || ps.status === 'red'
+              ? ps.status
+              : (ps.cited > 0 ? 'green' : 'red'));
         counts[key] = (counts[key] || 0) + 1;
       });
       return { phase: phase, total: inPhase.length, counts: counts };
@@ -7828,7 +8064,7 @@
         '<th style="width:26px;"></th>' +
         '<th>Prompt</th>' +
         '<th style="width:150px;">Zitierte Quellen</th>' +
-        '<th style="width:150px;">Zitiert</th>' +
+        '<th style="width:150px;">Zitiert (28 Tage)</th>' +
         '<th style="width:170px;">Typ / Rolle</th>' +
         '<th style="width:50px;"></th>' +
       '</tr></thead>';
@@ -7836,12 +8072,15 @@
     var tbody = document.createElement('tbody');
 
     promptsInPhase.forEach(function (prompt) {
-      var dotClass = prompt.visibility_status ? 'cvz-dot-' + prompt.visibility_status : 'cvz-dot-unknown';
-      var statusLabel = prompt.visibility_status ? VISIBILITY_LABELS[prompt.visibility_status] : 'Unbekannt';
-      var citationBadge = (prompt.total_runs !== null && prompt.total_runs !== undefined && prompt.total_runs > 0)
-        ? (prompt.cited_count > 0
-            ? '<span class="cvz-prompt-citation-count">' + prompt.cited_count + '/' + prompt.total_runs + ' zitiert</span>'
-            : '<span class="cvz-prompt-citation-count" style="color:var(--cvz-text-muted,#8b98a5);">nicht sichtbar</span>')
+      // GEÄNDERT (21.10.2026): Ampel und Zahlen aus den letzten 28 Tagen, je gewähltem Kanal.
+      var ps = promptStats(prompt);
+      var dotClass = ps.status ? 'cvz-dot-' + ps.status : 'cvz-dot-unknown';
+      var statusLabel = (ps.status ? VISIBILITY_LABELS[ps.status] : 'Keine Messung') + ' (' + promptWindowLabel(prompt) + ', ' + activeChannelLabel() + ')';
+      var citationTitle = escapeHtml(ps.cited + ' von ' + ps.total + ' Antworten zitieren eure Domain (' + promptWindowLabel(prompt) + ', ' + activeChannelLabel() + ')');
+      var citationBadge = ps.total > 0
+        ? (ps.cited > 0
+            ? '<span class="cvz-prompt-citation-count" title="' + citationTitle + '">' + ps.cited + '/' + ps.total + ' zitiert</span>'
+            : '<span class="cvz-prompt-citation-count" style="color:var(--cvz-text-muted,#8b98a5);" title="' + citationTitle + '">nicht sichtbar</span>')
         : '';
 
       // NEU (18.09.2026): priorisierter Marker fuer Prompts, bei denen die
@@ -8132,6 +8371,21 @@
     // wrap.innerHTML komplett neu, das würde einen bereits angehängten
     // SERP-Block sonst überschreiben.
     var serpHtml = renderSerpSummaryBlock(row);
+
+    // NEU (21.10.2026): gleitender 28-Tage-Verlauf aus GSC-Tageswerten. Die
+    // Monats-Snapshots darunter sind 90-Tage-Durchschnitte und überlappen
+    // stark, sie bleiben nur als Rückfall für Themen ohne Tageswerte.
+    var gscKey = gscHistoryKey(state.activeTopicId, row.query);
+    if (state.loadingGscHistory[gscKey] && !(gscKey in state.gscHistoryCache)) {
+      wrap.innerHTML = serpHtml + '<p class="cvz-card-placeholder-text">L\u00e4dt Verlauf...</p>';
+      return wrap;
+    }
+    var gscRolling = state.gscHistoryCache[gscKey];
+    if (gscRolling && gscRolling.points && gscRolling.points.length) {
+      wrap.innerHTML = serpHtml;
+      wrap.appendChild(renderGscRollingBlock(gscRolling, state.activeTopicId, { compact: true }));
+      return wrap;
+    }
 
     if (state.loadingGscRankHistory[rowId]) {
       wrap.innerHTML = serpHtml + '<p class="cvz-card-placeholder-text">L\u00e4dt Verlauf...</p>';
@@ -8589,6 +8843,17 @@
 
     // Nur aktuell aktive Fragen: deaktivierte Fragen sind keine Arbeitsgrundlage mehr.
     var rows = raw.filter(function (r) { return r.is_active !== false; });
+    // NEU (21.10.2026): bei gewähltem Kanal die Zahlen dieses Kanals (by_channel,
+    // siehe dashboard.py: _compute_prompt_source_matrix). Fragen ohne Lauf in
+    // diesem Kanal fallen weg.
+    var ch = activeChannel();
+    if (ch !== 'all') {
+      rows = rows.map(function (r) {
+        var bc = r.by_channel && r.by_channel[ch];
+        if (!bc) return r;
+        return Object.assign({}, r, { total_runs: bc.total_runs, own_cited_runs: bc.own_cited_runs, domains: bc.domains || {} });
+      }).filter(function (r) { return (r.total_runs || 0) > 0; });
+    }
     if (!rows.length) return null;
 
     // Rollen: Reihenfolge und Namen aus dem Buying Center, falls schon geladen,
@@ -8735,8 +9000,8 @@
     heading.textContent = 'Wer wird zitiert? Quellen und Wettbewerber';
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
-      'Zeigt, welche Domains in den KI-Antworten der letzten 12 Wochen als Quelle auftauchen, und bei welchen Fragen und Rollen. ' +
-      '"Bei 3 von 5 Fragen" heißt: In mindestens einer ChatGPT- oder Gemini-Antwort auf 3 von 5 Fragen wurde die Domain zitiert. ' +
+      'Zeigt, welche Domains in den KI-Antworten der letzten 28 Tage als Quelle auftauchen, und bei welchen Fragen und Rollen. ' +
+      '"Bei 3 von 5 Fragen" heißt: In mindestens einer Antwort auf 3 von 5 Fragen wurde die Domain zitiert. ' +
       'Das ist bewusst keine Prozent-Zitierrate pro Antwort, damit die Zahlen zu "Sichtbarkeit je Rolle" passen. ' +
       'Zeile anklicken, um die Fragen dahinter zu sehen. Fragen mit "Ihr: nicht zitiert" sind die konkreten Content-Lücken.'
     ));
@@ -8857,7 +9122,7 @@
     if (!agg.length) {
       html += '<p class="cvz-card-placeholder-text" style="margin-top:10px;">In dieser Auswahl wurden keine fremden Domains zitiert.</p>';
     }
-    html += '<p class="cvz-sm-foot">Zeitraum: letzte 12 Wochen, nur ChatGPT und Gemini. Typ, Zusammenfassung und Differenzierung ' +
+    html += '<p class="cvz-sm-foot">Zeitraum: letzte ' + ((dashData && dashData.prompt_source_matrix_window_days) || 28) + ' Tage, Kanal: ' + escapeHtml(activeChannelLabel()) + '. Typ, Zusammenfassung und Differenzierung ' +
       'liegen nur für die meistzitierten Domains je Phase vor.</p>';
 
     var box = document.createElement('div');
@@ -8881,7 +9146,7 @@
     heading.textContent = 'Wer wird stattdessen zitiert?';
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
-      'Pro Rolle und Journey-Phase die zwei Domains, die in den KI-Antworten der letzten 12 Wochen bei den meisten Fragen als Quelle genannt wurden. ' +
+      'Pro Rolle und Journey-Phase die zwei Domains, die in den KI-Antworten der letzten 28 Tage bei den meisten Fragen als Quelle genannt wurden. ' +
       '"2/3" heißt: bei 2 von 3 Fragen. Die vollständige Liste mit den Fragen dahinter steht im Tab Wettbewerb.'
     ));
     var link = document.createElement('button');
@@ -9196,6 +9461,9 @@
       delete state.visibilityTrendCache[topicId];
       delete state.monthlyOverviewTrendCache[topicId];
       delete state.topicRankHistoryCache[topicId];
+      Object.keys(state.gscHistoryCache).forEach(function (k) {
+        if (k.indexOf(topicId + '|') === 0) delete state.gscHistoryCache[k];
+      });
 
       render();
       if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
@@ -9805,7 +10073,7 @@
 
   var VERDICT_COLORS = {
     verbessert: '#4ec68a', verschlechtert: '#de5b50', gemischt: '#c98e2a',
-    unveraendert: '#c98e2a', zu_frueh: '#8b98a5', zu_wenig_daten: '#8b98a5',
+    unveraendert: '#c98e2a', zu_frueh: '#8b98a5', zu_wenig_daten: '#8b98a5', nicht_eindeutig: '#8b98a5',
   };
 
   function renderChangeAssessmentSection(detail) {
@@ -10021,6 +10289,26 @@
         'border: 1px solid var(--cvz-border,#30363d); background: transparent; color: var(--cvz-text-muted,#8b98a5); cursor: pointer; }' +
       '.cvz-weeks-preset-btn:hover { border-color: var(--cvz-teal); color: var(--cvz-teal); }' +
       '.cvz-weeks-preset-btn-active { border-color: var(--cvz-teal); color: var(--cvz-teal); background: rgba(13,148,136,.14); }' +
+      // NEU (21.10.2026): Kanal-Umschalter und Verlauf
+      '.cvz-gsc-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }' +
+      '.cvz-gsc-tile { padding: 10px 12px; }' +
+      '.cvz-gsc-tile-value { font-size: 20px; font-weight: 600; }' +
+      '.cvz-channel-switch { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -8px 0 20px; }' +
+      '.cvz-channel-switch-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--cvz-text-muted); }' +
+      '.cvz-channel-switch-group { display: inline-flex; border: 1px solid var(--cvz-border); }' +
+      '.cvz-channel-btn { font-family: "Geist", sans-serif; font-size: 13px; padding: 6px 14px; background: transparent; color: var(--cvz-text-muted); border: none; border-right: 1px solid var(--cvz-border); cursor: pointer; }' +
+      '.cvz-channel-btn:last-child { border-right: none; }' +
+      '.cvz-channel-btn:hover { color: var(--cvz-text); }' +
+      '.cvz-channel-btn-active { color: var(--cvz-navy); background: var(--cvz-teal); font-weight: 600; }' +
+      '.cvz-channel-btn-active:hover { color: var(--cvz-navy); }' +
+      '.cvz-channel-btn:focus-visible { outline: 1px solid var(--cvz-teal); outline-offset: 2px; }' +
+      '.cvz-rolling-summary { padding: 14px 16px; margin-bottom: 4px; }' +
+      '.cvz-rolling-summary-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }' +
+      '.cvz-rolling-split { display: flex; gap: 18px; flex-wrap: wrap; margin: 10px 0 0; font-size: 13px; color: var(--cvz-text); }' +
+      '.cvz-rolling-split .cvz-legend-dot { margin-right: 6px; }' +
+      '.cvz-rolling-split-n { color: var(--cvz-text-muted); font-size: 12px; }' +
+      '.cvz-rolling-weeks { margin-top: 16px; }' +
+      '.cvz-rolling-weeks > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--cvz-teal); padding: 6px 0; }' +
 
       '.cvz-timeline-logo {' +
         'width: 20px; height: 20px; border-radius: 0; border: 1px solid var(--cvz-border);' +
@@ -10675,7 +10963,8 @@
   // Gewichtung: cited_count (wie oft zitiert); fehlt er, zählt jede Domain 1.
   function renderContentTypeByPhase(dashData) {
     if (!dashData || dashData._error || !dashData.share_of_voice) return null;
-    var sov = dashData.share_of_voice;
+    // GEÄNDERT (21.10.2026): gewählter Kanal, letzte 28 Tage (wie Journey-Karten).
+    var sov = journeySourcesForChannel(dashData);
     var LABELS = { exploration: 'Erforschung', evaluation: 'Bewertung', comparison: 'Vergleich', decision: 'Entscheidung' };
     var TYPE_COLORS = ['#4fd1c5', '#c98e2a', '#de5b50', '#8878ca', '#4ec68a', '#5aacd2', '#e8855b', '#a3c97a', '#c97ab5', '#7b8794'];
 
@@ -10754,12 +11043,128 @@
     return section;
   }
 
+  // =========================================================================
+  // NEU (21.10.2026): Kanal-Umschalter (Gesamt / ChatGPT / Gemini)
+  // =========================================================================
+  // Ein Umschalter für das ganze Thema statt einer Auswahl pro Grafik. Sonst
+  // zeigen zwei Grafiken auf derselben Seite unterschiedliche Kanäle.
+  // "Gesamt" ist gepoolt gerechnet (alle Zitierungen / alle Antworten), nicht
+  // der Schnitt der beiden Kanal-Prozente. Google AI Overviews zählen nicht
+  // mit (monatlich, eigener Block).
+  var CHANNEL_FILTERS = [
+    { id: 'all', label: 'Gesamt' },
+    { id: 'chat_gpt', label: 'ChatGPT' },
+    { id: 'gemini', label: 'Gemini' },
+  ];
+  var CHANNEL_SWITCH_TABS = ['situation', 'journey', 'wettbewerb', 'verlauf'];
+  var CHANNEL_LINE_COLORS = { all: '#4fd1c5', chat_gpt: '#5aacd2', gemini: '#8878ca' };
+
+  function activeChannel() {
+    var ch = state.activeChannel;
+    return (ch === 'chat_gpt' || ch === 'gemini') ? ch : 'all';
+  }
+
+  function activeChannelLabel() {
+    var ch = activeChannel();
+    return ch === 'all' ? 'ChatGPT und Gemini' : (CHANNEL_LABELS[ch] || ch);
+  }
+
+  // Kanäle, die in Journey-Karten und Hinweisen angezeigt werden.
+  function visibleChannels() {
+    var ch = activeChannel();
+    return ch === 'all' ? JOURNEY_PERCENT_CHANNELS : [ch];
+  }
+
+  // Quellen pro Phase (28 Tage) für den aktiven Kanal. Fehlt die Aufteilung
+  // (ältere API), wird auf die gemeinsamen Zahlen zurückgegriffen.
+  function journeySourcesForChannel(dashData) {
+    var jc = dashData && dashData.journey_comparison;
+    var ch = activeChannel();
+    if (jc) {
+      if (ch !== 'all' && jc.sources_by_channel && jc.sources_by_channel[ch]) return jc.sources_by_channel[ch];
+      return jc.sources || {};
+    }
+    return shareOfVoiceForChannel(dashData);
+  }
+
+  // Quellen pro Phase (12 Wochen) für den aktiven Kanal.
+  function shareOfVoiceForChannel(dashData) {
+    var ch = activeChannel();
+    if (ch !== 'all' && dashData && dashData.share_of_voice_by_channel && dashData.share_of_voice_by_channel[ch]) {
+      return dashData.share_of_voice_by_channel[ch];
+    }
+    return (dashData && dashData.share_of_voice) || {};
+  }
+
+  // NEU (21.10.2026): Zahlen eines Prompts für den gewählten Kanal, letzte 28
+  // Tage (main.py: _compute_citation_counts_by_prompt). Ältere API ohne
+  // citation_by_channel: die gemeinsamen Zahlen.
+  function promptStats(p) {
+    var ch = activeChannel();
+    var src = (ch !== 'all' && p.citation_by_channel && p.citation_by_channel[ch]) ? p.citation_by_channel[ch] : null;
+    if (src) {
+      return { cited: src.cited_count || 0, total: src.total_runs || 0, status: src.visibility_status || null };
+    }
+    return {
+      cited: p.cited_count || 0,
+      total: p.total_runs || 0,
+      status: p.visibility_status || null,
+    };
+  }
+
+  function promptWindowLabel(p) {
+    return p && p.citation_window_days ? 'letzte ' + p.citation_window_days + ' Tage' : 'seit Start';
+  }
+
+  function renderChannelSwitch() {
+    var bar = document.createElement('div');
+    bar.className = 'cvz-channel-switch';
+    var label = document.createElement('span');
+    label.className = 'cvz-channel-switch-label';
+    label.textContent = 'KI-Kanal';
+    bar.appendChild(label);
+    var group = document.createElement('div');
+    group.className = 'cvz-channel-switch-group';
+    group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', 'KI-Kanal wählen');
+    CHANNEL_FILTERS.forEach(function (f) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      var active = activeChannel() === f.id;
+      btn.className = 'cvz-channel-btn' + (active ? ' cvz-channel-btn-active' : '');
+      btn.setAttribute('data-cvz-channel', f.id);
+      btn.setAttribute('role', 'radio');
+      btn.setAttribute('aria-checked', active ? 'true' : 'false');
+      btn.textContent = f.label;
+      group.appendChild(btn);
+    });
+    bar.appendChild(group);
+    bar.appendChild(makeTip(
+      'Gesamt fasst ChatGPT und Gemini zusammen (alle Zitierungen geteilt durch alle Antworten). ' +
+      'ChatGPT oder Gemini zeigt nur diesen Kanal. Die Auswahl gilt für Situation, Journey, Wettbewerb und Verlauf. ' +
+      'Google AI Overviews werden monatlich gemessen und stehen getrennt in den Journey-Karten.'
+    ));
+    return bar;
+  }
+
   // NEU (16.10.2026): Gesamtwert der eigenen Sichtbarkeit pro Phase (ChatGPT +
   // Gemini gepoolt, 28 Tage). Kommt fertig vom Backend (journey_comparison.
   // phase_totals, inkl. Trend). Ältere API ohne phase_totals: gleich gerechnet
   // aus den Kanalwerten, dann ohne Trend. Ohne journey_comparison: 12 Wochen.
   function ownPhaseTotal(dashData, phase) {
     var jc = dashData && dashData.journey_comparison;
+    // GEÄNDERT (21.10.2026): bei gewähltem Kanal der Wert dieses Kanals
+    // (gleiche Felder inkl. Trend, siehe dashboard.py: _compute_journey_comparison).
+    var ch = activeChannel();
+    if (ch !== 'all') {
+      var single = ((jc ? jc.phase_scores : dashData && dashData.phase_scores) || {})[phase];
+      var s = (single && single[ch]) || {};
+      return {
+        score: s.total > 0 ? s.score : null, cited: s.cited || 0, total: s.total || 0,
+        previous_score: s.previous_score, previous_cited: s.previous_cited, previous_total: s.previous_total,
+        delta_pp: s.delta_pp, trend: s.trend || null,
+      };
+    }
     if (jc && jc.phase_totals && jc.phase_totals[phase]) return jc.phase_totals[phase];
     var scores = ((jc ? jc.phase_scores : dashData && dashData.phase_scores) || {})[phase] || {};
     var cited = 0, total = 0;
@@ -10791,7 +11196,7 @@
     heading.textContent = 'KI-Sichtbarkeit nach Kaufphase';
     head.appendChild(heading);
     head.appendChild(makeTip(
-      'Anteil der Antworten von ChatGPT und Gemini, die eure Domain als Quelle nennen, je Kaufphase' +
+      'Anteil der Antworten von ' + activeChannelLabel() + ', die eure Domain als Quelle nennen, je Kaufphase' +
       (jc ? ', letzte ' + cfg.windowDays + ' Tage. Ein Pfeil erscheint erst bei einer Veränderung, die größer ist als die normale Schwankung von KI-Antworten.' : '.') +
       ' Die Aufschlüsselung nach Kanal und Rolle steht im Tab Journey.'
     ));
@@ -10890,7 +11295,8 @@
     // das Backend den Vergleichsblock nicht liefert (Fehler, alte API).
     var _cjc = dashData.journey_comparison || null;
     var windowLabel = _cjc ? 'letzte ' + _cjc.window_days + ' Tage' : 'letzte 12 Wochen';
-    var sov = _cjc ? (_cjc.sources || {}) : (dashData.share_of_voice || {});
+    // GEÄNDERT (21.10.2026): Quellen und eigene Werte für den gewählten Kanal.
+    var sov = journeySourcesForChannel(dashData);
     var ownPhaseScores = _cjc ? (_cjc.phase_scores || {}) : dashData.phase_scores;
 
     // Top-5-Wettbewerber: Summe der citation_rate ueber alle Phasen
@@ -11789,7 +12195,7 @@
   // Handlungsempfehlung nicht nur im Hover-Tooltip steht.
   function _journeyCardHint(scores, sources, cfg) {
     var down = null, up = null, maxOwn = null, measured = 0;
-    JOURNEY_PERCENT_CHANNELS.forEach(function (ch) {
+    visibleChannels().forEach(function (ch) {
       var e = scores[ch];
       if (!e || !e.total) return;
       measured += e.total;
@@ -11822,7 +12228,8 @@
       minDeltaPp: jc ? jc.min_delta_pp : 10,
     };
     var phaseScores = jc ? jc.phase_scores : (data.phase_scores || {});
-    var sourcesByPhase = jc ? jc.sources : (data.share_of_voice || {});
+    // GEÄNDERT (21.10.2026): Quellen für den gewählten Kanal.
+    var sourcesByPhase = journeySourcesForChannel(data);
     var intervalDays = (detail && detail.topic && detail.topic.prompt_interval_days) || 2;
 
     var section = document.createElement('div');
@@ -11866,7 +12273,7 @@
         ' Tage in ChatGPT und Gemini abgefragt.';
       card.appendChild(nameEl);
 
-      JOURNEY_PERCENT_CHANNELS.forEach(function (channel) {
+      visibleChannels().forEach(function (channel) {
         var ch = scores[channel] || { score: null, cited: 0, total: 0 };
         var hasData = (ch.total || 0) > 0 && ch.score != null;
         var pct = hasData ? Math.round(ch.score) : 0;
@@ -13181,14 +13588,12 @@
     var changeAssessmentSection = renderChangeAssessmentSection(detail);
     if (changeAssessmentSection) wrap.appendChild(changeAssessmentSection);
 
-    // Chart section (neu aufgebaut im Oktober 2026, siehe renderPhaseTrendSection)
-    var selectedWeeks = state.phaseTrendWeeksByTopic[topicId] || 12;
-    var isDefaultWeeks = selectedWeeks === 12;
-    var phaseTrendKey = topicId + ':' + selectedWeeks;
-    var data = isDefaultWeeks ? state.dashboardDataCache[topicId] : state.phaseTrendCache[phaseTrendKey];
-    var isLoading = (isDefaultWeeks ? state.isLoadingDashboard : !!state.isLoadingPhaseTrend[phaseTrendKey]) ||
-      (!isDefaultWeeks && !data);
-    wrap.appendChild(renderPhaseTrendSection(topicId, data, selectedWeeks, isLoading));
+    // GEÄNDERT (21.10.2026): gleitender 28-Tage-Verlauf über die ganze Laufzeit
+    // statt Wochenwerten mit Zeitraum-Presets, siehe renderRollingTrendSection.
+    wrap.appendChild(renderRollingTrendSection(topicId, state.dashboardDataCache[topicId], state.isLoadingDashboard));
+
+    // NEU (21.10.2026): Google-Suche (Search Console) im selben Raster
+    wrap.appendChild(renderGscTopicSection(topicId, detail));
 
     // Timeline: Content-Änderungen (user-logged) + detail.changelog (system)
     // GEAENDERT (18.09.2026): Eintraege mit change_type 'aktionsplan'
@@ -13277,12 +13682,593 @@
     }
 
     // Visibility trend from prompt data (weekly cite/mention rates)
-    var visWeeks = state.visibilityTrendCache[topicId];
-    if (visWeeks && visWeeks.length >= 2) {
-      wrap.appendChild(renderVisibilityTrendSection(visWeeks, false, detail.changelog));
-    }
+    // ENTFERNT (21.10.2026): "Sichtbarkeits-Verlauf im Detail". Die Wochen mit
+    // Rohzahlen stehen jetzt eingeklappt unter dem Verlauf (renderRollingWeeklyTable).
 
     return wrap;
+  }
+
+  // =========================================================================
+  // NEU (21.10.2026): Gleitender 28-Tage-Verlauf
+  // =========================================================================
+  // Datenbasis: dashData.rolling_trend (dashboard.py: _compute_rolling_trend).
+  // Jeder Punkt fasst die 28 Tage bis zu seinem Datum zusammen, ein Punkt pro
+  // Woche. Einzelne Wochen schwanken bei ~10 Antworten pro Phase und Kanal zu
+  // stark, um daraus etwas abzulesen. Der letzte Punkt ist genau der Wert aus
+  // den Journey-Karten (gleiches 28-Tage-Fenster).
+  //
+  // Das schattierte Band ist ein Schwankungsbereich (Wilson-Intervall, 90 %):
+  // So weit kann die Rate allein durch Zufall schwanken. Liegen zwei Punkte
+  // innerhalb ihrer Bänder, ist die Veränderung nicht belegt.
+
+  var ROLLING_MIN_ANSWERS = 20;   // darunter wird ein Punkt nicht gezeichnet
+  var ROLLING_BAND_Z = 1.645;     // 90 %
+
+  function wilsonInterval(cited, total, z) {
+    if (!total) return null;
+    var p = cited / total;
+    var z2 = z * z;
+    var denom = 1 + z2 / total;
+    var center = (p + z2 / (2 * total)) / denom;
+    var half = (z * Math.sqrt(p * (1 - p) / total + z2 / (4 * total * total))) / denom;
+    return { low: Math.max(0, (center - half) * 100), high: Math.min(100, (center + half) * 100) };
+  }
+
+  function rollingRate(c) {
+    return c && c.total >= ROLLING_MIN_ANSWERS ? (c.cited / c.total) * 100 : null;
+  }
+
+  // Zeichnet den Verlauf. lines: [{ label, color, values, width, band }],
+  // complete: [bool] je Punkt (false = Aufbauphase, gestrichelt).
+  function buildRollingSvg(lines, xLabels, complete, opts) {
+    opts = opts || {};
+    var W = 720, H = 240, padL = 44, padR = 14, padT = 18, padB = 28;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var n = xLabels.length;
+    var maxY = opts.maxY || 10;
+    function xAt(i) { return padL + (n <= 1 ? plotW / 2 : (plotW * i) / (n - 1)); }
+    function yAt(v) { return padT + plotH - (Math.min(v, maxY) / maxY) * plotH; }
+
+    var p = [];
+    p.push('<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;max-width:100%;height:auto;" role="img" aria-label="Verlauf der Zitierrate">');
+
+    [0, maxY / 2, maxY].forEach(function (tick) {
+      var y = yAt(tick);
+      p.push('<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="var(--cvz-border)" stroke-width="1" opacity="' + (tick === 0 ? '0.9' : '0.45') + '"/>');
+      p.push('<text x="' + (padL - 6) + '" y="' + (y + 3.5) + '" text-anchor="end" font-size="11" fill="var(--cvz-text-muted, #8b98a5)">' +
+        String(Math.round(tick * 10) / 10).replace('.', ',') + ' %</text>');
+    });
+
+    var every = Math.max(1, Math.ceil(n / 8));
+    for (var xi = 0; xi < n; xi++) {
+      if (xi % every !== 0 && xi !== n - 1) continue;
+      if (xi !== n - 1 && n - 1 - xi < every / 2) continue;
+      p.push('<text x="' + xAt(xi) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="11" fill="var(--cvz-text-muted, #8b98a5)">' + escapeHtml(String(xLabels[xi])) + '</text>');
+    }
+
+    // Aufbauphase hinterlegen
+    var lastIncomplete = -1;
+    for (var ci = 0; ci < n; ci++) if (!complete[ci]) lastIncomplete = ci;
+    if (lastIncomplete >= 0 && n > 1) {
+      var xEnd = lastIncomplete === n - 1 ? W - padR : (xAt(lastIncomplete) + xAt(lastIncomplete + 1)) / 2;
+      p.push('<rect x="' + padL + '" y="' + padT + '" width="' + Math.max(0, xEnd - padL) + '" height="' + plotH + '" fill="var(--cvz-text-muted, #8b98a5)" opacity="0.06"/>');
+    }
+
+    // Marker (Content-Änderungen)
+    (opts.markers || []).forEach(function (mk) {
+      if (mk.index < 0 || mk.index >= n) return;
+      var mx = xAt(mk.index);
+      p.push('<line x1="' + mx + '" y1="' + padT + '" x2="' + mx + '" y2="' + (padT + plotH) + '" stroke="var(--cvz-amber, #c98e2a)" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"/>');
+      p.push('<path d="M' + mx + ' ' + (padT - 8) + ' l4 4 l-4 4 l-4 -4 z" fill="var(--cvz-amber, #c98e2a)"><title>' + escapeHtml(mk.label || '') + '</title></path>');
+    });
+
+    // Bänder zuerst, damit die Linien darüber liegen
+    lines.forEach(function (ln) {
+      if (!ln.band) return;
+      var upper = [], lower = [];
+      ln.band.forEach(function (b, i) {
+        if (!b) {
+          if (upper.length > 1) p.push(bandPath(upper, lower, ln.color));
+          upper = []; lower = [];
+          return;
+        }
+        upper.push([xAt(i), yAt(b.high)]);
+        lower.push([xAt(i), yAt(b.low)]);
+      });
+      if (upper.length > 1) p.push(bandPath(upper, lower, ln.color));
+    });
+    function bandPath(upper, lower, color) {
+      var pts = upper.concat(lower.slice().reverse()).map(function (pt) { return pt[0].toFixed(1) + ',' + pt[1].toFixed(1); });
+      return '<polygon points="' + pts.join(' ') + '" fill="' + color + '" opacity="0.14"/>';
+    }
+
+    lines.forEach(function (ln) {
+      var width = ln.width || 2;
+      for (var i = 0; i < n - 1; i++) {
+        var a = ln.values[i], b = ln.values[i + 1];
+        if (a == null || b == null) continue;
+        var dashed = !complete[i] || !complete[i + 1];
+        p.push('<line x1="' + xAt(i).toFixed(1) + '" y1="' + yAt(a).toFixed(1) + '" x2="' + xAt(i + 1).toFixed(1) + '" y2="' + yAt(b).toFixed(1) +
+          '" stroke="' + ln.color + '" stroke-width="' + width + '" stroke-linecap="round"' + (dashed ? ' stroke-dasharray="5 4" opacity="0.8"' : '') + '/>');
+      }
+      ln.values.forEach(function (v, i) {
+        if (v == null) return;
+        var cx = xAt(i).toFixed(1), cy = yAt(v).toFixed(1);
+        var tip = ln.label + ', 28 Tage bis ' + xLabels[i] + ': ' + fmtPct(v) + (ln.tips && ln.tips[i] ? ' (' + ln.tips[i] + ')' : '');
+        p.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + (ln.width > 2 ? 3.5 : 2.5) + '" fill="' + ln.color + '"/>');
+        p.push('<circle cx="' + cx + '" cy="' + cy + '" r="9" fill="transparent"><title>' + escapeHtml(tip) + '</title></circle>');
+      });
+    });
+
+    p.push('</svg>');
+    return p.join('');
+  }
+
+  // Content-Änderungen auf die Punkte legen: eine Änderung gehört zum ersten
+  // Punkt, dessen Fenster-Ende danach liegt. Änderungen außerhalb des
+  // Zeitraums werden weggelassen.
+  // =========================================================================
+  // NEU (21.10.2026): GSC-Verlauf (Tageswerte, gleitend 28 Tage)
+  // =========================================================================
+
+  function fmtInt(v) {
+    if (v == null || isNaN(v)) return '–';
+    return Math.round(v).toLocaleString('de-DE');
+  }
+
+  function fmtNum1(v) {
+    if (v == null || isNaN(v)) return '–';
+    return String(Math.round(v * 10) / 10).replace('.', ',');
+  }
+
+  // Einfaches Liniendiagramm mit Achsenbeschriftung. invert: kleine Werte
+  // oben (Position 1 ist die beste).
+  function buildMetricSvg(lines, xLabels, opts) {
+    opts = opts || {};
+    var W = 720, H = opts.height || 200, padL = 48, padR = 14, padT = 18, padB = 28;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var n = xLabels.length;
+    var fmt = opts.fmt || fmtInt;
+    var minY = opts.minY != null ? opts.minY : 0;
+    var maxY = opts.maxY;
+    if (maxY == null) {
+      maxY = minY + 1;
+      lines.forEach(function (ln) { ln.values.forEach(function (v) { if (v != null && v > maxY) maxY = v; }); });
+      maxY = niceCountMax(maxY);
+    }
+    function xAt(i) { return padL + (n <= 1 ? plotW / 2 : (plotW * i) / (n - 1)); }
+    function yAt(v) {
+      var t = (Math.min(Math.max(v, minY), maxY) - minY) / (maxY - minY || 1);
+      return opts.invert ? padT + t * plotH : padT + plotH - t * plotH;
+    }
+    var p = ['<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;max-width:100%;height:auto;" role="img" aria-label="' + escapeHtml(opts.ariaLabel || 'Verlauf') + '">'];
+    [minY, (minY + maxY) / 2, maxY].forEach(function (tick) {
+      var y = yAt(tick);
+      p.push('<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="var(--cvz-border)" stroke-width="1" opacity="0.45"/>');
+      p.push('<text x="' + (padL - 6) + '" y="' + (y + 3.5) + '" text-anchor="end" font-size="11" fill="var(--cvz-text-muted, #8b98a5)">' + escapeHtml(fmt(tick)) + '</text>');
+    });
+    var every = Math.max(1, Math.ceil(n / 8));
+    for (var xi = 0; xi < n; xi++) {
+      if (xi % every !== 0 && xi !== n - 1) continue;
+      if (xi !== n - 1 && n - 1 - xi < every / 2) continue;
+      p.push('<text x="' + xAt(xi) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="11" fill="var(--cvz-text-muted, #8b98a5)">' + escapeHtml(String(xLabels[xi])) + '</text>');
+    }
+    (opts.markers || []).forEach(function (mk) {
+      if (mk.index < 0 || mk.index >= n) return;
+      var mx = xAt(mk.index);
+      p.push('<line x1="' + mx + '" y1="' + padT + '" x2="' + mx + '" y2="' + (padT + plotH) + '" stroke="var(--cvz-amber, #c98e2a)" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"/>');
+      p.push('<path d="M' + mx + ' ' + (padT - 8) + ' l4 4 l-4 4 l-4 -4 z" fill="var(--cvz-amber, #c98e2a)"><title>' + escapeHtml(mk.label || '') + '</title></path>');
+    });
+    lines.forEach(function (ln) {
+      for (var i = 0; i < n - 1; i++) {
+        var a = ln.values[i], b = ln.values[i + 1];
+        if (a == null || b == null) continue;
+        p.push('<line x1="' + xAt(i).toFixed(1) + '" y1="' + yAt(a).toFixed(1) + '" x2="' + xAt(i + 1).toFixed(1) + '" y2="' + yAt(b).toFixed(1) +
+          '" stroke="' + ln.color + '" stroke-width="' + (ln.width || 2.5) + '" stroke-linecap="round"/>');
+      }
+      ln.values.forEach(function (v, i) {
+        if (v == null) return;
+        var cx = xAt(i).toFixed(1), cy = yAt(v).toFixed(1);
+        var tip = ln.label + ', 28 Tage bis ' + xLabels[i] + ': ' + fmt(v) + (ln.tips && ln.tips[i] ? ' (' + ln.tips[i] + ')' : '');
+        p.push('<circle cx="' + cx + '" cy="' + cy + '" r="3" fill="' + ln.color + '"/>');
+        p.push('<circle cx="' + cx + '" cy="' + cy + '" r="9" fill="transparent"><title>' + escapeHtml(tip) + '</title></circle>');
+      });
+    });
+    p.push('</svg>');
+    return p.join('');
+  }
+
+  // niceChartMax ist auf Prozent (max. 100) ausgelegt, Klicks können größer sein.
+  function niceCountMax(v) {
+    if (!v || v <= 10) return 10;
+    var mag = Math.pow(10, Math.floor(Math.log10(v)));
+    var steps = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < steps.length; i++) {
+      if (v <= steps[i] * mag) return steps[i] * mag;
+    }
+    return 10 * mag;
+  }
+
+  function gscDeltaHtml(cur, prev, kind) {
+    // kind: 'count' (mehr ist besser, Prozent) | 'position' (weniger ist besser, Positionen)
+    if (cur == null || prev == null) return '';
+    var better, text;
+    if (kind === 'position') {
+      var d = prev - cur;
+      if (Math.abs(d) < 0.5) return '<span class="cvz-journey-channel-delta cvz-delta-flat cvz-delta-quiet">→</span>';
+      better = d > 0;
+      text = (better ? '▲ ' : '▼ ') + fmtNum1(Math.abs(d));
+    } else {
+      if (!prev) return '';
+      var pct = (cur - prev) / prev * 100;
+      if (Math.abs(pct) < 10) return '<span class="cvz-journey-channel-delta cvz-delta-flat cvz-delta-quiet">→</span>';
+      better = pct > 0;
+      text = (better ? '▲ ' : '▼ ') + Math.round(Math.abs(pct)) + ' %';
+    }
+    return '<span class="cvz-journey-channel-delta ' + (better ? 'cvz-delta-up' : 'cvz-delta-down') + '">' + text + '</span>';
+  }
+
+  function renderGscRollingBlock(rolling, topicId, opts) {
+    opts = opts || {};
+    var block = document.createElement('div');
+    var points = rolling.points || [];
+    var series = rolling.series || [];
+    var xLabels = points.map(function (pt) { return (formatShortDate(pt.end) || pt.end).slice(0, 6); });
+    var markers = topicId ? buildRollingMarkers(state.contentChangesCache[topicId] || [], points) : [];
+    var cur = rolling.current || {}, prev = rolling.previous;
+
+    var tiles = document.createElement('div');
+    tiles.className = 'cvz-gsc-tiles';
+    tiles.innerHTML = [
+      ['Klicks', fmtInt(cur.clicks), gscDeltaHtml(cur.clicks, prev && prev.clicks, 'count')],
+      ['Impressionen', fmtInt(cur.impressions), gscDeltaHtml(cur.impressions, prev && prev.impressions, 'count')],
+      ['Ø Position', fmtNum1(cur.position), gscDeltaHtml(cur.position, prev && prev.position, 'position')],
+      ['CTR', cur.ctr == null ? '–' : fmtNum1(cur.ctr) + ' %', ''],
+    ].map(function (t) {
+      return '<div class="cvz-card cvz-gsc-tile"><p class="cvz-sit-tile-meta" style="margin:0">' + t[0] + '</p>' +
+        '<div style="display:flex;align-items:center;gap:6px"><span class="cvz-gsc-tile-value">' + t[1] + '</span>' + t[2] + '</div></div>';
+    }).join('');
+    block.appendChild(tiles);
+    var tilesNote = document.createElement('p');
+    tilesNote.className = 'cvz-chart-caption';
+    tilesNote.textContent = 'Letzte ' + rolling.window_days + ' Tage bis ' + formatShortDate(rolling.last_day) +
+      (prev ? ', Pfeile im Vergleich zu den ' + rolling.window_days + ' Tagen davor. Pfeile erst ab 10 % bzw. einer halben Position.' : '.');
+    block.appendChild(tilesNote);
+
+    if (points.length >= 2) {
+      var clicksCard = document.createElement('div');
+      clicksCard.className = 'cvz-card';
+      clicksCard.style.marginTop = '10px';
+      clicksCard.innerHTML = '<p class="cvz-sit-tile-meta" style="margin:0 0 4px">Klicks (je 28 Tage)</p>' +
+        buildMetricSvg([{
+          label: 'Klicks', color: CHANNEL_LINE_COLORS.all,
+          values: series.map(function (s) { return s ? s.clicks : null; }),
+          tips: series.map(function (s) { return s ? fmtInt(s.impressions) + ' Impressionen' : ''; }),
+        }], xLabels, { markers: markers, height: opts.compact ? 160 : 200, ariaLabel: 'Klicks im Verlauf' });
+      block.appendChild(clicksCard);
+
+      var positions = series.map(function (s) { return s ? s.position : null; });
+      if (positions.some(function (v) { return v != null; })) {
+        var maxPos = 1;
+        positions.forEach(function (v) { if (v != null && v > maxPos) maxPos = v; });
+        var posCard = document.createElement('div');
+        posCard.className = 'cvz-card';
+        posCard.style.marginTop = '10px';
+        posCard.innerHTML = '<p class="cvz-sit-tile-meta" style="margin:0 0 4px">Ø Position (oben ist besser)</p>' +
+          buildMetricSvg([{
+            label: 'Ø Position', color: '#e0a458', values: positions,
+          }], xLabels, { invert: true, minY: 1, maxY: Math.max(10, Math.ceil(maxPos / 5) * 5), fmt: fmtNum1,
+            markers: markers, height: opts.compact ? 160 : 200, ariaLabel: 'Position im Verlauf' });
+        block.appendChild(posCard);
+      }
+      var cap = document.createElement('p');
+      cap.className = 'cvz-chart-caption';
+      cap.textContent = 'Jeder Punkt fasst die ' + rolling.window_days + ' Tage bis zum Datum zusammen, ein Punkt pro Woche. ' +
+        'Quelle: Google Search Console, Tageswerte ab ' + formatShortDate(rolling.first_day) + '.' +
+        (markers.length ? ' Rauten: eingetragene Änderungen.' : '');
+      block.appendChild(cap);
+    }
+    return block;
+  }
+
+  function renderGscTopicSection(topicId, detail) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Google-Suche (Search Console)';
+    head.appendChild(heading);
+    head.appendChild(makeTip(
+      'Klicks, Impressionen und durchschnittliche Position aller aktiven Keywords dieses Themas, laut Google Search Console. ' +
+      'Die Position ist nach Impressionen gewichtet, wie in der Search Console selbst. ' +
+      'Den Verlauf einzelner Suchanfragen seht ihr unter Daten → GSC, wenn ihr eine Zeile aufklappt.'
+    ));
+    section.appendChild(head);
+
+    var key = gscHistoryKey(topicId, '');
+    if (!(key in state.gscHistoryCache) && !state.loadingGscHistory[key] && !CONFIG.useMockData) {
+      setTimeout(function () { maybeLoadGscHistory(topicId, ''); }, 0);
+    }
+    var rolling = state.gscHistoryCache[key];
+    if (!(key in state.gscHistoryCache)) {
+      var l = document.createElement('p');
+      l.className = 'cvz-card-placeholder-text';
+      l.innerHTML = '<span class="cvz-spinner"></span>GSC-Verlauf wird geladen …';
+      section.appendChild(l);
+      return section;
+    }
+    if (!rolling || !rolling.points || !rolling.points.length) {
+      var topic = detail && detail.topic;
+      var project = topic ? getProjectById(topic.project_id) : null;
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = project && project.gsc_connected === false
+        ? 'Für diese Domain ist keine Google Search Console verbunden.'
+        : 'Noch keine GSC-Tageswerte. Sie werden beim nächsten GSC-Abruf geladen, rückwirkend für rund 16 Monate.';
+      section.appendChild(none);
+      return section;
+    }
+    section.appendChild(renderGscRollingBlock(rolling, topicId, {}));
+    return section;
+  }
+
+  function buildRollingMarkers(changes, points) {
+    var out = [];
+    if (!points.length) return out;
+    var firstStart = new Date(points[0].start).getTime();
+    var lastEnd = new Date(points[points.length - 1].end).getTime() + 86400000;
+    (changes || []).forEach(function (chg) {
+      var t = new Date(chg.changed_at).getTime();
+      if (isNaN(t) || t < firstStart || t > lastEnd) return;
+      var idx = -1;
+      for (var i = 0; i < points.length; i++) {
+        if (new Date(points[i].end).getTime() + 86400000 > t) { idx = i; break; }
+      }
+      if (idx === -1) return;
+      out.push({
+        index: idx,
+        label: formatShortDate(chg.changed_at) + ': ' + (CONTENT_CHANGE_TYPE_LABELS[chg.change_type] || chg.change_type || 'Änderung') +
+          (chg.description ? ', ' + chg.description : ''),
+      });
+    });
+    return out;
+  }
+
+  function renderRollingTrendSection(topicId, dashData, isLoading) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Sichtbarkeit im Verlauf';
+    head.appendChild(heading);
+    head.appendChild(makeTip(
+      'Jeder Punkt zeigt, bei wie vielen Antworten der letzten 28 Tage eure Domain als Quelle genannt wurde. ' +
+      'Ein Punkt pro Woche, über die ganze Laufzeit des Themas. 28 statt 7 Tage, weil einzelne Wochen bei KI-Antworten stark schwanken. ' +
+      'Das schattierte Band zeigt, wie weit die Rate allein durch Zufall schwanken kann. ' +
+      'Gestrichelt: Aufbauphase, das 28-Tage-Fenster beginnt noch vor der ersten Messung.'
+    ));
+    section.appendChild(head);
+
+    if (isLoading) {
+      var l = document.createElement('p');
+      l.className = 'cvz-card-placeholder-text';
+      l.innerHTML = '<span class="cvz-spinner"></span>Verlauf wird geladen …';
+      section.appendChild(l);
+      return section;
+    }
+    if (!dashData || dashData._error) {
+      var e = document.createElement('p');
+      e.className = 'cvz-card-placeholder-text';
+      e.innerHTML = 'Der Verlauf konnte nicht geladen werden. ' +
+        '<button type="button" class="cvz-link-btn" style="font-size:inherit;" data-cvz-journey-retry="' + escapeHtml(topicId) + '">Erneut versuchen</button>';
+      section.appendChild(e);
+      return section;
+    }
+    var rt = dashData.rolling_trend;
+    if (!rt || !rt.points || !rt.points.length) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = 'Noch kein Verlauf verfügbar. Der erste Punkt erscheint eine Woche nach der ersten Messung.';
+      section.appendChild(none);
+      return section;
+    }
+
+    var ch = activeChannel();
+    var phase = state.rollingPhaseByTopic[topicId] || 'total';
+    var points = rt.points;
+    var complete = points.map(function (pt) { return !!pt.complete; });
+    var xLabels = points.map(function (pt) { return (formatShortDate(pt.end) || pt.end).slice(0, 6); });
+
+    // ---- Kopfzahlen: letzte 28 Tage gegen die 28 Tage davor
+    var sum = (rt.summary || {})[ch];
+    if (sum) section.appendChild(renderRollingSummary(rt, sum, ch));
+
+    // ---- Phasen-Auswahl
+    var chips = document.createElement('div');
+    chips.className = 'cvz-persona-filter';
+    chips.style.margin = '10px 0 6px';
+    [['total', 'Alle Phasen']].concat(PHASE_ORDER.map(function (ph) { return [ph, PHASE_LABELS[ph]]; })).forEach(function (pair) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cvz-persona-chip' + (phase === pair[0] ? ' cvz-persona-chip-active' : '');
+      if (pair[0] !== 'total') b.style.borderLeftColor = PHASE_COLORS[pair[0]] || '';
+      b.setAttribute('data-cvz-rolling-phase', pair[0]);
+      b.setAttribute('data-cvz-rolling-topic', topicId);
+      b.textContent = pair[1];
+      chips.appendChild(b);
+    });
+    section.appendChild(chips);
+
+    // ---- Linien
+    function lineFor(channelKey, label, width, withBand) {
+      var counts = ((rt.series || {})[channelKey] || {})[phase] || [];
+      return {
+        label: label,
+        color: CHANNEL_LINE_COLORS[channelKey],
+        width: width,
+        values: counts.map(rollingRate),
+        band: withBand ? counts.map(function (c) {
+          return c && c.total >= ROLLING_MIN_ANSWERS ? wilsonInterval(c.cited, c.total, ROLLING_BAND_Z) : null;
+        }) : null,
+        tips: counts.map(function (c) { return c ? c.cited + ' von ' + c.total + ' Antworten' : ''; }),
+      };
+    }
+    var lines = ch === 'all'
+      ? [lineFor('all', 'Gesamt', 3, true), lineFor('chat_gpt', 'ChatGPT', 1.5, false), lineFor('gemini', 'Gemini', 1.5, false)]
+      : [lineFor(ch, CHANNEL_LABELS[ch] || ch, 3, true)];
+
+    var hasAny = lines.some(function (ln) { return ln.values.some(function (v) { return v != null; }); });
+    if (!hasAny) {
+      var thin = document.createElement('p');
+      thin.className = 'cvz-card-placeholder-text';
+      thin.textContent = 'Für diese Auswahl gibt es zu wenige Antworten (unter ' + ROLLING_MIN_ANSWERS +
+        ' pro 28 Tage), um einen Verlauf zu zeigen. Wählt „Alle Phasen“ oder „Gesamt“.';
+      section.appendChild(thin);
+    } else {
+      var maxVal = 0;
+      lines.forEach(function (ln) {
+        ln.values.forEach(function (v) { if (v != null && v > maxVal) maxVal = v; });
+        (ln.band || []).forEach(function (b) { if (b && b.high > maxVal) maxVal = b.high; });
+      });
+      var maxY = niceChartMax(maxVal);
+      var markers = buildRollingMarkers(state.contentChangesCache[topicId] || [], points);
+
+      var card = document.createElement('div');
+      card.className = 'cvz-card';
+      card.innerHTML = buildRollingSvg(lines, xLabels, complete, { maxY: maxY, markers: markers });
+      section.appendChild(card);
+
+      var legend = document.createElement('div');
+      legend.className = 'cvz-chart-legend';
+      legend.innerHTML = lines.map(function (ln) {
+        return '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background:' + ln.color + '"></span>' + escapeHtml(ln.label) + '</span>';
+      }).join('') +
+        '<span class="cvz-chart-legend-item"><span style="display:inline-block;width:14px;height:8px;background:' + lines[0].color + ';opacity:.25;"></span>Schwankungsbereich</span>' +
+        (complete.indexOf(false) !== -1 ? '<span class="cvz-chart-legend-item">- - Aufbauphase</span>' : '') +
+        (markers.length ? '<span class="cvz-chart-legend-item"><span style="color:var(--cvz-amber,#c98e2a)">◆</span> Content-Änderung</span>' : '');
+      section.appendChild(legend);
+
+      var cap = document.createElement('p');
+      cap.className = 'cvz-chart-caption';
+      cap.textContent = 'Zitierrate von ' + activeChannelLabel() + (phase === 'total' ? '' : ', Phase ' + (PHASE_LABELS[phase] || phase)) +
+        ', jeweils über die 28 Tage bis zum angegebenen Datum. Punkte mit weniger als ' + ROLLING_MIN_ANSWERS +
+        ' Antworten werden nicht gezeichnet. Eine Veränderung ist erst belegt, wenn sich die Schwankungsbereiche zweier Punkte nicht mehr überschneiden. ' +
+        'Content-Änderungen wirken in KI-Antworten meist erst nach einigen Wochen.';
+      section.appendChild(cap);
+    }
+
+    section.appendChild(renderRollingWeeklyTable(topicId, rt, ch));
+    return section;
+  }
+
+  function renderRollingSummary(rt, sum, ch) {
+    var box = document.createElement('div');
+    box.className = 'cvz-card cvz-rolling-summary';
+
+    var main = document.createElement('div');
+    main.className = 'cvz-rolling-summary-main';
+    var val = document.createElement('span');
+    val.className = 'cvz-sit-tile-value' + (sum.score == null ? ' cvz-journey-nodata' : '');
+    val.textContent = sum.score == null ? 'k. A.' : fmtPct(sum.score);
+    main.appendChild(val);
+    var badge = renderJourneyTrendBadge(
+      {
+        trend: sum.trend, cited: sum.current.cited, total: sum.current.total,
+        previous_cited: sum.previous.cited, previous_total: sum.previous.total,
+        previous_score: sum.previous_score, delta_pp: sum.delta_pp,
+      },
+      'own',
+      { windowDays: rt.window_days, minAnswers: 15, minDeltaPp: 10 }
+    );
+    if (badge) main.appendChild(badge);
+    box.appendChild(main);
+
+    var meta = document.createElement('p');
+    meta.className = 'cvz-sit-tile-meta';
+    var txt = sum.current.cited + ' von ' + sum.current.total + ' Antworten der letzten ' + rt.window_days +
+      ' Tage nennen eure Domain als Quelle (' + activeChannelLabel() + ').';
+    if (sum.previous.total === 0 && rt.first_run_at) {
+      var cmpFrom = new Date(new Date(rt.first_run_at).getTime() + 2 * rt.window_days * 86400000);
+      txt += ' Den Vergleich mit den ' + rt.window_days + ' Tagen davor gibt es ab ' + formatShortDate(cmpFrom.toISOString()) + '.';
+    } else if (sum.previous_score != null) {
+      txt += ' Davor: ' + fmtPct(sum.previous_score) + ' (' + sum.previous.cited + ' von ' + sum.previous.total + ').';
+    }
+    meta.textContent = txt;
+    box.appendChild(meta);
+
+    // Bei "Gesamt" beide Kanäle nebeneinander: zeigt sofort, wer zitiert.
+    if (ch === 'all' && rt.summary.chat_gpt && rt.summary.gemini) {
+      var split = document.createElement('p');
+      split.className = 'cvz-rolling-split';
+      split.innerHTML = ['chat_gpt', 'gemini'].map(function (k) {
+        var s = rt.summary[k];
+        return '<span><span class="cvz-legend-dot" style="background:' + CHANNEL_LINE_COLORS[k] + '"></span>' +
+          escapeHtml(CHANNEL_LABELS[k]) + ': <strong>' + (s.score == null ? 'k. A.' : fmtPct(s.score)) + '</strong> ' +
+          '<span class="cvz-rolling-split-n">(' + s.current.cited + ' von ' + s.current.total + ')</span></span>';
+      }).join('');
+      box.appendChild(split);
+    }
+    return box;
+  }
+
+  function renderRollingWeeklyTable(topicId, rt, ch) {
+    var details = document.createElement('details');
+    details.className = 'cvz-rolling-weeks';
+    if (state.rollingTableOpen[topicId]) details.open = true;
+    details.addEventListener('toggle', function () { state.rollingTableOpen[topicId] = details.open; });
+    var summary = document.createElement('summary');
+    summary.textContent = 'Rohzahlen pro Kalenderwoche';
+    details.appendChild(summary);
+
+    var weeks = (rt.weekly || []).slice().reverse();
+    if (!weeks.length) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = 'Noch keine Wochen mit Messungen.';
+      details.appendChild(none);
+      return details;
+    }
+
+    function cell(n, total) {
+      return n + ' <span class="cvz-rolling-split-n">(' + fmtPct(total ? n / total * 100 : null) + ')</span>';
+    }
+    var rows = weeks.map(function (w) {
+      var c = (w.by_channel || {})[ch] || { cited: 0, mentioned: 0, recommended: 0, total: 0 };
+      var sel = state.selectedWeekDetailKey === topicId + '|' + w.week_start;
+      return '<tr data-cvz-week-detail="' + escapeHtml(w.week_start) + '" style="cursor:pointer;' + (sel ? 'background:rgba(255,255,255,0.05);' : '') + '">' +
+        '<td>' + escapeHtml(formatShortDate(w.week_start) || w.week_start) + '</td>' +
+        '<td style="text-align:right;">' + c.total + '</td>' +
+        '<td style="text-align:right;">' + cell(c.mentioned, c.total) + '</td>' +
+        '<td style="text-align:right;">' + cell(c.cited, c.total) + '</td>' +
+        '<td style="text-align:right;">' + cell(c.recommended, c.total) + '</td>' +
+      '</tr>';
+    }).join('');
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-table-scroll';
+    wrap.innerHTML =
+      '<table class="cvz-table" style="min-width:520px;"><thead><tr>' +
+        '<th>Woche ab</th><th style="text-align:right;">Antworten</th><th style="text-align:right;">Erwähnt</th>' +
+        '<th style="text-align:right;">Zitiert</th><th style="text-align:right;">Empfohlen</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>';
+    details.appendChild(wrap);
+
+    var note = document.createElement('p');
+    note.className = 'cvz-chart-caption';
+    note.textContent = 'Kanal: ' + activeChannelLabel() + '. Einzelne Wochen schwanken stark, für Trends die Linie oben nutzen. ' +
+      'Die aktuelle Woche ist noch nicht vollständig. Klickt auf eine Zeile für die Details dieser Woche.';
+    details.appendChild(note);
+
+    if (state.selectedWeekDetailKey && state.selectedWeekDetailKey.indexOf(topicId + '|') === 0) {
+      details.appendChild(renderWeekDetailPanel(topicId, state.selectedWeekDetailKey.split('|')[1]));
+    }
+    return details;
   }
 
   document.addEventListener('DOMContentLoaded', init);
