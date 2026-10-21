@@ -1907,6 +1907,7 @@
     if (kvBrand && state.keywordViewer) {
       var kvKey = kvBrand.getAttribute('data-cvz-kv-brand');
       state.keywordViewer.focus = state.keywordViewer.focus === kvKey ? null : kvKey;
+      if (!state.keywordViewer.focus) { var kvRootK = document.getElementById('cvz-pv-root'); if (kvRootK) kvRootK.setAttribute('data-keep-chat', '1'); }
       state.keywordViewer.scrollToFocus = !!state.keywordViewer.focus;
       render();
       return;
@@ -1928,6 +1929,7 @@
     if (pvBrand && state.promptViewer) {
       var brandKey = pvBrand.getAttribute('data-cvz-pv-brand');
       state.promptViewer.focus = state.promptViewer.focus === brandKey ? null : brandKey;
+      if (!state.promptViewer.focus) { var pvRootK = document.getElementById('cvz-pv-root'); if (pvRootK) pvRootK.setAttribute('data-keep-chat', '1'); }
       state.promptViewer.scrollToFocus = !!state.promptViewer.focus;
       render();
       return;
@@ -2181,7 +2183,9 @@
       submitManualKeyword(manualKeywordSubmit.getAttribute('data-cvz-manual-keyword-submit'));
       return;
     }
-    var keywordToggle = event.target.closest('[data-cvz-keyword-toggle]');
+    // Links in Zeilen (z. B. rankende URL) öffnen nur den Link, nicht die Ansicht
+    var inRowLink = !!event.target.closest('#cvz-visibility-app a[href]');
+    var keywordToggle = inRowLink ? null : event.target.closest('[data-cvz-keyword-toggle]');
     // GEÄNDERT (21.10.2026): Zeilen mit echter ID öffnen die Google-Ansicht
     if (keywordToggle && keywordToggle.getAttribute('data-cvz-kv-open')) {
       openKeywordViewer(keywordToggle.getAttribute('data-cvz-kv-open'),
@@ -2543,7 +2547,7 @@
     }
     // NEU (15.09.2026): GSC-Zeilen im selben Auf-/Zuklapp-Stil wie Keywords,
     // siehe renderGscBlock/toggleGscRowExpansion.
-    var gscToggle = event.target.closest('[data-cvz-gsc-toggle]');
+    var gscToggle = event.target.closest('#cvz-visibility-app a[href]') ? null : event.target.closest('[data-cvz-gsc-toggle]');
     if (gscToggle && gscToggle.getAttribute('data-cvz-kv-open')) {
       openKeywordViewer(gscToggle.getAttribute('data-cvz-kv-open'),
         collectRowIds('data-cvz-kv-open', gscToggle.closest('.cvz-section')));
@@ -7314,7 +7318,6 @@
     table.style.minWidth = '1170px';
     table.innerHTML =
       '<thead><tr>' +
-        '<th style="width:26px;"></th>' +
         '<th style="width:340px;">Keyword</th>' +
         '<th style="width:140px;text-align:right;">Suchvolumen/Monat</th>' +
         // NEU (02.10.2026): eigene Google-Position (GSC, sonst SERP-Check)
@@ -7348,10 +7351,12 @@
         tr.setAttribute('data-cvz-keyword-toggle', rowId);
         tr.setAttribute('data-cvz-keyword-text', kw.keyword);
         if (kw.id) tr.setAttribute('data-cvz-kv-open', kw.id);
+        // GEÄNDERT (21.10.2026): ganze Zeile klickbar statt Pfeil-Spalte
+        tr.className = 'cvz-row-open';
+        tr.tabIndex = 0;
       }
       tr.innerHTML =
-        '<td class="cvz-prompt-expand-chevron">' + ((canExpand || kw.id) ? '\u25b8' : '') + '</td>' +
-        '<td>' + escapeHtml(kw.keyword) +
+        '<td class="cvz-row-title">' + escapeHtml(kw.keyword) +
           (linkedCount > 0 ? ' <span class="cvz-changelog-linked-badge" title="' + linkedCount + ' verknüpfte Änderung(en)">✎</span>' : '') +
         '</td>' +
         '<td style="text-align:right;color:var(--cvz-text-muted,#8b98a5);">' +
@@ -7380,7 +7385,7 @@
       if (canExpand && state.expandedKeywordId === rowId) {
         var expTr = document.createElement('tr');
         var expTd = document.createElement('td');
-        expTd.colSpan = 8;
+        expTd.colSpan = 7;
         expTd.appendChild(renderKeywordExpansion(kw, rowId, changelogEntries));
         expTr.appendChild(expTd);
         tbody.appendChild(expTr);
@@ -8002,13 +8007,16 @@
     return out;
   }
 
-  async function openPromptViewer(promptId) {
-    state.keywordViewer = null;
-    state.promptViewer = { promptId: promptId, engine: null, runId: null };
-    updateUrlParams({ cvz_prompt: promptId });
-    if (!(promptId in state.promptCitationsCache)) {
-      state.loadingPromptCitations[promptId] = true;
-      render();
+  // GEÄNDERT (21.10.2026): Wechsel ohne Flackern. Ist die Ansicht schon offen
+  // und die Antworten des nächsten Prompts noch nicht geladen, bleibt der
+  // bisherige Inhalt stehen (mit Ladebalken oben), bis die Daten da sind.
+  // Nachbarn (‹ ›) werden im Hintergrund vorgeladen, der Wechsel ist dann sofort.
+  async function fetchPromptCitations(promptId) {
+    if (promptId in state.promptCitationsCache) return;
+    if (state.loadingPromptCitations[promptId]) {
+      return state.loadingPromptCitations[promptId];
+    }
+    var p = (async function () {
       try {
         state.promptCitationsCache[promptId] = await loadPromptCitations(state.activeTopicId, promptId);
       } catch (e) {
@@ -8016,10 +8024,39 @@
         state.promptCitationsCache[promptId] = null;
       }
       state.loadingPromptCitations[promptId] = false;
+    })();
+    state.loadingPromptCitations[promptId] = p;
+    return p;
+  }
+
+  function prefetchPromptNeighbors(promptId) {
+    var order = visiblePromptOrder().map(function (p) { return p.id; });
+    var i = order.indexOf(promptId);
+    [order[i - 1], order[i + 1]].forEach(function (id) { if (id) fetchPromptCitations(id); });
+  }
+
+  async function openPromptViewer(promptId) {
+    var wasOpen = !!state.promptViewer;
+    state.keywordViewer = null;
+    if (wasOpen && !(promptId in state.promptCitationsCache)) {
+      state.promptViewer.loadingNext = promptId;
+      render();
+      await fetchPromptCitations(promptId);
+      if (!state.promptViewer || state.promptViewer.loadingNext !== promptId) return; // inzwischen anders entschieden
+    }
+    state.promptViewer = { promptId: promptId, engine: null, runId: null, focus: wasOpen && state.promptViewer ? state.promptViewer.focus : null };
+    updateUrlParams({ cvz_prompt: promptId });
+    if (!(promptId in state.promptCitationsCache)) {
+      render();
+      await fetchPromptCitations(promptId);
+      if (!state.promptViewer || state.promptViewer.promptId !== promptId) return;
     }
     render();
-    var closeBtn = document.querySelector('.cvz-pv [data-cvz-pv-close]');
-    if (closeBtn) closeBtn.focus();
+    if (!wasOpen) {
+      var closeBtn = document.querySelector('.cvz-pv [data-cvz-pv-close]');
+      if (closeBtn) closeBtn.focus();
+    }
+    prefetchPromptNeighbors(promptId);
   }
 
   function closePromptViewer() {
@@ -8042,6 +8079,32 @@
     return { key: 'none', label: 'Nicht genannt' };
   }
 
+  // Ersetzt den Inhalt von #cvz-pv-root. Beim ersten Öffnen läuft die
+  // Einblend-Animation, danach nicht mehr (vorher bei jedem Klick: Flackern).
+  // Gleiches Element (Prompt/Keyword): Scrollposition bleibt. Neues Element:
+  // kurzer Überblend-Effekt statt Sprung.
+  function mountViewer(root, backdrop, itemKey) {
+    var old = root.querySelector('.cvz-pv-backdrop');
+    var oldScroll = old ? old.scrollTop : 0;
+    var oldChat = old ? old.querySelector('.cvz-pv-chat') : null;
+    var oldChatScroll = oldChat ? oldChat.scrollTop : 0;
+    var sameItem = old && root.getAttribute('data-item') === itemKey;
+    if (old) backdrop.classList.add('cvz-pv-noanim');
+    if (old && !sameItem) {
+      var grid = backdrop.querySelector('.cvz-pv-grid');
+      if (grid) grid.classList.add('cvz-pv-swap');
+    }
+    root.innerHTML = '';
+    root.appendChild(backdrop);
+    root.setAttribute('data-item', itemKey);
+    if (old) backdrop.scrollTop = sameItem ? oldScroll : Math.min(oldScroll, 0);
+    if (sameItem && root.getAttribute('data-keep-chat') === '1') {
+      var chat = backdrop.querySelector('.cvz-pv-chat');
+      if (chat) chat.scrollTop = oldChatScroll;
+    }
+    root.removeAttribute('data-keep-chat');
+  }
+
   function renderPromptViewer() {
     var root = document.getElementById('cvz-pv-root');
     if (!state.promptViewer && state.keywordViewer) return renderKeywordViewer();
@@ -8062,7 +8125,7 @@
     var pv = state.promptViewer;
     var prompt = (detail.prompts || []).filter(function (p) { return p.id === pv.promptId; })[0] || { id: pv.promptId, prompt_text: '' };
     var data = state.promptCitationsCache[pv.promptId];
-    var loading = state.loadingPromptCitations[pv.promptId];
+    var loading = !!state.loadingPromptCitations[pv.promptId];
 
     var order = visiblePromptOrder();
     var pos = order.map(function (p) { return p.id; }).indexOf(pv.promptId);
@@ -8073,10 +8136,12 @@
     backdrop.className = 'cvz-pv-backdrop';
     backdrop.setAttribute('data-cvz-pv-backdrop', '1');
     var box = document.createElement('div');
-    box.className = 'cvz-pv';
+    box.className = 'cvz-pv' + (pv.loadingNext ? ' cvz-pv-busy' : '');
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-modal', 'true');
     box.setAttribute('aria-label', 'KI-Antworten zum Prompt');
+    box.setAttribute('aria-busy', pv.loadingNext ? 'true' : 'false');
+    if (pv.loadingNext) box.insertAdjacentHTML('afterbegin', '<div class="cvz-pv-loadbar" aria-hidden="true"></div>');
     backdrop.appendChild(box);
 
     // ---- Kopf
@@ -8106,8 +8171,7 @@
         ? '<span class="cvz-spinner"></span>Antworten werden geladen …'
         : 'Für diesen Prompt liegen noch keine Antworten vor. Sie erscheinen nach dem nächsten Messlauf.';
       box.appendChild(ph);
-      root.innerHTML = '';
-      root.appendChild(backdrop);
+      mountViewer(root, backdrop, 'p:' + pv.promptId);
       return;
     }
 
@@ -8149,12 +8213,17 @@
     } else {
       var st = pvRunStatus(run);
       var when = new Date(run.collected_at);
+      var runIdx = eng.runs.indexOf(run);
+      var isNewest = runIdx === eng.runs.length - 1;
+      // GEÄNDERT (21.10.2026): Datum prominent, mit Position in der Reihe
       stage.innerHTML =
         '<div class="cvz-pv-stage-bar">' +
           '<span class="cvz-pv-engine-icon">' + pvFavicon(PV_ENGINE_ICONS[eng.id], 18) + '</span>' +
           '<span class="cvz-pv-stage-name">' + escapeHtml(eng.label) + '</span>' +
-          '<span class="cvz-pv-stage-date">' + when.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
-            ', ' + when.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + '</span>' +
+          '<span class="cvz-pv-when"><span class="cvz-pv-when-date">Antwort vom ' +
+            when.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + '</span>' +
+            '<span class="cvz-pv-when-sub">' + when.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr \u00b7 ' +
+              (isNewest ? 'neueste' : (runIdx + 1) + ' von ' + eng.runs.length) + '</span></span>' +
           '<span class="cvz-pv-status cvz-pv-status-' + st.key + '">' + escapeHtml(st.label) +
             (run.own_domain_recommended ? ' · empfohlen' : '') + '</span>' +
         '</div>' +
@@ -8186,7 +8255,9 @@
       var strip = document.createElement('div');
       strip.className = 'cvz-pv-strip';
       strip.innerHTML =
-        '<span class="cvz-pv-strip-label">' + escapeHtml(eng.label) + ', ' + eng.runs.length + ' Antworten in ' + PV_WINDOW_DAYS + ' Tagen</span>' +
+        '<span class="cvz-pv-strip-label">' + escapeHtml(eng.label) + ': ' + eng.runs.length + ' Antworten vom ' +
+          escapeHtml((formatShortDate(eng.runs[0].collected_at) || '').slice(0, 6)) + ' bis ' +
+          escapeHtml((formatShortDate(eng.runs[eng.runs.length - 1].collected_at) || '').slice(0, 6)) + ', \u00e4lteste links</span>' +
         '<div class="cvz-pv-dots">' + eng.runs.map(function (r) {
           var s = pvRunStatus(r);
           var d = new Date(r.collected_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
@@ -8284,8 +8355,7 @@
       }).join(''));
     }
 
-    root.innerHTML = '';
-    root.appendChild(backdrop);
+    mountViewer(root, backdrop, 'p:' + pv.promptId);
     if (pv.focus && pv.scrollToFocus) {
       pv.scrollToFocus = false;
       scrollToFocusedBrand(root);
@@ -8294,6 +8364,12 @@
 
   // Tastatur: einmal registriert, wirkt nur bei offener Ansicht
   document.addEventListener('keydown', function (e) {
+    // Zeilen per Tastatur öffnen (Tab + Enter)
+    if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.classList && e.target.classList.contains('cvz-row-open')) {
+      e.preventDefault();
+      e.target.click();
+      return;
+    }
     if (state.keywordViewer && e.key === 'Escape') { e.preventDefault(); closeKeywordViewer(); return; }
     if (!state.promptViewer) return;
     var tag = (e.target && e.target.tagName) || '';
@@ -8323,16 +8399,10 @@
   // reichen die Top-Ergebnisse aus der Themen-Antwort.
   // =========================================================================
 
-  async function openKeywordViewer(keywordId, orderIds) {
-    state.promptViewer = null;
-    state.keywordViewer = { keywordId: keywordId, focus: null, order: orderIds || (state.keywordViewer && state.keywordViewer.order) || [] };
-    updateUrlParams({ cvz_keyword: keywordId, cvz_prompt: null });
-    var detail = state.topicDetailCache[state.activeTopicId] || {};
-    var kw = (detail.search_queries || []).filter(function (q) { return q.id === keywordId; })[0];
-    if (kw && (kw.gsc_impressions != null || kw.source === 'gsc_near_miss')) maybeLoadGscHistory(state.activeTopicId, kw.keyword);
-    if (!(keywordId in state.keywordSerpCache)) {
-      state.loadingKeywordSerp[keywordId] = true;
-      render();
+  async function fetchKeywordSerp(keywordId) {
+    if (keywordId in state.keywordSerpCache) return;
+    if (state.loadingKeywordSerp[keywordId]) return state.loadingKeywordSerp[keywordId];
+    var p = (async function () {
       try {
         state.keywordSerpCache[keywordId] = CONFIG.useMockData ? null
           : await apiFetch('/topics/' + state.activeTopicId + '/keywords/' + encodeURIComponent(keywordId) + '/serp');
@@ -8341,10 +8411,38 @@
         state.keywordSerpCache[keywordId] = null;
       }
       state.loadingKeywordSerp[keywordId] = false;
+    })();
+    state.loadingKeywordSerp[keywordId] = p;
+    return p;
+  }
+
+  async function openKeywordViewer(keywordId, orderIds) {
+    var wasOpen = !!state.keywordViewer;
+    var order = orderIds || (state.keywordViewer && state.keywordViewer.order) || [];
+    state.promptViewer = null;
+    if (wasOpen && !(keywordId in state.keywordSerpCache)) {
+      state.keywordViewer.loadingNext = keywordId;
+      render();
+      await fetchKeywordSerp(keywordId);
+      if (!state.keywordViewer || state.keywordViewer.loadingNext !== keywordId) return;
+    }
+    state.keywordViewer = { keywordId: keywordId, focus: null, order: order };
+    updateUrlParams({ cvz_keyword: keywordId, cvz_prompt: null });
+    var detail = state.topicDetailCache[state.activeTopicId] || {};
+    var kw = (detail.search_queries || []).filter(function (q) { return q.id === keywordId; })[0];
+    if (kw && (kw.gsc_impressions != null || kw.source === 'gsc_near_miss')) maybeLoadGscHistory(state.activeTopicId, kw.keyword);
+    if (!(keywordId in state.keywordSerpCache)) {
+      render();
+      await fetchKeywordSerp(keywordId);
+      if (!state.keywordViewer || state.keywordViewer.keywordId !== keywordId) return;
     }
     render();
-    var closeBtn = document.querySelector('.cvz-pv [data-cvz-pv-close]');
-    if (closeBtn) closeBtn.focus();
+    if (!wasOpen) {
+      var closeBtn = document.querySelector('.cvz-pv [data-cvz-pv-close]');
+      if (closeBtn) closeBtn.focus();
+    }
+    var i = order.indexOf(keywordId);
+    [order[i - 1], order[i + 1]].forEach(function (id) { if (id) fetchKeywordSerp(id); });
   }
 
   function closeKeywordViewer() {
@@ -8367,7 +8465,7 @@
     var detail = state.topicDetailCache[state.activeTopicId] || {};
     var kw = (detail.search_queries || []).filter(function (q) { return q.id === kvs.keywordId; })[0] || { id: kvs.keywordId, keyword: '' };
     var serp = state.keywordSerpCache[kvs.keywordId];
-    var loading = state.loadingKeywordSerp[kvs.keywordId];
+    var loading = !!state.loadingKeywordSerp[kvs.keywordId];
     var results = (serp && serp.top_serp_results && serp.top_serp_results.length ? serp.top_serp_results : kw.top_serp_results) || [];
     var features = (serp && serp.serp_features) || kw.serp_features || [];
     var aio = serp ? serp.ai_overview : null;
@@ -8390,6 +8488,10 @@
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-modal', 'true');
     box.setAttribute('aria-label', 'Google-Ergebnis zum Keyword');
+    if (kvs.loadingNext) {
+      box.classList.add('cvz-pv-busy');
+      box.insertAdjacentHTML('afterbegin', '<div class="cvz-pv-loadbar" aria-hidden="true"></div>');
+    }
     backdrop.appendChild(box);
 
     var sourceLabel = KEYWORD_SOURCE_LABELS[kw.source] || '';
@@ -8427,7 +8529,7 @@
     summary.className = 'cvz-pv-summary';
     summary.innerHTML = pills.map(function (p, i) {
       return '<span class="' + (i === 0 ? 'cvz-pv-summary-main' : 'cvz-pv-pill') + (p.ok ? ' cvz-pv-ok' : '') + '">' + escapeHtml(p.t) + '</span>';
-    }).join('') + (checkedAt ? '<span class="cvz-pv-summary-sub">geprüft am ' + escapeHtml(formatShortDate(checkedAt)) + ', Google Deutschland</span>' : '');
+    }).join('');
     box.appendChild(summary);
 
     if (loading && !results.length) {
@@ -8435,8 +8537,7 @@
       ph.className = 'cvz-pv-empty';
       ph.innerHTML = '<span class="cvz-spinner"></span>Google-Ergebnis wird geladen …';
       box.appendChild(ph);
-      root.innerHTML = '';
-      root.appendChild(backdrop);
+      mountViewer(root, backdrop, 'k:' + kvs.keywordId);
       return;
     }
 
@@ -8466,6 +8567,8 @@
         '<span class="cvz-pv-engine-icon">' + pvFavicon('google.com', 18) + '</span>' +
         '<span class="cvz-pv-stage-name">Google</span>' +
         '<span class="cvz-kv-query">' + escapeHtml(kw.keyword || '') + '</span>' +
+        (checkedAt ? '<span class="cvz-pv-when"><span class="cvz-pv-when-date">Stand ' + escapeHtml(formatShortDate(checkedAt)) + '</span>' +
+          '<span class="cvz-pv-when-sub">Google Deutschland</span></span>' : '') +
       '</div>';
     var body = document.createElement('div');
     body.className = 'cvz-pv-chat cvz-kv-body' + (focus ? ' cvz-pv-focus-mode' : '');
@@ -8617,8 +8720,7 @@
       }).join(''));
     }
 
-    root.innerHTML = '';
-    root.appendChild(backdrop);
+    mountViewer(root, backdrop, 'k:' + kvs.keywordId);
     if (kvs.scrollToFocus) {
       kvs.scrollToFocus = false;
       scrollToFocusedBrand(root);
@@ -9109,7 +9211,6 @@
     // Topic pro Tabelle) nie gesetzt, die Spalte war also faktisch immer leer.
     table.innerHTML =
       '<thead><tr>' +
-        '<th style="width:26px;"></th>' +
         '<th>Prompt</th>' +
         '<th style="width:150px;">Zitierte Quellen</th>' +
         '<th style="width:150px;">Zitiert (28 Tage)</th>' +
@@ -9186,10 +9287,13 @@
         : '<span style="color:var(--cvz-text-muted,#8b98a5);">\u2013</span>';
 
       var tr = document.createElement('tr');
-      if (enableCitations) tr.setAttribute('data-cvz-prompt-toggle', prompt.id);
+      if (enableCitations) {
+        tr.setAttribute('data-cvz-prompt-toggle', prompt.id);
+        tr.className = 'cvz-row-open';
+        tr.tabIndex = 0;
+      }
       tr.innerHTML =
-        '<td class="cvz-prompt-expand-chevron cvz-pt-chev">' + (enableCitations ? (state.expandedPromptId === prompt.id ? '\u25be' : '\u25b8') : '') + '</td>' +
-        '<td class="cvz-pt-text">' +
+        '<td class="cvz-pt-text cvz-row-title">' +
           '<span class="cvz-dot ' + dotClass + '" title="' + escapeHtml(statusLabel) + '"></span> ' +
           escapeHtml(prompt.prompt_text) + changelogBadgeHtml +
         '</td>' +
@@ -9206,7 +9310,7 @@
         var expTr = document.createElement('tr');
         var expTd = document.createElement('td');
         expTr.className = 'cvz-pt-exp-row';
-        expTd.colSpan = 6;
+        expTd.colSpan = 5;
         expTd.appendChild(renderPromptExpansion(prompt, changelogEntries));
         expTr.appendChild(expTd);
         tbody.appendChild(expTr);
@@ -9352,7 +9456,6 @@
     var table = document.createElement('table');
     table.className = 'cvz-table cvz-gsc-table';
     table.innerHTML = '<thead><tr>' +
-      '<th style="width:26px;"></th>' +
       '<th style="width:220px;">Suchanfrage</th>' +
       '<th style="width:170px;">Rankende URL</th>' +
       '<th style="width:70px;">Klicks</th>' +
@@ -9374,7 +9477,8 @@
       var rowId = row.id || row.query;
       var isExpanded = state.expandedGscRowId === rowId;
       var tr = document.createElement('tr');
-      tr.className = 'cvz-gsc-row-clickable';
+      tr.className = 'cvz-gsc-row-clickable cvz-row-open';
+      tr.tabIndex = 0;
       tr.setAttribute('data-cvz-gsc-toggle', rowId);
       tr.setAttribute('data-cvz-gsc-text', row.query);
       if (row.id) tr.setAttribute('data-cvz-kv-open', row.id);
@@ -9383,8 +9487,7 @@
             escapeHtml(row.page_url.replace(/^https?:\/\/[^\/]+/, '').slice(0, 40) || '/') + '</a>'
         : '-';
       tr.innerHTML =
-        '<td class="cvz-prompt-expand-chevron">' + (isExpanded ? '\u25be' : '\u25b8') + '</td>' +
-        '<td>' + escapeHtml(row.query) + '</td>' +
+        '<td class="cvz-row-title">' + escapeHtml(row.query) + '</td>' +
         '<td class="cvz-gsc-cell-url">' + pageUrlHtml + '</td>' +
         '<td>' + escapeHtml(row.clicks) + '</td>' +
         '<td>' + escapeHtml(row.impressions) + '</td>' +
@@ -9398,7 +9501,7 @@
       if (isExpanded) {
         var expansionTr = document.createElement('tr');
         var expansionTd = document.createElement('td');
-        expansionTd.colSpan = 10;
+        expansionTd.colSpan = 9;
         expansionTd.appendChild(renderGscRowExpansion(row, rowId));
         expansionTr.appendChild(expansionTd);
         tbody.appendChild(expansionTr);
@@ -11499,12 +11602,11 @@
       '@media (max-width: 720px) {' +
         '.cvz-prompt-table, .cvz-prompt-table > tbody { display: block; width: 100% !important; min-width: 0 !important; table-layout: auto; }' +
         '.cvz-prompt-table > thead { display: none; }' +
-        '.cvz-prompt-table > tbody > tr { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 6px 8px; align-items: start; padding: 12px 4px; border-bottom: 1px solid var(--cvz-border); }' +
+        '.cvz-prompt-table > tbody > tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: start; padding: 12px 4px; border-bottom: 1px solid var(--cvz-border); }' +
         '.cvz-prompt-table > tbody > tr > td { display: block; padding: 0 !important; border: 0 !important; min-width: 0; width: auto !important; box-sizing: border-box; white-space: normal !important; }' +
-        '.cvz-prompt-table .cvz-pt-chev { grid-column: 1; grid-row: 1; }' +
-        '.cvz-prompt-table .cvz-pt-text { grid-column: 2; grid-row: 1; overflow-wrap: anywhere; line-height: 1.4; }' +
-        '.cvz-prompt-table .cvz-pt-del { grid-column: 3; grid-row: 1; text-align: right; }' +
-        '.cvz-prompt-table .cvz-pt-src, .cvz-prompt-table .cvz-pt-cite, .cvz-prompt-table .cvz-pt-meta { grid-column: 2 / -1; }' +
+        '.cvz-prompt-table .cvz-pt-text { grid-column: 1; grid-row: 1; overflow-wrap: anywhere; line-height: 1.4; }' +
+        '.cvz-prompt-table .cvz-pt-del { grid-column: 2; grid-row: 1; text-align: right; }' +
+        '.cvz-prompt-table .cvz-pt-src, .cvz-prompt-table .cvz-pt-cite, .cvz-prompt-table .cvz-pt-meta { grid-column: 1 / -1; }' +
         '.cvz-prompt-table .cvz-pt-src:empty, .cvz-prompt-table .cvz-pt-cite:empty, .cvz-prompt-table .cvz-pt-meta:empty { display: none; }' +
         '.cvz-prompt-table .cvz-pt-src::before { content: attr(data-label) ": "; font-size: 11px; color: var(--cvz-text-muted); margin-right: 6px; }' +
         '.cvz-prompt-table .cvz-pt-meta br { display: none; }' +
@@ -11594,6 +11696,14 @@
       // in _buildKeywordTable/_buildPromptTable/renderGscBlock), größer,
       // fett und in der Akzentfarbe, damit sofort klar ist: hier lässt sich
       // etwas aufklappen.
+      // NEU (21.10.2026): klickbare Zeilen ohne Pfeil-Spalte
+      '.cvz-row-open { cursor: pointer; }' +
+      '.cvz-row-open:hover > td { background: rgba(79,209,197,.05); }' +
+      '.cvz-row-open:focus-visible { outline: 2px solid var(--cvz-teal); outline-offset: -2px; }' +
+      '.cvz-row-open .cvz-row-title { transition: color .12s; }' +
+      '.cvz-row-open:hover .cvz-row-title { color: var(--cvz-teal); }' +
+      '.cvz-row-open .cvz-row-title::after { content: " \\203A"; opacity: 0; transition: opacity .12s; color: var(--cvz-teal); }' +
+      '.cvz-row-open:hover .cvz-row-title::after, .cvz-row-open:focus-visible .cvz-row-title::after { opacity: 1; }' +
       '.cvz-prompt-expand-chevron { color: var(--cvz-teal); font-size: 16px; font-weight: 700; text-align: center; vertical-align: middle; }' +
       '.cvz-prompt-expansion { margin: 4px 0 12px 18px; padding: 14px; border-left: 2px solid var(--cvz-teal); background: rgba(79, 209, 197, 0.03); }' +
       '.cvz-prompt-engine-nav, .cvz-prompt-run-nav { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }' +
@@ -11688,6 +11798,17 @@
       '#cvz-pv-root { --cvz-navy: #0d1117; --cvz-navy-raised: #141b24; --cvz-teal: #4fd1c5; --cvz-text: #e6edf3; --cvz-text-muted: #8b98a5; --cvz-border: #232b36; --pv-bg: #0d1117; --pv-raised: #141b24; --pv-card: #18212c; --pv-border: #232b36; --pv-text: #e6edf3; --pv-muted: #8b98a5; --pv-teal: #4fd1c5; --pv-amber: #e0a458; font-family: "Geist", sans-serif; color: var(--pv-text); }' +
       '.cvz-pv-backdrop { position: fixed; inset: 0; z-index: 2147483000; background: rgba(5,8,12,.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; align-items: flex-start; justify-content: center; padding: 32px 16px; overflow-y: auto; animation: cvzPvFade .15s ease-out; }' +
       '@keyframes cvzPvFade { from { opacity: 0; } to { opacity: 1; } }' +
+      '.cvz-pv-noanim, .cvz-pv-noanim .cvz-pv { animation: none !important; }' +
+      '.cvz-pv { position: relative; }' +
+      '.cvz-pv-swap { animation: cvzPvSwap .18s ease-out; }' +
+      '@keyframes cvzPvSwap { from { opacity: .35; } to { opacity: 1; } }' +
+      '.cvz-pv-busy .cvz-pv-grid, .cvz-pv-busy .cvz-pv-summary { opacity: .55; transition: opacity .15s; }' +
+      '.cvz-pv-loadbar { position: absolute; top: 0; left: 0; right: 0; height: 2px; overflow: hidden; background: rgba(79,209,197,.15); }' +
+      '.cvz-pv-loadbar::after { content: ""; position: absolute; top: 0; bottom: 0; width: 30%; background: var(--pv-teal); animation: cvzPvLoad 1s ease-in-out infinite; }' +
+      '@keyframes cvzPvLoad { from { left: -30%; } to { left: 100%; } }' +
+      '.cvz-pv-when { display: inline-flex; flex-direction: column; line-height: 1.2; padding-left: 10px; border-left: 1px solid var(--pv-border); }' +
+      '.cvz-pv-when-date { font-size: 13px; font-weight: 600; color: var(--pv-text); }' +
+      '.cvz-pv-when-sub { font-size: 11px; color: var(--pv-muted); }' +
       '@keyframes cvzPvRise { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }' +
       '.cvz-pv { width: 100%; max-width: 1180px; background: var(--pv-bg); border: 1px solid var(--pv-border); padding: 24px 28px 28px; box-sizing: border-box; animation: cvzPvRise .2s ease-out; }' +
       '@media (prefers-reduced-motion: reduce) { .cvz-pv, .cvz-pv-backdrop { animation: none; } }' +
