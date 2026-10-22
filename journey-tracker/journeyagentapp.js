@@ -197,6 +197,8 @@
     keywordViewer: null,
     keywordSerpCache: {},
     loadingKeywordSerp: {},
+    kvChecking: {},
+    kvCheckError: {},
     expandedGscRowId: null,
     expandedOppId: null,
     // NEU (16.09.2026): Journey-Map-Tab
@@ -1904,6 +1906,11 @@
       if (kvGotoId) openKeywordViewer(kvGotoId);
       return;
     }
+    var kvCheck = event.target.closest('[data-cvz-kv-check]');
+    if (kvCheck) {
+      checkKeywordSerpNow(kvCheck.getAttribute('data-cvz-kv-check'));
+      return;
+    }
     var kvBrand = event.target.closest('[data-cvz-kv-brand]');
     if (kvBrand && state.keywordViewer) {
       var kvKey = kvBrand.getAttribute('data-cvz-kv-brand');
@@ -1933,6 +1940,11 @@
       if (!state.promptViewer.focus) { var pvRootK = document.getElementById('cvz-pv-root'); if (pvRootK) pvRootK.setAttribute('data-keep-chat', '1'); }
       state.promptViewer.scrollToFocus = !!state.promptViewer.focus;
       render();
+      return;
+    }
+    var pvStepBtn = event.target.closest('[data-cvz-pv-step]');
+    if (pvStepBtn && state.promptViewer) {
+      pvStep(parseInt(pvStepBtn.getAttribute('data-cvz-pv-step'), 10) || 0);
       return;
     }
     var pvRun = event.target.closest('[data-cvz-pv-run]');
@@ -5195,11 +5207,10 @@
 
   // Das Backend akzeptiert nur diese Zeiträume (422 sonst). Ungültige Werte
   // (z.B. NaN aus einem fehlenden data-Attribut) fallen auf 12 zurück.
-  var ALLOWED_FANOUT_WEEKS = [4, 12, 26];
-
+  // GEÄNDERT (22.10.2026): fest 28 Tage (= 4 Wochen, vom Backend so unterstützt),
+  // wie alle anderen Auswertungen. Die Auswahl 4/12/26 Wochen entfällt.
   function getFanOutWeeks(topicId) {
-    var w = state.fanOutWeeksByTopic[topicId];
-    return ALLOWED_FANOUT_WEEKS.indexOf(w) !== -1 ? w : 12;
+    return 4;
   }
 
   function fanOutKey(topicId) {
@@ -5353,20 +5364,6 @@
 
     var key = fanOutKey(topicId);
 
-    // Zeitraum-Auswahl
-    var weeksWrap = document.createElement('div');
-    weeksWrap.className = 'cvz-weeks-preset-picker';
-    weeksWrap.style.marginBottom = '12px';
-    [4, 12, 26].forEach(function (w) {
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'cvz-weeks-preset-btn' + (w === getFanOutWeeks(topicId) ? ' cvz-weeks-preset-btn-active' : '');
-      btn.textContent = w + ' Wochen';
-      btn.setAttribute('data-cvz-fanout-weeks', String(w));
-      btn.setAttribute('data-cvz-fanout-topic', topicId);
-      weeksWrap.appendChild(btn);
-    });
-    section.appendChild(weeksWrap);
 
     if (state.loadingFanOut[key]) {
       var loading = document.createElement('p');
@@ -5397,12 +5394,12 @@
     var coverage = document.createElement('p');
     coverage.className = 'cvz-fanout-coverage';
     if (total === 0) {
-      coverage.textContent = 'In diesem Zeitraum liegen keine ChatGPT-Läufe vor.';
+      coverage.textContent = 'In den letzten 28 Tagen liegen keine ChatGPT-Läufe vor.';
       section.appendChild(coverage);
       return section;
     }
     var pct = Math.round((withFo / total) * 100);
-    coverage.textContent = 'Bei ' + withFo + ' von ' + total + ' ChatGPT-Läufen (' + pct + ' %) hat ChatGPT Suchanfragen geliefert. Nur diese Läufe sind in der Auswertung.';
+    coverage.textContent = 'Letzte 28 Tage: Bei ' + withFo + ' von ' + total + ' ChatGPT-Läufen (' + pct + ' %) hat ChatGPT Suchanfragen geliefert. Nur diese Läufe sind in der Auswertung.';
     section.appendChild(coverage);
     if (withFo < 10) {
       var warn = document.createElement('p');
@@ -5442,7 +5439,7 @@
         var none = document.createElement('p');
         none.className = 'cvz-card-placeholder-text';
         none.style.margin = '8px 0 0';
-        none.textContent = 'Für diesen Prompt hat ChatGPT in diesem Zeitraum keine Suchanfragen geliefert.';
+        none.textContent = 'Für diesen Prompt hat ChatGPT in den letzten 28 Tagen keine Suchanfragen geliefert.';
         details.appendChild(none);
       } else {
         details.appendChild(buildFanOutPromptBody(topicId, p));
@@ -5491,14 +5488,14 @@
     var runs = p.runs.map(function (r) { return { collected_at: r.collected_at, fan_out_queries: r.queries || [] }; })
       .filter(function (r) { return r.collected_at && r.fan_out_queries.length > 0; });
 
-    // Nur Tage im gewählten Zeitraum (4/12/26 Wochen), passend zur Gesamtliste.
+    // Nur Tage der letzten 28 Tage, passend zur Gesamtliste.
     var cutoff = Date.now() - getFanOutWeeks(topicId) * 7 * 24 * 3600 * 1000;
     var days = groupFanOutRunsByDay(runs.filter(function (r) { return new Date(r.collected_at).getTime() >= cutoff; }));
     if (days.length === 0) {
       var why = document.createElement('p');
       why.className = 'cvz-card-placeholder-text';
       why.style.margin = '8px 0 0';
-      why.textContent = 'Keine Läufe mit Fan-out im gewählten Zeitraum. Gesamtübersicht:';
+      why.textContent = 'Keine Läufe mit Fan-out in den letzten 28 Tagen. Gesamtübersicht:';
       body.appendChild(why);
       body.appendChild(totalChips());
       return body;
@@ -5509,46 +5506,85 @@
     days.forEach(function (d, i) { if (d.key === sel) selIdx = i; });
     if (selIdx === -1) sel = null;
 
-    var LIMIT = 8;
-    var expanded = !!state.fanOutDaysExpanded[pid];
-    // Ein gewählter, älterer Tag bleibt sichtbar, auch wenn die Liste gekürzt ist.
-    var shownDays = (expanded || days.length <= LIMIT) ? days : days.slice(0, LIMIT);
-    if (!expanded && selIdx >= LIMIT) shownDays = shownDays.concat([days[selIdx]]);
-
+    // GEÄNDERT (22.10.2026): statt eines Knopfs je Messtag (wurde bei 12/26
+    // Wochen zur Knopfwüste) zwei Ansichten: "Gesamt" und "Nach Tag" mit
+    // Blättern (‹ älter, › neuer). Gleiches Prinzip wie in der Antwort-Ansicht.
     var bar = document.createElement('div');
-    bar.className = 'cvz-fanout-chips';
-    bar.style.margin = '8px 0 6px';
-    function dayBtn(label, key, active, title) {
+    bar.className = 'cvz-fanout-modebar';
+    function modeBtn(label, key, active) {
       var b = document.createElement('button');
       b.type = 'button';
       b.className = 'cvz-weeks-preset-btn' + (active ? ' cvz-weeks-preset-btn-active' : '');
       b.setAttribute('data-cvz-fanout-day-prompt', pid);
       b.setAttribute('data-cvz-fanout-day', key);
       b.textContent = label;
-      if (title) b.title = title;
       return b;
     }
-    bar.appendChild(dayBtn('Gesamt', '', sel === null, 'Alle Läufe im Zeitraum zusammen'));
-    shownDays.forEach(function (d) {
-      bar.appendChild(dayBtn(d.label, d.key, d.key === sel, d.runCount + (d.runCount === 1 ? ' Lauf' : ' Läufe') + ' an diesem Tag'));
-    });
-    if (days.length > LIMIT) {
-      var more = document.createElement('button');
-      more.type = 'button';
-      more.className = 'cvz-weeks-preset-btn';
-      more.setAttribute('data-cvz-fanout-days-more', pid);
-      more.textContent = expanded ? 'Weniger Tage' : 'Weitere ' + (days.length - LIMIT) + ' Tage';
-      bar.appendChild(more);
+    bar.appendChild(modeBtn('Gesamt', '', sel === null));
+    bar.appendChild(modeBtn('Nach Tag', sel || days[0].key, sel !== null));
+    if (sel !== null) {
+      var stepper = document.createElement('div');
+      stepper.className = 'cvz-fanout-stepper';
+      var olderDay = days[selIdx + 1], newerDay = days[selIdx - 1];
+      var prev = modeBtn('\u2039', olderDay ? olderDay.key : '', false);
+      prev.title = olderDay ? 'Älterer Messtag: ' + olderDay.label : 'Kein älterer Messtag';
+      prev.setAttribute('aria-label', prev.title);
+      if (!olderDay) prev.disabled = true;
+      var next = modeBtn('\u203a', newerDay ? newerDay.key : '', false);
+      next.title = newerDay ? 'Neuerer Messtag: ' + newerDay.label : 'Kein neuerer Messtag';
+      next.setAttribute('aria-label', next.title);
+      if (!newerDay) next.disabled = true;
+      var lbl = document.createElement('span');
+      lbl.className = 'cvz-fanout-stepper-label';
+      lbl.innerHTML = '<strong>' + escapeHtml(days[selIdx].label) + '</strong> ' +
+        escapeHtml(days[selIdx].runCount + (days[selIdx].runCount === 1 ? ' Lauf' : ' Läufe') + ' \u00b7 Tag ' + (days.length - selIdx) + ' von ' + days.length);
+      stepper.appendChild(prev);
+      stepper.appendChild(lbl);
+      stepper.appendChild(next);
+      bar.appendChild(stepper);
     }
     body.appendChild(bar);
 
     if (sel === null) {
+      // GEÄNDERT (22.10.2026): Gesamt nach Beständigkeit gruppiert. Für
+      // Inhalte zählen die Suchen, die ChatGPT fast immer startet; einmalige
+      // sind eher Rauschen.
+      var runsWith = Math.max(1, p.runs_with_fan_out || days.reduce(function (n, d) { return n + d.runCount; }, 0));
+      var groups = [
+        { title: 'Fast immer (in mindestens der Hälfte der Läufe)', items: [] },
+        { title: 'Gelegentlich', items: [] },
+        { title: 'Nur einmal', items: [] },
+      ];
+      p.queries.forEach(function (q) {
+        var share = q.run_count / runsWith;
+        (q.run_count <= 1 ? groups[2] : (share >= 0.5 ? groups[0] : groups[1])).items.push(q);
+      });
       var gInfo = document.createElement('p');
       gInfo.className = 'cvz-card-placeholder-text';
-      gInfo.style.margin = '0';
-      gInfo.textContent = 'Alle Queries im gewählten Zeitraum, mit Anzahl der Läufe, in denen sie vorkamen.';
+      gInfo.style.margin = '0 0 6px';
+      gInfo.textContent = p.queries.length + ' verschiedene Queries in ' + runsWith + (runsWith === 1 ? ' Lauf' : ' Läufen') +
+        '. Die Zahl am Chip: in wie vielen Läufen die Query vorkam.';
       body.appendChild(gInfo);
-      body.appendChild(totalChips());
+      groups.forEach(function (g) {
+        if (!g.items.length) return;
+        var gl = document.createElement('p');
+        gl.className = 'cvz-fanout-group-label';
+        gl.textContent = g.title + ' (' + g.items.length + ')';
+        body.appendChild(gl);
+        var chips = document.createElement('div');
+        chips.className = 'cvz-fanout-chips';
+        g.items.forEach(function (q) {
+          var chip = document.createElement('span');
+          chip.className = 'cvz-fanout-chip';
+          chip.textContent = q.query;
+          var count = document.createElement('span');
+          count.className = 'cvz-fanout-chip-count';
+          count.textContent = q.run_count + '/' + runsWith;
+          chip.appendChild(count);
+          chips.appendChild(chip);
+        });
+        body.appendChild(chips);
+      });
       return body;
     }
 
@@ -8066,12 +8102,29 @@
     render();
   }
 
+  // GEÄNDERT (21.10.2026): alle geladenen Antworten (bis 15 je KI), nicht nur
+  // die der letzten 28 Tage. Vorher war bei einem Thema ohne neue Messungen
+  // (z. B. vor der Deaktivierung) fast nichts mehr zu sehen. Ältere Antworten
+  // tragen _old = true: sie sind ansehbar, zählen aber nicht in die Quote.
   function pvRunsFor(data, engine) {
     var runs = ((data && data[engine]) || []).filter(function (r) { return !isNaN(new Date(r.collected_at).getTime()); });
     runs.sort(function (a, b) { return new Date(a.collected_at) - new Date(b.collected_at); }); // alt -> neu
     var cutoff = Date.now() - PV_WINDOW_DAYS * 86400000;
-    var recent = runs.filter(function (r) { return new Date(r.collected_at).getTime() >= cutoff; });
-    return recent.length ? recent : runs.slice(-1);
+    runs.forEach(function (r) { r._old = new Date(r.collected_at).getTime() < cutoff; });
+    return runs;
+  }
+
+  function pvStep(delta) {
+    var pv = state.promptViewer;
+    var data = pv && state.promptCitationsCache[pv.promptId];
+    if (!data) return;
+    var runs = pvRunsFor(data, pv.engine || 'chat_gpt');
+    if (!runs.length) return;
+    var idx = runs.map(function (r) { return r.run_id; }).indexOf(pv.runId);
+    if (idx === -1) idx = runs.length - 1;
+    idx = Math.max(0, Math.min(runs.length - 1, idx + delta));
+    pv.runId = runs[idx].run_id;
+    render();
   }
 
   function pvRunStatus(run) {
@@ -8153,7 +8206,7 @@
       '<div class="cvz-pv-head-text">' +
         '<p class="cvz-pv-eyebrow">Gespeicherte KI-Antworten' + (phaseLabel ? ' · ' + escapeHtml(phaseLabel) : '') +
           (prompt.persona ? ' · ' + escapeHtml(prompt.persona) : '') + '</p>' +
-        '<h3 class="cvz-pv-title">' + escapeHtml(prompt.prompt_text || (data && data.prompt_text) || '') + '</h3>' +
+        '<div class="cvz-pv-title" role="heading" aria-level="2">' + escapeHtml(prompt.prompt_text || (data && data.prompt_text) || '') + '</div>' +
       '</div>' +
       '<div class="cvz-pv-head-nav">' +
         (order.length > 1 && pos >= 0
@@ -8179,8 +8232,9 @@
     // ---- Daten je KI
     var engines = ['chat_gpt', 'gemini'].map(function (id) {
       var runs = pvRunsFor(data, id);
-      var cited = runs.filter(function (r) { return r.own_domain_cited; }).length;
-      return { id: id, label: MODEL_LABELS[id], runs: runs, cited: cited };
+      var windowRuns = runs.filter(function (r) { return !r._old; });
+      var cited = windowRuns.filter(function (r) { return r.own_domain_cited; }).length;
+      return { id: id, label: MODEL_LABELS[id], runs: runs, windowRuns: windowRuns, cited: cited };
     });
     if (!pv.engine) {
       var pref = state.activeChannel !== 'all' ? state.activeChannel : null;
@@ -8190,7 +8244,7 @@
     var eng = engines.filter(function (e) { return e.id === pv.engine; })[0];
     var brandIndex = [], brandCounts = {}, brandPerAnswer = {};
     var run = eng.runs.filter(function (r) { return r.run_id === pv.runId; })[0] || eng.runs[eng.runs.length - 1];
-    var totalRuns = engines.reduce(function (n, e) { return n + e.runs.length; }, 0);
+    var totalRuns = engines.reduce(function (n, e) { return n + e.windowRuns.length; }, 0);
     var totalCited = engines.reduce(function (n, e) { return n + e.cited; }, 0);
 
     var summary = document.createElement('div');
@@ -8219,12 +8273,10 @@
       // GEÄNDERT (21.10.2026): Datum prominent, mit Position in der Reihe
       stage.innerHTML =
         '<div class="cvz-pv-stage-bar">' +
-          '<span class="cvz-pv-engine-icon">' + pvFavicon(PV_ENGINE_ICONS[eng.id], 18) + '</span>' +
-          '<span class="cvz-pv-stage-name">' + escapeHtml(eng.label) + '</span>' +
-          '<span class="cvz-pv-when"><span class="cvz-pv-when-date">Antwort vom ' +
+          '<span class="cvz-pv-when cvz-pv-when-first"><span class="cvz-pv-when-date">Antwort vom ' +
             when.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + '</span>' +
             '<span class="cvz-pv-when-sub">' + when.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr \u00b7 ' +
-              (isNewest ? 'neueste' : (runIdx + 1) + ' von ' + eng.runs.length) + '</span></span>' +
+              (isNewest ? 'neueste' : (runIdx + 1) + ' von ' + eng.runs.length) + (run._old ? ' \u00b7 älter als 28 Tage' : '') + '</span></span>' +
           '<span class="cvz-pv-status cvz-pv-status-' + st.key + '">' + escapeHtml(st.label) +
             (run.own_domain_recommended ? ' · empfohlen' : '') + '</span>' +
         '</div>' +
@@ -8255,19 +8307,41 @@
       // Punktleiste
       var strip = document.createElement('div');
       strip.className = 'cvz-pv-strip';
+      // GEÄNDERT (21.10.2026): Vor/Zurück-Knöpfe, Datum unter jedem Punkt,
+      // damit klar ist, dass man durch die Antworten blättern kann.
+      var hasOld = eng.runs.some(function (r) { return r._old; });
       strip.innerHTML =
-        '<span class="cvz-pv-strip-label">' + escapeHtml(eng.label) + ': ' + eng.runs.length + ' Antworten vom ' +
-          escapeHtml((formatShortDate(eng.runs[0].collected_at) || '').slice(0, 6)) + ' bis ' +
-          escapeHtml((formatShortDate(eng.runs[eng.runs.length - 1].collected_at) || '').slice(0, 6)) + ', \u00e4lteste links</span>' +
+        '<div class="cvz-pv-stripnav">' +
+          '<button type="button" class="cvz-pv-stepbtn" data-cvz-pv-step="-1"' + (runIdx <= 0 ? ' disabled' : '') + '>\u2039 \u00c4ltere Antwort</button>' +
+          '<span class="cvz-pv-stripnav-pos">Antwort ' + (runIdx + 1) + ' von ' + eng.runs.length + '</span>' +
+          '<button type="button" class="cvz-pv-stepbtn" data-cvz-pv-step="1"' + (isNewest ? ' disabled' : '') + '>Neuere Antwort \u203a</button>' +
+        '</div>' +
         '<div class="cvz-pv-dots">' + eng.runs.map(function (r) {
           var s = pvRunStatus(r);
           var d = new Date(r.collected_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
-          return '<button type="button" class="cvz-pv-dot cvz-pv-dot-' + s.key + (r === run ? ' cvz-pv-dot-active' : '') + '" ' +
-            'data-cvz-pv-run="' + escapeHtml(r.run_id) + '" title="' + escapeHtml(d + ': ' + s.label) + '" aria-label="' + escapeHtml(d + ': ' + s.label) + '"></button>';
+          var tip = d + ': ' + s.label + (r._old ? ' (älter als 28 Tage, zählt nicht in die Quote)' : '');
+          return '<button type="button" class="cvz-pv-dotbtn' + (r === run ? ' cvz-pv-dotbtn-active' : '') + (r._old ? ' cvz-pv-dotbtn-old' : '') + '" ' +
+            'data-cvz-pv-run="' + escapeHtml(r.run_id) + '" title="' + escapeHtml(tip) + '" aria-label="' + escapeHtml(tip) + '"' + (r === run ? ' aria-current="true"' : '') + '>' +
+            '<i class="cvz-pv-dot cvz-pv-dot-' + s.key + '"></i><span>' + escapeHtml(d.slice(0, 5)) + '</span></button>';
         }).join('') + '</div>' +
-        '<span class="cvz-pv-legend"><i class="cvz-pv-dot cvz-pv-dot-cited"></i>zitiert <i class="cvz-pv-dot cvz-pv-dot-mentioned"></i>erwähnt <i class="cvz-pv-dot cvz-pv-dot-none"></i>nicht genannt · ← → blättern</span>';
+        '<span class="cvz-pv-legend"><i class="cvz-pv-dot cvz-pv-dot-cited"></i>zitiert <i class="cvz-pv-dot cvz-pv-dot-mentioned"></i>erwähnt <i class="cvz-pv-dot cvz-pv-dot-none"></i>nicht genannt' +
+          (hasOld ? ' \u00b7 blass: älter als 28 Tage, zählt nicht in die Quote' : '') + ' \u00b7 Tasten \u2190 \u2192</span>';
       stage.appendChild(strip);
     }
+
+    // GEÄNDERT (22.10.2026): KI-Auswahl als Reiter direkt über der Antwort
+    // (vorher Karte in der rechten Spalte, auf dem Handy erst unter der Antwort).
+    stage.insertAdjacentHTML('afterbegin', '<div class="cvz-pv-engine-tabs" role="tablist" aria-label="KI-System">' + engines.map(function (e) {
+      var pct = e.windowRuns.length ? Math.round(e.cited / e.windowRuns.length * 100) : 0;
+      var sub = e.windowRuns.length ? e.cited + ' von ' + e.windowRuns.length + ' zitiert'
+        : (e.runs.length ? 'keine in 28 Tagen' : 'noch keine Antwort');
+      return '<button type="button" role="tab" aria-selected="' + (e.id === eng.id) + '" class="cvz-pv-engine-tab' + (e.id === eng.id ? ' cvz-pv-engine-tab-active' : '') + '" data-cvz-pv-engine="' + e.id + '"' + (e.runs.length ? '' : ' disabled') +
+        ' title="' + escapeHtml(e.label + ': ' + sub + (e.windowRuns.length ? ' (28 Tage)' : '')) + '">' +
+        '<span class="cvz-pv-engine-icon">' + pvFavicon(PV_ENGINE_ICONS[e.id], 16) + '</span>' +
+        '<span class="cvz-pv-engine-tab-text"><strong>' + escapeHtml(e.label) + '</strong><small>' + escapeHtml(sub) + '</small></span>' +
+        '<span class="cvz-pv-engine-bar"><i style="width:' + pct + '%"></i></span>' +
+      '</button>';
+    }).join('') + '</div>');
 
     // ---- Rechts
     var side = document.createElement('div');
@@ -8282,14 +8356,6 @@
       return c;
     }
 
-    card('KI-Systeme', engines.map(function (e) {
-      return '<button type="button" class="cvz-pv-engine' + (e.id === eng.id ? ' cvz-pv-engine-active' : '') + '" data-cvz-pv-engine="' + e.id + '"' + (e.runs.length ? '' : ' disabled') + '>' +
-        '<span class="cvz-pv-engine-icon">' + pvFavicon(PV_ENGINE_ICONS[e.id], 18) + '</span>' +
-        '<span class="cvz-pv-engine-text"><strong>' + escapeHtml(e.label) + '</strong><small>' +
-          (e.runs.length ? e.cited + ' von ' + e.runs.length + ' zitiert' : 'noch keine Antwort') + '</small></span>' +
-        '<span class="cvz-pv-engine-bar"><i style="width:' + (e.runs.length ? Math.round(e.cited / e.runs.length * 100) : 0) + '%"></i></span>' +
-      '</button>';
-    }).join(''));
 
     if (run) {
       card('Genannte Anbieter in dieser Antwort',
@@ -8321,7 +8387,9 @@
 
       // Häufigste Quellen über alle Antworten dieser KI im Zeitraum
       var counts = {}, isComp = {};
-      eng.runs.forEach(function (r) {
+      var topRuns = eng.windowRuns.length ? eng.windowRuns : eng.runs;
+      var topLabel = eng.windowRuns.length ? PV_WINDOW_DAYS + ' Tage' : 'alle geladenen Antworten';
+      topRuns.forEach(function (r) {
         var inRun = {};
         (r.sources || []).forEach(function (s) {
           var b = pvBareDomain(s.domain);
@@ -8333,11 +8401,11 @@
       });
       var top = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 10);
       var ownRank = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).indexOf(ownBare);
-      card('Häufigste Quellen · ' + escapeHtml(eng.label) + ', ' + PV_WINDOW_DAYS + ' Tage',
+      card('Häufigste Quellen · ' + escapeHtml(eng.label) + ', ' + topLabel,
         top.length
           ? '<div class="cvz-pv-chips">' + top.map(function (b) { return chip(b, { count: counts[b], comp: isComp[b] }); }).join('') + '</div>' +
             '<p class="cvz-pv-muted">' + (ownRank === -1
-              ? 'Eure Domain war in keiner dieser ' + eng.runs.length + ' Antworten Quelle.'
+              ? 'Eure Domain war in keiner dieser ' + topRuns.length + ' Antworten Quelle.'
               : 'Eure Domain: Platz ' + (ownRank + 1) + ' von ' + Object.keys(counts).length + ' Quellen.') + '</p>'
           : '<p class="cvz-pv-muted">Noch keine Quellen.</p>');
 
@@ -8377,16 +8445,8 @@
     if (/INPUT|TEXTAREA|SELECT/.test(tag)) return;
     if (e.key === 'Escape') { e.preventDefault(); closePromptViewer(); return; }
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    var data = state.promptCitationsCache[state.promptViewer.promptId];
-    if (!data) return;
-    var runs = pvRunsFor(data, state.promptViewer.engine || 'chat_gpt');
-    if (!runs.length) return;
-    var idx = runs.map(function (r) { return r.run_id; }).indexOf(state.promptViewer.runId);
-    if (idx === -1) idx = runs.length - 1;
-    idx = Math.max(0, Math.min(runs.length - 1, idx + (e.key === 'ArrowLeft' ? -1 : 1)));
-    state.promptViewer.runId = runs[idx].run_id;
     e.preventDefault();
-    render();
+    pvStep(e.key === 'ArrowLeft' ? -1 : 1);
   });
 
   // =========================================================================
@@ -8446,6 +8506,36 @@
     [order[i - 1], order[i + 1]].forEach(function (id) { if (id) fetchKeywordSerp(id); });
   }
 
+  // NEU (21.10.2026): Google-Ergebnis + KI-Übersicht sofort prüfen (Live-Abfrage,
+  // einige Sekunden). Aktualisiert danach auch die Zeile in der Tabelle.
+  async function checkKeywordSerpNow(keywordId) {
+    if (state.kvChecking[keywordId]) return;
+    state.kvChecking[keywordId] = true;
+    delete state.kvCheckError[keywordId];
+    render();
+    try {
+      var resp = await apiFetch('/topics/' + state.activeTopicId + '/keywords/' + encodeURIComponent(keywordId) + '/check-serp',
+        { method: 'POST', body: {} });
+      state.keywordSerpCache[keywordId] = resp;
+      var detail = state.topicDetailCache[state.activeTopicId];
+      ((detail && detail.search_queries) || []).concat((detail && detail.gsc_rows) || []).forEach(function (q) {
+        if (q.id !== keywordId) return;
+        q.serp_checked_at = resp.serp_checked_at;
+        q.top_serp_results = resp.top_serp_results;
+        q.serp_features = resp.serp_features;
+        if (resp.organic_rank != null || 'organic_rank' in q) q.organic_rank = resp.organic_rank;
+        var hasAio = (resp.serp_features || []).indexOf('ai_overview') !== -1;
+        q.ai_overview_status = hasAio ? 'yes' : 'no';
+        q.ai_overview_label = hasAio ? 'Ja' : 'Nein';
+      });
+    } catch (e) {
+      console.error('[CVZ Visibility] Live-Prüfung fehlgeschlagen:', e);
+      state.kvCheckError[keywordId] = 'Die Prüfung bei Google hat nicht geklappt. Bitte später erneut versuchen.';
+    }
+    state.kvChecking[keywordId] = false;
+    render();
+  }
+
   function closeKeywordViewer() {
     state.keywordViewer = null;
     updateUrlParams({ cvz_keyword: null });
@@ -8474,6 +8564,13 @@
     var ownDomain = (detail.topic && detail.topic.own_domain) || '';
     var ownBare = pvBareDomain(ownDomain);
     var compDomains = detail.competitor_domains || [];
+    var checking = !!state.kvChecking[kvs.keywordId];
+    var checkErr = state.kvCheckError[kvs.keywordId];
+    function checkBtn(label) {
+      return '<button type="button" class="cvz-kv-checkbtn" data-cvz-kv-check="' + escapeHtml(kvs.keywordId) + '"' + (checking ? ' disabled' : '') + '>' +
+        (checking ? '<span class="cvz-spinner"></span>Wird bei Google geprüft … (bis zu 30 Sekunden)' : escapeHtml(label)) + '</button>' +
+        (checkErr ? '<p class="cvz-pv-muted" style="color:var(--pv-amber);">' + escapeHtml(checkErr) + '</p>' : '');
+    }
     var compBare = compDomains.map(pvBareDomain);
 
     var order = kvs.order || [];
@@ -8489,7 +8586,7 @@
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-modal', 'true');
     box.setAttribute('aria-label', 'Google-Ergebnis zum Keyword');
-    if (kvs.loadingNext) {
+    if (kvs.loadingNext || checking) {
       box.classList.add('cvz-pv-busy');
       box.insertAdjacentHTML('afterbegin', '<div class="cvz-pv-loadbar" aria-hidden="true"></div>');
     }
@@ -8503,7 +8600,7 @@
       '<div class="cvz-pv-head-text">' +
         '<p class="cvz-pv-eyebrow">Google-Ergebnis' + (sourceLabel ? ' · ' + escapeHtml(sourceLabel) : '') +
           (phaseLabel ? ' · ' + escapeHtml(phaseLabel) : '') + '</p>' +
-        '<h3 class="cvz-pv-title">' + escapeHtml(kw.keyword || (serp && serp.keyword) || '') + '</h3>' +
+        '<div class="cvz-pv-title" role="heading" aria-level="2">' + escapeHtml(kw.keyword || (serp && serp.keyword) || '') + '</div>' +
       '</div>' +
       '<div class="cvz-pv-head-nav">' +
         (order.length > 1 && pos >= 0
@@ -8569,7 +8666,7 @@
         '<span class="cvz-pv-stage-name">Google</span>' +
         '<span class="cvz-kv-query">' + escapeHtml(kw.keyword || '') + '</span>' +
         (checkedAt ? '<span class="cvz-pv-when"><span class="cvz-pv-when-date">Stand ' + escapeHtml(formatShortDate(checkedAt)) + '</span>' +
-          '<span class="cvz-pv-when-sub">Google Deutschland</span></span>' : '') +
+          '<span class="cvz-pv-when-sub" title="Wird mit dem nächsten Monatslauf aktualisiert">Google Deutschland · Update mit dem Monatslauf</span></span>' : '') +
       '</div>';
     var body = document.createElement('div');
     body.className = 'cvz-pv-chat cvz-kv-body' + (focus ? ' cvz-pv-focus-mode' : '');
@@ -8597,8 +8694,8 @@
     } else if (features.indexOf('ai_overview') !== -1) {
       var aioNote = document.createElement('div');
       aioNote.className = 'cvz-kv-aio cvz-kv-aio-empty';
-      aioNote.innerHTML = '<p class="cvz-kv-aio-label">✦ KI-Übersicht</p><p class="cvz-pv-muted" style="margin:0;">Google zeigt hier eine KI-Übersicht. ' +
-        'Ihren Inhalt speichert der Tracker ab dem nächsten SERP-Check.</p>';
+      aioNote.innerHTML = '<p class="cvz-kv-aio-label">✦ KI-Übersicht</p><p class="cvz-pv-muted" style="margin:0 0 10px;">Google zeigt hier eine KI-Übersicht, ' +
+        'ihr Inhalt wurde bei der letzten Prüfung noch nicht gespeichert.</p>' + checkBtn('KI-Übersicht jetzt laden');
       body.appendChild(aioNote);
     }
 
@@ -8626,7 +8723,9 @@
     } else {
       var none = document.createElement('div');
       none.className = 'cvz-pv-empty';
-      none.textContent = checkedAt ? 'Keine organischen Ergebnisse gespeichert.' : 'Dieses Keyword wurde noch nicht bei Google geprüft. Das passiert mit dem nächsten Monatslauf.';
+      none.innerHTML = checkedAt
+        ? '<p style="margin:0;">Keine organischen Ergebnisse gespeichert. Die nächste Prüfung läuft mit dem Monatslauf.</p>'
+        : '<p style="margin:0 0 12px;">Dieses Keyword wurde noch nicht bei Google geprüft.</p>' + checkBtn('Jetzt bei Google prüfen');
       body.appendChild(none);
     }
 
@@ -11880,7 +11979,21 @@
       '@media (prefers-reduced-motion: reduce) { .cvz-pv, .cvz-pv-backdrop { animation: none; } }' +
       '.cvz-pv-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }' +
       '.cvz-pv-eyebrow { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--pv-muted); }' +
-      '.cvz-pv-title { margin: 0; font-family: "Syne", sans-serif; font-size: 22px; line-height: 1.3; color: var(--pv-text); }' +
+      '.cvz-pv-title { margin: 0 !important; font-family: "Syne", sans-serif !important; font-size: 22px !important; font-weight: 700; letter-spacing: 0 !important; line-height: 1.3 !important; color: var(--pv-text); overflow-wrap: anywhere; hyphens: auto; text-align: left; }' +
+      '.cvz-pv, .cvz-pv * { box-sizing: border-box; }' +
+      '.cvz-pv { overflow-x: hidden; }' +
+      '.cvz-pv-head-text, .cvz-pv-grid > * { min-width: 0; }' +
+      '.cvz-pv-engine-tabs { display: flex; border-bottom: 1px solid var(--pv-border); }' +
+      '.cvz-pv-engine-tab { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: transparent; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; color: var(--pv-muted); cursor: pointer; font-family: inherit; text-align: left; }' +
+      '.cvz-pv-engine-tab:hover:not(:disabled) { color: var(--pv-text); background: var(--pv-card); }' +
+      '.cvz-pv-engine-tab:disabled { opacity: .4; cursor: default; }' +
+      '.cvz-pv-engine-tab-active { color: var(--pv-text); border-bottom-color: var(--pv-teal); background: var(--pv-card); }' +
+      '.cvz-pv-engine-tab-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }' +
+      '.cvz-pv-engine-tab-text strong { font-size: 14px; }' +
+      '.cvz-pv-engine-tab-text small { font-size: 11px; color: var(--pv-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }' +
+      '.cvz-pv-engine-tab .cvz-pv-engine-icon { width: 24px; height: 24px; }' +
+      '.cvz-pv-engine-tab .cvz-pv-engine-bar { width: 44px; }' +
+      '.cvz-pv-when-first { border-left: 0; padding-left: 0; }' +
       '.cvz-pv-head-nav { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }' +
       '.cvz-pv-count { font-size: 12px; color: var(--pv-muted); min-width: 44px; text-align: center; }' +
       '.cvz-pv-iconbtn { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; background: var(--pv-raised); color: var(--pv-text); border: 1px solid var(--pv-border); font-size: 20px; line-height: 1; cursor: pointer; padding: 0; }' +
@@ -11915,7 +12028,19 @@
       'mark.cvz-pv-mark-comp { background: rgba(224,164,88,.18); color: inherit; box-shadow: inset 0 -2px 0 var(--pv-amber); padding: 0 2px; }' +
       '.cvz-pv-strip { border-top: 1px solid var(--pv-border); padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 8px; }' +
       '.cvz-pv-strip-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--pv-muted); }' +
-      '.cvz-pv-dots { display: flex; gap: 6px; flex-wrap: wrap; }' +
+      '.cvz-pv-dots { display: flex; gap: 4px; flex-wrap: wrap; }' +
+      '.cvz-pv-stripnav { display: flex; align-items: center; gap: 10px; }' +
+      '.cvz-pv-stripnav-pos { font-size: 12px; color: var(--pv-muted); flex: 1; text-align: center; }' +
+      '.cvz-pv-stepbtn { font-family: inherit; font-size: 12px; padding: 6px 10px; background: var(--pv-card); color: var(--pv-text); border: 1px solid var(--pv-border); cursor: pointer; }' +
+      '.cvz-pv-stepbtn:hover:not(:disabled) { border-color: var(--pv-teal); color: var(--pv-teal); }' +
+      '.cvz-pv-stepbtn:disabled { opacity: .35; cursor: default; }' +
+      '.cvz-pv-dotbtn { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 5px 4px; background: transparent; border: 1px solid transparent; cursor: pointer; font-family: inherit; color: var(--pv-muted); }' +
+      '.cvz-pv-dotbtn span { font-size: 10px; line-height: 1; }' +
+      '.cvz-pv-dotbtn:hover { border-color: var(--pv-border); background: var(--pv-card); color: var(--pv-text); }' +
+      '.cvz-pv-dotbtn-active { border-color: var(--pv-text); background: var(--pv-card); color: var(--pv-text); }' +
+      '.cvz-pv-dotbtn-old { opacity: .45; }' +
+      '.cvz-pv-dotbtn-old:hover, .cvz-pv-dotbtn-old.cvz-pv-dotbtn-active { opacity: 1; }' +
+      '.cvz-pv-dotbtn .cvz-pv-dot { cursor: pointer; }' +
       '.cvz-pv-dot { width: 18px; height: 18px; padding: 0; border: 2px solid var(--pv-border); background: transparent; cursor: pointer; display: inline-block; box-sizing: border-box; }' +
       '.cvz-pv-dot-cited { background: var(--pv-teal); border-color: var(--pv-teal); }' +
       '.cvz-pv-dot-mentioned { border-color: var(--pv-amber); }' +
@@ -11962,6 +12087,8 @@
       '.cvz-kv-tag-own { border-color: var(--pv-teal); color: var(--pv-teal); }' +
       '.cvz-kv-result-title { display: block; font-size: 15px; font-weight: 600; color: var(--pv-text); text-decoration: none; line-height: 1.35; }' +
       '.cvz-kv-result-title:hover { color: var(--pv-teal); }' +
+      '.cvz-kv-checkbtn { font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 14px; background: var(--pv-teal); color: var(--pv-bg); border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }' +
+      '.cvz-kv-checkbtn:disabled { opacity: .7; cursor: default; }' +
       '.cvz-kv-result-desc { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--pv-muted); }' +
       '.cvz-pv-muted { margin: 8px 0 0; font-size: 12px; color: var(--pv-muted); line-height: 1.45; }' +
       '.cvz-pv-empty { padding: 40px 16px; text-align: center; color: var(--pv-muted); }' +
@@ -11969,10 +12096,30 @@
         '.cvz-pv-backdrop { padding: 0; }' +
         '.cvz-pv { min-height: 100%; border: 0; padding: 16px; }' +
         '.cvz-pv-grid { grid-template-columns: 1fr; }' +
-        '.cvz-pv-title { font-size: 18px; }' +
+        '.cvz-pv-title { font-size: 18px !important; }' +
+        '.cvz-pv-head { flex-direction: column; gap: 10px; }' +
+        '.cvz-pv-head-nav { order: -1; align-self: stretch; }' +
+        '.cvz-pv-head-text { width: 100%; }' +
+        '.cvz-pv-close { margin-left: auto; }' +
+        '.cvz-pv-head-nav .cvz-pv-iconbtn:first-child { margin-right: 0; }' +
+        '.cvz-pv-engine-tab { padding: 8px 10px; gap: 8px; }' +
+        '.cvz-pv-engine-tab .cvz-pv-engine-bar { display: none; }' +
+        '.cvz-pv-stage-bar { padding: 10px 12px; }' +
+        '.cvz-pv-chat { padding: 14px 12px 6px; }' +
+        '.cvz-pv-bubble-user { max-width: 92%; }' +
+        '.cvz-pv-stripnav { flex-wrap: wrap; }' +
+        '.cvz-pv-stripnav-pos { order: -1; flex-basis: 100%; text-align: left; }' +
+        '.cvz-pv-stepbtn { flex: 1; }' +
         '.cvz-pv-chat { max-height: none; }' +
         '.cvz-pv-count { display: none; }' +
       '}' +
+      '.cvz-fanout-modebar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 8px 0 10px; }' +
+      '.cvz-fanout-stepper { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; }' +
+      '.cvz-fanout-stepper .cvz-weeks-preset-btn { min-width: 34px; font-size: 16px; line-height: 1; }' +
+      '.cvz-fanout-stepper .cvz-weeks-preset-btn:disabled { opacity: .35; cursor: default; }' +
+      '.cvz-fanout-stepper-label { font-size: 12px; color: var(--cvz-text-muted); min-width: 150px; text-align: center; }' +
+      '.cvz-fanout-stepper-label strong { color: var(--cvz-text); font-size: 13px; }' +
+      '.cvz-fanout-group-label { margin: 10px 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--cvz-text-muted); }' +
       '.cvz-freshness-compact { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--cvz-text-muted); margin: 0 0 14px; }' +
       '.cvz-freshness-stale { color: var(--cvz-amber, #c98e2a); font-weight: 600; }' +
       '.cvz-float-tip { white-space: pre-line !important; }' +
@@ -11980,9 +12127,9 @@
       '.cvz-tab-intro { margin: 4px 0 20px; max-width: 760px; text-align: left !important; }' +
       '.cvz-tab-intro > * { text-align: left !important; margin-left: 0 !important; margin-right: 0 !important; max-width: none !important; }' +
       '.cvz-tab-intro-eyebrow { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--cvz-text-muted); }' +
-      '.cvz-tab-intro-q { margin: 0; font-family: "Syne", sans-serif; font-size: 26px; line-height: 1.25; font-weight: 700; color: var(--cvz-text); }' +
+      '.cvz-tab-intro-q { margin: 0 !important; font-family: "Syne", sans-serif !important; font-size: 26px !important; line-height: 1.25 !important; letter-spacing: 0 !important; font-weight: 700; color: var(--cvz-text); overflow-wrap: anywhere; hyphens: auto; }' +
       '.cvz-tab-intro-lead { margin: 8px 0 0; font-size: 14px; line-height: 1.5; color: var(--cvz-text-muted); }' +
-      '@media (max-width: 600px) { .cvz-tab-intro-q { font-size: 21px; } }' +
+      '@media (max-width: 600px) { .cvz-tab-intro-q { font-size: 21px !important; } }' +
       // NEU (21.10.2026): Sichtbarkeitsfeld (Wettbewerb)
       '.cvz-vf { margin-top: 8px; }' +
       '.cvz-vf-own { border: 1px solid var(--cvz-border); background: var(--cvz-navy-raised); padding: 16px 18px; margin-bottom: 18px; }' +
