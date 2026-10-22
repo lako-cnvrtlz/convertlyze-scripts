@@ -5,6 +5,8 @@
   // KONFIGURATION
   // =========================================================================
   var CONFIG = {
+    // GEFIXT (20.09.2026): Es stand ein Sonderzeichen (U+2013) statt eines normalen
+    // Bindestrichs in der Domain, dadurch liefen
     // ALLE apiFetch()-Calls gegen eine nicht existierende Adresse.
     apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
     // GEFIXT (20.09.2026): Platzhalter durch die echte Supabase-Projekt-URL ersetzt.
@@ -9148,6 +9150,16 @@
     var personaChips = renderPersonaFilterChips(prompts);
     if (personaChips) section.appendChild(personaChips);
 
+    // NEU (22.10.2026): Fehlen die Werte je KI (älterer Backend-Stand), sagen wir
+    // das, statt still die Gesamtwerte zu zeigen.
+    if (activeChannel() !== 'all' && (prompts || []).some(function (p) { return p.total_runs && !p.citation_by_channel; })) {
+      var chMissing = document.createElement('p');
+      chMissing.className = 'cvz-card-placeholder-text';
+      chMissing.style.cssText = 'margin:0 0 10px;color:var(--cvz-amber,#c98e2a);';
+      chMissing.textContent = 'Hinweis: Für ' + activeChannelLabel() + ' allein liegen hier noch keine Werte vor. Die Tabelle zeigt ChatGPT und Gemini zusammen.';
+      section.appendChild(chMissing);
+    }
+
     var filteredPrompts = state.activePersonaFilter
       ? prompts.filter(function (p) { return p.persona === state.activePersonaFilter; })
       : prompts;
@@ -9318,7 +9330,7 @@
       var citationBadge = ps.total > 0
         ? (ps.cited > 0
             ? '<span class="cvz-prompt-citation-count" title="' + citationTitle + '">' + ps.cited + '/' + ps.total + ' zitiert</span>'
-            : '<span class="cvz-prompt-citation-count" style="color:var(--cvz-text-muted,#8b98a5);" title="' + citationTitle + '">nicht sichtbar</span>')
+            : '<span class="cvz-prompt-citation-count" style="color:var(--cvz-text-muted,#8b98a5);" title="' + citationTitle + '">0/' + ps.total + ' zitiert</span>')
         : '';
 
       // NEU (18.09.2026): priorisierter Marker fuer Prompts, bei denen die
@@ -9357,13 +9369,18 @@
 
       // Favicons: cited_domains kommt direkt vom Backend (alle zitierten Domains
       // sortiert nach Häufigkeit). Fallback auf top_cited_domain für ältere Responses.
-      var _favDomains = (prompt.cited_domains && prompt.cited_domains.length > 0)
-        ? prompt.cited_domains.slice(0, 6)
-        : (prompt.top_cited_domain ? [prompt.top_cited_domain] : []);
+      // GEÄNDERT (22.10.2026): Quellen folgen dem KI-Umschalter (cited_domains_by_channel).
+      var _chFav = activeChannel();
+      var _domList = (_chFav !== 'all' && prompt.cited_domains_by_channel)
+        ? (prompt.cited_domains_by_channel[_chFav] || [])
+        : (prompt.cited_domains || []);
+      var _favDomains = _domList.length > 0
+        ? _domList.slice(0, 6)
+        : ((_chFav === 'all' || !prompt.cited_domains_by_channel) && prompt.top_cited_domain ? [prompt.top_cited_domain] : []);
       // GEÄNDERT (30.09.2026, Kundenwunsch): Favicons stehen in einer eigenen
       // Spalte "Zitierte Quellen" statt direkt hinter dem Prompt-Text. Bei mehr
       // als 6 zitierten Domains zeigt ein "+N" die Restmenge.
-      var _favTotal = (prompt.cited_domains && prompt.cited_domains.length > 0) ? prompt.cited_domains.length : _favDomains.length;
+      var _favTotal = _domList.length > 0 ? _domList.length : _favDomains.length;
       var faviconHtml = _favDomains.length > 0
         ? '<span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;">' +
             _favDomains.map(function (d) {
@@ -11968,7 +11985,7 @@
       '@media (prefers-reduced-motion: reduce) { .cvz-pv, .cvz-pv-backdrop { animation: none; } }' +
       '.cvz-pv-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }' +
       '.cvz-pv-eyebrow { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--pv-muted); }' +
-      '.cvz-pv-title { margin: 0 !important; font-family: "Syne", sans-serif !important; font-size: 22px !important; font-weight: 700; letter-spacing: 0 !important; line-height: 1.3 !important; color: var(--pv-text); overflow-wrap: anywhere; hyphens: auto; text-align: left; }' +
+      '.cvz-pv-title { margin: 0 !important; font-family: "Syne", sans-serif !important; font-size: 22px !important; font-weight: 700; letter-spacing: 0 !important; line-height: 1.3 !important; color: var(--pv-text); overflow-wrap: break-word; hyphens: manual; text-align: left; }' +
       '.cvz-pv, .cvz-pv * { box-sizing: border-box; }' +
       '.cvz-pv { overflow-x: hidden; }' +
       '.cvz-pv-head-text, .cvz-pv-grid > * { min-width: 0; }' +
@@ -12107,10 +12124,11 @@
       '.cvz-freshness-stale { color: var(--cvz-amber, #c98e2a); font-weight: 600; }' +
       '.cvz-float-tip { white-space: pre-line !important; }' +
       // NEU (21.10.2026): Frage am Anfang jedes Tabs
-      '.cvz-tab-intro { margin: 4px 0 20px; max-width: 760px; text-align: left !important; }' +
+      '.cvz-tab-intro { margin: 4px 0 20px; text-align: left !important; }' +
       '.cvz-tab-intro > * { text-align: left !important; margin-left: 0 !important; margin-right: 0 !important; max-width: none !important; }' +
+      '.cvz-tab-intro .cvz-tab-intro-lead { max-width: 760px !important; }' +
       '.cvz-tab-intro-eyebrow { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--cvz-text-muted); }' +
-      '.cvz-tab-intro-q { margin: 0 !important; font-family: "Syne", sans-serif !important; font-size: 26px !important; line-height: 1.25 !important; letter-spacing: 0 !important; font-weight: 700; color: var(--cvz-text); overflow-wrap: anywhere; hyphens: auto; }' +
+      '.cvz-tab-intro-q { margin: 0 !important; font-family: "Syne", sans-serif !important; font-size: 26px !important; line-height: 1.25 !important; letter-spacing: 0 !important; font-weight: 700; color: var(--cvz-text); overflow-wrap: break-word; hyphens: manual; }' +
       '.cvz-tab-intro-lead { margin: 8px 0 0; font-size: 14px; line-height: 1.5; color: var(--cvz-text-muted); }' +
       '@media (max-width: 600px) { .cvz-tab-intro-q { font-size: 21px !important; } }' +
       // NEU (21.10.2026): Sichtbarkeitsfeld (Wettbewerb)
