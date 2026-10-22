@@ -6062,7 +6062,7 @@
       (topic.last_monthly_collection_at
         // GEÄNDERT (02.10.2026): "Zusammenfassung vom" statt "Datenstand",
         // weil die Zusammenfassung nur monatlich entsteht, die Prompt-Daten
-        // darunter aber alle 2 Tage aktualisiert werden.
+        // darunter aber täglich aktualisiert werden.
         ? '<p class="cvz-freshness-note">Zusammenfassung vom ' + escapeHtml(formatShortDate(topic.last_monthly_collection_at) || '') +
           ' (' + escapeHtml(formatRelativeTime(topic.last_monthly_collection_at)) + ', wird monatlich aktualisiert)</p>'
         : '<p class="cvz-freshness-note">Zusammenfassung: noch kein abgeschlossener Analyse-Lauf.</p>') +
@@ -9851,9 +9851,14 @@
   // GEÄNDERT (02.10.2026): Für 'prompts' kommt das Datum fertig vom Backend
   // (topic.next_prompt_run_at, berechnet mit WEEKLY_COLLECTION_INTERVAL_DAYS
   // aus run_topic.py). Vorher stand hier fest 7 Tage, obwohl der Cron seit
-  // 30.09.2026 alle 2 Tage misst. Fallback, falls das Backend das Feld noch
-  // nicht liefert: letzter Lauf + topic.prompt_interval_days (sonst 2).
-  var DEFAULT_PROMPT_INTERVAL_DAYS = 2;
+  // 30.09.2026 alle 2 Tage misst (seit 23.10.2026 täglich). Fallback, falls das
+  // Backend das Feld noch nicht liefert: letzter Lauf + topic.prompt_interval_days (sonst 1).
+  var DEFAULT_PROMPT_INTERVAL_DAYS = 1;
+
+  // NEU (23.10.2026): "täglich" statt "alle 1 Tage".
+  function formatIntervalText(days) {
+    return days === 1 ? 'täglich' : 'alle ' + days + ' Tage';
+  }
 
   function renderNextRunNote(topic, cadenceDays, label) {
     var p = document.createElement('p');
@@ -9970,7 +9975,7 @@
         var si = staleInfo(staleNotes[0]);
         lines.push('');
         lines.push('Veraltet: Diese Daten sind älter als das Messintervall (' +
-          (si.interval === 30 ? 'monatlich' : 'alle ' + si.interval + ' Tage') + '). ' +
+          (si.interval === 30 ? 'monatlich' : formatIntervalText(si.interval)) + '). ' +
           'Vermutlich ist ein Lauf ausgefallen. Fehlgeschlagene Schritte zeigt der Tracker als Hinweis mit Knopf zum Neustarten an.');
         el.appendChild(document.createTextNode('\u26a0 Datenstand' + (short ? ': ' + short : '') + ' \u00b7 veraltet'));
       } else {
@@ -13797,7 +13802,7 @@
     var phaseScores = jc ? jc.phase_scores : (data.phase_scores || {});
     // GEÄNDERT (21.10.2026): Quellen für den gewählten Kanal.
     var sourcesByPhase = journeySourcesForChannel(data);
-    var intervalDays = (detail && detail.topic && detail.topic.prompt_interval_days) || 2;
+    var intervalDays = (detail && detail.topic && detail.topic.prompt_interval_days) || DEFAULT_PROMPT_INTERVAL_DAYS;
 
     var section = document.createElement('div');
     section.className = 'cvz-section';
@@ -13836,8 +13841,8 @@
       nameEl.className = 'cvz-journey-phase-name';
       nameEl.style.color = color;
       nameEl.textContent = (PHASE_LABELS[phase] || phase) + (promptCount > 0 ? ' (' + promptCount + ')' : '');
-      nameEl.title = promptCount + ' aktive Prompts in dieser Phase. Jeder wird alle ' + intervalDays +
-        ' Tage in ChatGPT und Gemini abgefragt.';
+      nameEl.title = promptCount + ' aktive Prompts in dieser Phase. Jeder wird ' + formatIntervalText(intervalDays) +
+        ' in ChatGPT und Gemini abgefragt.';
       card.appendChild(nameEl);
 
       visibleChannels().forEach(function (channel) {
@@ -14014,7 +14019,7 @@
     }
 
     // GEÄNDERT (02.10.2026): "Datenstand dieses Tabs" zeigte das Datum des
-    // MONATLICHEN Laufs, obwohl die Phasen-Karten alle 2 Tage neu berechnet
+    // MONATLICHEN Laufs, obwohl die Phasen-Karten täglich neu berechnet
     // werden. Jetzt zwei getrennte, ehrliche Angaben.
     var _jc = data.journey_comparison || null;
     wrap.appendChild(renderDataFreshnessNote(_jc && _jc.last_run_at, 'Zitationen zuletzt gemessen'));
