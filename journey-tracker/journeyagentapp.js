@@ -5,8 +5,6 @@
   // KONFIGURATION
   // =========================================================================
   var CONFIG = {
-    // GEFIXT (20.09.2026): Es stand ein Sonderzeichen (U+2013) statt eines normalen
-    // Bindestrichs in der Domain, dadurch liefen
     // ALLE apiFetch()-Calls gegen eine nicht existierende Adresse.
     apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
     // GEFIXT (20.09.2026): Platzhalter durch die echte Supabase-Projekt-URL ersetzt.
@@ -8307,25 +8305,16 @@
       // Punktleiste
       var strip = document.createElement('div');
       strip.className = 'cvz-pv-strip';
-      // GEÄNDERT (21.10.2026): Vor/Zurück-Knöpfe, Datum unter jedem Punkt,
-      // damit klar ist, dass man durch die Antworten blättern kann.
-      var hasOld = eng.runs.some(function (r) { return r._old; });
+      // GEÄNDERT (22.10.2026): nur noch Ältere / Datum / Neuere. Die Punktleiste
+      // mit einem Kästchen je Antwort entfällt (wurde bei vielen Antworten unruhig).
+      var whenShort = when.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
       strip.innerHTML =
         '<div class="cvz-pv-stripnav">' +
-          '<button type="button" class="cvz-pv-stepbtn" data-cvz-pv-step="-1"' + (runIdx <= 0 ? ' disabled' : '') + '>\u2039 \u00c4ltere Antwort</button>' +
-          '<span class="cvz-pv-stripnav-pos">Antwort ' + (runIdx + 1) + ' von ' + eng.runs.length + '</span>' +
-          '<button type="button" class="cvz-pv-stepbtn" data-cvz-pv-step="1"' + (isNewest ? ' disabled' : '') + '>Neuere Antwort \u203a</button>' +
-        '</div>' +
-        '<div class="cvz-pv-dots">' + eng.runs.map(function (r) {
-          var s = pvRunStatus(r);
-          var d = new Date(r.collected_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
-          var tip = d + ': ' + s.label + (r._old ? ' (älter als 28 Tage, zählt nicht in die Quote)' : '');
-          return '<button type="button" class="cvz-pv-dotbtn' + (r === run ? ' cvz-pv-dotbtn-active' : '') + (r._old ? ' cvz-pv-dotbtn-old' : '') + '" ' +
-            'data-cvz-pv-run="' + escapeHtml(r.run_id) + '" title="' + escapeHtml(tip) + '" aria-label="' + escapeHtml(tip) + '"' + (r === run ? ' aria-current="true"' : '') + '>' +
-            '<i class="cvz-pv-dot cvz-pv-dot-' + s.key + '"></i><span>' + escapeHtml(d.slice(0, 5)) + '</span></button>';
-        }).join('') + '</div>' +
-        '<span class="cvz-pv-legend"><i class="cvz-pv-dot cvz-pv-dot-cited"></i>zitiert <i class="cvz-pv-dot cvz-pv-dot-mentioned"></i>erwähnt <i class="cvz-pv-dot cvz-pv-dot-none"></i>nicht genannt' +
-          (hasOld ? ' \u00b7 blass: älter als 28 Tage, zählt nicht in die Quote' : '') + ' \u00b7 Tasten \u2190 \u2192</span>';
+          '<button type="button" class="cvz-pv-stepbtn" data-cvz-pv-step="-1"' + (runIdx <= 0 ? ' disabled' : '') + ' aria-label="Ältere Antwort">\u2039 Ältere<span class="cvz-pv-step-long"> Antwort</span></button>' +
+          '<span class="cvz-pv-stripnav-pos"><strong>' + escapeHtml(whenShort) + '</strong>' +
+            '<small>Antwort ' + (runIdx + 1) + ' von ' + eng.runs.length + (run._old ? ' \u00b7 älter als 28 Tage' : '') + '</small></span>' +
+          '<button type="button" class="cvz-pv-stepbtn" data-cvz-pv-step="1"' + (isNewest ? ' disabled' : '') + ' aria-label="Neuere Antwort">Neuere<span class="cvz-pv-step-long"> Antwort</span> \u203a</button>' +
+        '</div>';
       stage.appendChild(strip);
     }
 
@@ -12030,17 +12019,12 @@
       '.cvz-pv-strip-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--pv-muted); }' +
       '.cvz-pv-dots { display: flex; gap: 4px; flex-wrap: wrap; }' +
       '.cvz-pv-stripnav { display: flex; align-items: center; gap: 10px; }' +
-      '.cvz-pv-stripnav-pos { font-size: 12px; color: var(--pv-muted); flex: 1; text-align: center; }' +
+      '.cvz-pv-stripnav-pos { flex: 1; display: flex; flex-direction: column; align-items: center; line-height: 1.25; min-width: 0; }' +
+      '.cvz-pv-stripnav-pos strong { font-size: 14px; color: var(--pv-text); }' +
+      '.cvz-pv-stripnav-pos small { font-size: 11px; color: var(--pv-muted); text-align: center; }' +
       '.cvz-pv-stepbtn { font-family: inherit; font-size: 12px; padding: 6px 10px; background: var(--pv-card); color: var(--pv-text); border: 1px solid var(--pv-border); cursor: pointer; }' +
       '.cvz-pv-stepbtn:hover:not(:disabled) { border-color: var(--pv-teal); color: var(--pv-teal); }' +
       '.cvz-pv-stepbtn:disabled { opacity: .35; cursor: default; }' +
-      '.cvz-pv-dotbtn { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 5px 4px; background: transparent; border: 1px solid transparent; cursor: pointer; font-family: inherit; color: var(--pv-muted); }' +
-      '.cvz-pv-dotbtn span { font-size: 10px; line-height: 1; }' +
-      '.cvz-pv-dotbtn:hover { border-color: var(--pv-border); background: var(--pv-card); color: var(--pv-text); }' +
-      '.cvz-pv-dotbtn-active { border-color: var(--pv-text); background: var(--pv-card); color: var(--pv-text); }' +
-      '.cvz-pv-dotbtn-old { opacity: .45; }' +
-      '.cvz-pv-dotbtn-old:hover, .cvz-pv-dotbtn-old.cvz-pv-dotbtn-active { opacity: 1; }' +
-      '.cvz-pv-dotbtn .cvz-pv-dot { cursor: pointer; }' +
       '.cvz-pv-dot { width: 18px; height: 18px; padding: 0; border: 2px solid var(--pv-border); background: transparent; cursor: pointer; display: inline-block; box-sizing: border-box; }' +
       '.cvz-pv-dot-cited { background: var(--pv-teal); border-color: var(--pv-teal); }' +
       '.cvz-pv-dot-mentioned { border-color: var(--pv-amber); }' +
@@ -12107,9 +12091,8 @@
         '.cvz-pv-stage-bar { padding: 10px 12px; }' +
         '.cvz-pv-chat { padding: 14px 12px 6px; }' +
         '.cvz-pv-bubble-user { max-width: 92%; }' +
-        '.cvz-pv-stripnav { flex-wrap: wrap; }' +
-        '.cvz-pv-stripnav-pos { order: -1; flex-basis: 100%; text-align: left; }' +
-        '.cvz-pv-stepbtn { flex: 1; }' +
+        '.cvz-pv-step-long { display: none; }' +
+        '.cvz-pv-stepbtn { padding: 8px 10px; }' +
         '.cvz-pv-chat { max-height: none; }' +
         '.cvz-pv-count { display: none; }' +
       '}' +
