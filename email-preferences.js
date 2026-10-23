@@ -119,10 +119,11 @@
       resendBtn.textContent  = 'Wird gesendet\u2026';
 
       try {
-        var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/resend-doi-email', {
+        // Funktionsname korrigiert: Die Funktion heisst resend-doi (resend-doi-email gibt es nicht)
+        var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/resend-doi', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ memberstackId }),
+          body:    JSON.stringify({ memberstackId, memberstack_token: await getMemberToken() }),
         });
         var data = await res.json();
         if (!data.success) throw new Error(data.error || 'Fehler');
@@ -157,13 +158,26 @@
     if (hint) hint.remove();
   }
 
+  // Memberstack-Token (JWT) des eingeloggten Nutzers. Die Edge Functions pruefen es serverseitig
+  // und leiten die Identitaet daraus ab. Die Member-ID im Body zaehlt dort nicht mehr.
+  async function getMemberToken() {
+    try {
+      var c = await window.$memberstackDom.getMemberCookie();
+      if (typeof c === 'string') return c;
+      return (c && c.data) || null;
+    } catch (e) {
+      console.warn('[CVZ] Token nicht lesbar:', e);
+      return null;
+    }
+  }
+
   // ── Data layer ───────────────────────────────────────────────────────────────
 
   async function fetchPreferences(memberstackId) {
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/get-user-billing', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ memberstackId }),
+      body:    JSON.stringify({ memberstackId, memberstack_token: await getMemberToken() }),
     });
     var json = await res.json();
     return json.data || null;
@@ -173,7 +187,7 @@
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/update-email-preferences', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(Object.assign({ memberstackId }, preferences)),
+      body:    JSON.stringify(Object.assign({ memberstackId, memberstack_token: await getMemberToken() }, preferences)),
     });
     var data = await res.json();
     if (!data.success) throw new Error(data.error || 'Speichern fehlgeschlagen');
