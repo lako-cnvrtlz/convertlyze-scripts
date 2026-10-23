@@ -3,15 +3,13 @@
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
  *
  * ÄNDERUNGEN ggü. v10 (Sicherheit, 23.10.2026):
- *   - Die Analyse wird nicht mehr nur per select('*') aus der Tabelle gelesen. Die Policy
- *     anon_read_completed_only gab JEDEM Besucher alle abgeschlossenen Analysen aller Kunden
- *     frei, samt memberstack_id. Jetzt: erst die Tabelle (liefert die Zeile nur Mitgliedern des
- *     Teams der Analyse, über den Header x-memberstack-id und die Policy analyses_select_team),
- *     danach die öffentliche Einzelabfrage get_analysis_public(p_id) für alle anderen (geteilter
- *     Link, Beispielanalyse). Sie liefert nur diese eine abgeschlossene Analyse per ID, ohne
- *     memberstack_id, pdf_url und credit_transaction_id. Siehe loadAnalysis().
+ *   - Die Analyse wird nur noch aus der Tabelle gelesen und nur, wenn der eingeloggte Nutzer zum
+ *     Team der Analyse gehört (Policy analyses_select_team über den Header x-memberstack-id).
+ *     Die Policy anon_read_completed_only gab bisher JEDEM Besucher alle abgeschlossenen
+ *     Analysen aller Kunden frei, samt memberstack_id. Berichte sind Produktentscheidung nur
+ *     eingeloggt sichtbar, deshalb gibt es keinen öffentlichen Weg (kein get_analysis_public).
  *   - Stellt die geladene Analyse als window.CVZ_REPORT bereit und feuert cvz:report-ready, damit
- *     report-export.js sie nicht selbst per select('*') nachladen muss (das scheitert fuer geteilte Links).
+ *     report-export.js sie nicht selbst nachladen muss.
  *   - PDF-Download: schickt zusätzlich das signierte Memberstack-Token (memberstack_token) an
  *     generate-pdf-report. Der Header x-memberstack-id bleibt für die Übergangszeit erhalten,
  *     bis die neue Version der Edge Function live ist.
@@ -2016,22 +2014,13 @@
   }
 
   // ── Analyse laden (v11) ─────────────────────────────────────────────────────
-  // Weg 1: Tabelle. Liefert die Zeile nur, wenn der eingeloggte Nutzer zum Team der
-  //        Analyse gehört (Policy analyses_select_team über den Header x-memberstack-id).
-  // Weg 2: öffentliche Einzelabfrage get_analysis_public(p_id) für alle anderen, etwa
-  //        einen geteilten Link oder die Beispielanalyse. Liefert nur diese eine
-  //        abgeschlossene Analyse per ID, ohne memberstack_id, pdf_url und
-  //        credit_transaction_id.
-  // maybeSingle() statt single(): "keine Zeile" ist hier der Normalfall für Besucher
-  // ohne Team-Zugehörigkeit und kein Fehler.
+  // Nur Tabelle: Die Zeile kommt nur zurück, wenn der eingeloggte Nutzer zum Team der Analyse
+  // gehört (Policy analyses_select_team über den Header x-memberstack-id). Berichte sind
+  // Produktentscheidung nur für eingeloggte Teammitglieder sichtbar. maybeSingle() statt
+  // single(): "keine Zeile" ist der Normalfall für fremde Analysen und kein Fehler.
   async function loadAnalysis(supabase, analysisId) {
-    const first = await supabase.from('analyses').select('*').eq('id', analysisId).maybeSingle();
-    if (first.data) return { analysis: first.data, error: null };
-
-    const second = await supabase.rpc('get_analysis_public', { p_id: analysisId });
-    if (second.error) return { analysis: null, error: second.error };
-    const row = Array.isArray(second.data) ? second.data[0] : second.data;
-    return { analysis: row || null, error: first.error || null };
+    const res = await supabase.from('analyses').select('*').eq('id', analysisId).maybeSingle();
+    return { analysis: res.data || null, error: res.error || null };
   }
 
   // ── Bootstrap ───────────────────────────────────────────────────────────────
@@ -2068,7 +2057,7 @@
       if (!analysis) {
         if (error && error.message && error.message.includes('JWT')) alert('Zugriff verweigert.');
         else if (error) alert('Fehler: ' + error.message);
-        else alert('Analyse nicht gefunden. Bitte überprüfe den Link.');
+        else alert('Analyse nicht gefunden oder kein Zugriff. Bitte logge dich mit dem Konto ein, zu dem diese Analyse gehört.');
         hideReportLoader();
         return;
       }
@@ -2077,7 +2066,7 @@
       renderAll(analysis, analysisId, currentUserId);
 
       // v11: Analyse fuer report-export.js bereitstellen. Ohne diese zwei Zeilen laedt report-export.js
-      // sie selbst per select('*') nach, und das scheitert fuer Besucher mit geteiltem Link.
+      // sie selbst per select('*') nach (Fallback, funktioniert nur fuer Teammitglieder).
       window.CVZ_REPORT = { analysis: analysis, analysisId: analysisId };
       document.dispatchEvent(new CustomEvent('cvz:report-ready'));
 
