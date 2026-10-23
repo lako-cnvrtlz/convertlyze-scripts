@@ -73,13 +73,26 @@
   }
 
 
+  // Memberstack-Token (JWT) des eingeloggten Nutzers. Die Edge Functions pruefen es serverseitig
+  // und leiten die Identitaet daraus ab. Die Member-ID im Body zaehlt dort nicht mehr.
+  async function getMemberToken() {
+    try {
+      var c = await window.$memberstackDom.getMemberCookie();
+      if (typeof c === 'string') return c;
+      return (c && c.data) || null;
+    } catch (e) {
+      console.warn('[CVZ] Token nicht lesbar:', e);
+      return null;
+    }
+  }
+
   // ── Data layer ───────────────────────────────────────────────────────────────
 
   async function saveProfile(memberstackId, formData) {
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/update-profile', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(Object.assign({ memberstackId }, formData)),
+      body:    JSON.stringify(Object.assign({ memberstackId, memberstack_token: await getMemberToken() }, formData)),
     });
     var data = await res.json();
     if (!data.success) throw new Error(data.error || 'Speichern fehlgeschlagen');
