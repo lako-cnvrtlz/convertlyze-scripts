@@ -26,6 +26,19 @@
     return !!window.$memberstackDom && document.querySelectorAll('form').length > 0;
   }
 
+  // Memberstack-Token (JWT) des eingeloggten Nutzers. Die Edge Functions pruefen es serverseitig
+  // und leiten die Identitaet daraus ab. Die Member-ID im Body zaehlt dort nicht mehr.
+  async function getMemberToken() {
+    try {
+      var c = await window.$memberstackDom.getMemberCookie();
+      if (typeof c === 'string') return c;
+      return (c && c.data) || null;
+    } catch (e) {
+      console.warn('[CVZ] Token nicht lesbar:', e);
+      return null;
+    }
+  }
+
   // ── Data layer ───────────────────────────────────────────────────────────────
 
   async function getCurrentMember() {
@@ -41,7 +54,7 @@
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/get-user-billing', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ memberstackId }),
+      body:    JSON.stringify({ memberstackId, memberstack_token: await getMemberToken() }),
     });
     var json = await res.json();
     return json.data || null;
@@ -51,7 +64,7 @@
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/update-profile', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ memberstackId, ...formData }),
+      body:    JSON.stringify({ memberstackId, ...formData, memberstack_token: await getMemberToken() }),
     });
     var data = await res.json();
     if (!data.success) throw new Error(data.error || 'Update fehlgeschlagen');
@@ -62,7 +75,7 @@
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/update-email-preferences', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ memberstackId, ...preferences }),
+      body:    JSON.stringify({ memberstackId, ...preferences, memberstack_token: await getMemberToken() }),
     });
     var data = await res.json();
     if (!data.success) throw new Error(data.error || 'Speichern fehlgeschlagen');
