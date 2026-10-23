@@ -38,6 +38,19 @@
     return !!window.$memberstackDom && typeof window.supabase?.from === 'function';
   }
 
+  // Memberstack-Token (JWT) des eingeloggten Nutzers. Die Edge Functions pruefen es serverseitig
+  // und leiten die Identitaet daraus ab. Die Member-ID im Body zaehlt dort nicht mehr.
+  async function getMemberToken() {
+    try {
+      var c = await window.$memberstackDom.getMemberCookie();
+      if (typeof c === 'string') return c;
+      return (c && c.data) || null;
+    } catch (e) {
+      console.warn('[CVZ] Token nicht lesbar:', e);
+      return null;
+    }
+  }
+
   // ── Data layer ───────────────────────────────────────────────────────────────
 
   async function getCurrentMember() {
@@ -117,7 +130,8 @@
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/stripe-portal', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CONFIG.supabaseAnonKey },
-      body:    JSON.stringify({ memberstackId }),
+      // stripe-portal prueft das Token serverseitig. Ohne Token gibt es 401 (der alte Weg ueber die ID ist zu).
+      body:    JSON.stringify({ memberstack_token: await getMemberToken(), memberstackId }),
     });
     var data = await res.json();
     return data?.url || null;
