@@ -6,12 +6,12 @@
   var CONFIG = {
     supabaseUrl:     'https://zpkifipmyeunorhtepzq.supabase.co',
     supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU',
-    // WHY: Die Analyse läuft jetzt im eigenen Worker (Railway) statt in Make.
-    // Der Worker prüft das Memberstack-Token serverseitig und legt die Secrets selbst ab.
-    // Rückfall: useWorker auf false setzen, dann läuft es wieder über die alte Edge Function (Make).
-    useWorker:       true,
+    // Die Analyse läuft im eigenen Worker (Railway). Der Worker prüft das Memberstack-Token
+    // serverseitig und legt die Secrets selbst ab.
+    // ENTFERNT (23.10.2026): Der Rückfall über die Edge Function trigger-analysis (Make) ist raus.
+    // Er nahm die Member-ID ungeprüft aus dem Body und war ein offener Weg, in fremdem Namen
+    // Analysen zu starten. Die Edge Function trigger-analysis sollte gelöscht werden.
     workerUrl:       'https://convertlyze-analysis-worker-production.up.railway.app/api/analyze',
-    triggerUrl:      'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/trigger-analysis',
     maxInitAttempts: 30,
     initRetryMs:     300,
   };
@@ -89,18 +89,7 @@
     var payload = {};
     new FormData(formEl).forEach(function(v, k) { payload[k] = v; });
 
-    // ALTER WEG (Make über Edge Function) – nur noch als Rückfall
-    if (!CONFIG.useWorker) {
-      var legacy = await fetch(CONFIG.triggerUrl, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(payload),
-      });
-      window.location.href = legacy.ok ? '/analyse/in-arbeit' : '/analyse/fehler';
-      return;
-    }
-
-    // NEUER WEG: Worker. Das Token beweist dem Server, wer du bist.
+    // Worker: Das Token beweist dem Server, wer du bist.
     var token = await getMemberToken();
     if (!token) {
       window.location.href = '/analyse/fehler';
