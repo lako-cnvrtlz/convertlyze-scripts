@@ -9,6 +9,15 @@
  * Embedding: jsDelivr (<script src=".../dashboard-v12.js">)
  * Dependencies: window.supabase (global), window.$memberstackDom
  *
+ * ÄNDERUNGEN ggü. v12 (Sicherheit, 23.10.2026, "v12.1"):
+ *   - PDF-Download und Team-Einladung (Cookie cvz_invite) schicken jetzt zusaetzlich das signierte
+ *     Memberstack-Token (memberstack_token) an die Edge Functions generate-pdf-report und
+ *     accept-team-invite. Die neuen Versionen der Funktionen pruefen es bei Memberstack und
+ *     glauben der mitgeschickten Member-ID nicht mehr. Header x-memberstack-id und Feld
+ *     memberstack_id bleiben fuer die Uebergangszeit, bis beide Funktionen live sind.
+ *   - Beim PDF-Download wird das Token frisch geholt (getMemberCookie), nicht das beim Laden der
+ *     Seite gespeicherte. Ein lange offener Tab hat sonst ein abgelaufenes Token.
+ *
  * ÄNDERUNGEN ggü. v11 (Kontingent-Übersicht neu geordnet, UX):
  *   - GEÄNDERT: Statt 12 Stat-Karten (Verbrauch / Verbleibend / Pay-per-Use je Tool) gibt es jetzt
  *     eine schmale Plan-Kopfzeile (Plan, Monatskontingent, Erneuerungsdatum) und genau 4 Karten
@@ -2243,6 +2252,15 @@
       var ext      = isAgency ? 'docx' : 'pdf';
       var fileName = 'convertlyze-' + domain + datetime + '.' + ext;
 
+      // v12.1: signiertes Memberstack-Token frisch holen (ein lange offener Tab hat sonst ein
+      // abgelaufenes). Die neue Version von generate-pdf-report prueft es serverseitig und
+      // ignoriert den Header x-memberstack-id. Der Header bleibt fuer die Uebergangszeit.
+      var memberToken = state.memberToken;
+      try {
+        var freshToken = await window.$memberstackDom.getMemberCookie();
+        if (freshToken) memberToken = freshToken;
+      } catch (e) {}
+
       var response = await fetch(
         CONFIG.generateReportUrl,
         {
@@ -2252,9 +2270,10 @@
             'x-memberstack-id': state.memberstackId,
           },
           body: JSON.stringify({
-            userId:     state.supabaseUserId,
-            analysisId: analysisId,
-            type:       isAgency ? 'word' : 'pdf',
+            userId:            state.supabaseUserId,
+            analysisId:        analysisId,
+            type:              isAgency ? 'word' : 'pdf',
+            memberstack_token: memberToken,
           }),
         }
       );
@@ -2464,10 +2483,17 @@
       var pendingInvite = getCookie('cvz_invite');
       if (pendingInvite) {
         try {
+          // v12.1: signiertes Memberstack-Token mitsenden. Die neue Version von accept-team-invite
+          // leitet die Member-ID daraus ab. memberstack_id bleibt fuer die Uebergangszeit im Body,
+          // bis die neue Funktion live ist, und kann danach entfernt werden.
           var inviteRes  = await fetch(CONFIG.SUPABASE_URL + '/functions/v1/accept-team-invite', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json', 'apikey': CONFIG.SUPABASE_ANON },
-            body:    JSON.stringify({ token: pendingInvite, memberstack_id: memberstackId }),
+            body:    JSON.stringify({
+              token:             pendingInvite,
+              memberstack_token: state.memberToken,
+              memberstack_id:    memberstackId,
+            }),
           });
           var inviteData = await inviteRes.json();
           if (inviteData.success) {
