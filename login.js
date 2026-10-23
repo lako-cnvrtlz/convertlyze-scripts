@@ -173,7 +173,13 @@
       var memberstackId = member?.data?.id;
       if (!memberstackId) return;
 
-      console.log('[CVZ] Login: Invite wird angenommen...', pendingInvite);
+      console.log('[CVZ] Login: Invite wird angenommen...');
+
+      // Signiertes Memberstack-Token holen. accept-team-invite prueft es serverseitig und
+      // glaubt der mitgeschickten Member-ID nicht mehr. memberstack_id bleibt fuer die
+      // Uebergangszeit im Body und kann nach dem Deploy der neuen Funktion entfernt werden.
+      var memberstackToken = null;
+      try { memberstackToken = await window.$memberstackDom.getMemberCookie(); } catch (e) {}
 
       var res = await fetch('https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/accept-team-invite', {
         method: 'POST',
@@ -181,7 +187,7 @@
           'Content-Type': 'application/json',
           'apikey': SUPABASE_ANON_KEY
         },
-        body: JSON.stringify({ token: pendingInvite, memberstack_id: memberstackId })
+        body: JSON.stringify({ token: pendingInvite, memberstack_token: memberstackToken, memberstack_id: memberstackId })
       });
 
       var data = await res.json();
