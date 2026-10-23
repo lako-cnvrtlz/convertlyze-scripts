@@ -10,6 +10,8 @@
  *     danach die öffentliche Einzelabfrage get_analysis_public(p_id) für alle anderen (geteilter
  *     Link, Beispielanalyse). Sie liefert nur diese eine abgeschlossene Analyse per ID, ohne
  *     memberstack_id, pdf_url und credit_transaction_id. Siehe loadAnalysis().
+ *   - Stellt die geladene Analyse als window.CVZ_REPORT bereit und feuert cvz:report-ready, damit
+ *     report-export.js sie nicht selbst per select('*') nachladen muss (das scheitert fuer geteilte Links).
  *   - PDF-Download: schickt zusätzlich das signierte Memberstack-Token (memberstack_token) an
  *     generate-pdf-report. Der Header x-memberstack-id bleibt für die Übergangszeit erhalten,
  *     bis die neue Version der Edge Function live ist.
@@ -22,6 +24,49 @@
  *   - Die Leiste wurde fixiert, sobald der Sentinel nicht sichtbar war, also auch, wenn er noch UNTERHALB des
  *     Bildschirms lag (z.B. beim Laden, wenn der Report weiter unten beginnt). Jetzt nur, wenn er oberhalb liegt.
  *
+ * ÄNDERUNGEN ggü. v8 (Report ist sehr lang -> Bereiche aufklappbar, nach dem
+ * Muster des Visibility Trackers):
+ *   - Jede Deep-Dive-Kategorie (Hero bis AI Sichtbarkeit) ist jetzt ein
+ *     Aufklapp-Bereich. Im zugeklappten Zustand sieht man Name, Score
+ *     (mit farbigem Balken links) und "3 Empfehlungen · 1 kritisch".
+ *   - Innerhalb einer Kategorie: "Stärken" ist eingeklappt, Zusammenfassung
+ *     und die Liste der Handlungsempfehlungen bleiben sichtbar.
+ *   - Jede Handlungsempfehlung zeigt zuerst Schweregrad + Problem. Die Lösung
+ *     klappt per Klick auf. Empfehlungen mit Schweregrad CRITICAL sind
+ *     standardmäßig offen, damit die dringendsten Lösungen nie verborgen sind.
+ *   - Roadmap: "Sofort umsetzen" ist offen, die anderen Gruppen sind zu
+ *     (mit Anzahl im Titel).
+ *   - Neuer Button "Alle aufklappen / Alle zuklappen" unter der Überschrift
+ *     "Deep Dive".
+ *   - Ein Klick in der Anker-Navigation öffnet die Kategorie automatisch.
+ *   - Beim Drucken (Strg+P) werden alle Bereiche vorübergehend geöffnet.
+ *   - Executive Summary bleibt bewusst unverändert und offen: sie ist die
+ *     Kurzfassung des Reports.
+ *   - WICHTIG: Die Daten-Logik (Dedup, Fallbacks, Sanitizing) ist unverändert.
+ *     Die Aufklapp-Hüllen werden erst NACH dem Rendern per enhanceCollapsibles()
+ *     um die fertigen Teile gelegt.
+ *
+ * ÄNDERUNGEN v8 (Executive Summary läuft auf Mobile rechts raus):
+ *   - Flex-Kinder (.cvz-bars, .cvz-badge, .cvz-card, Badge-Text) bekommen
+ *     min-width:0. WHY: Flex-Elemente sind standardmäßig mindestens so breit
+ *     wie ihr längstes unteilbares Wort. Lange deutsche Komposita oder URLs
+ *     aus dem KI-Text haben die Karten dadurch breiter als den Screen gemacht.
+ *   - Texte brechen jetzt notfalls mitten im Wort um (overflow-wrap:anywhere)
+ *     und trennen mit Bindestrich, wo der Browser es kann (hyphens:auto,
+ *     lang="de" am Executive-Summary-Container).
+ *   - Mobile-Badge: min-width:100% ersetzt durch min-width:0 (100% plus
+ *     Padding war bei content-box-Sizing breiter als der Container).
+ *   - box-sizing:border-box für alles innerhalb von .cvz-section.
+ *   - Tabellen/Bilder/Code im KI-HTML: max-width:100%, Tabellen scrollen
+ *     intern statt die Seite zu verbreitern.
+ *   - Mobile: .cvz-exec-panel align-items:stretch statt center.
+ *   - Sektions-Überschriften skalieren jetzt mit der verfügbaren Breite,
+ *     sodass das längste Wort (PERFORMANCE) immer in eine Zeile passt,
+ *     ohne Silbentrennung. WHY: Syne ExtraBold ist extrem breit
+ *     (EXECUTIVE = ca. 9,7em). Bei der alten Mindestgröße von 36px war
+ *     EXECUTIVE 348px breit und passte auf keinen Standard-Handyscreen.
+ *     overflow-wrap:anywhere bleibt nur als Notbremse für künftige,
+ *     noch längere Überschriften.
  *
  * Embed in Webflow Before </body>:
  * <script src="https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js"></script>
@@ -2030,6 +2075,11 @@
 
       console.log('✅ Analyse geladen:', analysis);
       renderAll(analysis, analysisId, currentUserId);
+
+      // v11: Analyse fuer report-export.js bereitstellen. Ohne diese zwei Zeilen laedt report-export.js
+      // sie selbst per select('*') nach, und das scheitert fuer Besucher mit geteiltem Link.
+      window.CVZ_REPORT = { analysis: analysis, analysisId: analysisId };
+      document.dispatchEvent(new CustomEvent('cvz:report-ready'));
 
       // renderAll setzt .analysis-loaded am Ende -> CTA wird per CSS sichtbar.
       // Loader-Element zusaetzlich explizit entfernen (CSS blendet es nur aus).
