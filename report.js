@@ -1,6 +1,18 @@
 /**
- * Convertlyze – Report Script v10
+ * Convertlyze – Report Script v11
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
+ *
+ * ÄNDERUNGEN ggü. v10 (Sicherheit, 23.10.2026):
+ *   - Die Analyse wird nicht mehr nur per select('*') aus der Tabelle gelesen. Die Policy
+ *     anon_read_completed_only gab JEDEM Besucher alle abgeschlossenen Analysen aller Kunden
+ *     frei, samt memberstack_id. Jetzt: erst die Tabelle (liefert die Zeile nur Mitgliedern des
+ *     Teams der Analyse, über den Header x-memberstack-id und die Policy analyses_select_team),
+ *     danach die öffentliche Einzelabfrage get_analysis_public(p_id) für alle anderen (geteilter
+ *     Link, Beispielanalyse). Sie liefert nur diese eine abgeschlossene Analyse per ID, ohne
+ *     memberstack_id, pdf_url und credit_transaction_id. Siehe loadAnalysis().
+ *   - PDF-Download: schickt zusätzlich das signierte Memberstack-Token (memberstack_token) an
+ *     generate-pdf-report. Der Header x-memberstack-id bleibt für die Übergangszeit erhalten,
+ *     bis die neue Version der Edge Function live ist.
  *
  * ÄNDERUNGEN ggü. v9 (Anker-Navigation, drei Fehler beim Abgleich mit dem Content-Strategie-Widget gefunden):
  *   - Aktiver Abschnitt war unsichtbar: .cvz-nav-active hatte dieselbe graue Farbe wie ein inaktiver Link und keine
@@ -10,49 +22,6 @@
  *   - Die Leiste wurde fixiert, sobald der Sentinel nicht sichtbar war, also auch, wenn er noch UNTERHALB des
  *     Bildschirms lag (z.B. beim Laden, wenn der Report weiter unten beginnt). Jetzt nur, wenn er oberhalb liegt.
  *
- * ÄNDERUNGEN ggü. v8 (Report ist sehr lang -> Bereiche aufklappbar, nach dem
- * Muster des Visibility Trackers):
- *   - Jede Deep-Dive-Kategorie (Hero bis AI Sichtbarkeit) ist jetzt ein
- *     Aufklapp-Bereich. Im zugeklappten Zustand sieht man Name, Score
- *     (mit farbigem Balken links) und "3 Empfehlungen · 1 kritisch".
- *   - Innerhalb einer Kategorie: "Stärken" ist eingeklappt, Zusammenfassung
- *     und die Liste der Handlungsempfehlungen bleiben sichtbar.
- *   - Jede Handlungsempfehlung zeigt zuerst Schweregrad + Problem. Die Lösung
- *     klappt per Klick auf. Empfehlungen mit Schweregrad CRITICAL sind
- *     standardmäßig offen, damit die dringendsten Lösungen nie verborgen sind.
- *   - Roadmap: "Sofort umsetzen" ist offen, die anderen Gruppen sind zu
- *     (mit Anzahl im Titel).
- *   - Neuer Button "Alle aufklappen / Alle zuklappen" unter der Überschrift
- *     "Deep Dive".
- *   - Ein Klick in der Anker-Navigation öffnet die Kategorie automatisch.
- *   - Beim Drucken (Strg+P) werden alle Bereiche vorübergehend geöffnet.
- *   - Executive Summary bleibt bewusst unverändert und offen: sie ist die
- *     Kurzfassung des Reports.
- *   - WICHTIG: Die Daten-Logik (Dedup, Fallbacks, Sanitizing) ist unverändert.
- *     Die Aufklapp-Hüllen werden erst NACH dem Rendern per enhanceCollapsibles()
- *     um die fertigen Teile gelegt.
- *
- * ÄNDERUNGEN v8 (Executive Summary läuft auf Mobile rechts raus):
- *   - Flex-Kinder (.cvz-bars, .cvz-badge, .cvz-card, Badge-Text) bekommen
- *     min-width:0. WHY: Flex-Elemente sind standardmäßig mindestens so breit
- *     wie ihr längstes unteilbares Wort. Lange deutsche Komposita oder URLs
- *     aus dem KI-Text haben die Karten dadurch breiter als den Screen gemacht.
- *   - Texte brechen jetzt notfalls mitten im Wort um (overflow-wrap:anywhere)
- *     und trennen mit Bindestrich, wo der Browser es kann (hyphens:auto,
- *     lang="de" am Executive-Summary-Container).
- *   - Mobile-Badge: min-width:100% ersetzt durch min-width:0 (100% plus
- *     Padding war bei content-box-Sizing breiter als der Container).
- *   - box-sizing:border-box für alles innerhalb von .cvz-section.
- *   - Tabellen/Bilder/Code im KI-HTML: max-width:100%, Tabellen scrollen
- *     intern statt die Seite zu verbreitern.
- *   - Mobile: .cvz-exec-panel align-items:stretch statt center.
- *   - Sektions-Überschriften skalieren jetzt mit der verfügbaren Breite,
- *     sodass das längste Wort (PERFORMANCE) immer in eine Zeile passt,
- *     ohne Silbentrennung. WHY: Syne ExtraBold ist extrem breit
- *     (EXECUTIVE = ca. 9,7em). Bei der alten Mindestgröße von 36px war
- *     EXECUTIVE 348px breit und passte auf keinen Standard-Handyscreen.
- *     overflow-wrap:anywhere bleibt nur als Notbremse für künftige,
- *     noch längere Überschriften.
  *
  * Embed in Webflow Before </body>:
  * <script src="https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js"></script>
@@ -1222,12 +1191,22 @@
       try {
         const memberstackId = (await window.$memberstackDom.getCurrentMember())?.data?.id;
         if (!memberstackId) throw new Error('Nicht eingeloggt');
+        // v11: signiertes Memberstack-Token mitsenden. Die neue Version der Edge Function
+        // prüft es serverseitig, statt der bloßen ID im Header zu glauben. Der Header
+        // bleibt für die Übergangszeit, bis die neue Version live ist.
+        let memberstackToken = null;
+        try { memberstackToken = await window.$memberstackDom.getMemberCookie(); } catch (e) {}
         const resp = await fetch(
           'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/generate-pdf-report',
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-memberstack-id': memberstackId },
-            body: JSON.stringify({ analysisId: analysisId, userId: analysis.user_id, type: 'pdf' }),
+            body: JSON.stringify({
+              analysisId: analysisId,
+              userId: analysis.user_id,
+              type: 'pdf',
+              memberstack_token: memberstackToken,
+            }),
           }
         );
         if (!resp.ok) {
@@ -1991,6 +1970,25 @@
     }
   }
 
+  // ── Analyse laden (v11) ─────────────────────────────────────────────────────
+  // Weg 1: Tabelle. Liefert die Zeile nur, wenn der eingeloggte Nutzer zum Team der
+  //        Analyse gehört (Policy analyses_select_team über den Header x-memberstack-id).
+  // Weg 2: öffentliche Einzelabfrage get_analysis_public(p_id) für alle anderen, etwa
+  //        einen geteilten Link oder die Beispielanalyse. Liefert nur diese eine
+  //        abgeschlossene Analyse per ID, ohne memberstack_id, pdf_url und
+  //        credit_transaction_id.
+  // maybeSingle() statt single(): "keine Zeile" ist hier der Normalfall für Besucher
+  // ohne Team-Zugehörigkeit und kein Fehler.
+  async function loadAnalysis(supabase, analysisId) {
+    const first = await supabase.from('analyses').select('*').eq('id', analysisId).maybeSingle();
+    if (first.data) return { analysis: first.data, error: null };
+
+    const second = await supabase.rpc('get_analysis_public', { p_id: analysisId });
+    if (second.error) return { analysis: null, error: second.error };
+    const row = Array.isArray(second.data) ? second.data[0] : second.data;
+    return { analysis: row || null, error: first.error || null };
+  }
+
   // ── Bootstrap ───────────────────────────────────────────────────────────────
   async function bootstrap() {
     injectStyles();
@@ -2017,19 +2015,18 @@
 
     try {
       // Eigene user_id parallel zur Analyse holen (fuer Ersteller-Check)
-      const [{ data: analysis, error }, currentUserId] = await Promise.all([
-        supabase.from('analyses').select('*').eq('id', analysisId).single(),
+      const [{ analysis, error }, currentUserId] = await Promise.all([
+        loadAnalysis(supabase, analysisId),
         fetchCurrentUserId(supabase),
       ]);
 
-      if (error) {
-        if (error.code === 'PGRST116') alert('Analyse nicht gefunden. Bitte überprüfe den Link.');
-        else if (error.message.includes('JWT')) alert('Zugriff verweigert.');
-        else alert('Fehler: ' + error.message);
+      if (!analysis) {
+        if (error && error.message && error.message.includes('JWT')) alert('Zugriff verweigert.');
+        else if (error) alert('Fehler: ' + error.message);
+        else alert('Analyse nicht gefunden. Bitte überprüfe den Link.');
         hideReportLoader();
         return;
       }
-      if (!analysis) { alert('Analyse nicht gefunden'); hideReportLoader(); return; }
 
       console.log('✅ Analyse geladen:', analysis);
       renderAll(analysis, analysisId, currentUserId);
