@@ -98,13 +98,26 @@
     }
   }
 
+  // Memberstack-Token (JWT) des eingeloggten Nutzers. Die Edge Functions pruefen es serverseitig
+  // und leiten die Identitaet daraus ab. Die Member-ID im Body zaehlt dort nicht mehr.
+  async function getMemberToken() {
+    try {
+      var c = await window.$memberstackDom.getMemberCookie();
+      if (typeof c === 'string') return c;
+      return (c && c.data) || null;
+    } catch (e) {
+      console.warn('[CVZ] Token nicht lesbar:', e);
+      return null;
+    }
+  }
+
   // ── Data layer ───────────────────────────────────────────────────────────────
 
   async function fetchBillingData(memberstackId) {
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/get-user-billing', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CONFIG.supabaseAnonKey },
-      body:    JSON.stringify({ memberstackId }),
+      body:    JSON.stringify({ memberstackId, memberstack_token: await getMemberToken() }),
     });
     var json = await res.json();
     return json.data || null;
@@ -114,7 +127,7 @@
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/update-billing', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CONFIG.supabaseAnonKey },
-      body:    JSON.stringify(payload),
+      body:    JSON.stringify(Object.assign({}, payload, { memberstack_token: await getMemberToken() })),
     });
     var data = await res.json();
     if (!data.success) throw new Error(data.error || 'Speichern fehlgeschlagen');
