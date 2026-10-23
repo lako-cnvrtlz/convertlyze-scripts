@@ -4,8 +4,9 @@
   // ── Konfiguration ────────────────────────────────────────────────────────────
 
   var CONFIG = {
-    supabaseUrl:     'https://zpkifipmyeunorhtepzq.supabase.co',
-    supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU',
+    // Kontingent kommt von der Railway-API (Token wird serverseitig geprueft). Direkte Supabase-Abfragen
+    // gibt es hier nicht mehr (GEAENDERT 23.10.2026).
+    apiBase:         'https://convertlyze-agent-api-production.up.railway.app',
     // Die Analyse läuft im eigenen Worker (Railway). Der Worker prüft das Memberstack-Token
     // serverseitig und legt die Secrets selbst ab.
     // ENTFERNT (23.10.2026): Der Rückfall über die Edge Function trigger-analysis (Make) ist raus.
@@ -30,7 +31,7 @@
   }
 
   function depsReady() {
-    return !!window.$memberstackDom && typeof window.supabase?.from === 'function';
+    return !!window.$memberstackDom && typeof window.$memberstackDom.getMemberCookie === 'function';
   }
 
   // ── Data layer ───────────────────────────────────────────────────────────────
@@ -56,13 +57,20 @@
   }
 
   async function fetchCredits(memberstackId) {
-    var res = await window.supabase
-      .from('user_effective_credits')
-      .select('credits_limit, credits_used_current_period, reserved_credits, ppu_credits, reserved_ppu_credits')
-      .eq('memberstack_id', memberstackId)
-      .single();
-    if (res.error) console.warn('[CVZ] fetchCredits error:', res.error);
-    return res.data || null;
+    // memberstackId wird nicht mehr gebraucht, die Identitaet kommt serverseitig aus dem Token.
+    var token = await getMemberToken();
+    if (!token) return null;
+    try {
+      var res = await fetch(CONFIG.apiBase + '/api/user/effective-credits', {
+        headers: { 'Authorization': 'Bearer ' + token },
+      });
+      if (!res.ok) { console.warn('[CVZ] fetchCredits error: Status', res.status); return null; }
+      var data = await res.json();
+      return data.credits || null;
+    } catch (e) {
+      console.warn('[CVZ] fetchCredits error:', e);
+      return null;
+    }
   }
 
   function calcCredits(d) {
