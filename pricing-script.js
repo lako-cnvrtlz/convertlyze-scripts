@@ -1,17 +1,26 @@
 /**
  * pricing-script.js
  *
- * GEÄNDERT (28.09.2026):
- *  1. Supabase-Abfragen senden jetzt den Header x-memberstack-id. Die RLS-Policy
- *     auf "users" prüft ihn; ohne ihn lieferte jede Abfrage 0 Zeilen. Folge vorher:
- *     Tracker zeigte "Verbindungsfehler", und fetchCurrentPriceId lieferte still
- *     null, wodurch Kunden MIT Abo in einen zweiten Checkout statt ins Portal kamen.
- *  2. fetchCurrentPriceId wirft bei Fehlern, statt still null zurückzugeben.
- *  3. Team-Mitglieder (team_role = 'member') sehen die Tracker-Buttons ausgegraut
- *     mit Tooltip. Topics für das Team kann nur der Owner kaufen.
- *  4. Der Tracker wird NICHT mehr über Memberstack gekauft, sondern über die
- *     Edge Function stripe-topic-slot-checkout (Stripe-Preis mit Staffelung).
- *  5. stripe-portal bekommt das Memberstack-Token statt nur der ID.
+ * GEÄNDERT (23.10.2026):
+ *  1. Keine direkten Supabase-Abfragen mehr. Abo-Status, Team-Rolle und gekaufte
+ *     Tracker-Topics kommen jetzt von GET /api/user/account-context. Der Server
+ *     prüft das Memberstack-Token und liest dann mit dem Service-Key. Vorher ging
+ *     das mit dem öffentlichen Key und dem ungeprüften Header x-memberstack-id,
+ *     den jeder von Hand setzen konnte.
+ *  2. Das Supabase-SDK wird hier nicht mehr gebraucht (depsReady prüft nur noch
+ *     Memberstack). Die zwei Edge Functions (stripe-portal und
+ *     stripe-topic-slot-checkout) brauchen den öffentlichen Key weiterhin zum
+ *     Aufrufen und prüfen das Memberstack-Token selbst.
+ *  3. Nach dem Kauf eines Aufbau-Pakets landet der Kunde auf /member/aufbau
+ *     (vorher /member/landingpage-assistant).
+ *
+ * Frühere Änderungen (28.09.2026):
+ *  - fetchCurrentPriceId wirft bei Fehlern, statt still null zurückzugeben.
+ *  - Team-Mitglieder (team_role = 'member') sehen die Tracker-Buttons ausgegraut
+ *    mit Tooltip. Topics für das Team kann nur der Owner kaufen.
+ *  - Der Tracker wird NICHT über Memberstack gekauft, sondern über die Edge
+ *    Function stripe-topic-slot-checkout (Stripe-Preis mit Staffelung).
+ *  - stripe-portal bekommt das Memberstack-Token statt nur der ID.
  *
  * Der automatische Checkout nach Registrierung/Login läuft NICHT hier, sondern
  * ausschließlich im site-weiten "CVZ CHECKOUT RESUME"-Script im Webflow-Site-Footer.
@@ -21,6 +30,8 @@
 
   // ── Konfiguration ────────────────────────────────────────────────────────────
   var CONFIG = {
+    apiBase:         'https://convertlyze-agent-api-production.up.railway.app',
+    // Nur noch für den Aufruf der Edge Functions (Header apikey/Authorization).
     supabaseUrl:     'https://zpkifipmyeunorhtepzq.supabase.co',
     supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU',
     ppuPriceIds: [
@@ -55,24 +66,9 @@
   // Nach dem Tracker-Checkout landet der Kunde direkt im Tracker
   var TRACKER_SUCCESS_PATH = '/member/customer-journey-tracker?checkout=success';
 
-  // NEU: Selektor und Texte für die Owner-Sperre beim Tracker
+  // Selektor und Texte für die Owner-Sperre beim Tracker
   var TRACKER_BTN_SELECTOR = 'a[href*="/register?plan=tracker"]';
   var TRACKER_LOCK_TEXT    = 'Topics für das Team kann nur der Account-Inhaber buchen. Wende dich an deinen Admin.';
-
-  // ── Supabase ─────────────────────────────────────────────────────────────────
-  // Ein Client je Memberstack-ID. Der Header x-memberstack-id ist Pflicht,
-  // weil die RLS-Policy auf "users" ihn prüft.
-  var sbClients = {};
-  function getSb(memberstackId) {
-    var key = memberstackId || '_anon';
-    if (!sbClients[key]) {
-      sbClients[key] = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey, {
-        global: { headers: { 'x-memberstack-id': memberstackId || '' } },
-        auth:   { persistSession: false, autoRefreshToken: false, storageKey: 'cvz-pricing-' + key },
-      });
-    }
-    return sbClients[key];
-  }
 
   // ── Utilities ────────────────────────────────────────────────────────────────
   function retry(fn, maxAttempts, intervalMs) {
@@ -91,7 +87,7 @@
   }
 
   function depsReady() {
-    return !!window.$memberstackDom && !!(window.supabase && window.supabase.createClient);
+    return !!window.$memberstackDom;
   }
 
   // Memberstack braucht nach dem Laden kurz, um die Session wiederherzustellen.
@@ -108,51 +104,52 @@
   }
 
   // ── Data layer ───────────────────────────────────────────────────────────────
-  // Wirft bei Fehlern, statt still null zurückzugeben. Sonst würden Kunden
-  // mit Abo bei einem Datenbankfehler in einen ZWEITEN Checkout geschickt.
-  async function fetchCurrentPriceId(memberstackId) {
-    var res = await getSb(memberstackId)
-      .from('users')
-      .select('current_price_id')
-      .eq('memberstack_id', memberstackId)
-      .maybeSingle();
-    if (res.error) {
-      console.error('[CVZ] fetchCurrentPriceId error:', res.error.code, res.error.message);
-      throw res.error;
-    }
-    if (!res.data) {
-      console.error('[CVZ] fetchCurrentPriceId: keine users-Zeile für', memberstackId);
-      throw new Error('users row not found');
-    }
-    return res.data.current_price_id || null;
-  }
-
-  // Rolle und bereits gebuchte Topics. Bei Fehler oder fehlender Zeile null,
-  // damit wir im Zweifel NICHT einen zweiten Tracker-Checkout starten.
-  async function fetchTrackerContext(memberstackId) {
-    var res = await getSb(memberstackId)
-      .from('users')
-      .select('team_role, ai_visibility_topics_purchased')
-      .eq('memberstack_id', memberstackId)
-      .maybeSingle();
-    if (res.error || !res.data) {
-      console.error('[CVZ] fetchTrackerContext error:',
-        res.error ? (res.error.code + ' ' + res.error.message) : 'keine users-Zeile für ' + memberstackId);
-      return null;
-    }
-    return {
-      teamRole:        res.data.team_role || null,
-      topicsPurchased: res.data.ai_visibility_topics_purchased || 0,
-    };
-  }
-
   async function getMemberToken() {
     try { return await window.$memberstackDom.getMemberCookie(); }
     catch (e) { return null; }
   }
 
-  // GEÄNDERT: schickt das Memberstack-Token mit, stripe-portal prüft es
-  // auf dem Server. memberstackId nur noch für die Übergangszeit.
+  // Holt Abo-Status, Team-Rolle und Tracker-Topics vom Server. Wirft bei
+  // Fehlern, damit niemand bei einem Ausfall in einen zweiten Checkout
+  // geschickt wird.
+  async function fetchAccountContext() {
+    var token = await getMemberToken();
+    if (!token) throw new Error('Kein Memberstack-Token vorhanden');
+
+    var res = await fetch(CONFIG.apiBase + '/api/user/account-context', {
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+    if (!res.ok) {
+      console.error('[CVZ] account-context Fehler:', res.status);
+      var err = new Error('account-context ' + res.status);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  }
+
+  async function fetchCurrentPriceId() {
+    var ctx = await fetchAccountContext();
+    return ctx.current_price_id || null;
+  }
+
+  // Rolle und bereits gebuchte Topics. Bei Fehler null, damit wir im Zweifel
+  // NICHT einen zweiten Tracker-Checkout starten.
+  async function fetchTrackerContext() {
+    try {
+      var ctx = await fetchAccountContext();
+      return {
+        teamRole:        ctx.team_role || null,
+        topicsPurchased: ctx.topics_purchased || 0,
+      };
+    } catch (e) {
+      console.error('[CVZ] fetchTrackerContext error:', e && e.message);
+      return null;
+    }
+  }
+
+  // schickt das Memberstack-Token mit, stripe-portal prüft es auf dem Server.
+  // memberstackId nur noch für die Übergangszeit.
   async function fetchStripePortalUrl(memberstackId) {
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/stripe-portal', {
       method:  'POST',
@@ -167,8 +164,8 @@
     return (data && data.url) || null;
   }
 
-  // NEU: Tracker-Checkout über die Edge Function. new_only = true heißt: gibt
-  // es schon ein Tracker-Abo, wird nichts gekauft, sondern already_subscribed
+  // Tracker-Checkout über die Edge Function. new_only = true heißt: gibt es
+  // schon ein Tracker-Abo, wird nichts gekauft, sondern already_subscribed
   // zurückgegeben (dann geht es ins Portal).
   async function startTrackerCheckout() {
     var res = await fetch(CONFIG.supabaseUrl + '/functions/v1/stripe-topic-slot-checkout', {
@@ -328,7 +325,7 @@
   window.cvzCloseModal      = Modal.close;
   window.cvzShowMemberModal = Modal.showMemberError;
 
-  // ── UI: Tooltip für gesperrte Buttons (NEU) ──────────────────────────────────
+  // ── UI: Tooltip für gesperrte Buttons ────────────────────────────────────────
   // Eigenes Element im <body> statt CSS ::after am Button, damit der Tooltip
   // nicht von Karten mit overflow:hidden abgeschnitten wird.
   var Tooltip = (function () {
@@ -398,7 +395,7 @@
     btn.style.pointerEvents = 'auto';
   }
 
-  // NEU: Tracker-Buttons für Team-Mitglieder sperren. Der Button bleibt
+  // Tracker-Buttons für Team-Mitglieder sperren. Der Button bleibt
   // fokussier- und hoverbar (kein pointer-events:none), damit der Tooltip
   // per Maus, Tastatur und Tippen auf dem Handy erreichbar ist.
   function lockTrackerButtons() {
@@ -438,7 +435,7 @@
   async function handleTrackerClick(btn, memberstackId) {
     setBtnLoading(btn);
 
-    var ctx = await fetchTrackerContext(memberstackId);
+    var ctx = await fetchTrackerContext();
     if (!ctx) {
       resetBtn(btn);
       Modal.show({
@@ -496,7 +493,7 @@
   async function handlePlanClick(btn, memberstackId, priceId) {
     setBtnLoading(btn);
     try {
-      var currentPriceId = await fetchCurrentPriceId(memberstackId);
+      var currentPriceId = await fetchCurrentPriceId();
       var isPPU          = CONFIG.ppuPriceIds.indexOf(priceId) !== -1;
       var isAufbauPPU    = isPPU && priceId.indexOf('aufbau') !== -1;
       var isStrategiePPU = isPPU && priceId.indexOf('strategie') !== -1;
@@ -518,7 +515,7 @@
 
       resetBtn(btn);
       var successPath = '/member/danke';
-      if (isAufbauPPU)         successPath = '/member/landingpage-assistant';
+      if (isAufbauPPU)         successPath = '/member/aufbau';
       else if (isStrategiePPU) successPath = '/member/content-strategie';
       else if (isPPU)          successPath = '/analyse/formular';
 
@@ -544,7 +541,7 @@
       btn.addEventListener('click', async function (e) {
         e.preventDefault();
 
-        // NEU: Gesperrter Tracker-Button. Auf dem Handy gibt es kein Hover,
+        // Gesperrter Tracker-Button. Auf dem Handy gibt es kein Hover,
         // deshalb zeigt ein Tippen den Tooltip für ein paar Sekunden.
         if (isLocked(btn)) {
           Tooltip.show(btn, TRACKER_LOCK_TEXT, 4000);
@@ -566,8 +563,8 @@
         var url        = new URL(btn.href);
         var plan       = url.searchParams.get('plan');
 
-        // NEU: Tracker hat einen eigenen Ablauf (Edge Function statt
-        // Memberstack) und muss VOR dem Haupt-Plan-Routing abgefangen werden.
+        // Tracker hat einen eigenen Ablauf (Edge Function statt Memberstack)
+        // und muss VOR dem Haupt-Plan-Routing abgefangen werden.
         if (plan === 'tracker') {
           await handleTrackerClick(btn, memberstackId);
           return;
@@ -583,15 +580,15 @@
     });
   }
 
-  // NEU: Beim Laden prüfen, ob der eingeloggte Nutzer Team-Mitglied ist,
-  // und die Tracker-Buttons dann sofort ausgrauen.
+  // Beim Laden prüfen, ob der eingeloggte Nutzer Team-Mitglied ist, und die
+  // Tracker-Buttons dann sofort ausgrauen.
   async function applyTrackerLockForMembers() {
     if (!document.querySelector(TRACKER_BTN_SELECTOR)) return;
 
     var memberstackId = await getMemberstackIdWithRetry(10, 300);
     if (!memberstackId) return; // nicht eingeloggt: Button bleibt aktiv
 
-    var ctx = await fetchTrackerContext(memberstackId);
+    var ctx = await fetchTrackerContext();
     if (ctx && ctx.teamRole === 'member') lockTrackerButtons();
   }
 
