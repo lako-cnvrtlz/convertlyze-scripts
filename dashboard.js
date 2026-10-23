@@ -7,7 +7,19 @@
  *
  * Seite: /member/dashboard
  * Embedding: jsDelivr (<script src=".../dashboard-v12.js">)
- * Dependencies: window.supabase (global), window.$memberstackDom
+ * Dependencies: window.$memberstackDom (Supabase wird hier nicht mehr benoetigt)
+ *
+ * ÄNDERUNGEN ggü. v12.1, Stufe 2 (Sicherheit, 23.10.2026, "v12.2"):
+ *   - Keine direkten Supabase-Abfragen und keine RPCs mehr. Konto, Team-Abrechnung, Analysen-Liste,
+ *     Tracker-Kontingent, "Zuletzt aktiv", Credit-Reset und Plan-Limits kommen von der Railway-API
+ *     (/api/user/...). Der Server prueft das Memberstack-Token und liest mit dem Service-Key. Die RPCs
+ *     vertrauten einer mitgeschickten Member- bzw. User-ID, die jeder von Hand setzen konnte.
+ *   - Weniger Aufrufe: GET /api/user/dashboard-account liefert Konto, Plan-Limits und Tracker-Kontingent
+ *     in einer Antwort, GET /api/user/recent-activity die beiden "Zuletzt aktiv"-Listen. Die Einzel-
+ *     Routen bleiben als Rueckfall, falls eine Beigabe fehlt.
+ *   - Realtime-Abo auf analyses entfaellt (lief mit dem oeffentlichen Key und ohne Header ins Leere).
+ *     Das Polling bei laufenden Analysen bleibt.
+ *   - PDF-Download schickt keinen Header x-memberstack-id mehr, nur noch das Token.
  *
  * ÄNDERUNGEN ggü. v12 (Sicherheit, 23.10.2026, "v12.1"):
  *   - PDF-Download und Team-Einladung (Cookie cvz_invite) schicken jetzt zusaetzlich das signierte
@@ -341,12 +353,13 @@
   async function waitForDependencies() {
     for (var i = 0; i < 100; i++) {
       if (
-        window.supabase && typeof window.supabase.from === 'function' &&
-        window.$memberstackDom && typeof window.$memberstackDom.getCurrentMember === 'function'
+        window.$memberstackDom &&
+        typeof window.$memberstackDom.getCurrentMember === 'function' &&
+        typeof window.$memberstackDom.getMemberCookie === 'function'
       ) return true;
       await sleep(100);
     }
-    console.warn('[CVZ] Timeout: Supabase oder Memberstack nicht geladen.');
+    console.warn('[CVZ] Timeout: Memberstack nicht geladen.');
     return false;
   }
 
@@ -378,35 +391,90 @@
     return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
   }
 
+  // -- API-Zugriff (Railway) ---------------------------------------------------
+  // Alle Daten kommen ueber die Railway-API. Das Memberstack-Token wird bei jedem Aufruf frisch
+  // geholt (ein lange offener Tab hat sonst ein abgelaufenes). Der Server leitet die Identitaet nur
+  // daraus ab. Rueckgabe: { ok, status, data }. Wirft nie.
+  async function getFreshMemberToken() {
+    try {
+      var c = await window.$memberstackDom.getMemberCookie();
+      if (typeof c === 'string') return c;
+      return (c && c.data) || state.memberToken || null;
+    } catch (e) {
+      return state.memberToken || null;
+    }
+  }
+
+  async function apiCall(path, method) {
+    var token = await getFreshMemberToken();
+    if (!token) return { ok: false, status: 401, data: null };
+    try {
+      var res = await fetch(CONFIG.pageAgentApiBase + path, {
+        method:  method || 'GET',
+        headers: { 'Authorization': 'Bearer ' + token },
+      });
+      var data = null;
+      try { data = await res.json(); } catch (e) {}
+      return { ok: res.ok, status: res.status, data: data };
+    } catch (e) {
+      console.warn('[CVZ] API-Aufruf fehlgeschlagen:', path, e);
+      return { ok: false, status: 0, data: null };
+    }
+  }
+
+  // Beigaben aus der letzten Konto-Antwort (siehe fetchUser). Das Kontingent gilt nur kurz, danach
+  // wird es neu geladen (die Karten sollen nach einer Aenderung frische Zahlen zeigen).
+  var trackerPrefetch = { quota: null, at: 0 };
+  var TRACKER_PREFETCH_MS = 15000;
+
+  function mapTrackerQuota(d) {
+    if (!d || d.used == null) return null;
+    return {
+      used:      Math.max(0, Math.round(Number(d.used))),
+      limit:     d.limit != null ? Math.max(0, Math.round(Number(d.limit))) : null,
+      included:  d.plan_included != null ? Math.round(Number(d.plan_included)) : null,
+      purchased: d.purchased != null ? Math.round(Number(d.purchased)) : null,
+    };
+  }
+
+  // "Zuletzt aktiv": beide Listen kommen aus einem Aufruf. Die zwei Hilfsfunktionen darunter teilen
+  // sich das Ergebnis (kurz gemerkt, damit der zweite Aufruf nicht noch einmal fragt).
+  var recentActivityMemo = { key: null, at: 0, promise: null };
+  function fetchRecentActivity(limit) {
+    var key = String(limit);
+    if (recentActivityMemo.promise && recentActivityMemo.key === key && Date.now() - recentActivityMemo.at < 5000) {
+      return recentActivityMemo.promise;
+    }
+    var promise = apiCall('/api/user/recent-activity?limit=' + encodeURIComponent(limit));
+    recentActivityMemo = { key: key, at: Date.now(), promise: promise };
+    return promise;
+  }
+
+  var planLimitsCache = {};
+  async function fetchPlanLimits(planName) {
+    if (!planName) return null;
+    if (planLimitsCache[planName]) return planLimitsCache[planName];
+    var r = await apiCall('/api/user/plan-limits?name=' + encodeURIComponent(planName));
+    if (!r.ok || !r.data) { console.warn('[CVZ] fetchPlanLimits:', r.status); return null; }
+    planLimitsCache[planName] = r.data;
+    return r.data;
+  }
+
+  // Konto-Zeile plus (bei Team-Mitgliedern) _billingUser mit den Plan-Daten des Owners.
+  // memberstackId wird nicht mehr gebraucht, die Identitaet kommt serverseitig aus dem Token.
   async function fetchUser(memberstackId, maxAttempts) {
     maxAttempts = maxAttempts || 1;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-      var result = await window.supabase
-        .from('users')
-        .select('id, email, full_name, license_type, license_status, license_expires_at, credits_limit, credits_used_current_period, credits_remaining, reserved_credits, chat_messages_limit, chat_messages_used_current_period, period_start_date, next_credit_reset_date, plan_price, owner_user_id, team_role, ppu_credits, reserved_ppu_credits, ppu_aufbau_credits, reserved_ppu_aufbau_credits, ppu_strategy_credits, reserved_ppu_strategy_credits, page_agent_sessions_used_current_period, page_agent_sessions_period_start, content_strategy_sessions_used_current_period, content_strategy_sessions_period_start, ai_visibility_topics_limit, ai_visibility_topics_plan_included, ai_visibility_topics_purchased, ai_visibility_trial_started_at')
-        .eq('memberstack_id', memberstackId)
-        .single();
-      if (result.data) {
-        if (result.data.owner_user_id) {
-          // GEÄNDERT (v11): Owner-Zeile per RPC statt per direktem Select.
-          // WHY: Das Frontend laeuft per Memberstack + Anon-Key, auth.uid() ist null. Ein direkter
-          // Select auf die Zeile des Owners kam per RLS still leer zurueck (200 OK, keine Zeile,
-          // kein Fehler) - das Dashboard fiel dann unbemerkt auf die Plan-Daten der Member-Zeile
-          // zurueck. Die RPC get_team_billing_user (SECURITY DEFINER) prueft serverseitig, dass
-          // der Aufrufer wirklich Mitglied dieses Owners ist, und liefert nur Plan-/Zaehlerfelder.
-          // Wichtig: Kein Fallback auf die Member-Zeile mehr - fehlt _billingUser, bricht
-          // initDashboard mit einer Fehlermeldung ab (siehe showTeamDataError).
-          var ownerResult = await window.supabase.rpc('get_team_billing_user', {
-            p_user_id: result.data.id,
-          });
-          if (ownerResult.error) {
-            console.warn('[CVZ] Owner-Daten laden fehlgeschlagen:', ownerResult.error);
-          }
-          if (ownerResult.data) result.data._billingUser = ownerResult.data;
-        }
-        return result.data;
+      var r = await apiCall('/api/user/dashboard-account');
+      if (r.ok && r.data && r.data.user) {
+        // Beigaben merken, damit Plan-Limits und Tracker-Kontingent keinen eigenen Aufruf brauchen
+        var pl = r.data.plan_limits;
+        if (pl && pl.name) planLimitsCache[pl.name] = pl;
+        trackerPrefetch = { quota: r.data.tracker_quota || null, at: Date.now() };
+        return r.data.user;
       }
-      if (result.error) console.warn('[CVZ] fetchUser attempt ' + attempt + ':', result.error);
+      console.warn('[CVZ] fetchUser attempt ' + attempt + ': Status ' + r.status);
+      if (r.status === 401) return null;
       if (attempt < maxAttempts) await sleep(300);
     }
     return null;
@@ -422,44 +490,24 @@
   // WICHTIG: Das behebt nur das Symptom hier - die Duplikate in plans sollten in
   // Supabase direkt bereinigt werden, sonst kann das an anderer Stelle wieder zuschlagen.
   async function fetchPlanSessionsLimit(planName) {
-    if (!planName) return 0;
-    var result = await window.supabase
-      .from('plans')
-      .select('page_agent_sessions_limit')
-      .eq('name', planName)
-      .limit(1);
-    if (result.error) {
-      console.warn('[CVZ] fetchPlanSessionsLimit:', result.error);
-      return 0;
-    }
-    var row = result.data && result.data[0];
-    return row ? Math.round(Number(row.page_agent_sessions_limit || 0)) : 0;
+    var l = await fetchPlanLimits(planName);
+    return l ? Math.round(Number(l.page_agent_sessions_limit || 0)) : 0;
   }
   // Analog zu fetchPlanSessionsLimit, nur fuer das Content-Strategie-Kontingent
   // (plans.content_strategy_sessions_limit, siehe migrations/content_strategy_plan_limit.sql).
   // Gleicher limit(1)-Workaround wegen doppelter plans-Zeilen pro Plan-Name.
   async function fetchPlanContentStrategyLimit(planName) {
-    if (!planName) return 0;
-    var result = await window.supabase
-      .from('plans')
-      .select('content_strategy_sessions_limit')
-      .eq('name', planName)
-      .limit(1);
-    if (result.error) {
-      console.warn('[CVZ] fetchPlanContentStrategyLimit:', result.error);
-      return 0;
-    }
-    var row = result.data && result.data[0];
-    return row ? Math.round(Number(row.content_strategy_sessions_limit || 0)) : 0;
+    var l = await fetchPlanLimits(planName);
+    return l ? Math.round(Number(l.content_strategy_sessions_limit || 0)) : 0;
   }
   async function fetchAnalysesForMember(memberstackId) {
     if (!memberstackId) return [];
-    var result = await window.supabase.rpc('get_analyses_for_member', { p_memberstack_id: memberstackId });
-    if (result.error) {
-      console.error('[CVZ] Analysen laden fehlgeschlagen:', result.error);
+    var r = await apiCall('/api/user/analyses');
+    if (!r.ok) {
+      console.error('[CVZ] Analysen laden fehlgeschlagen:', r.status);
       return [];
     }
-    return result.data || [];
+    return (r.data && r.data.analyses) || [];
   }
 
   // NEU (v10): Anzahl belegter (aktiver) Tracker-Topics des Teams. Laeuft wie die anderen
@@ -467,15 +515,8 @@
   // tracker-topic-usage-rpc.sql), weil auth.uid() im Frontend null ist. Gibt null zurueck,
   // wenn die RPC fehlt oder fehlschlaegt: dann zeigen die Karten nur das Limit.
   async function fetchTrackerUsage(userId) {
-    if (!userId) return null;
-    var result = await window.supabase.rpc('get_tracker_topic_usage', { p_user_id: userId });
-    if (result.error) {
-      console.warn('[CVZ] fetchTrackerUsage:', result.error);
-      return null;
-    }
-    if (result.data == null) return null;
-    var n = Number(result.data);
-    return isNaN(n) ? null : Math.max(0, Math.round(n));
+    var q = await fetchTrackerQuota(userId);
+    return q ? q.used : null;
   }
 
   // NEU (v12): Nutzung UND Limit des Trackers aus einer Quelle (RPC get_tracker_quota, siehe
@@ -484,21 +525,16 @@
   // Funktion auf get_tracker_topic_usage zurueck (dann ohne eigenes Limit: es gilt das der Zeile bu).
   async function fetchTrackerQuota(userId) {
     if (!userId) return null;
-    var result = await window.supabase.rpc('get_tracker_quota', { p_user_id: userId });
-    if (!result.error && result.data) {
-      var d = Array.isArray(result.data) ? result.data[0] : result.data;
-      if (d && d.used != null) {
-        return {
-          used:      Math.max(0, Math.round(Number(d.used))),
-          limit:     d.limit != null ? Math.max(0, Math.round(Number(d.limit))) : null,
-          included:  d.plan_included != null ? Math.round(Number(d.plan_included)) : null,
-          purchased: d.purchased != null ? Math.round(Number(d.purchased)) : null,
-        };
-      }
+    if (trackerPrefetch.quota && Date.now() - trackerPrefetch.at < TRACKER_PREFETCH_MS) {
+      var pre = mapTrackerQuota(trackerPrefetch.quota);
+      if (pre) return pre;
     }
-    if (result.error) console.warn('[CVZ] fetchTrackerQuota (Fallback auf get_tracker_topic_usage):', result.error);
-    var n = await fetchTrackerUsage(userId);
-    return n == null ? null : { used: n, limit: null, included: null, purchased: null };
+    var r = await apiCall('/api/user/tracker-quota');
+    if (!r.ok) {
+      console.warn('[CVZ] fetchTrackerQuota:', r.status);
+      return null;
+    }
+    return mapTrackerQuota(r.data);
   }
 
   // NEU (06.10.2026): Free Trial fuer den Tracker (Free Plan). Spiegel von get_trial_state()
@@ -535,15 +571,9 @@
   // recent-activity-rpcs.sql fuer die Funktionsdefinition.
   async function fetchRecentPageProjects(userId, limit) {
     if (!userId) return [];
-    var result = await window.supabase.rpc('get_recent_page_projects', {
-      p_user_id: userId,
-      p_limit:   limit,
-    });
-    if (result.error) {
-      console.warn('[CVZ] fetchRecentPageProjects:', result.error);
-      return [];
-    }
-    return result.data || [];
+    var r = await fetchRecentActivity(limit);
+    if (!r.ok) { console.warn('[CVZ] fetchRecentPageProjects:', r.status); return []; }
+    return (r.data && r.data.projects) || [];
   }
 
   // Letzte KI-Agent-Sessions fuer "Zuletzt aktiv" - gleiches RLS-Problem wie
@@ -555,15 +585,9 @@
   // Liste nicht mit leeren Eintraegen fuellen (Filter sitzt in der RPC).
   async function fetchRecentAgentSessions(userId, limit) {
     if (!userId) return [];
-    var result = await window.supabase.rpc('get_recent_agent_sessions', {
-      p_user_id: userId,
-      p_limit:   limit,
-    });
-    if (result.error) {
-      console.warn('[CVZ] fetchRecentAgentSessions:', result.error);
-      return [];
-    }
-    return result.data || [];
+    var r = await fetchRecentActivity(limit);
+    if (!r.ok) { console.warn('[CVZ] fetchRecentAgentSessions:', r.status); return []; }
+    return (r.data && r.data.sessions) || [];
   }
   // -- Content-Strategie-Sessions & Aufbau-Projekte (Node/Railway-API) ---------
   // Beide Calls laufen NICHT ueber Supabase, sondern direkt gegen die
@@ -610,12 +634,11 @@
     try {
       var bu = user._billingUser || user;
       if (CONFIG.PAID_PLANS.indexOf(bu.license_type) === -1) return false;
-      var result = await window.supabase.rpc('reset_user_credits_if_due', { p_user_id: bu.id });
-      if (result.error) { console.warn('[CVZ] reset_user_credits_if_due:', result.error); return false; }
-      var row = Array.isArray(result.data) ? result.data[0] : result.data;
-      return !!(row && row.did_reset);
+      var r = await apiCall('/api/user/credits/reset-if-due', 'POST');
+      if (!r.ok) { console.warn('[CVZ] reset-if-due:', r.status); return false; }
+      return !!(r.data && r.data.did_reset);
     } catch (e) {
-      console.warn('[CVZ] reset_user_credits_if_due exception:', e);
+      console.warn('[CVZ] reset-if-due exception:', e);
       return false;
     }
   }
@@ -2254,7 +2277,7 @@
 
       // v12.1: signiertes Memberstack-Token frisch holen (ein lange offener Tab hat sonst ein
       // abgelaufenes). Die neue Version von generate-pdf-report prueft es serverseitig und
-      // ignoriert den Header x-memberstack-id. Der Header bleibt fuer die Uebergangszeit.
+      // ignoriert den Header x-memberstack-id, der deshalb nicht mehr gesendet wird.
       var memberToken = state.memberToken;
       try {
         var freshToken = await window.$memberstackDom.getMemberCookie();
@@ -2265,10 +2288,7 @@
         CONFIG.generateReportUrl,
         {
           method:  'POST',
-          headers: {
-            'Content-Type':     'application/json',
-            'x-memberstack-id': state.memberstackId,
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userId:            state.supabaseUserId,
             analysisId:        analysisId,
@@ -2382,25 +2402,6 @@
     }
   });
 
-  function subscribeToAnalysisChanges(userId) {
-    try {
-      if (!window.supabase || !window.supabase.channel) return;
-      if (state.realtimeChannel) window.supabase.removeChannel(state.realtimeChannel);
-      state.realtimeChannel = window.supabase
-        .channel('analyses-realtime-' + userId)
-        .on('postgres_changes',
-          { event: '*', schema: 'public', table: 'analyses', filter: 'user_id=eq.' + userId },
-          // NEU (v11): nach jeder Aenderung an den Analysen auch die Kontingent-Karten neu laden
-          async function () { await loadAndRenderAnalyses(true); refreshCredits(); }
-        )
-        .on('system', {}, function (status) {
-          if (status === 'SUBSCRIBED') loadAndRenderAnalyses(true);
-        })
-        .subscribe();
-    } catch (e) {
-      console.warn('[CVZ] Realtime-Subscription fehlgeschlagen:', e);
-    }
-  }
 
   // -- Init -------------------------------------------------------------------
 
@@ -2563,7 +2564,6 @@
       // Laedt (bei hasStrategyAccess) gleich auch die Content-Strategie-Sessions
       // mit und befuellt damit sowohl "Zuletzt aktiv" als auch den Strategien-Tab.
       await loadRecentActivity(currentUser.id);
-      subscribeToAnalysisChanges(currentUser.id);
       startPolling();
 
       document.body.classList.add('content-loaded');
