@@ -2,6 +2,13 @@
  * Convertlyze – Report Script v11
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
  *
+ * ÄNDERUNGEN ggü. v10, Stufe 2 (Sicherheit, 23.10.2026):
+ *   - Kein direkter Zugriff auf Supabase mehr. Die Analyse kommt von GET /api/user/analyses/:id
+ *     (Railway-API). Der Server prüft das Memberstack-Token und liest mit dem Service-Key. Die
+ *     eigene users.id für den Ersteller-Check kommt aus derselben Antwort (current_user_id).
+ *     Der Header x-memberstack-id und der öffentliche Supabase-Key werden hier nicht mehr benutzt,
+ *     auch nicht mehr beim PDF-Download.
+ *
  * ÄNDERUNGEN ggü. v10 (Sicherheit, 23.10.2026):
  *   - Die Analyse wird nur noch aus der Tabelle gelesen und nur, wenn der eingeloggte Nutzer zum
  *     Team der Analyse gehört (Policy analyses_select_team über den Header x-memberstack-id).
@@ -10,9 +17,8 @@
  *     eingeloggt sichtbar, deshalb gibt es keinen öffentlichen Weg (kein get_analysis_public).
  *   - Stellt die geladene Analyse als window.CVZ_REPORT bereit und feuert cvz:report-ready, damit
  *     report-export.js sie nicht selbst nachladen muss.
- *   - PDF-Download: schickt zusätzlich das signierte Memberstack-Token (memberstack_token) an
- *     generate-pdf-report. Der Header x-memberstack-id bleibt für die Übergangszeit erhalten,
- *     bis die neue Version der Edge Function live ist.
+ *   - PDF-Download: schickt das signierte Memberstack-Token (memberstack_token) an
+ *     generate-pdf-report. Der Header x-memberstack-id entfällt.
  *
  * ÄNDERUNGEN ggü. v9 (Anker-Navigation, drei Fehler beim Abgleich mit dem Content-Strategie-Widget gefunden):
  *   - Aktiver Abschnitt war unsichtbar: .cvz-nav-active hatte dieselbe graue Farbe wie ein inaktiver Link und keine
@@ -102,9 +108,8 @@
   // In Webflow dem Element die Klasse "section-ai-notice" geben.
   const AI_NOTICE_SELECTOR = '.section-ai-notice';
 
-  // ── Supabase Config ─────────────────────────────────────────────────────────
-  const SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
+  // ── API Config ──────────────────────────────────────────────────────────────
+  const API_BASE = 'https://convertlyze-agent-api-production.up.railway.app';
 
   // ── PDF-Zugriffsprüfung (UX-Ebene) ──────────────────────────────────────────
   // Identische Liste/Logik wie dashboard-v6.js CONFIG.PDF_ACCESS_SOURCES.
@@ -1243,7 +1248,7 @@
           'https://zpkifipmyeunorhtepzq.supabase.co/functions/v1/generate-pdf-report',
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-memberstack-id': memberstackId },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               analysisId: analysisId,
               userId: analysis.user_id,
@@ -1982,45 +1987,35 @@
   }
 
   // ── Supabase mit Memberstack-Header initialisieren ──────────────────────────
-  async function initSupabase() {
-    if (!window.supabase?.createClient) return null;
-    let memberstackId = null;
-    try { memberstackId = (await window.$memberstackDom.getCurrentMember())?.data?.id || null; } catch(e) {}
-    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { 'x-memberstack-id': memberstackId || '' } }
-    });
-    window.supabaseClient = client;
-    window.supabase = client;
-    console.log('✅ Supabase initialized', memberstackId ? '| User: ' + memberstackId : '| kein User');
-    return client;
-  }
-
-  // ── Eigene Supabase-user_id holen (fuer Ersteller-Check) ────────────────────
-  async function fetchCurrentUserId(supabase) {
+  // ── Analyse laden ───────────────────────────────────────────────────────────
+  // Über die Railway-API. Der Server prüft das Memberstack-Token und liefert die Analyse nur, wenn
+  // der eingeloggte Nutzer zum Team der Analyse gehört. Berichte sind Produktentscheidung nur für
+  // eingeloggte Teammitglieder sichtbar. 404 ist der Normalfall für fremde Analysen, kein Fehler.
+  async function getMemberToken() {
     try {
-      const memberstackId = (await window.$memberstackDom.getCurrentMember())?.data?.id;
-      if (!memberstackId) return null;
-      const { data, error } = await supabase
-        .from('users')
-        .select('id')
-        .eq('memberstack_id', memberstackId)
-        .single();
-      if (error) { console.warn('[CVZ] fetchCurrentUserId:', error); return null; }
-      return data?.id || null;
+      const c = await window.$memberstackDom.getMemberCookie();
+      if (typeof c === 'string') return c;
+      return (c && c.data) || null;
     } catch (e) {
-      console.warn('[CVZ] fetchCurrentUserId exception:', e);
+      console.warn('[CVZ] Token nicht lesbar:', e);
       return null;
     }
   }
 
-  // ── Analyse laden (v11) ─────────────────────────────────────────────────────
-  // Nur Tabelle: Die Zeile kommt nur zurück, wenn der eingeloggte Nutzer zum Team der Analyse
-  // gehört (Policy analyses_select_team über den Header x-memberstack-id). Berichte sind
-  // Produktentscheidung nur für eingeloggte Teammitglieder sichtbar. maybeSingle() statt
-  // single(): "keine Zeile" ist der Normalfall für fremde Analysen und kein Fehler.
-  async function loadAnalysis(supabase, analysisId) {
-    const res = await supabase.from('analyses').select('*').eq('id', analysisId).maybeSingle();
-    return { analysis: res.data || null, error: res.error || null };
+  async function loadAnalysis(analysisId) {
+    const token = await getMemberToken();
+    if (!token) return { analysis: null, currentUserId: null, error: { status: 401, message: 'Nicht eingeloggt' } };
+    try {
+      const res = await fetch(API_BASE + '/api/user/analyses/' + encodeURIComponent(analysisId), {
+        headers: { 'Authorization': 'Bearer ' + token },
+      });
+      if (res.status === 404) return { analysis: null, currentUserId: null, error: null };
+      if (!res.ok) return { analysis: null, currentUserId: null, error: { status: res.status, message: 'Der Server antwortet mit ' + res.status } };
+      const body = await res.json();
+      return { analysis: body.analysis || null, currentUserId: body.current_user_id || null, error: null };
+    } catch (e) {
+      return { analysis: null, currentUserId: null, error: { status: 0, message: e.message || 'Netzwerkfehler' } };
+    }
   }
 
   // ── Bootstrap ───────────────────────────────────────────────────────────────
@@ -2031,16 +2026,14 @@
     // CTA verstecken + Spinner zeigen, sobald CSS bereit ist
     showReportLoader();
 
-    // Warten bis Supabase SDK + Memberstack bereit
+    // Warten bis Memberstack bereit
     let attempts = 0;
     while (attempts < 50) {
-      if (window.supabase?.createClient && window.$memberstackDom?.getCurrentMember) break;
+      if (window.$memberstackDom?.getMemberCookie) break;
       await new Promise(r => setTimeout(r, 100));
       attempts++;
     }
-
-    const supabase = await initSupabase();
-    if (!supabase) { console.error('❌ Supabase nicht verfügbar'); hideReportLoader(); return; }
+    if (!window.$memberstackDom?.getMemberCookie) { console.error('❌ Memberstack nicht verfügbar'); hideReportLoader(); return; }
 
     const analysisId = new URLSearchParams(window.location.search).get('id');
     if (!analysisId) { console.error('❌ Keine Analysis ID in URL'); hideReportLoader(); return; }
@@ -2048,14 +2041,11 @@
     console.log('📊 Lade Analyse:', analysisId);
 
     try {
-      // Eigene user_id parallel zur Analyse holen (fuer Ersteller-Check)
-      const [{ analysis, error }, currentUserId] = await Promise.all([
-        loadAnalysis(supabase, analysisId),
-        fetchCurrentUserId(supabase),
-      ]);
+      // Analyse und eigene user_id (für den Ersteller-Check) kommen aus einer Antwort
+      const { analysis, currentUserId, error } = await loadAnalysis(analysisId);
 
       if (!analysis) {
-        if (error && error.message && error.message.includes('JWT')) alert('Zugriff verweigert.');
+        if (error && error.status === 401) alert('Bitte melde dich an, um diese Analyse zu sehen.');
         else if (error) alert('Fehler: ' + error.message);
         else alert('Analyse nicht gefunden oder kein Zugriff. Bitte logge dich mit dem Konto ein, zu dem diese Analyse gehört.');
         hideReportLoader();
@@ -2065,8 +2055,8 @@
       console.log('✅ Analyse geladen:', analysis);
       renderAll(analysis, analysisId, currentUserId);
 
-      // v11: Analyse fuer report-export.js bereitstellen. Ohne diese zwei Zeilen laedt report-export.js
-      // sie selbst per select('*') nach (Fallback, funktioniert nur fuer Teammitglieder).
+      // Analyse fuer report-export.js bereitstellen. Ohne diese zwei Zeilen muesste report-export.js
+      // sie selbst nachladen.
       window.CVZ_REPORT = { analysis: analysis, analysisId: analysisId };
       document.dispatchEvent(new CustomEvent('cvz:report-ready'));
 
