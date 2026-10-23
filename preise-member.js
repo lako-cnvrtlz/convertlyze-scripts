@@ -1,9 +1,20 @@
+/**
+ * preise-member.js
+ *
+ * GEAENDERT (23.10.2026), SICHERHEIT: Keine direkten Supabase-Abfragen mehr. Konto-Daten kommen von
+ * GET /api/user/account-context, das Kontingent von GET /api/user/effective-credits und ein vorgemerkter
+ * Plan von POST /api/user/pending-checkout/claim (Railway-API, Token wird serverseitig geprueft).
+ * Vorher las die Seite users, user_effective_credits und pending_checkouts mit dem oeffentlichen Key,
+ * und mit der E-Mail-Adresse jedes beliebigen Kontos liess sich der vorgemerkte Plan abrufen und loeschen.
+ * Supabase wird hier nur noch fuer die Edge Function stripe-portal angesprochen (Aufruf-Schluessel).
+ */
 (function () {
   'use strict';
 
   // ── Konfiguration ────────────────────────────────────────────────────────────
 
   var CONFIG = {
+    apiBase:         'https://convertlyze-agent-api-production.up.railway.app',
     supabaseUrl:     'https://zpkifipmyeunorhtepzq.supabase.co',
     supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU',
     ppuPriceId:      'prc_pay-per-use-14750y0n',
@@ -35,7 +46,7 @@
   }
 
   function depsReady() {
-    return !!window.$memberstackDom && typeof window.supabase?.from === 'function';
+    return !!window.$memberstackDom && typeof window.$memberstackDom.getMemberCookie === 'function';
   }
 
   // Memberstack-Token (JWT) des eingeloggten Nutzers. Die Edge Functions pruefen es serverseitig
@@ -61,29 +72,49 @@
     };
   }
 
+  // Aufruf der Railway-API mit dem Memberstack-Token. Rueckgabe { ok, status, data }, wirft nie.
+  async function apiCall(path, method) {
+    var token = await getMemberToken();
+    if (!token) return { ok: false, status: 401, data: null };
+    try {
+      var res = await fetch(CONFIG.apiBase + path, {
+        method:  method || 'GET',
+        headers: { 'Authorization': 'Bearer ' + token },
+      });
+      var data = null;
+      try { data = await res.json(); } catch (e) {}
+      return { ok: res.ok, status: res.status, data: data };
+    } catch (e) {
+      console.warn('[CVZ] API-Aufruf fehlgeschlagen:', path, e);
+      return { ok: false, status: 0, data: null };
+    }
+  }
+
+  // Konto: Vorname, E-Mail, Team-Kennzeichen, aktiver Plan. memberstackId wird nicht mehr gebraucht
+  // (die Identitaet kommt serverseitig aus dem Token). 404 = Konto noch nicht angelegt (frisch registriert).
   async function fetchUser(memberstackId, options) {
     var maxAttempts = (options && options.maxAttempts) || 1;
     for (var i = 0; i < maxAttempts; i++) {
-      var res = await window.supabase
-        .from('users')
-        .select('id, firstname, email, owner_user_id, current_price_id')
-        .eq('memberstack_id', memberstackId)
-        .single();
-      if (res.data) return res.data;
-      if (i < maxAttempts - 1) await new Promise(function (r) { setTimeout(r, 1500); });
-      else console.warn('[CVZ] fetchUser error:', res.error);
+      var r = await apiCall('/api/user/account-context');
+      if (r.ok && r.data) {
+        return {
+          firstname:        r.data.firstname || null,
+          email:            r.data.email || null,
+          is_team_member:   !!r.data.is_team_member,
+          current_price_id: r.data.current_price_id || null,
+        };
+      }
+      if (r.status === 401) { console.warn('[CVZ] fetchUser: nicht angemeldet'); return null; }
+      if (i < maxAttempts - 1) await new Promise(function (res) { setTimeout(res, 1500); });
+      else console.warn('[CVZ] fetchUser error: Status', r.status);
     }
     return null;
   }
 
   async function fetchCredits(memberstackId) {
-    var res = await window.supabase
-      .from('user_effective_credits')
-      .select('credits_limit, credits_used_current_period, reserved_credits, ppu_credits, reserved_ppu_credits')
-      .eq('memberstack_id', memberstackId)
-      .single();
-    if (res.error) console.warn('[CVZ] fetchCredits error:', res.error);
-    return res.data || null;
+    var r = await apiCall('/api/user/effective-credits');
+    if (!r.ok) console.warn('[CVZ] fetchCredits error: Status', r.status);
+    return (r.ok && r.data && r.data.credits) || null;
   }
 
   function calcCredits(d) {
@@ -99,31 +130,12 @@
     return plan + ppu;
   }
 
-  async function fetchPendingCheckout(email) {
-    if (!email) return null;
-    try {
-      var res = await fetch(
-        CONFIG.supabaseUrl + '/rest/v1/pending_checkouts?email=eq.' + encodeURIComponent(email) + '&limit=1',
-        { headers: { 'apikey': CONFIG.supabaseAnonKey, 'Authorization': 'Bearer ' + CONFIG.supabaseAnonKey } }
-      );
-      var data = await res.json();
-      return data?.[0] || null;
-    } catch (e) {
-      console.warn('[CVZ] fetchPendingCheckout error:', e);
-      return null;
-    }
-  }
-
-  async function deletePendingCheckout(email) {
-    if (!email) return;
-    try {
-      await fetch(
-        CONFIG.supabaseUrl + '/rest/v1/pending_checkouts?email=eq.' + encodeURIComponent(email),
-        { method: 'DELETE', headers: { 'apikey': CONFIG.supabaseAnonKey, 'Authorization': 'Bearer ' + CONFIG.supabaseAnonKey } }
-      );
-    } catch (e) {
-      console.warn('[CVZ] deletePendingCheckout error:', e);
-    }
+  // Vorgemerkten Plan abholen. Der Server liest und loescht in einem Schritt (ein zweiter Abruf
+  // bekommt nichts mehr) und nimmt die E-Mail aus dem verifizierten Konto, nicht aus dem Request.
+  async function claimPendingCheckout() {
+    var r = await apiCall('/api/user/pending-checkout/claim', 'POST');
+    if (!r.ok) { console.warn('[CVZ] claimPendingCheckout: Status', r.status); return null; }
+    return (r.data && r.data.pending) || null;
   }
 
   async function fetchStripePortalUrl(memberstackId) {
@@ -384,7 +396,6 @@
 
     var member = await getCurrentMember();
     var user   = member.id ? await fetchUser(member.id, { maxAttempts: 5 }) : null;
-    var email  = user?.email || member.email;
 
     renderFirstName(user?.firstname);
 
@@ -395,7 +406,7 @@
     }
 
     // ── State 1: Team-Member ─────────────────────────────────────────────────
-    if (user?.owner_user_id) {
+    if (user?.is_team_member) {
       hidePlanSection();
       setCheckoutButtons('locked');
       revealPage();
@@ -416,12 +427,11 @@
     var planKey = getParam('plan');
     var billing = getParam('billing') || 'monthly';
 
-    if (!planKey && email) {
-      var pending = await fetchPendingCheckout(email);
+    if (!planKey) {
+      var pending = await claimPendingCheckout();
       if (pending) {
         planKey = pending.plan;
         billing = pending.billing || 'monthly';
-        await deletePendingCheckout(email);
       }
     }
 
