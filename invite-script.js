@@ -1,4 +1,8 @@
 // ==================== MEMBER INVITE SCRIPT ====================
+// v2 (Sicherheit, 23.10.2026): schickt zusätzlich das signierte Memberstack-Token
+// (memberstack_token). Die neue Version von accept-team-invite leitet die Member-ID
+// daraus ab und glaubt der mitgeschickten ID nicht mehr. memberstack_id bleibt für die
+// Übergangszeit im Body, bis die neue Funktion live ist, und kann danach entfernt werden.
 (function() {
 
   var SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
@@ -54,6 +58,10 @@
           return;
         }
 
+        // Signiertes Token holen. Die Funktion prüft es serverseitig bei Memberstack.
+        var memberstackToken = null;
+        try { memberstackToken = await window.$memberstackDom.getMemberCookie(); } catch (err) {}
+
         var response = await fetch(SUPABASE_URL + '/functions/v1/accept-team-invite', {
           method: 'POST',
           headers: {
@@ -62,7 +70,8 @@
           },
           body: JSON.stringify({
             token: token,
-            memberstack_id: memberstackId
+            memberstack_token: memberstackToken,
+            memberstack_id: memberstackId // Übergang, nach dem Deploy der neuen Funktion entfernen
           })
         });
 
