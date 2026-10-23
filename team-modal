@@ -1,3 +1,423 @@
+<!-- ═══════════════════════════════════════════════════════════
+     CONVERTLYZE · TEAM MANAGEMENT MODAL
+     Als Custom Code Embed in Webflow einfügen.
+     Trigger-Button braucht: id="open-team-modal"
+     ═══════════════════════════════════════════════════════════ -->
+
+<style>
+  /* ── Variablen ── */
+  :root {
+    --cvl-bg:        #0d1117;
+    --cvl-surface:   #161b27;
+    --cvl-border:    #252d3d;
+    --cvl-border2:   #1e2738;
+    --cvl-text:      #e8edf5;
+    --cvl-muted:     #6b7a99;
+    --cvl-accent:    #4fd1c5;
+    --cvl-accent2:   #38b2ac;
+    --cvl-danger:    #fc8181;
+    --cvl-danger-bg: rgba(252,129,129,0.08);
+    --cvl-success:   #68d391;
+    --cvl-tag-bg:    rgba(79,209,197,0.1);
+    --cvl-radius:    0px;
+    --cvl-radius-sm: 0px;
+  }
+
+  #cvl-team-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(5,8,15,0.75);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  #cvl-team-overlay.is-open {
+    display: flex;
+    animation: cvl-fade-in 0.2s ease;
+  }
+  @keyframes cvl-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+  #cvl-team-modal {
+    background: var(--cvl-surface);
+    border: 1px solid var(--cvl-border);
+    border-radius: var(--cvl-radius);
+    width: 100%;
+    max-width: 600px;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 32px 80px rgba(0,0,0,0.6);
+    animation: cvl-slide-up 0.25s cubic-bezier(0.16,1,0.3,1);
+  }
+  @keyframes cvl-slide-up {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .cvl-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 0;
+    flex-shrink: 0;
+  }
+  .cvl-modal-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--cvl-text);
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .cvl-modal-close {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: var(--cvl-muted);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+  }
+  .cvl-modal-close:hover { background: var(--cvl-border); color: var(--cvl-text); }
+
+  .cvl-seat-bar {
+    margin: 14px 24px 0;
+    background: var(--cvl-bg);
+    border: 1px solid var(--cvl-border);
+    border-radius: var(--cvl-radius-sm);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .cvl-seat-label { font-size: 13px; color: var(--cvl-muted); }
+  .cvl-seat-count { font-size: 13px; font-weight: 600; color: var(--cvl-accent); }
+  .cvl-seat-progress {
+    flex: 1;
+    height: 4px;
+    background: var(--cvl-border);
+    border-radius: 99px;
+    overflow: hidden;
+    max-width: 120px;
+  }
+  .cvl-seat-progress-bar {
+    height: 100%;
+    background: var(--cvl-accent);
+    border-radius: 99px;
+    transition: width 0.4s ease;
+  }
+
+  .cvl-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 16px 24px 0;
+    flex-shrink: 0;
+  }
+  .cvl-tab {
+    padding: 7px 14px;
+    border-radius: var(--cvl-radius-sm);
+    border: none;
+    background: transparent;
+    color: var(--cvl-muted);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .cvl-tab:hover { color: var(--cvl-text); background: var(--cvl-border2); }
+  .cvl-tab.is-active { background: var(--cvl-tag-bg); color: var(--cvl-accent); }
+  .cvl-tab-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px; height: 18px;
+    background: var(--cvl-accent);
+    color: var(--cvl-bg);
+    border-radius: 99px;
+    font-size: 10px;
+    font-weight: 700;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+
+  .cvl-divider { height: 1px; background: var(--cvl-border); margin: 14px 24px 0; flex-shrink: 0; }
+
+  .cvl-modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px 24px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--cvl-border) transparent;
+  }
+  .cvl-modal-body::-webkit-scrollbar { width: 4px; }
+  .cvl-modal-body::-webkit-scrollbar-thumb { background: var(--cvl-border); border-radius: 99px; }
+
+  .cvl-panel { display: none; }
+  .cvl-panel.is-active { display: block; }
+
+  .cvl-member-list { display: flex; flex-direction: column; gap: 8px; }
+  .cvl-member-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--cvl-bg);
+    border: 1px solid var(--cvl-border);
+    border-radius: var(--cvl-radius-sm);
+    transition: border-color 0.15s;
+  }
+  .cvl-member-row:hover { border-color: var(--cvl-border2); }
+  .cvl-avatar {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: var(--cvl-tag-bg);
+    border: 1px solid var(--cvl-accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 600;
+    color: var(--cvl-accent);
+    flex-shrink: 0;
+  }
+  .cvl-member-info { flex: 1; min-width: 0; }
+  .cvl-member-name {
+    font-size: 14px; font-weight: 500; color: var(--cvl-text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .cvl-member-email {
+    font-size: 12px; color: var(--cvl-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .cvl-member-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+  .cvl-tag {
+    padding: 3px 9px;
+    border-radius: 99px;
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .cvl-tag-owner  { background: rgba(246,173,85,0.12); color: #f6ad55; }
+  .cvl-tag-member { background: var(--cvl-border2); color: var(--cvl-muted); }
+
+  .cvl-btn-icon {
+    width: 30px; height: 30px;
+    border-radius: 7px;
+    border: 1px solid var(--cvl-border);
+    background: transparent;
+    color: var(--cvl-muted);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .cvl-btn-icon:hover { background: var(--cvl-danger-bg); border-color: var(--cvl-danger); color: var(--cvl-danger); }
+
+  .cvl-btn-primary {
+    padding: 9px 18px;
+    border-radius: var(--cvl-radius-sm);
+    border: none;
+    background: var(--cvl-accent);
+    color: var(--cvl-bg);
+    font-size: 14px; font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .cvl-btn-primary:hover { background: var(--cvl-accent2); }
+  .cvl-btn-primary:active { transform: scale(0.98); }
+  .cvl-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .cvl-btn-primary.is-loading { pointer-events: none; opacity: 0.7; }
+
+  .cvl-btn-ghost {
+    padding: 7px 14px;
+    border-radius: var(--cvl-radius-sm);
+    border: 1px solid var(--cvl-border);
+    background: transparent;
+    color: var(--cvl-muted);
+    font-size: 13px; font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .cvl-btn-ghost:hover { border-color: var(--cvl-danger); color: var(--cvl-danger); background: var(--cvl-danger-bg); }
+
+  .cvl-btn-leave {
+    padding: 7px 14px;
+    border-radius: var(--cvl-radius-sm);
+    border: 1px solid var(--cvl-danger);
+    background: transparent;
+    color: var(--cvl-danger);
+    font-size: 13px; font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .cvl-btn-leave:hover { background: var(--cvl-danger-bg); }
+  .cvl-btn-leave:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .cvl-form-group { margin-bottom: 16px; }
+  .cvl-label { display: block; font-size: 13px; font-weight: 500; color: var(--cvl-muted); margin-bottom: 7px; }
+  .cvl-input {
+    width: 100%; padding: 10px 14px;
+    background: var(--cvl-bg);
+    border: 1px solid var(--cvl-border);
+    border-radius: var(--cvl-radius-sm);
+    color: var(--cvl-text); font-size: 14px;
+    outline: none; transition: border-color 0.15s; box-sizing: border-box;
+  }
+  .cvl-input::placeholder { color: var(--cvl-muted); opacity: 0.6; }
+  .cvl-input:focus { border-color: var(--cvl-accent); }
+  .cvl-form-footer { display: flex; justify-content: flex-end; margin-top: 20px; }
+
+  .cvl-invite-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px;
+    background: var(--cvl-bg);
+    border: 1px solid var(--cvl-border);
+    border-radius: var(--cvl-radius-sm);
+    margin-bottom: 8px; flex-wrap: wrap;
+  }
+  .cvl-invite-icon {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: rgba(246,173,85,0.1);
+    border: 1px solid rgba(246,173,85,0.3);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .cvl-invite-info { flex: 1; min-width: 120px; }
+  .cvl-invite-email { font-size: 14px; color: var(--cvl-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cvl-invite-meta { font-size: 12px; color: var(--cvl-muted); margin-top: 2px; }
+  .cvl-invite-actions { display: flex; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
+  @media (max-width: 480px) {
+    .cvl-invite-actions { width: 100%; justify-content: flex-end; }
+    .cvl-btn-ghost { font-size: 12px; padding: 6px 10px; }
+  }
+
+  #cvl-toast {
+    position: fixed; bottom: 24px; right: 24px;
+    padding: 12px 18px;
+    border-radius: var(--cvl-radius-sm);
+    font-size: 14px; font-weight: 500; color: var(--cvl-bg);
+    z-index: 10000; display: none;
+    animation: cvl-toast-in 0.25s cubic-bezier(0.16,1,0.3,1);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  #cvl-toast.is-success { background: var(--cvl-success); display: block; }
+  #cvl-toast.is-error   { background: var(--cvl-danger);  display: block; }
+  @keyframes cvl-toast-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .cvl-empty { text-align: center; padding: 32px 20px; color: var(--cvl-muted); font-size: 14px; }
+  .cvl-empty-icon { font-size: 28px; margin-bottom: 10px; }
+
+  .cvl-spinner {
+    width: 20px; height: 20px;
+    border: 2px solid var(--cvl-border);
+    border-top-color: var(--cvl-accent);
+    border-radius: 50%;
+    animation: cvl-spin 0.7s linear infinite;
+    margin: 32px auto;
+  }
+  @keyframes cvl-spin { to { transform: rotate(360deg); } }
+</style>
+
+<!-- Overlay -->
+<div id="cvl-team-overlay" role="dialog" aria-modal="true" aria-label="Team verwalten">
+
+  <!-- Bestätigungs-Modal -->
+  <div id="cvl-confirm-modal" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,0.6);z-index:100;border-radius:20px;align-items:center;justify-content:center;">
+    <div style="background:#1a2035;border:1px solid var(--cvl-border);border-radius:16px;padding:28px;max-width:340px;width:90%;box-shadow:0 16px 48px rgba(0,0,0,0.5);">
+      <div style="width:44px;height:44px;border-radius:12px;background:rgba(239,68,68,0.12);display:flex;align-items:center;justify-content:center;margin-bottom:16px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <line x1="17" y1="8" x2="23" y2="8"/></svg>
+      </div>
+      <p style="font-size:16px;font-weight:700;color:var(--cvl-text);margin:0 0 8px" id="cvl-confirm-title">Mitglied entfernen?</p>
+      <p style="font-size:13px;color:var(--cvl-muted);margin:0 0 20px;line-height:1.6" id="cvl-confirm-text">Das Mitglied verliert den Zugang zum Team.</p>
+      <div style="display:flex;gap:10px;">
+        <button id="cvl-confirm-cancel" style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--cvl-border);background:transparent;color:var(--cvl-muted);font-size:14px;font-weight:500;cursor:pointer;">Abbrechen</button>
+        <button id="cvl-confirm-ok" style="flex:1;padding:10px;border-radius:10px;border:none;background:#ef4444;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Bestätigen</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="cvl-team-modal">
+
+    <!-- Header -->
+    <div class="cvl-modal-header">
+      <p class="cvl-modal-title">Team verwalten</p>
+      <button class="cvl-modal-close" id="cvl-close-btn" aria-label="Schließen">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Seat-Anzeige -->
+    <div class="cvl-seat-bar">
+      <span class="cvl-seat-label">Seats genutzt</span>
+      <div class="cvl-seat-progress">
+        <div class="cvl-seat-progress-bar" id="cvl-seat-bar" style="width: 0%"></div>
+      </div>
+      <span class="cvl-seat-count" id="cvl-seat-count">0 / 0</span>
+    </div>
+
+    <!-- Tabs -->
+    <div class="cvl-tabs" role="tablist">
+      <button class="cvl-tab is-active" data-tab="members" role="tab">Mitglieder</button>
+      <button class="cvl-tab" data-tab="invite" role="tab">Einladen</button>
+      <button class="cvl-tab" data-tab="pending" role="tab">
+        Offen <span class="cvl-tab-badge" id="cvl-pending-badge" style="display:none">0</span>
+      </button>
+    </div>
+
+    <div class="cvl-divider"></div>
+
+    <!-- Body -->
+    <div class="cvl-modal-body">
+
+      <!-- Panel: Mitglieder -->
+      <div class="cvl-panel is-active" id="cvl-panel-members">
+        <div class="cvl-spinner" id="cvl-members-spinner"></div>
+        <div class="cvl-member-list" id="cvl-member-list" style="display:none"></div>
+      </div>
+
+      <!-- Panel: Einladen -->
+      <div class="cvl-panel" id="cvl-panel-invite">
+        <div class="cvl-form-group">
+          <label class="cvl-label" for="cvl-invite-email">E-Mail-Adresse</label>
+          <input class="cvl-input" id="cvl-invite-email" type="email" placeholder="member@leadmachine.de" autocomplete="off"/>
+        </div>
+        <div class="cvl-form-footer">
+          <button class="cvl-btn-primary" id="cvl-invite-btn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Einladung senden
+          </button>
+        </div>
+      </div>
+
+      <!-- Panel: Offene Einladungen -->
+      <div class="cvl-panel" id="cvl-panel-pending">
+        <div class="cvl-spinner" id="cvl-pending-spinner"></div>
+        <div id="cvl-pending-list" style="display:none"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div id="cvl-toast"></div>
+
+<script>
 (function () {
 
   var SUPABASE_URL      = window.cvlSupabaseUrl     || '';
@@ -13,23 +433,9 @@
   var currentMemberstackId = null;
   var currentUserIsOwner   = false;
 
-  // ── Utilities ────────────────────────────────────────────────────────────────
+  // ── Utilities ──────────────────────────────────────────────────────────────
 
   function qs(sel) { return document.querySelector(sel); }
-
-  // FIX 1: XSS-sichere Textsetzung – nie innerHTML mit User-Daten
-  function setText(el, text) {
-    if (el) el.textContent = text;
-  }
-
-  function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
 
   function getInitials(name) {
     if (!name) return '?';
@@ -43,7 +449,7 @@
     return new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
 
-  // ── UI helpers ───────────────────────────────────────────────────────────────
+  // ── UI helpers ─────────────────────────────────────────────────────────────
 
   function showConfirm(title, text, onConfirm) {
     var modal   = document.getElementById('cvl-confirm-modal');
@@ -52,8 +458,8 @@
     var titleEl = document.getElementById('cvl-confirm-title');
     var textEl  = document.getElementById('cvl-confirm-text');
     if (!modal) { onConfirm(); return; }
-    setText(titleEl, title);
-    setText(textEl, text);
+    titleEl.textContent = title;
+    textEl.textContent  = text;
     modal.style.display = 'flex';
     function close() { modal.style.display = 'none'; }
     okBtn.onclick  = function () { close(); onConfirm(); };
@@ -70,34 +476,33 @@
 
   function updateSeatBar(used, max) {
     var pct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
-    qs('#cvl-seat-bar').style.width    = pct + '%';
-    qs('#cvl-seat-count').textContent  = used + ' / ' + max;
+    qs('#cvl-seat-bar').style.width   = pct + '%';
+    qs('#cvl-seat-count').textContent = used + ' / ' + max;
   }
 
-  // FIX 7: Invite-Button zurücksetzen ohne innerHTML
   function resetInviteBtn(btn) {
     btn.classList.remove('is-loading');
-    btn.disabled     = false;
-    var icon         = document.createElement('span');
-    icon.innerHTML   = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    btn.textContent  = '';
-    btn.appendChild(icon.firstChild);
+    btn.disabled    = false;
+    btn.textContent = '';
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '15'); svg.setAttribute('height', '15');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none');
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z');
+    path.setAttribute('stroke', 'currentColor'); path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+    btn.appendChild(svg);
     btn.appendChild(document.createTextNode(' Einladung senden'));
   }
 
-  // ── API layer ────────────────────────────────────────────────────────────────
+  // ── API layer ──────────────────────────────────────────────────────────────
 
-  // Haengt an jeden Aufruf das signierte Memberstack-Token. Die Edge Functions pruefen es serverseitig
-  // und leiten die Identitaet daraus ab. Die alten Felder (memberstack_id, inviter_user_id,
-  // requester_memberstack_id) bleiben im Body, werden von den neuen Versionen aber ignoriert.
   async function edgeFetch(endpoint, body) {
-    var token = null;
-    try { token = await window.$memberstackDom.getMemberCookie(); } catch (e) {}
-    var payload = Object.assign({}, body, { memberstack_token: token });
     var res = await fetch(EDGE_BASE + endpoint, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
-      body:    JSON.stringify(payload),
+      body:    JSON.stringify(body),
     });
     return res.json();
   }
@@ -113,7 +518,7 @@
     return res.json();
   }
 
-  // ── Member row builder (XSS-safe, kein innerHTML mit User-Daten) ─────────────
+  // ── Member row builder (XSS-safe) ──────────────────────────────────────────
 
   function buildMemberRow(m) {
     var user    = m.users || {};
@@ -125,7 +530,7 @@
 
     // Avatar
     var avatar = document.createElement('div');
-    avatar.className = 'cvl-avatar';
+    avatar.className   = 'cvl-avatar';
     avatar.textContent = getInitials(user.full_name || user.email);
     row.appendChild(avatar);
 
@@ -133,8 +538,8 @@
     var info     = document.createElement('div');
     info.className = 'cvl-member-info';
     var nameEl   = document.createElement('div');
-    nameEl.className = 'cvl-member-name';
-    nameEl.textContent = user.full_name || '–';
+    nameEl.className   = 'cvl-member-name';
+    nameEl.textContent = user.full_name || '\u2013';
     if (isMe) {
       var meBadge = document.createElement('span');
       meBadge.textContent = ' (Du)';
@@ -156,14 +561,12 @@
     tag.textContent = isOwner ? 'Owner' : 'Member';
     actions.appendChild(tag);
 
-    // FIX 2: Remove-Button nur anzeigen wenn eingeloggter User Owner ist
+    // Remove-Button nur für Owner sichtbar, nicht für sich selbst und nicht für andere Owner
     if (!isOwner && !isMe && currentUserIsOwner) {
       var removeBtn = document.createElement('button');
       removeBtn.className = 'cvl-btn-icon';
       removeBtn.title     = 'Entfernen';
       removeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
-      // FIX 8: ID als Closure-Variable, nicht als data-Attribut im DOM
       var userId = m.user_id;
       removeBtn.addEventListener('click', function () {
         showConfirm(
@@ -193,6 +596,7 @@
       actions.appendChild(removeBtn);
     }
 
+    // Leave-Button nur für eingeloggten Member sichtbar (nicht für Owner)
     if (isMe && !isOwner) {
       var leaveBtn = document.createElement('button');
       leaveBtn.className   = 'cvl-btn-leave';
@@ -227,7 +631,7 @@
     return row;
   }
 
-  // ── Member laden ─────────────────────────────────────────────────────────────
+  // ── Member laden ───────────────────────────────────────────────────────────
 
   async function loadMembers() {
     var spinner = qs('#cvl-members-spinner');
@@ -240,8 +644,8 @@
     try {
       var result      = await edgeFetch('/get-team-members', { memberstack_id: currentMemberstackId });
       var data        = result.members    || [];
-      var planMax     = result.max_seats  ?? 0;
-      var memberCount = result.used_seats ?? 0;
+      var planMax     = result.max_seats  != null ? result.max_seats  : 0;
+      var memberCount = result.used_seats != null ? result.used_seats : 0;
 
       if (result.owner_id) currentUserId = result.owner_id;
       if (result.team_id)  currentTeamId = result.team_id;
@@ -252,9 +656,12 @@
 
       if (!data.length) {
         var empty = document.createElement('div');
-        empty.className   = 'cvl-empty';
-        empty.innerHTML   = '<div class="cvl-empty-icon">\uD83D\uDC65</div>';
-        empty.appendChild(document.createTextNode('Noch keine Team-Mitglieder. Lade jemanden ein!'));
+        empty.className = 'cvl-empty';
+        var icon = document.createElement('div');
+        icon.className   = 'cvl-empty-icon';
+        icon.textContent = '\uD83D\uDC65';
+        var msg = document.createTextNode('Noch keine Team-Mitglieder. Lade jemanden ein!');
+        empty.append(icon, msg);
         list.appendChild(empty);
         return;
       }
@@ -265,11 +672,11 @@
       console.error('[CVZ] loadMembers error:', e);
       spinner.style.display = 'none';
       list.style.display    = 'flex';
-      list.innerHTML        = '<div class="cvl-empty" style="color:var(--cvl-danger)">Fehler beim Laden. Bitte erneut versuchen.</div>';
+      list.innerHTML = '<div class="cvl-empty" style="color:var(--cvl-danger)">Fehler beim Laden. Bitte erneut versuchen.</div>';
     }
   }
 
-  // ── Pending Invites laden ────────────────────────────────────────────────────
+  // ── Pending Invites laden ──────────────────────────────────────────────────
 
   async function loadPending() {
     var spinner = qs('#cvl-pending-spinner');
@@ -309,8 +716,6 @@
       data.forEach(function (inv) {
         var row = document.createElement('div');
         row.className = 'cvl-invite-row';
-
-        // FIX 1: E-Mail per textContent, nicht innerHTML
         row.innerHTML =
           '<div class="cvl-invite-icon">' +
             '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="#f6ad55" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
@@ -324,18 +729,15 @@
             '<button class="cvl-btn-ghost cvl-btn-revoke">Zur\u00fcckziehen</button>' +
           '</div>';
 
-        // XSS-safe: textContent nach dem Bauen setzen
         row.querySelector('.cvl-invite-email').textContent = inv.email;
         row.querySelector('.cvl-invite-meta').textContent  = 'L\u00e4uft ab am ' + formatDate(inv.expires_at);
 
-        // FIX 8: IDs als Closure-Variablen
         var inviteId = inv.id;
         var email    = inv.email;
 
         row.querySelector('.cvl-btn-resend').addEventListener('click', async function () {
           var btn = this;
-          btn.disabled    = true;
-          btn.textContent = '\u2026';
+          btn.disabled = true; btn.textContent = '\u2026';
           try {
             await edgeFetch('/revoke-team-invite', { invite_id: inviteId, memberstack_id: currentMemberstackId });
             var res = await edgeFetch('/invite-team-member', { inviter_user_id: currentUserId, email: email });
@@ -344,20 +746,17 @@
               loadPending();
             } else {
               showToast(res.error || 'Fehler beim Senden.', 'error');
-              btn.disabled    = false;
-              btn.textContent = 'Erneut senden';
+              btn.disabled = false; btn.textContent = 'Erneut senden';
             }
           } catch (e) {
             showToast('Verbindungsfehler.', 'error');
-            btn.disabled    = false;
-            btn.textContent = 'Erneut senden';
+            btn.disabled = false; btn.textContent = 'Erneut senden';
           }
         });
 
         row.querySelector('.cvl-btn-revoke').addEventListener('click', async function () {
           var btn = this;
-          btn.disabled    = true;
-          btn.textContent = '\u2026';
+          btn.disabled = true; btn.textContent = '\u2026';
           try {
             var res = await edgeFetch('/revoke-team-invite', { invite_id: inviteId, memberstack_id: currentMemberstackId });
             if (res.success) {
@@ -365,13 +764,11 @@
               loadPending();
             } else {
               showToast(res.error || 'Fehler beim Zur\u00fcckziehen.', 'error');
-              btn.disabled    = false;
-              btn.textContent = 'Zur\u00fcckziehen';
+              btn.disabled = false; btn.textContent = 'Zur\u00fcckziehen';
             }
           } catch (e) {
             showToast('Verbindungsfehler.', 'error');
-            btn.disabled    = false;
-            btn.textContent = 'Zur\u00fcckziehen';
+            btn.disabled = false; btn.textContent = 'Zur\u00fcckziehen';
           }
         });
 
@@ -386,7 +783,7 @@
     }
   }
 
-  // ── Tabs ─────────────────────────────────────────────────────────────────────
+  // ── Tabs ───────────────────────────────────────────────────────────────────
 
   document.querySelectorAll('.cvl-tab').forEach(function (tab) {
     tab.addEventListener('click', function () {
@@ -399,20 +796,17 @@
     });
   });
 
-  // ── Invite senden ─────────────────────────────────────────────────────────────
+  // ── Invite senden ──────────────────────────────────────────────────────────
 
   qs('#cvl-invite-btn').addEventListener('click', async function () {
     var emailInput = qs('#cvl-invite-email');
     var email      = emailInput.value.trim();
     var btn        = qs('#cvl-invite-btn');
-
-    if (!email)              { showToast('Bitte E-Mail eingeben.', 'error'); return; }
-    if (!email.includes('@')){ showToast('Ung\u00fcltige E-Mail-Adresse.', 'error'); return; }
-
+    if (!email)               { showToast('Bitte E-Mail eingeben.', 'error'); return; }
+    if (!email.includes('@')) { showToast('Ung\u00fcltige E-Mail-Adresse.', 'error'); return; }
     btn.classList.add('is-loading');
     btn.disabled    = true;
     btn.textContent = 'Wird gesendet\u2026';
-
     try {
       var res = await edgeFetch('/invite-team-member', { inviter_user_id: currentUserId, email: email });
       resetInviteBtn(btn);
@@ -429,35 +823,22 @@
     }
   });
 
-  // ── Modal öffnen / schließen ──────────────────────────────────────────────────
+  // ── Modal öffnen / schließen ───────────────────────────────────────────────
 
   async function openModal() {
     if (!window.$memberstackDom) { showToast('Nicht eingeloggt.', 'error'); return; }
-
     try {
       var member = await window.$memberstackDom.getCurrentMember();
-      if (!member?.data?.id) { showToast('Nicht eingeloggt.', 'error'); return; }
+      if (!member || !member.data || !member.data.id) { showToast('Nicht eingeloggt.', 'error'); return; }
 
-      // IDs und Rolle kommen jetzt aus get-team-members (Token-geprueft) statt aus einem direkten
-      // Lesezugriff auf die Tabelle users, den die Zugriffsregeln der Datenbank ohne Header ablehnen.
-      var info = await edgeFetch('/get-team-members', { memberstack_id: member.data.id });
-      var user = null;
-      if (info && info.user_id) {
-        user = { id: info.user_id, team_id: info.team_id, owner_user_id: info.is_owner ? null : info.owner_id };
-      } else {
-        // Uebergang: aeltere Version der Funktion ohne user_id. Dann der bisherige Weg.
-        var users = await supabaseGet(
-          '/users?memberstack_id=eq.' + member.data.id +
-          '&select=id,team_id,owner_user_id'
-        );
-        user = users?.[0];
-      }
+      var user = await edgeFetch('/get-current-user', { memberstack_id: member.data.id });
+if (user.error) { showToast('User nicht gefunden.', 'error'); return; }
       if (!user) { showToast('User nicht gefunden.', 'error'); return; }
 
       currentUserId        = user.owner_user_id || user.id;
       currentTeamId        = user.team_id       || null;
       currentMemberstackId = member.data.id;
-      currentUserIsOwner   = !user.owner_user_id; // FIX 2
+      currentUserIsOwner   = !user.owner_user_id;
 
       var overlay = qs('#cvl-team-overlay');
       overlay.classList.add('is-open');
@@ -492,3 +873,4 @@
   window.openTeamModal = openModal;
 
 })();
+</script>
