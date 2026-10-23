@@ -87,11 +87,17 @@
 
   // ── API layer ────────────────────────────────────────────────────────────────
 
+  // Haengt an jeden Aufruf das signierte Memberstack-Token. Die Edge Functions pruefen es serverseitig
+  // und leiten die Identitaet daraus ab. Die alten Felder (memberstack_id, inviter_user_id,
+  // requester_memberstack_id) bleiben im Body, werden von den neuen Versionen aber ignoriert.
   async function edgeFetch(endpoint, body) {
+    var token = null;
+    try { token = await window.$memberstackDom.getMemberCookie(); } catch (e) {}
+    var payload = Object.assign({}, body, { memberstack_token: token });
     var res = await fetch(EDGE_BASE + endpoint, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
-      body:    JSON.stringify(body),
+      body:    JSON.stringify(payload),
     });
     return res.json();
   }
@@ -432,11 +438,20 @@
       var member = await window.$memberstackDom.getCurrentMember();
       if (!member?.data?.id) { showToast('Nicht eingeloggt.', 'error'); return; }
 
-      var users = await supabaseGet(
-        '/users?memberstack_id=eq.' + member.data.id +
-        '&select=id,team_id,owner_user_id'
-      );
-      var user = users?.[0];
+      // IDs und Rolle kommen jetzt aus get-team-members (Token-geprueft) statt aus einem direkten
+      // Lesezugriff auf die Tabelle users, den die Zugriffsregeln der Datenbank ohne Header ablehnen.
+      var info = await edgeFetch('/get-team-members', { memberstack_id: member.data.id });
+      var user = null;
+      if (info && info.user_id) {
+        user = { id: info.user_id, team_id: info.team_id, owner_user_id: info.is_owner ? null : info.owner_id };
+      } else {
+        // Uebergang: aeltere Version der Funktion ohne user_id. Dann der bisherige Weg.
+        var users = await supabaseGet(
+          '/users?memberstack_id=eq.' + member.data.id +
+          '&select=id,team_id,owner_user_id'
+        );
+        user = users?.[0];
+      }
       if (!user) { showToast('User nicht gefunden.', 'error'); return; }
 
       currentUserId        = user.owner_user_id || user.id;
