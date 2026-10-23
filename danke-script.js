@@ -1,6 +1,18 @@
+/*
+ * danke-script.js (Seite /member/danke)
+ *
+ * GEAENDERT (23.10.2026): kein direkter Datenbankzugriff mehr.
+ *  - Nutzerdaten (Vorname, E-Mail, Plan, Team-Status) kommen von GET /api/user/account-context
+ *  - der vorgemerkte Plan kommt von POST /api/user/pending-checkout/claim
+ *    (liest und loescht den Eintrag in einem Schritt, Identitaet aus dem Memberstack-Token)
+ *  - Supabase-Client und Direktabfragen auf users / pending_checkouts sind entfernt
+ * Der Supabase-Schluessel bleibt nur noch fuer den Aufruf der Edge Function stripe-portal.
+ */
+
 const SUPABASE_URL      = 'https://zpkifipmyeunorhtepzq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpwa2lmaXBteWV1bm9yaHRlcHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMTU5NzUsImV4cCI6MjA3NTU5MTk3NX0.srygp8EElOknEnIBeUxdgHGLw0VzH-etxLhcD0CIPcU';
 const PORTAL_ENDPOINT   = SUPABASE_URL + '/functions/v1/stripe-portal';
+const API_BASE          = 'https://convertlyze-agent-api-production.up.railway.app';
 
 const PLAN_DATA = {
   'starter':     { monthly: { name: 'Starter',    price: '€149/Monat',  priceId: 'prc_starter-monthly-udf40q28'   }, annual: { name: 'Starter',    price: '€1.490/Jahr', priceId: 'prc_starter-yearly-uu680b3d'   } },
@@ -139,62 +151,63 @@ function revealContent() {
   }
 })();
 
-// ── Supabase: User laden ──────────────────────────────────────────────────────
+// ── Railway-API: Nutzer laden ─────────────────────────────────────────────────
 
-async function fetchUserFast(memberstackId) {
-  const { data, error } = await supabase
-    .from('users')
-    .select('id, firstname, owner_user_id, current_price_id, email')
-    .eq('memberstack_id', memberstackId)
-    .single();
-  if (data) return data;
-  if (error) console.warn('fetchUserFast error:', error);
+async function apiFetch(path, options) {
+  const token = await getMemberToken();
+  if (!token) return { ok: false, status: 0, data: null };
+  const res = await fetch(API_BASE + path, Object.assign({}, options, {
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
+  }));
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  return { ok: res.ok, status: res.status, data: data };
+}
+
+// Liefert dieselben Felder wie vorher die users-Abfrage:
+// firstname, email, current_price_id und owner_user_id (hier nur als true/false).
+function mapAccount(d) {
+  return {
+    firstname:        d.firstname || '',
+    email:            d.email || null,
+    current_price_id: d.current_price_id || null,
+    owner_user_id:    d.is_team_member ? 'team' : null
+  };
+}
+
+async function fetchUserFast() {
+  try {
+    const r = await apiFetch('/api/user/account-context');
+    if (r.ok && r.data) return mapAccount(r.data);
+    if (r.status !== 404) console.warn('fetchUserFast Status:', r.status);
+  } catch (e) {
+    console.warn('fetchUserFast error:', e);
+  }
   return null;
 }
 
-async function fetchUserWithSmartRetry(memberstackId) {
+// Direkt nach der Registrierung legt das Backend das Konto erst nach ein paar
+// Sekunden an. Deshalb bis zu 5 Versuche im Abstand von 1,5 Sekunden.
+async function fetchUserWithSmartRetry() {
   for (let attempt = 1; attempt <= 5; attempt++) {
-    const { data, error } = await supabase
-      .from('users')
-      .select('id, firstname, owner_user_id, current_price_id, email')
-      .eq('memberstack_id', memberstackId)
-      .single();
-    if (data) return data;
-    if (error) console.warn(`Versuch ${attempt} error:`, error);
+    const user = await fetchUserFast();
+    if (user) return user;
     if (attempt < 5) await sleep(1500);
   }
   return null;
 }
 
-// ── Supabase: pending_checkout ────────────────────────────────────────────────
+// ── Railway-API: vorgemerkter Plan ────────────────────────────────────────────
+// Liest den Eintrag und loescht ihn im selben Schritt. Die E-Mail kommt aus dem
+// geprueften Token, nicht aus dem Browser.
 
-async function getPendingCheckout(email) {
-  if (!email) return null;
+async function claimPendingCheckout() {
   try {
-    const res = await fetch(
-      SUPABASE_URL + '/rest/v1/pending_checkouts?email=eq.' + encodeURIComponent(email) + '&limit=1',
-      { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY } }
-    );
-    const data = await res.json();
-    return data?.[0] || null;
+    const r = await apiFetch('/api/user/pending-checkout/claim', { method: 'POST', body: '{}' });
+    return (r.ok && r.data && r.data.pending) ? r.data.pending : null;
   } catch (e) {
-    console.warn('[CVZ] pending_checkout lesen Fehler:', e);
+    console.warn('[CVZ] pending_checkout abrufen Fehler:', e);
     return null;
-  }
-}
-
-async function deletePendingCheckout(email) {
-  if (!email) return;
-  try {
-    await fetch(
-      SUPABASE_URL + '/rest/v1/pending_checkouts?email=eq.' + encodeURIComponent(email),
-      {
-        method:  'DELETE',
-        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY }
-      }
-    );
-  } catch (e) {
-    console.warn('[CVZ] pending_checkout löschen Fehler:', e);
   }
 }
 
@@ -279,24 +292,20 @@ document.addEventListener('DOMContentLoaded', async function () {
 
   try {
     let memberstackId = null;
-    let memberEmail   = null;
     try {
       if (window.$memberstackDom) {
         const member = await window.$memberstackDom.getCurrentMember();
         memberstackId = member?.data?.id || null;
-        memberEmail   = member?.data?.auth?.email || member?.data?.email || null;
       }
     } catch (e) {
       console.error('[CVZ] Memberstack Fehler:', e);
     }
 
     let currentUser = null;
-    if (memberstackId && typeof supabase !== 'undefined') {
-      currentUser = await fetchUserFast(memberstackId);
-      if (!currentUser) currentUser = await fetchUserWithSmartRetry(memberstackId);
+    if (memberstackId) {
+      currentUser = await fetchUserFast();
+      if (!currentUser) currentUser = await fetchUserWithSmartRetry();
     }
-
-    const email = currentUser?.email || memberEmail;
 
     setFirstName(currentUser?.firstname || '');
 
@@ -355,12 +364,11 @@ document.addEventListener('DOMContentLoaded', async function () {
     let planKey = getParam('plan');
     let billing = getParam('billing') || 'monthly';
 
-    if (!planKey && email) {
-      const pending = await getPendingCheckout(email);
+    if (!planKey && memberstackId) {
+      const pending = await claimPendingCheckout();
       if (pending) {
         planKey = pending.plan;
         billing = pending.billing || 'monthly';
-        await deletePendingCheckout(email);
       }
     }
 
