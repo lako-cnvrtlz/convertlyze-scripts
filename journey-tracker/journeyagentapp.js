@@ -1700,7 +1700,7 @@
     'daten:keywords':{ eyebrow: 'Daten · Keywords', q: 'Wonach sucht eure Zielgruppe bei Google?',
                        lead: 'Suchbegriffe rund ums Thema mit Suchvolumen, eurer Position und ob Google eine KI-Übersicht zeigt.' },
     'daten:fragen':  { eyebrow: 'Daten · Fragen', q: 'Welche Fragen stellt eure Zielgruppe rund ums Thema?',
-                       lead: 'Fragen aus Googles „Ähnliche Fragen“ und KI-Vorschläge. Gute Kandidaten für FAQ-Abschnitte und neue Inhalte.' },
+                       lead: 'Fragen aus Googles „Ähnliche Fragen“ und KI-Vorschläge. Gute Kandidaten für FAQ-Abschnitte und neue Inhalte. Klickt eine Frage an, um die Antwort zu sehen, die Google dazu zeigt, samt Quelle.' },
     'daten:prompts': { eyebrow: 'Daten · Prompts', q: 'Welche Fragen führen zu euch, welche nicht?',
                        lead: 'Die Fragen, die der Tracker regelmäßig an ChatGPT und Gemini stellt. Klickt auf eine Frage, um die Antworten zu sehen.' },
     'daten:fanout':  { eyebrow: 'Daten · Fan-out', q: 'Wonach suchen die KIs im Hintergrund?',
@@ -7394,6 +7394,7 @@
       }
       tr.innerHTML =
         '<td class="cvz-row-title">' + escapeHtml(kw.keyword) +
+          (kw.has_paa_answer ? ' <span class="cvz-changelog-linked-badge" title="Google zeigt hierzu eine Antwort. Zeile öffnen.">✓ Antwort</span>' : '') +
           (linkedCount > 0 ? ' <span class="cvz-changelog-linked-badge" title="' + linkedCount + ' verknüpfte Änderung(en)">✎</span>' : '') +
         '</td>' +
         '<td style="text-align:right;color:var(--cvz-text-muted,#8b98a5);">' +
@@ -8483,6 +8484,7 @@
     var detail = state.topicDetailCache[state.activeTopicId] || {};
     var kw = (detail.search_queries || []).filter(function (q) { return q.id === keywordId; })[0];
     if (kw && (kw.gsc_impressions != null || kw.source === 'gsc_near_miss')) maybeLoadGscHistory(state.activeTopicId, kw.keyword);
+    if (kw && kw.has_paa_answer) maybeLoadPaaHistory(keywordId);
     if (!(keywordId in state.keywordSerpCache)) {
       render();
       await fetchKeywordSerp(keywordId);
@@ -8499,6 +8501,20 @@
 
   // NEU (21.10.2026): Google-Ergebnis + KI-Übersicht sofort prüfen (Live-Abfrage,
   // einige Sekunden). Aktualisiert danach auch die Zeile in der Tabelle.
+  async function maybeLoadPaaHistory(keywordId) {
+    if (CONFIG.useMockData || !keywordId) return;
+    if (!state.paaHistoryCache) state.paaHistoryCache = {};
+    if (keywordId in state.paaHistoryCache) return;
+    state.paaHistoryCache[keywordId] = null;
+    try {
+      state.paaHistoryCache[keywordId] = await apiFetch('/topics/' + state.activeTopicId + '/keywords/' + encodeURIComponent(keywordId) + '/paa-history');
+    } catch (e) {
+      console.warn('[CVZ Visibility] Antwort-Verlauf nicht ladbar:', e);
+      state.paaHistoryCache[keywordId] = { snapshots: [], changed_count: 0 };
+    }
+    if (state.keywordViewer && state.keywordViewer.keywordId === keywordId) render();
+  }
+
   async function checkKeywordSerpNow(keywordId) {
     if (state.kvChecking[keywordId]) return;
     state.kvChecking[keywordId] = true;
@@ -8514,6 +8530,7 @@
         q.serp_checked_at = resp.serp_checked_at;
         q.top_serp_results = resp.top_serp_results;
         q.serp_features = resp.serp_features;
+        if (resp.paa_answer) q.has_paa_answer = true;
         if (resp.organic_rank != null || 'organic_rank' in q) q.organic_rank = resp.organic_rank;
         var hasAio = (resp.serp_features || []).indexOf('ai_overview') !== -1;
         q.ai_overview_status = hasAio ? 'yes' : 'no';
@@ -8636,7 +8653,10 @@
 
     // ---- Anbieter-Index: Ergebnis-Domains + Quellen der KI-Übersicht
     var otherDomains = results.map(function (r) { return r.domain; })
-      .concat(aio ? (aio.references || []).map(function (r) { return r.domain; }) : []);
+      .concat(aio ? (aio.references || []).map(function (r) { return r.domain; }) : [])
+      .concat(serp && serp.paa_answer
+        ? (serp.paa_answer.references || []).map(function (r) { return r.domain || r.url; }).concat(serp.paa_answer.domain || serp.paa_answer.url ? [serp.paa_answer.domain || serp.paa_answer.url] : [])
+        : []);
     var brands = buildBrandIndex(ownDomain, compDomains, otherDomains);
     function keyOfDomain(d) {
       var bare = pvBareDomain(d);
@@ -8662,6 +8682,39 @@
     var body = document.createElement('div');
     body.className = 'cvz-pv-chat cvz-kv-body' + (focus ? ' cvz-pv-focus-mode' : '');
     stage.appendChild(body);
+
+    var paaAns = serp && serp.paa_answer;
+    if (paaAns && (paaAns.text || paaAns.url || (paaAns.references || []).length)) {
+      var paaRefs = (paaAns.references || []).slice();
+      if (paaAns.url) paaRefs.unshift({ domain: paaAns.domain, url: paaAns.url, title: paaAns.title });
+      var paaBox = document.createElement('div');
+      paaBox.className = 'cvz-kv-aio cvz-kv-paa';
+      paaBox.style.borderLeftColor = 'var(--pv-teal)';
+      paaBox.innerHTML =
+        '<p class="cvz-kv-aio-label" style="color:var(--pv-teal);">Antwort bei Google' + (paaAns.kind === 'ai_overview' ? ' (KI-Antwort)' : '') + '</p>' +
+        '<div class="cvz-pv-answer cvz-prompt-answer"></div>' +
+        (paaRefs.length
+          ? '<p class="cvz-kv-aio-label" style="margin-top:12px;">' + (paaAns.kind === 'ai_overview' ? 'Quellen der Antwort' : 'Quelle der Antwort') + '</p><div class="cvz-pv-chips">' +
+            paaRefs.map(function (r) {
+              var bare = pvBareDomain(r.domain || r.url);
+              var k = keyOfDomain(bare);
+              var cls = bare === ownBare ? ' cvz-pv-chip-own' : (compBare.indexOf(bare) !== -1 ? ' cvz-pv-chip-comp' : '');
+              var href = /^https?:\/\//i.test(r.url || '') ? String(r.url).replace(/"/g, '%22') : '#';
+              return '<a class="cvz-pv-chip' + cls + (focus === k ? ' cvz-pv-chip-focus' : '') + (focus && focus !== k ? ' cvz-kv-dim' : '') +
+                '" href="' + href + '" target="_blank" rel="noopener" title="' + escapeHtml(r.title || r.url || '') + '">' +
+                pvFavicon(bare, 14) + '<span>' + escapeHtml(bare) + '</span></a>';
+            }).join('') + '</div>'
+          : '') +
+        (paaAns.checked_at
+          ? '<p class="cvz-pv-muted">Stand ' + escapeHtml(formatShortDate(paaAns.checked_at) || '') +
+            (paaAns.from_keyword ? ', gefunden bei der Suche nach ' + escapeHtml(paaAns.from_keyword) : '') +
+            '. Google zeigt nicht für jeden Suchbegriff dieselbe Antwort.</p>'
+          : '');
+      body.appendChild(paaBox);
+      var paaText = paaBox.querySelector('.cvz-pv-answer');
+      paaText.innerHTML = renderMarkdownLite(paaAns.text) || '<p class="cvz-pv-muted">Kein Antworttext gespeichert.</p>';
+      highlightBrands(paaText, brands, focus);
+    }
 
     var brandCounts = {};
     if (aio && (aio.markdown || (aio.references || []).length)) {
@@ -8716,7 +8769,7 @@
       none.className = 'cvz-pv-empty';
       none.innerHTML = checkedAt
         ? '<p style="margin:0;">Keine organischen Ergebnisse gespeichert. Die nächste Prüfung läuft mit dem Monatslauf.</p>'
-        : '<p style="margin:0 0 12px;">Dieses Keyword wurde noch nicht bei Google geprüft.</p>' + checkBtn('Jetzt bei Google prüfen');
+        : '<p style="margin:0 0 12px;">' + ((serp && serp.paa_answer) ? 'Die Suchergebnisse zu dieser Frage selbst wurden noch nicht geprüft.' : 'Dieses Keyword wurde noch nicht bei Google geprüft.') + '</p>' + checkBtn('Jetzt bei Google prüfen');
       body.appendChild(none);
     }
 
@@ -8739,6 +8792,18 @@
       var w = who[k] || (who[k] = { key: k, domain: pvBareDomain(r.domain), ranks: [], aio: false, aioText: 0 });
       w.ranks.push(r.rank || (i + 1));
     });
+    var paaWho = serp && serp.paa_answer;
+    if (paaWho) {
+      var paaWhoRefs = (paaWho.references || []).slice();
+      if (paaWho.domain || paaWho.url) paaWhoRefs.push({ domain: paaWho.domain, url: paaWho.url });
+      paaWhoRefs.forEach(function (r) {
+        var d = pvBareDomain(r.domain || r.url);
+        if (!d) return;
+        var kk = keyOfDomain(d);
+        var ww = who[kk] || (who[kk] = { key: kk, domain: d, ranks: [], aio: false, aioText: 0 });
+        ww.paa = true;
+      });
+    }
     if (aio) (aio.references || []).forEach(function (r) {
       var k = keyOfDomain(r.domain);
       var w = who[k] || (who[k] = { key: k, domain: pvBareDomain(r.domain), ranks: [], aio: false, aioText: 0 });
@@ -8761,6 +8826,7 @@
           var cls = pvBareDomain(w.domain) === ownBare ? ' cvz-pv-chip-own' : (compBare.indexOf(pvBareDomain(w.domain)) !== -1 ? ' cvz-pv-chip-comp' : '');
           var badges = [];
           if (w.ranks.length) badges.push('#' + w.ranks.join(', #'));
+          if (w.paa) badges.push('Antwort');
           if (w.aio || w.aioText) badges.push('✦');
           var tip = [w.ranks.length ? 'Platz ' + w.ranks.join(' und ') + ' in den Ergebnissen' : '',
             w.aio ? 'Quelle der KI-Übersicht' : '', w.aioText ? w.aioText + '× im Text der KI-Übersicht genannt' : '']
@@ -8792,6 +8858,24 @@
         gscCard.insertAdjacentHTML('beforeend', '<p class="cvz-pv-muted" style="margin-top:0;">' +
           (state.loadingGscHistory[gscKey] ? 'Verlauf wird geladen …' : 'Noch keine Tageswerte für diese Suchanfrage.') + '</p>');
       }
+    }
+
+    var paaHist = (state.paaHistoryCache || {})[kvs.keywordId];
+    if (paaHist && paaHist.snapshots && paaHist.snapshots.length) {
+      var snaps = paaHist.snapshots;
+      var histHtml = snaps.length === 1
+        ? '<p class="cvz-pv-muted" style="margin-top:0;">Die Antwort ist seit ' + escapeHtml(formatShortDate(snaps[0].first_seen_at) || '') +
+          ' unverändert (zuletzt gesehen ' + escapeHtml(formatShortDate(snaps[0].last_seen_at) || '') + ').</p>'
+        : '<p class="cvz-pv-muted" style="margin-top:0;">Google hat die Antwort ' + paaHist.changed_count + ' Mal geändert. Neueste zuerst:</p>';
+      if (snaps.length > 1) {
+        histHtml += snaps.slice(0, 5).map(function (s) {
+          var t = String(s.text || '');
+          var who2 = s.kind === 'ai_overview' ? 'KI-Antwort' : (s.domain || 'Textauszug');
+          return '<p class="cvz-pv-muted"><strong>' + escapeHtml(formatShortDate(s.first_seen_at) || '') + ' bis ' + escapeHtml(formatShortDate(s.last_seen_at) || '') + '</strong>, ' +
+            escapeHtml(who2) + ': ' + escapeHtml(t.length > 140 ? t.slice(0, 139) + '…' : t) + '</p>';
+        }).join('');
+      }
+      card('Verlauf der Antwort', histHtml);
     }
 
     if (kw.id && kw.source !== 'gsc_near_miss') {
@@ -13636,7 +13720,7 @@
     'Zeigt, wie oft KI-Antworten eure Domain als Quelle nennen, getrennt nach Kaufphase und KI-Kanal. ' +
     'Hohe Werte in Vergleich und Entscheidung sind am wertvollsten, weil Käufer dort ihre Shortlist bilden. ' +
     'Niedrige Werte zeigen, in welcher Phase Käufer andere Quellen lesen als eure: Dort setzt der Aktionsplan an. ' +
-    'Google AI Overviews werden seltener (monatlich) geprüft und deshalb als Anzahl statt in Prozent gezeigt.';
+    'Google AI Overviews stammen aus der Google-Prüfung der Keywords (monatlich, die wichtigsten Keywords zusätzlich wöchentlich) und werden deshalb als Anzahl statt in Prozent gezeigt.';
 
   var JOURNEY_SOURCES_TIP =
     'Domains, die KI-Antworten in dieser Phase am häufigsten als Quelle nennen, in % der Antworten. ' +
@@ -13665,13 +13749,13 @@
 
     var chip = document.createElement('span');
     chip.className = 'cvz-journey-aio-chip';
-    chip.textContent = 'monatlich';
+    chip.textContent = 'Google-Prüfung';
 
     var tip;
     if (!aio || !aio.checked) {
       val.textContent = 'nicht geprüft';
       val.classList.add('cvz-journey-nodata');
-      tip = 'AI Overviews werden einmal im Monat für die 2 Suchbegriffe mit dem meisten Suchvolumen in dieser Phase geprüft. ' +
+      tip = 'AI Overviews kommen aus der Google-Prüfung der Keywords dieser Phase (monatlich, die wichtigsten Keywords zusätzlich wöchentlich). ' +
         'Für diese Phase liegt noch keine Prüfung vor, sie kommt mit dem nächsten Monatslauf.';
     } else {
       if (aio.with_overview === 0) {
@@ -13681,13 +13765,14 @@
         val.textContent = aio.cited + ' von ' + aio.with_overview + ' zitiert';
         if (aio.cited > 0) val.classList.add('cvz-journey-aio-hit');
       }
-      var lines = (aio.keywords || []).map(function (k) {
+      var lines = (aio.keywords || []).slice(0, 6).map(function (k) {
         var status = !k.has_overview ? 'kein Overview gefunden'
           : (k.cited ? 'Overview zitiert euch' : 'Overview zitiert andere Quellen');
         return '„' + k.keyword + '“: ' + status;
       });
       var when = aio.last_checked_at ? ' (zuletzt ' + formatShortDate(aio.last_checked_at) + ')' : '';
-      tip = 'Monatlich geprüft' + when + ': ' + lines.join('. ') + '. ';
+      tip = 'Bei Google geprüft' + when + ': ' + lines.join('. ') + '. ' +
+        (aio.checked > 6 ? 'Und ' + (aio.checked - 6) + ' weitere Keywords. ' : '');
       if (aio.with_overview > aio.cited) {
         tip += 'Wo ein Overview andere Quellen nutzt, haben Seiten die besten Chancen, die genau diese Suchanfrage kurz und direkt beantworten.';
       } else if (aio.with_overview === 0) {
