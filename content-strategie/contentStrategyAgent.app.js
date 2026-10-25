@@ -432,6 +432,21 @@
       '.cvz-cs-path-list li{margin:0 0 6px;font-size:14px;color:var(--cvz-text);overflow-wrap:anywhere;}',
       '.cvz-cs-path-page{color:var(--cvz-muted);}',
       '.cvz-cs-path-endtext{margin:0;font-size:14px;color:var(--cvz-heading);font-weight:600;overflow-wrap:anywhere;}',
+      /* NEU: Funnel-Befund und Lead-Magneten */
+      '.cvz-cs-funnel-row{padding:10px 14px;border:1px solid var(--cvz-border);border-left:3px solid var(--cvz-border);background:var(--cvz-surface);margin:0 0 8px;}',
+      '.cvz-cs-funnel-row--luecke{border-left-color:var(--cvz-red);}',
+      '.cvz-cs-funnel-row--schwach{border-left-color:var(--cvz-amber);}',
+      '.cvz-cs-funnel-row--ok{border-left-color:var(--cvz-teal);}',
+      '.cvz-cs-funnel-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 4px;}',
+      '.cvz-cs-funnel-phase{font-family:"Syne",sans-serif;font-size:.95rem;font-weight:700;color:var(--cvz-heading);}',
+      '.cvz-cs-funnel-status--luecke{background:rgba(239,68,68,.12);color:#fca5a5;border-color:rgba(239,68,68,.3);}',
+      '.cvz-cs-funnel-status--schwach{background:rgba(245,158,11,.12);color:var(--cvz-amber);border-color:rgba(245,158,11,.3);}',
+      '.cvz-cs-funnel-status--ok{background:rgba(79,209,197,.12);color:var(--cvz-teal);border-color:rgba(79,209,197,.25);}',
+      '.cvz-cs-funnel-steps{font-size:13px;color:var(--cvz-muted);margin:2px 0;overflow-wrap:anywhere;}',
+      '.cvz-cs-funnel-finding{font-size:14px;color:var(--cvz-text);margin:6px 0 0;overflow-wrap:anywhere;}',
+      '.cvz-cs-magnet-gap{color:var(--cvz-amber);font-weight:600;}',
+      '.cvz-cs-magnet-line{font-size:14px;color:var(--cvz-text);margin:8px 0;overflow-wrap:anywhere;}',
+      '.cvz-cs-magnet-line strong{color:var(--cvz-heading);}',
       '.cvz-cs-zwischenziel{margin:0 0 10px;}',
       '.cvz-cs-zwischenziel p{margin:2px 0;}',
       '.cvz-cs-badge-path-ohne_huerde{background:rgba(255,255,255,.06);color:var(--cvz-text);}',
@@ -757,6 +772,7 @@
     if (!state.userId) return;
     // NEU: Strategie-Ziel aus dem Startformular gehört zu jedem Entwurf, sonst fehlt es nach dem Wiederherstellen.
     if (data && state.strategyGoal) data.strategyGoal = state.strategyGoal;
+    if (data && state.existingMagnets) data.existingMagnets = state.existingMagnets; // NEU: vorhandene Lead-Magneten
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ v: 1, userId: state.userId, savedAt: Date.now(), step: step, data: data }));
     } catch (e) { /* Speicher voll oder blockiert: ohne Entwurf weiter */ }
@@ -788,6 +804,7 @@
   function resumeDraft(draft) {
     var d = draft.data;
     state.strategyGoal = d.strategyGoal || null;
+    state.existingMagnets = d.existingMagnets || null;
     if (draft.step === 'validation') {
       state.wizardSteps = d.trackerTopicId ? STEPS_TRACKER : STEPS_FULL;
       renderTopicValidationResult(d.result, d.domain, d.originalTopic, d.trackerTopicId);
@@ -1106,6 +1123,14 @@
       ctaInput,
       el('span', { class: 'cvz-cs-hint' }, ['Leer lassen, dann schlägt die Strategie einen Text passend zum Endziel vor.']),
     ]));
+    // NEU (Lead-Magneten): Was es schon gibt, wird nicht noch einmal vorgeschlagen, sondern sinnvoll ergänzt.
+    var magnetsInput = el('textarea', { name: 'existing_magnets', rows: '2', maxlength: '600', placeholder: 'z.B. 7 Tage Testversion, Checkliste zum Thema, kostenloser Rechner' });
+    magnetsInput.value = prefill.existingMagnets || state.existingMagnets || '';
+    form.appendChild(el('label', { class: 'cvz-cs-label' }, [
+      'Welche Lead-Magneten oder kostenlosen Tools gibt es schon? (optional)',
+      magnetsInput,
+      el('span', { class: 'cvz-cs-hint' }, ['Die Strategie schlägt Zwischenschritte für den Funnel vor, zum Beispiel Checks, Rechner oder Vorlagen. Was du schon hast, wird nicht doppelt vorgeschlagen.']),
+    ]));
     // NEU (Tracker-Verbindung): nur sichtbar, wenn der User Tracker-Themen hat.
     var trackerSelect = null;
     if (state.trackerTopics.length > 0) {
@@ -1162,6 +1187,7 @@
       var cta = ctaInput.value.trim();
       state.strategyGoal = { offer_type: offerSelect.value, end_goal: goalSelect.value };
       if (cta.length >= 2) state.strategyGoal.cta_label = cta.slice(0, 80);
+      state.existingMagnets = magnetsInput.value.trim().slice(0, 600) || null;
       formError.textContent = '';
       startTopicValidation(topic, domain || undefined, trackerTopicId);
     });
@@ -1193,6 +1219,18 @@
     beleg: 'Beleg',
     endziel: 'Endziel',
   };
+  // ==== FUNNEL-KONSTANTEN-ANFANG ====
+  // NEU (Funnel und Lead-Magneten): Bezeichnungen der Werte aus result.funnel_check und result.lead_magnets.
+  var FUNNEL_STATUS_LABELS = { ok: 'Ok', schwach: 'Schwach', luecke: 'Lücke', keine_seiten: 'Keine Seiten' };
+  var FUNNEL_STEP_ORDER = ['ohne_huerde', 'gegen_email', 'produkt_erleben', 'beleg', 'endziel', 'fehlt'];
+  var BRIDGE_MODE_LABELS = {
+    weiterfuehren: 'Weiterführen (noch kein Verkaufsschritt)',
+    ergebnis_nutzen: 'Ergebnis als Anlass für den Endschritt',
+    nachfassen: 'Per E-Mail nachfassen',
+    direkt: 'Direkt zum Endziel',
+  };
+  var MAGNET_HURDLE_LABELS = { ohne_anmeldung: 'Ohne Anmeldung', email: 'Gegen E-Mail', registrierung: 'Mit Registrierung' };
+  // ==== FUNNEL-KONSTANTEN-ENDE ====
 
   var INTENT_FIT_LABELS = {
     besser: 'Besserer Fit',
@@ -1824,6 +1862,8 @@
         tracker_topic_id: trackerTopicId || undefined,
         // NEU: Angebotstyp, Endziel und Button-Text aus dem Startformular.
         strategy_goal: state.strategyGoal || undefined,
+        // NEU (Lead-Magneten): was es schon gibt, damit es nicht noch einmal vorgeschlagen wird.
+        existing_magnets: state.existingMagnets || undefined,
         prompt_plan_id: planExtra ? planExtra.prompt_plan_id : undefined,
         selected_prompts: planExtra ? planExtra.selected_prompts : undefined,
         // NEU: nur im Tracker-Pfad (sonst stecken die Kundenfragen schon in der bestätigten Zielgruppe des Plans)
@@ -2671,7 +2711,11 @@
       var options = { method: 'PUT', body: body };
       if (keepalive === true) options.keepalive = true;
       return apiFetch('/api/content-strategy/' + sessionId + '/flow', options)
-        .then(function () { ui.saveState = 'saved'; renderToolbar(); })
+        .then(function (data) {
+          ui.saveState = 'saved'; renderToolbar();
+          // NEU: Der Server rechnet den Funnel-Befund mit den eigenen Seiten aus dem Diagramm neu. Der Abschnitt "Funnel" zeigt ihn sofort.
+          if (data && data.funnel_check && typeof state.funnelRefresh === 'function') state.funnelRefresh(data.funnel_check);
+        })
         .catch(function (err) {
           ui.saveState = 'error';
           ui.saveError = err && err.message ? err.message : 'Unbekannter Fehler';
@@ -3345,22 +3389,28 @@
     // Für die Seiten-Karten: Messdaten der Fragen (Teilfragen/Fan-out), siehe renderPageCard.
     state.visibilityPrompts = getVisibilityPrompts(session);
     state.wizardActive = false;
+    state.funnelRefresh = null; // NEU: wird vom Funnel-Abschnitt neu gesetzt, falls der Bericht einen hat
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
     wrap.appendChild(renderReportHeader(result, session, sessionId));
     // NEU: Sprungleiste direkt unter dem Kopf. Wird erst aktiv, wenn der Bericht im DOM steht (siehe unten).
-    var anchorNav = buildAnchorNav();
+    // NEU: Abschnittsnummern aus dem Inhalt des Berichts (der Funnel-Abschnitt fehlt bei älteren Berichten).
+    var navItems = buildReportNavItems(result);
+    var secNo = {};
+    navItems.forEach(function (it) { secNo[it.key] = it.n; });
+    var anchorNav = buildAnchorNav(navItems);
     wrap.appendChild(anchorNav.sentinel);
     wrap.appendChild(anchorNav.nav);
     wrap.appendChild(anchorNav.spacer);
-    wrap.appendChild(renderReportSection(1, 'Themen-Check', [renderTopicValidationSection(result.topic_validation, result.seed_topic)]));
-    wrap.appendChild(renderReportSection(2, 'Ausgangslage', [renderTrackerSourceNote(session), renderProse(result.ausgangslage)]));
-    wrap.appendChild(renderReportSection(3, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])]));
-    wrap.appendChild(renderReportSection(4, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
-    wrap.appendChild(renderReportSection(5, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
-    wrap.appendChild(renderReportSection(6, 'Content-Flow: Themen-Baum bearbeiten', [renderFlowSection(sessionId, result, session)]));
-    wrap.appendChild(renderReportSection(7, 'GEO-Strategie', [renderVisibilitySection(session), renderOffsiteSection(result.offsite_measures, result.offsite_sources), renderGeoSection(result.geo_strategy)]));
-    wrap.appendChild(renderReportSection(8, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]));
+    wrap.appendChild(renderReportSection(secNo.validation, 'Themen-Check', [renderTopicValidationSection(result.topic_validation, result.seed_topic)]));
+    wrap.appendChild(renderReportSection(secNo.ausgangslage, 'Ausgangslage', [renderTrackerSourceNote(session), renderProse(result.ausgangslage)]));
+    wrap.appendChild(renderReportSection(secNo.summary, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])]));
+    wrap.appendChild(renderReportSection(secNo.state, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
+    wrap.appendChild(renderReportSection(secNo.cluster, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
+    wrap.appendChild(renderReportSection(secNo.flow, 'Content-Flow: Themen-Baum bearbeiten', [renderFlowSection(sessionId, result, session)]));
+    if (secNo.funnel) wrap.appendChild(renderReportSection(secNo.funnel, 'Funnel und Lead-Magneten', [renderFunnelSection(result)]));
+    wrap.appendChild(renderReportSection(secNo.geo, 'GEO-Strategie', [renderVisibilitySection(session), renderOffsiteSection(result.offsite_measures, result.offsite_sources), renderGeoSection(result.geo_strategy)]));
+    wrap.appendChild(renderReportSection(secNo.roadmap, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]));
     var fundingText = fundedBy
       ? 'Finanziert aus: ' + (fundedBy === 'ppu_strategy' ? 'Pay-per-Use-Credit' : 'Plan-Kontingent')
       : 'Gespeicherte Strategie';
@@ -3387,16 +3437,30 @@
   // - Aktiver Abschnitt ist sichtbar hervorgehoben (im LP-Report fehlt das, dort sieht "aktiv" aus wie "inaktiv").
   // - Die Leiste scrollt horizontal zum aktiven Link, ohne die Seite vertikal zu bewegen (scrollIntoView kann das).
   // - activate() gibt eine Aufräum-Funktion zurück. clear() ruft sie auf, wenn der Bericht verlassen wird.
-  var REPORT_NAV_ITEMS = [
-    { n: 1, label: 'Themen-Check' },
-    { n: 2, label: 'Ausgangslage' },
-    { n: 3, label: 'Zusammenfassung' },
-    { n: 4, label: 'Ist-Zustand' },
-    { n: 5, label: 'Cluster' },
-    { n: 6, label: 'Content-Flow' },
-    { n: 7, label: 'GEO' },
-    { n: 8, label: 'Roadmap' },
+  // GEÄNDERT: Die Nummern ergeben sich aus dem, was der Bericht enthält. Der Abschnitt "Funnel" fehlt bei älteren Berichten,
+  // dann rücken GEO und Roadmap auf und die Sprungleiste zeigt keinen toten Link.
+  var REPORT_NAV_BASE = [
+    { key: 'validation', label: 'Themen-Check' },
+    { key: 'ausgangslage', label: 'Ausgangslage' },
+    { key: 'summary', label: 'Zusammenfassung' },
+    { key: 'state', label: 'Ist-Zustand' },
+    { key: 'cluster', label: 'Cluster' },
+    { key: 'flow', label: 'Content-Flow' },
+    { key: 'funnel', label: 'Funnel', optional: true },
+    { key: 'geo', label: 'GEO' },
+    { key: 'roadmap', label: 'Roadmap' },
   ];
+
+  function buildReportNavItems(result) {
+    var n = 0;
+    var out = [];
+    REPORT_NAV_BASE.forEach(function (item) {
+      if (item.optional && !hasFunnelSection(result)) return;
+      n++;
+      out.push({ key: item.key, n: n, label: item.label });
+    });
+    return out;
+  }
 
   function reportSectionId(n) { return 'cvz-cs-sec-' + n; }
 
@@ -3406,7 +3470,8 @@
     return webflowNav ? webflowNav.offsetHeight : 0;
   }
 
-  function buildAnchorNav() {
+  function buildAnchorNav(navItems) {
+    var items = navItems || buildReportNavItems(null);
     var nav = el('nav', { class: 'cvz-cs-anchor-nav', 'aria-label': 'Bericht-Navigation' });
     var inner = el('div', { class: 'cvz-cs-anchor-inner' });
     nav.appendChild(inner);
@@ -3415,7 +3480,7 @@
     spacer.style.display = 'none';
     var links = {};
 
-    REPORT_NAV_ITEMS.forEach(function (item) {
+    items.forEach(function (item) {
       var a = el('a', { href: '#' + reportSectionId(item.n) }, [item.label]);
       a.addEventListener('click', function (e) {
         var target = document.getElementById(reportSectionId(item.n));
@@ -3489,7 +3554,7 @@
         Object.keys(visibleSections).forEach(function (k) { if (visibleSections[k] && Number(k) > current) current = Number(k); });
         if (current) setActive(current);
       }, { rootMargin: '-20% 0px -70% 0px' });
-      REPORT_NAV_ITEMS.forEach(function (item) {
+      items.forEach(function (item) {
         var sec = document.getElementById(reportSectionId(item.n));
         if (sec) activeObserver.observe(sec);
       });
@@ -3571,6 +3636,152 @@
     if (goal.cta_label) lines.push(el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Haupt-Button: ']), '„' + goal.cta_label + '“']));
     return el('div', { class: 'cvz-cs-goal-box' }, [el('p', { class: 'cvz-cs-brief-label' }, ['Ziel der Strategie']), el('div', {}, lines)]);
   }
+
+  // ==== FUNNEL-ANFANG ====
+  // NEU (Funnel und Lead-Magneten): Der Befund (result.funnel_check) wird vom Server aus den Seiten der Strategie berechnet.
+  // Die Lead-Magneten (result.lead_magnets) sind Vorschläge der KI, deren Format, Phase, Aufwand, Anker-Seite und
+  // Conversion-Ziel der Server geprüft oder selbst eingesetzt hat. Ältere Berichte haben beides nicht.
+  function hasFunnelSection(result) {
+    if (!result) return false;
+    var hasCheck = !!(result.funnel_check && result.funnel_check.phases && result.funnel_check.phases.length > 0);
+    var hasMagnets = !!(result.lead_magnets && result.lead_magnets.length > 0);
+    return hasCheck || hasMagnets;
+  }
+
+  function funnelStepsText(steps) {
+    var parts = FUNNEL_STEP_ORDER
+      .filter(function (art) { return steps && steps[art] > 0; })
+      .map(function (art) { return (art === 'fehlt' ? 'Ohne Zwischenziel' : (ZWISCHENZIEL_ART_LABELS[art] || art)) + ': ' + steps[art]; });
+    return parts.length > 0 ? parts.join(' · ') : 'keine Zwischenschritte';
+  }
+
+  function renderFunnelCheck(funnel) {
+    var box = el('div', { class: 'cvz-cs-funnel-check' });
+    box.appendChild(el('h5', {}, ['Funnel-Befund: wo fehlt ein Zwischenschritt?']));
+    if (funnel.summary) box.appendChild(el('p', { class: 'cvz-cs-hint' }, [funnel.summary]));
+    (funnel.phases || []).forEach(function (r) {
+      var status = (FUNNEL_STATUS_LABELS[r.status] || r.status) + (r.covered_by_own ? ', durch eigene Seite' : '');
+      var warn = r.status === 'luecke' || r.status === 'schwach' || r.covered_by_own === true;
+      var row = el('div', { class: 'cvz-cs-funnel-row cvz-cs-funnel-row--' + r.status });
+      row.appendChild(el('div', { class: 'cvz-cs-funnel-head' }, [
+        el('span', { class: 'cvz-cs-funnel-phase' }, [optionLabel(MESSY_MIDDLE_PHASES, r.phase)]),
+        el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--' + r.status }, [status]),
+        el('span', { class: 'cvz-cs-hint' }, [r.pages + (r.pages === 1 ? ' Seite' : ' Seiten')]),
+      ]));
+      row.appendChild(el('p', { class: 'cvz-cs-funnel-steps' }, [funnelStepsText(r.steps)]));
+      if (warn && r.finding) row.appendChild(el('p', { class: 'cvz-cs-funnel-finding' }, [r.finding]));
+      box.appendChild(row);
+    });
+    return box;
+  }
+
+  function magnetLine(label, text) {
+    return el('p', { class: 'cvz-cs-magnet-line' }, [el('strong', {}, [label + ' ']), text]);
+  }
+
+  function renderLeadMagnetCard(m) {
+    var card = el('details', { class: 'cvz-cs-page-card cvz-cs-fold cvz-cs-page-acc' });
+    var badges = [
+      el('span', { class: 'cvz-cs-badge' }, [optionLabel(MESSY_MIDDLE_PHASES, m.phase)]),
+      el('span', { class: 'cvz-cs-badge' }, [m.format_label || m.format]),
+      el('span', { class: 'cvz-cs-badge' }, [m.hurdle_label || MAGNET_HURDLE_LABELS[m.hurdle] || m.hurdle]),
+      el('span', { class: 'cvz-cs-badge' }, ['Aufwand ' + m.effort]),
+    ];
+    // Immer angelegt und nur ein- oder ausgeblendet: Ändert sich der Befund (eigene Seite im Flow), zieht die Karte mit.
+    var gapBadge = el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--schwach cvz-cs-magnet-gapbadge', 'data-phase': m.phase }, ['Schließt Lücke']);
+    if (!m.closes_gap) gapBadge.style.display = 'none';
+    badges.push(gapBadge);
+    card.appendChild(el('summary', {}, [el('div', { class: 'cvz-cs-page-acc-head' }, [
+      el('div', { class: 'cvz-cs-page-card-badges' }, badges),
+      el('h4', { class: 'cvz-cs-page-card-topic' }, [m.title]),
+      el('p', { class: 'cvz-cs-page-acc-teaser' }, [m.promise]),
+    ])]));
+    var body = el('div', { class: 'cvz-cs-page-acc-body' });
+    card.appendChild(body);
+    body.appendChild(magnetLine('Ergebnis für den Nutzer:', m.promise));
+    if (m.content_points && m.content_points.length > 0) {
+      var cp = el('ul', { class: 'cvz-cs-brief-list' });
+      m.content_points.forEach(function (pt) { cp.appendChild(el('li', {}, [pt])); });
+      body.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Das steckt konkret drin:']));
+      body.appendChild(cp);
+    }
+    if (m.differentiation) {
+      var proven = m.differentiation_basis === 'wettbewerber_daten' && m.competitor_domain;
+      body.appendChild(magnetLine(
+        proven ? 'Abgrenzung zu ' + m.competitor_domain + ' (aus der Struktur-Analyse der Wettbewerber-Seite):' : 'Abgrenzung (Vermutung, ohne belegte Wettbewerber-Daten):',
+        m.differentiation
+      ));
+    }
+    if (m.conversion_bridge) {
+      var modeLabel = BRIDGE_MODE_LABELS[m.bridge_mode];
+      body.appendChild(magnetLine('Danach' + (modeLabel ? ' (' + modeLabel + '):' : ':'), m.conversion_bridge));
+    }
+    if (m.conversion_target && m.conversion_target.page_topic) {
+      var t = m.conversion_target;
+      body.appendChild(magnetLine('Führt zur Conversion-Seite:',
+        t.page_topic + (t.cta_label ? ' mit dem Button „' + t.cta_label + '“' : '') + (t.end_goal_label ? ' (Endziel: ' + t.end_goal_label + ')' : '')));
+    }
+    if (m.captures && m.captures.length > 0) {
+      var cl = el('ul', { class: 'cvz-cs-brief-list' });
+      m.captures.forEach(function (c) { cl.appendChild(el('li', {}, [c])); });
+      body.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Das erfährst du über den Interessenten (freiwillige Angaben):']));
+      body.appendChild(cl);
+    }
+    if (m.prerequisites) body.appendChild(magnetLine('Das braucht ihr dafür:', m.prerequisites));
+    if (m.anchor_page && m.anchor_page.page_topic) {
+      var a = m.anchor_page;
+      var vol = a.search_volume != null ? volumeRangeText(a.search_volume) : 'Suchvolumen unbekannt';
+      body.appendChild(magnetLine('Wird beworben auf der Seite:', a.page_topic + (a.keyword ? ' (Suchbegriff „' + a.keyword + '“, ' + vol + ')' : '')));
+    }
+    if (m.search_term_idea) {
+      body.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Möglicher Suchbegriff für das Tool selbst: „' + m.search_term_idea + '“ (nicht geprüft, ohne Suchvolumen)']));
+    }
+    if (m.id) body.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Kennung für das Anfrageformular: ' + m.id]));
+    return card;
+  }
+
+  function renderFunnelSection(result) {
+    var box = el('div', { class: 'cvz-cs-funnel' });
+    box.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+      'Besucher kommen mit unterschiedlicher Kaufbereitschaft auf die Seiten der Strategie. Wer noch orientiert oder bewertet, ist selten bereit für das Endziel. ' +
+      'Ein Zwischenschritt mit echtem Nutzen, etwa ein Check, ein Rechner oder eine ehrliche Vorlage, hält Interessenten im Funnel und hebt den Anbieter von Wettbewerbern ab. ' +
+      'Er muss so nützlich sein, dass ihn jemand ohne Absender weiterleiten würde, sonst wird er nicht genutzt.',
+    ]));
+    box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Der Funnel-Befund ist aus den Seiten dieser Strategie berechnet. Eigene Seiten, die du im Content-Flow einer Phase zuordnest, zählen als Zwischenschritt, wenn sie vom Typ Rechner/Tool, Vorlage/Download, Vergleichsseite oder Test/Review sind (Vergleich und Review erst ab der Bewertungsphase). Die Lead-Magneten sind Vorschläge der KI, ihre Wirkung ist nicht prognostiziert.']));
+    var checkHolder = el('div', { class: 'cvz-cs-funnel-holder' });
+    function fillCheck(funnel) {
+      clear(checkHolder);
+      if (funnel && funnel.phases && funnel.phases.length > 0) checkHolder.appendChild(renderFunnelCheck(funnel));
+    }
+    fillCheck(result.funnel_check);
+    box.appendChild(checkHolder);
+    // NEU: Der Befund wird neu gezeichnet, sobald der Flow gespeichert ist (eigene Seiten ergänzt, geändert oder gelöscht).
+    state.funnelRefresh = function (funnel) {
+      if (!funnel || !funnel.phases) return;
+      result.funnel_check = funnel;
+      fillCheck(funnel);
+      var gaps = funnel.gap_phases || [];
+      Array.prototype.forEach.call(box.querySelectorAll('.cvz-cs-magnet-gapbadge'), function (b) {
+        b.style.display = gaps.indexOf(b.getAttribute('data-phase')) !== -1 ? '' : 'none';
+      });
+    };
+    var magnets = result.lead_magnets || [];
+    if (magnets.length > 0) {
+      box.appendChild(el('h5', {}, ['Vorgeschlagene Lead-Magneten und kostenlose Tools']));
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Tippe auf einen Vorschlag für Inhalte, Abgrenzung, den Übergang zum Endziel und den Aufwand. Vorschläge, die eine Lücke schließen, stehen zuerst.']));
+      magnets.forEach(function (m) { box.appendChild(renderLeadMagnetCard(m)); });
+      if (result.lead_magnets_tracking_note) {
+        box.appendChild(el('div', { class: 'cvz-cs-goal-box' }, [
+          el('p', { class: 'cvz-cs-brief-label' }, ['So misst du, welcher Magnet wirkt']),
+          el('p', { class: 'cvz-cs-goal-line' }, [result.lead_magnets_tracking_note]),
+        ]));
+      }
+    } else {
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für diesen Lauf liegen keine Lead-Magnet-Vorschläge vor.']));
+    }
+    return box;
+  }
+  // ==== FUNNEL-ENDE ====
 
   // NEU: Conversion-Pfad. Wird aus den Zwischenzielen der Seiten berechnet (nicht separat von Claude geliefert), damit
   // Übersicht und Seiten nie auseinanderlaufen. Je Phase: was der Besucher tut und wohin es führt, am Ende das Endziel.
