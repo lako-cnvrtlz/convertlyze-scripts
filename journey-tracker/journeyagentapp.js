@@ -2,7 +2,7 @@
   'use strict';
   // ==================== KONFIGURATION ====================
   var DEFAULT_CONFIG = {
-    apiBaseUrl: 'https://YOUR-API-DOMAIN.example',
+    apiBaseUrl: 'https://visibility-tracker-production-741c.up.railway.app',
     containerId: 'cvz-content-strategy-agent',
     settingsUrl: '/member/einstellungen#integrationen',
     landingpageAssistantUrl: '/member/landingpage-assistant',
