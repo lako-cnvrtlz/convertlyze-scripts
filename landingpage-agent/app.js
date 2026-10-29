@@ -2795,7 +2795,25 @@ function cvzRenderLpQuestions() {
       <div class="cvz-iv-question">${cvzEsc(p.what_is_missing)}</div>
       ${p.why_it_matters ? `<div class="cvz-iv-why">${cvzEsc(p.why_it_matters)}</div>` : ''}
     </div>`).join('');
-  el.innerHTML = intro + qHtml + cHtml;
+  const toolbar = questions.length === 0 ? '' : '<div class="cvz-iv-toolbar"><button type="button" class="cvz-btn-secondary" id="cvz-lp-pdf" onclick="cvzExportLpOpenPointsPdf(this)">Offene Punkte als PDF (zum Weiterleiten)</button><span class="cvz-iv-msg" id="cvz-lp-pdf-msg" role="status" hidden></span></div>';
+  el.innerHTML = toolbar + intro + qHtml + cHtml;
+}
+
+// Fragebogen als PDF, z.B. für Vertrieb oder Geschäftsführung. Der Server liest offene Punkte
+// und gespeicherte Antworten selbst. Ungespeicherte Eingaben im Tab fehlen deshalb im PDF.
+function cvzExportLpOpenPointsPdf(btn) {
+  const unsaved = Object.keys(cvzLpDrafts).some(id => {
+    const p = (cvzLpPoints.open_points || []).find(x => x.id === id);
+    const saved = p && p.answer ? p.answer.text : '';
+    return p && (cvzLpDrafts[id].text || '').trim() !== (saved || '').trim();
+  });
+  if (unsaved && !window.confirm('Es gibt ungespeicherte Antworten. Sie fehlen im PDF. Trotzdem fortfahren?')) return;
+  return cvzExportPdf({
+    buttonEl: btn,
+    errorEl: document.getElementById('cvz-lp-pdf-msg'),
+    type: 'open_points',
+    downloadName: `convertlyze-offene-punkte-${Date.now()}.pdf`,
+  });
 }
 
 async function cvzSaveLpAnswer(id) {
