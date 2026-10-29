@@ -406,7 +406,7 @@ const CONVERSION_GOAL_GROUPS = {
 // Beschreibung (siehe cvzLoadFormOptions). Rein clientseitige Deko, hat
 // keinen Einfluss auf den gesendeten Wert (immer der key aus dem Dropdown).
 const CVZ_FUNNEL_STAGE_HINTS = {
-  exploration: 'Besucher lernen Thema oder Problem erst kennen. Typische Suchen: „was ist …“, „wie funktioniert …“.',
+  exploration: 'Für Besucher aus Anzeigen oder Social Media, die das Thema noch nicht kennen. Ziel ist meist ein Lead-Magnet (Leitfaden, Checkliste, Webinar). Für Suchanfragen wie „was ist …“ ist eine Pillar Page besser.',
   evaluation: 'Besucher prüfen, ob sich die Lösungsart für sie lohnt. Typische Suchen: Kosten, Nutzen, Erfahrungen.',
   comparison: 'Besucher vergleichen konkrete Anbieter oder Alternativen. Typische Suchen: Vergleich, Alternativen, „X vs. Y“.',
   decision: 'Besucher wollen kaufen oder beauftragen. Typische Suchen: Anbieter, Angebot, Demo, Preise.',
@@ -415,10 +415,28 @@ const CVZ_FUNNEL_STAGE_HINTS = {
 function cvzFunnelStageHint(key) {
   return CVZ_FUNNEL_STAGE_HINTS[key] || '';
 }
+// Ziele mit hoher Verbindlichkeit: kalte Besucher (Erforschung) erreichen sie selten direkt.
+// Bewusst die Gruppe "Primary Conversions" aus CONVERSION_GOAL_GROUPS, keine eigene Liste.
+function cvzIsHighCommitmentGoal(goal) {
+  return (CONVERSION_GOAL_GROUPS['Primary Conversions (Sales & Umsatz)'] || []).includes(goal);
+}
+// Nur ein Hinweis, keine Sperre: Der Nutzer kann bewusst so bauen.
+function cvzUpdateStageGoalWarning() {
+  const box = document.getElementById('cvz-stage-goal-warning');
+  if (!box) return;
+  const goalEl = document.getElementById('cvz-in-goal');
+  const goal = goalEl ? goalEl.value : cvzState.conversion_goal;
+  const show = cvzState.funnel_stage === 'exploration' && cvzIsHighCommitmentGoal(goal);
+  box.hidden = !show;
+  if (show) {
+    box.innerHTML = `<strong>Passt das Ziel zur Phase?</strong><p>Besucher, die das Thema erst kennenlernen, gehen selten sofort den Schritt „${cvzEsc(goal)}“. Meist konvertiert ein Lead-Magnet als Hauptziel besser, zum Beispiel „Content Download (Lead Magnet)“ oder „Webinar-Anmeldung“, mit deinem Ziel als zweitem Weg auf der Seite. Du kannst trotzdem so weitermachen.</p>`;
+  }
+}
 function cvzOnFunnelStageChange(value) {
   cvzState.funnel_stage = value;
   const hint = document.getElementById('cvz-funnel-stage-hint');
   if (hint) hint.textContent = cvzFunnelStageHint(value);
+  cvzUpdateStageGoalWarning();
 }
 function cvzRenderStep1() {
   const optgroups = Object.entries(CONVERSION_GOAL_GROUPS).map(([group, options]) => `
@@ -437,7 +455,7 @@ function cvzRenderStep1() {
     <p class="cvz-subtitle">Conversion-Ziel und Phase in der Customer Journey.</p>
     <label class="cvz-label">Conversion-Ziel</label>
     <div class="cvz-select-wrap">
-      <select class="cvz-input" id="cvz-in-goal">
+      <select class="cvz-input" id="cvz-in-goal" onchange="cvzState.conversion_goal = this.value; cvzUpdateStageGoalWarning()">
         <option value="" disabled ${!cvzState.conversion_goal ? 'selected' : ''}>Conversion-Ziel auswählen …</option>
         ${optgroups}
       </select>
@@ -450,7 +468,9 @@ function cvzRenderStep1() {
       </select>
     </div>
     <p class="cvz-hint" id="cvz-funnel-stage-hint">${cvzEsc(cvzFunnelStageHint(cvzState.funnel_stage))}</p>
+    <div class="cvz-competitor-notice" id="cvz-stage-goal-warning" hidden></div>
   `;
+  cvzUpdateStageGoalWarning();
 }
 // ==================== SCHRITT 2: ANGEBOT ====================
 function cvzRenderStep2() {
