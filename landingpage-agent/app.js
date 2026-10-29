@@ -145,7 +145,7 @@ function cvzRenderQuotaBanner() {
   `;
   if (depleted) {
     const resetHint = cvzQuota.recurring && cvzQuota.next_reset
-      ? ` Naechste Zuruecksetzung am ${cvzFormatNextReset(cvzQuota.next_reset)}.`
+      ? ` Nächste Zurücksetzung am ${cvzFormatNextReset(cvzQuota.next_reset)}.`
       : '';
     banner.textContent = `Kein Sessions-Kontingent mehr verfügbar (0 von ${cvzQuota.limit}).${resetHint}`;
   } else if (planDepletedButHasPpu) {
@@ -2444,7 +2444,8 @@ function cvzApplyPageTypeUi() {
   if (pdf) pdf.hidden = isPillar;
   const empty = document.getElementById('cvz-preview-empty');
   if (empty && isPillar) empty.textContent = 'Sobald das Gerüst erstellt ist, erscheint hier die Vorschau.';
-  if (isPillar) cvzEnsurePillarUi();
+  // Landingpage: Tab "Offene Punkte" mit dem Fragebogen zu Lücken und Platzhaltern.
+  cvzEnsurePillarUi();
 }
 
 // Legt Statusleiste, Tabs und Interview-Fläche im Vorschau-Panel an. Per JS
@@ -2459,7 +2460,7 @@ function cvzEnsurePillarUi() {
     <div class="cvz-pillar-status" id="cvz-pillar-status"></div>
     <div class="cvz-pillar-tabs" role="tablist">
       <button type="button" class="cvz-pillar-tab active" id="cvz-tab-preview" role="tab" onclick="cvzSetPreviewTab('preview')">Vorschau</button>
-      <button type="button" class="cvz-pillar-tab" id="cvz-tab-interview" role="tab" onclick="cvzSetPreviewTab('interview')">Interview</button>
+      <button type="button" class="cvz-pillar-tab" id="cvz-tab-interview" role="tab" onclick="cvzSetPreviewTab('interview')">${cvzState.page_type === 'pillar' ? 'Interview' : 'Offene Punkte'}</button>
     </div>`;
   const header = panel.querySelector('.cvz-preview-header');
   header.insertAdjacentElement('afterend', bar);
@@ -2488,7 +2489,8 @@ function cvzSetPreviewTab(tab) {
 // Nimmt Pillar-Felder aus /resume, /start-session-Ergebnis, /chat/status
 // oder /interview entgegen. Für die Landingpage tut die Funktion nichts.
 function cvzApplyPillarData(data) {
-  if (cvzState.page_type !== 'pillar' || !data) return;
+  if (cvzState.page_type !== 'pillar') { cvzLoadLpOpenPoints(); return; }
+  if (!data) return;
   cvzEnsurePillarUi();
   if (Array.isArray(data.interview_items)) cvzInterview.items = data.interview_items;
   if (data.pillar_status) cvzInterview.status = data.pillar_status;
@@ -2688,6 +2690,150 @@ async function cvzSaveInterviewAnswer(id) {
   }
 }
 
+
+// ==================== LANDINGPAGE: FRAGEBOGEN ZU DEN OFFENEN PUNKTEN ====================
+// Wie das Interview der Pillar Page: Jeder Platzhalter und jede Lücke der
+// aktuellen Version ist eine Frage im Tab "Offene Punkte". Antworten speichert
+// POST /api/page-agent/open-points/answer im Briefing. Die Seite ändert sich
+// erst, wenn der User auf "Antworten in die Seite einarbeiten" klickt: Das
+// schickt eine normale Chat-Nachricht, der Agent ersetzt dann die Platzhalter.
+// Prüfpunkte (Warnungen der automatischen Prüfung) sind nur zur Info da, sie
+// behebt der Agent selbst.
+let cvzLpPoints = { open_points: [], questions_total: 0, questions_answered: 0, answers_pending: 0, checks_open: 0 };
+const cvzLpDrafts = {};
+let cvzLpLoadSeq = 0;
+const CVZ_LP_SEVERITY_LABELS = { kritisch: 'Kritisch', wichtig: 'Wichtig', optional: 'Optional', hoch: 'Hoch', mittel: 'Mittel', niedrig: 'Niedrig' };
+
+async function cvzLoadLpOpenPoints() {
+  if (cvzState.page_type === 'pillar' || !cvzState.page_project_id) return;
+  cvzEnsurePillarUi();
+  // Ältere Antworten dürfen eine neuere nicht überschreiben (mehrere Turns kurz hintereinander).
+  const seq = ++cvzLpLoadSeq;
+  try {
+    const res = await fetch(`${API_BASE}/api/page-agent/open-points?page_project_id=${encodeURIComponent(cvzState.page_project_id)}&user_id=${encodeURIComponent(cvzUserId())}`, { method: 'GET', headers: cvzAuthHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (seq !== cvzLpLoadSeq) return;
+    cvzLpPoints = data;
+    cvzRenderLpStatus();
+    cvzRenderLpQuestions();
+  } catch (e) {
+    console.warn('Offene Punkte konnten nicht geladen werden:', e.message);
+  }
+}
+
+function cvzRenderLpStatus() {
+  const el = document.getElementById('cvz-pillar-status');
+  const tab = document.getElementById('cvz-tab-interview');
+  const d = cvzLpPoints;
+  const openQuestions = Math.max(0, d.questions_total - d.questions_answered);
+  if (tab) tab.textContent = openQuestions > 0 ? `Offene Punkte (${openQuestions} ohne Antwort)` : 'Offene Punkte';
+  if (!el) return;
+  if (!d.questions_total && !d.checks_open) { el.innerHTML = ''; return; }
+  let html = `<span>${d.questions_answered} von ${d.questions_total} Fragen beantwortet${d.checks_open > 0 ? `, ${d.checks_open} Prüfpunkt${d.checks_open === 1 ? '' : 'e'} offen` : ''}</span>`;
+  if (d.answers_pending > 0 || d.checks_open > 0) {
+    html += `<button type="button" class="cvz-btn-secondary cvz-pillar-apply" onclick="cvzApplyLpAnswersToPage()">Antworten in die Seite einarbeiten</button>`;
+  }
+  el.innerHTML = html;
+}
+
+function cvzApplyLpAnswersToPage() {
+  if (cvzIsSending) return;
+  cvzSetPreviewTab('preview');
+  cvzSendMessage('Ich habe im Tab "Offene Punkte" Antworten ergänzt. Bitte arbeite sie ein und erzeuge eine neue Version. Freigegebene Antworten ersetzen die passenden Platzhalter. Nicht freigegebene Antworten nutzt du nur als Hintergrund, sie kommen nicht auf die Seite. Behebe dabei auch die offenen Prüfpunkte.');
+}
+
+function cvzRememberLpDraft(id) {
+  const t = document.getElementById('cvz-lp-text-' + id);
+  const a = document.getElementById('cvz-lp-appr-' + id);
+  if (!t) return;
+  cvzLpDrafts[id] = { text: t.value, approved: a ? a.checked : true };
+}
+
+function cvzRenderLpQuestions() {
+  if (cvzState.page_type === 'pillar') return;
+  const el = document.getElementById('cvz-interview-body');
+  if (!el) return;
+  const points = Array.isArray(cvzLpPoints.open_points) ? cvzLpPoints.open_points : [];
+  // Ungespeicherte Eingaben sichern, bevor das DOM ersetzt wird.
+  points.forEach(p => { if (document.getElementById('cvz-lp-text-' + p.id)) cvzRememberLpDraft(p.id); });
+  if (points.length === 0) {
+    el.innerHTML = '<p class="cvz-hint">Keine offenen Punkte. Sobald die Seite Platzhalter oder Lücken hat, kannst du sie hier beantworten.</p>';
+    return;
+  }
+  const questions = points.filter(p => p.kind !== 'pruefpunkt');
+  const checks = points.filter(p => p.kind === 'pruefpunkt');
+  const intro = '<p class="cvz-hint">Hier stehen die Angaben, die der Seite noch fehlen. Trag ein, was du weißt, und speichere jede Antwort. Nur Antworten mit Haken bei „Darf so auf die Seite“ werden als Aussage oder Zahl verwendet, alles andere dient dem Assistenten nur als Hintergrund. Mit „Antworten in die Seite einarbeiten“ entsteht danach eine neue Version.</p>';
+  const qHtml = questions.map(p => {
+    const id = cvzEsc(p.id);
+    const d = cvzLpDrafts[p.id];
+    const text = d ? d.text : (p.answer ? p.answer.text : '');
+    const approved = d ? d.approved : (p.answer ? p.answer.approved !== false : true);
+    const answered = !!(p.answer && p.answer.text && p.answer.text.trim());
+    return `
+    <div class="cvz-iv-item ${answered ? 'answered' : ''}" id="cvz-lp-${id}">
+      <div class="cvz-iv-head">
+        ${p.section_label ? `<span class="cvz-iv-badge">${cvzEsc(p.section_label)}</span>` : ''}
+        ${p.severity ? `<span class="cvz-iv-badge ${p.severity === 'kritisch' || p.severity === 'hoch' ? 'must' : ''}">${cvzEsc(CVZ_LP_SEVERITY_LABELS[p.severity] || p.severity)}</span>` : ''}
+        ${answered ? `<span class="cvz-iv-badge ok">${p.answer.approved === false ? 'Beantwortet, nur Hintergrund' : 'Beantwortet'}</span>` : ''}
+      </div>
+      <div class="cvz-iv-question">${cvzEsc(p.what_is_missing)}</div>
+      ${p.why_it_matters ? `<div class="cvz-iv-why">${cvzEsc(p.why_it_matters)}</div>` : ''}
+      ${p.how_to_close ? `<div class="cvz-iv-why">So schließt du die Lücke: ${cvzEsc(p.how_to_close)}</div>` : ''}
+      <textarea class="cvz-input" id="cvz-lp-text-${id}" rows="3" maxlength="2000" placeholder="Deine Angabe, z.B. Kundennamen, Zahl mit Zeitraum, Reaktionszeit" oninput="cvzRememberLpDraft('${id}')">${cvzEsc(text)}</textarea>
+      <label class="cvz-iv-appr"><input type="checkbox" id="cvz-lp-appr-${id}" ${approved ? 'checked' : ''} onchange="cvzRememberLpDraft('${id}')"> Darf so auf die Seite</label>
+      <div class="cvz-iv-actions">
+        <button type="button" class="cvz-btn-secondary" id="cvz-lp-save-${id}" onclick="cvzSaveLpAnswer('${id}')">Speichern</button>
+        <span class="cvz-iv-msg" id="cvz-lp-msg-${id}" role="status"></span>
+      </div>
+    </div>`;
+  }).join('');
+  const cHtml = checks.length === 0 ? '' : `<h4 class="cvz-cl-title">Prüfpunkte</h4>
+    <p class="cvz-hint">Hinweise der automatischen Prüfung. Sie brauchen keine Antwort, der Assistent behebt sie beim nächsten Einarbeiten.</p>` + checks.map(p => `
+    <div class="cvz-iv-item">
+      <div class="cvz-iv-head"><span class="cvz-iv-badge">Prüfpunkt</span>${p.section_label ? `<span class="cvz-iv-badge">${cvzEsc(p.section_label)}</span>` : ''}</div>
+      <div class="cvz-iv-question">${cvzEsc(p.what_is_missing)}</div>
+      ${p.why_it_matters ? `<div class="cvz-iv-why">${cvzEsc(p.why_it_matters)}</div>` : ''}
+    </div>`).join('');
+  el.innerHTML = intro + qHtml + cHtml;
+}
+
+async function cvzSaveLpAnswer(id) {
+  cvzRememberLpDraft(id);
+  const d = cvzLpDrafts[id];
+  const msg = document.getElementById('cvz-lp-msg-' + id);
+  const btn = document.getElementById('cvz-lp-save-' + id);
+  const setMsg = (text, bad) => { if (msg) { msg.textContent = text; msg.classList.toggle('bad', !!bad); } };
+  if (!d) return;
+  if (btn) btn.disabled = true;
+  setMsg('Wird gespeichert …', false);
+  try {
+    const res = await fetch(`${API_BASE}/api/page-agent/open-points/answer`, {
+      method: 'POST', headers: cvzAuthHeaders(),
+      body: JSON.stringify({ user_id: cvzUserId(), page_project_id: cvzState.page_project_id, point_id: id, text: d.text, approved: d.approved })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 404) {
+      // Die Lücke gibt es in der neuesten Version nicht mehr. Liste neu laden, Entwurf behalten.
+      setMsg(data.error || 'Diesen Punkt gibt es nicht mehr.', true);
+      cvzLoadLpOpenPoints();
+      return;
+    }
+    if (!res.ok) { setMsg(data.error || `Fehler (HTTP ${res.status})`, true); return; }
+    delete cvzLpDrafts[id];
+    cvzLpPoints = data;
+    cvzRenderLpStatus();
+    cvzRenderLpQuestions();
+    const msg2 = document.getElementById('cvz-lp-msg-' + id);
+    if (msg2) msg2.textContent = d.text.trim() ? 'Gespeichert' : 'Antwort entfernt';
+  } catch (e) {
+    console.error('Antwort konnte nicht gespeichert werden:', e);
+    setMsg('Speichern fehlgeschlagen. Bitte erneut versuchen.', true);
+  } finally {
+    const b2 = document.getElementById('cvz-lp-save-' + id);
+    if (b2) b2.disabled = false;
+  }
+}
 
 // ---------- Fragenliste als PDF ----------
 // Offene Fragen als PDF für den Fachbereich. Erstellt der Server (Puppeteer, gleiche Route und
