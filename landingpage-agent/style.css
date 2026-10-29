@@ -194,7 +194,21 @@
   background: var(--cvz-teal-dim); color: var(--cvz-teal); border: 1px solid var(--cvz-teal);
 }
 
+/* Erklärung über der Wettbewerberliste (keine Angebotsseiten gefunden,
+   Vorschläge aus der zweiten Suche). margin:0 an p gegen Webflows Abstände. */
+.cvz-app .cvz-competitor-notice {
+  border: 1px solid var(--cvz-border); border-left: 3px solid var(--cvz-teal);
+  background: var(--cvz-bg); border-radius: 0px;
+  padding: 12px 14px; margin: 0 0 14px;
+  font-size: 0.85rem; line-height: 1.5; color: var(--cvz-text);
+}
+.cvz-app .cvz-competitor-notice strong { display: block; margin-bottom: 6px; color: var(--cvz-text); }
+.cvz-app .cvz-competitor-notice p { margin: 6px 0 0; color: var(--cvz-text-muted); }
+
 .cvz-selection-count { font-size: 0.82rem; color: var(--cvz-text-muted); margin: 0 0 14px; }
+/* Abstand zum Feld "Weiteren Wettbewerber manuell hinzufügen" darunter: dessen
+   Label ist das erste im Schritt und hat per :first-of-type keinen Abstand oben. */
+.cvz-app #cvz-filtered-box:not(:empty) { margin-bottom: 22px; }
 .cvz-selection-count.limit { color: var(--cvz-teal); font-weight: 600; }
 
 /* Ausgefilterte Vorschläge bleiben einklappbar sichtbar, damit der Filter
