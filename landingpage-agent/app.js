@@ -201,6 +201,9 @@ const cvzState = {
   // Vom URL-Filter aussortierte Vorschlaege - bleiben einklappbar sichtbar,
   // damit ein faelschlich gefilterter Treffer nicht verloren geht.
   filteredOutCompetitors: [],
+  // Wie die Vorschläge zustande kamen, für die Erklärung über der Liste:
+  // { keyword, commercialQuery: string|null, validFromKeyword: number }
+  competitorSearchInfo: null,
   manualCompetitors: [],
   // Seitentyp: 'landingpage' (Standard) oder 'pillar'. Die Auswahl erscheint
   // nur, wenn GET /form-options mehr als einen Typ liefert (Feature-Flag
@@ -275,11 +278,14 @@ let cvzPageTypes = [];
 // business_type gibt es KEINEN Fallback – eine geratene Liste ist genau
 // der Fehler, der hier abgestellt werden soll. Dann lieber ein sichtbarer
 // Hinweis als ein Dropdown, das beim Launch scheitert.
+// Phasen nach dem Messy-Middle-Modell, dieselben vier wie im Strategie-Tool
+// und im Customer Journey Tracker. Der Wert geht als funnel_stage ans Backend.
 const CVZ_FUNNEL_STAGES_FALLBACK = [
-  { key: 'awareness',     label: 'Awareness' },
-  { key: 'consideration', label: 'Consideration' },
-  { key: 'decision',      label: 'Decision' },
-  { key: 'full_journey',  label: 'Komplette Journey' }
+  { key: 'exploration',  label: 'Erforschung' },
+  { key: 'evaluation',   label: 'Bewertung' },
+  { key: 'comparison',   label: 'Vergleich' },
+  { key: 'decision',     label: 'Entscheidung' },
+  { key: 'full_journey', label: 'Komplette Journey' }
 ];
 const CVZ_BUSINESS_TYPE_CUSTOM_MAXLEN = 60;
 async function cvzLoadFormOptions() {
@@ -400,10 +406,11 @@ const CONVERSION_GOAL_GROUPS = {
 // Beschreibung (siehe cvzLoadFormOptions). Rein clientseitige Deko, hat
 // keinen Einfluss auf den gesendeten Wert (immer der key aus dem Dropdown).
 const CVZ_FUNNEL_STAGE_HINTS = {
-  awareness: 'Problem noch nicht bewusst oder gerade erst erkannt.',
-  consideration: 'Problem klar, Lösungswege werden verglichen.',
-  decision: 'Anbieter stehen zur Wahl, Entscheidung steht an.',
-  full_journey: 'Seite bedient alle Phasen.'
+  exploration: 'Besucher lernen Thema oder Problem erst kennen. Typische Suchen: „was ist …“, „wie funktioniert …“.',
+  evaluation: 'Besucher prüfen, ob sich die Lösungsart für sie lohnt. Typische Suchen: Kosten, Nutzen, Erfahrungen.',
+  comparison: 'Besucher vergleichen konkrete Anbieter oder Alternativen. Typische Suchen: Vergleich, Alternativen, „X vs. Y“.',
+  decision: 'Besucher wollen kaufen oder beauftragen. Typische Suchen: Anbieter, Angebot, Demo, Preise.',
+  full_journey: 'Die Seite bedient alle vier Phasen, typisch für die zentrale Angebotsseite.'
 };
 function cvzFunnelStageHint(key) {
   return CVZ_FUNNEL_STAGE_HINTS[key] || '';
@@ -427,7 +434,7 @@ function cvzRenderStep1() {
   `).join('');
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Was soll auf der Seite passieren?</h1>
-    <p class="cvz-subtitle">Conversion-Ziel und Phase der Kaufentscheidung.</p>
+    <p class="cvz-subtitle">Conversion-Ziel und Phase in der Customer Journey.</p>
     <label class="cvz-label">Conversion-Ziel</label>
     <div class="cvz-select-wrap">
       <select class="cvz-input" id="cvz-in-goal">
@@ -435,10 +442,10 @@ function cvzRenderStep1() {
         ${optgroups}
       </select>
     </div>
-    <label class="cvz-label">Funnel-Stage</label>
+    <label class="cvz-label">In welcher Phase sind die Besucher dieser Seite?</label>
     <div class="cvz-select-wrap">
       <select class="cvz-input" id="cvz-in-funnel-stage" onchange="cvzOnFunnelStageChange(this.value)">
-        <option value="" disabled ${!cvzState.funnel_stage ? 'selected' : ''}>Funnel-Stage auswählen …</option>
+        <option value="" disabled ${!cvzState.funnel_stage ? 'selected' : ''}>Phase auswählen …</option>
         ${funnelOptions}
       </select>
     </div>
@@ -463,23 +470,20 @@ function cvzRenderStep2() {
       Keine Informationen vorhanden
     </label>
     <p class="cvz-hint">Das ist die Kundenperspektive, nicht eure eigene - oft aussagekräftiger als USPs/Features fürs Storytelling.</p>
-    <label class="cvz-label">Referenz-Links (optional)</label>
-    <input class="cvz-input" id="cvz-in-refurl" placeholder="URL eingeben, Enter drücken (Seite oder YouTube-Video)" onkeydown="cvzAddRefUrlOnEnter(event)">
+    <label class="cvz-label">Eigene Inhalte als Quelle (optional)</label>
+    <input class="cvz-input" id="cvz-in-refurl" placeholder="URL eurer Seite eingeben, Enter drücken (Seite oder YouTube-Video)" onkeydown="cvzAddRefUrlOnEnter(event)">
     <div class="cvz-chip-row" id="cvz-refurl-chips">${cvzRenderRefUrlChips()}</div>
-    <p class="cvz-hint">Bis zu 3 Links werden vom Assistenten tatsächlich abgerufen.</p>
+    <p class="cvz-hint">Eure eigenen Seiten mit Fakten zum Angebot: Produktseite, Case Study, Referenzprojekt, Webinar. Zahlen und Aussagen daraus darf der Assistent auf die Landingpage übernehmen. Wettbewerber gehören nicht hierher, die tragt ihr im Wettbewerber-Schritt ein. Bis zu 3 Links werden tatsächlich abgerufen.</p>
     <label class="cvz-label">PDF hochladen (optional)</label>
     <input type="file" accept="application/pdf" id="cvz-in-pdf" onchange="cvzUploadPdf(event)">
     <div id="cvz-pdf-status" style="margin-top:8px;"></div>
     <div class="cvz-chip-row" id="cvz-pdf-chips">${cvzRenderPdfChips()}</div>
     <label class="cvz-label">Eure Markenfarbe (optional)</label>
-    <div style="display:flex; gap:10px; align-items:center;">
-      <input type="color" id="cvz-in-brand-color-picker" value="${/^#([0-9a-fA-F]{6})$/.test(cvzState.brand_color) ? cvzState.brand_color : '#4f46e5'}" style="width:44px; height:40px; padding:2px; border-radius:0px; border:1px solid var(--cvz-border); background:var(--cvz-bg); cursor:pointer;" oninput="cvzSyncBrandColorFromPicker(this.value)">
-      <input class="cvz-input" id="cvz-in-brand-color" placeholder="#4f46e5" value="${cvzEsc(cvzState.brand_color)}" style="flex:1;" oninput="cvzSyncBrandColorFromText(this.value)">
-    </div>
-    <p class="cvz-hint">Direkte Eingabe hat Vorrang vor der automatischen Erkennung aus der Website unten - keine Bestätigung im Chat nötig, da hier eindeutig.</p>
+    <input class="cvz-input" id="cvz-in-brand-color" placeholder="#4f46e5" value="${cvzEsc(cvzState.brand_color)}" oninput="cvzSyncBrandColorFromText(this.value)">
+    <p class="cvz-hint">Nur ausfüllen, wenn die Akzentfarbe von eurer Website abweichen soll. Eine Farbe hier hat Vorrang vor der Farbe, die von der Website übernommen wird.</p>
     <label class="cvz-label">Eure Website für den Marken-Look (optional)</label>
     <input class="cvz-input" id="cvz-in-brand-url" placeholder="https://eure-website.de" value="${cvzEsc(cvzState.brand_reference_url)}">
-    <p class="cvz-hint">Nur relevant, wenn oben keine Farbe eingetragen ist - dann versucht der Assistent, sie automatisch zu erkennen und schlägt sie dir zur Bestätigung vor.</p>
+    <p class="cvz-hint">Die Vorschau übernimmt Farben, Schrift, Button-Form und Logo eurer Startseite. Sie ist an eure Marke angelehnt, keine exakte Kopie. Einige Seiten blockieren das automatische Auslesen, dann bleibt das Standard-Design.</p>
     <label class="cvz-label">Sonstiger Kontext (optional)</label>
     <textarea class="cvz-input" id="cvz-in-existing" placeholder="Weitere Hinweise für den Assistenten, die nicht in ein Feld oben passen">${cvzEsc(cvzState.existing_content)}</textarea>
   `;
@@ -755,6 +759,21 @@ function cvzFilterCompetitorSuggestions(rawList) {
   items.sort((a, b) => b.score - a.score);
   return { items, removed };
 }
+// Unterhalb dieser Zahl echter Angebotsseiten wird ein zweites Mal gesucht.
+const CVZ_MIN_GOOD_SUGGESTIONS = 2;
+async function cvzFetchCompetitorSuggestions(variant) {
+  const res = await fetch(`${API_BASE}/api/page-agent/suggest-competitors`, {
+    method: 'POST', headers: cvzAuthHeaders(),
+    body: JSON.stringify({
+      keyword: cvzState.keyword,
+      business_type: cvzState.business_type || null,
+      ...(variant ? { variant } : {})
+    })
+  });
+  const data = await res.json();
+  if (!res.ok && !Array.isArray(data.suggestions)) throw new Error(data.error || `HTTP ${res.status}`);
+  return { suggestions: data.suggestions || [], query: data.query || cvzState.keyword };
+}
 function cvzTotalCompetitorCount() {
   return cvzState.competitorSuggestions.filter(s => s.selected).length + cvzState.manualCompetitors.length;
 }
@@ -768,31 +787,50 @@ async function cvzRenderStep3() {
     <input class="cvz-input" id="cvz-in-manual-competitor" placeholder="URL eines Wettbewerbers, z.B. https://wettbewerber.de" onkeydown="cvzAddManualCompetitorOnEnter(event)">
     <p class="cvz-hint">Nicht eure eigene Seite — eine Seite, mit der ihr um dieselben Kunden konkurriert. Maximal ${CVZ_MAX_COMPETITORS} Wettbewerber insgesamt, eigene Einträge haben Vorrang vor Vorschlägen.</p>
   `;
+  // Keyword nach dem letzten Laden geändert: alte Vorschläge verwerfen, eigene Einträge bleiben.
+  if (cvzState.competitorSearchInfo && cvzState.competitorSearchInfo.keyword !== cvzState.keyword) {
+    cvzState.competitorSuggestions = [];
+    cvzState.filteredOutCompetitors = [];
+    cvzState.competitorSearchInfo = null;
+  }
   const nothingLoadedYet =
     cvzState.competitorSuggestions.length === 0 &&
-    cvzState.filteredOutCompetitors.length === 0;
+    cvzState.filteredOutCompetitors.length === 0 &&
+    !cvzState.competitorSearchInfo;
   if (nothingLoadedYet) {
     try {
-      const res = await fetch(`${API_BASE}/api/page-agent/suggest-competitors`, {
-        method: 'POST', headers: cvzAuthHeaders(),
-        body: JSON.stringify({
-          keyword: cvzState.keyword,
-          business_type: cvzState.business_type || null
-        })
-      });
-      const data = await res.json();
-      // WICHTIG: erst filtern, dann kuerzen. Vorher wurde auf 5 gekuerzt
-      // und danach gefiltert - dabei gingen gute Kandidaten auf Position
-      // 6+ verloren, sobald oben Blog- oder Video-Treffer standen.
-      const filtered = cvzFilterCompetitorSuggestions(data.suggestions || []);
-      cvzState.competitorSuggestions = filtered.items
+      const first = await cvzFetchCompetitorSuggestions(null);
+      // WICHTIG: erst filtern, dann kuerzen. Das Backend liefert dafür bis zu
+      // 20 Rohtreffer, nicht nur 5.
+      const filtered = cvzFilterCompetitorSuggestions(first.suggestions);
+      let items = filtered.items;
+      let removed = filtered.removed;
+      let commercialQuery = null;
+      // Für informationale Keywords ranken oft fast nur Ratgeber. Dann einmal mit
+      // "Anbieter"-Zusatz nachsuchen, statt den Nutzer mit leerer Liste stehen zu lassen.
+      if (items.length < CVZ_MIN_GOOD_SUGGESTIONS) {
+        try {
+          const second = await cvzFetchCompetitorSuggestions('commercial');
+          if (second.query && second.query !== first.query) {
+            const seen = new Set(items.map(x => x.host));
+            const extra = cvzFilterCompetitorSuggestions(second.suggestions);
+            const added = extra.items.filter(x => !seen.has(x.host)).map(x => ({ ...x, fromCommercial: true }));
+            if (added.length > 0) commercialQuery = second.query;
+            items = [...items, ...added];
+          }
+        } catch (e2) {
+          console.warn('Zweite Wettbewerber-Suche fehlgeschlagen:', e2.message);
+        }
+      }
+      cvzState.competitorSearchInfo = { keyword: cvzState.keyword, commercialQuery, validFromKeyword: filtered.items.length };
+      cvzState.competitorSuggestions = items
         .slice(0, CVZ_MAX_SUGGESTIONS_SHOWN)
         .map((s, i) => ({
           ...s,
           selected: i < CVZ_PRESELECT_COUNT,
           recommended: i < CVZ_PRESELECT_COUNT
         }));
-      cvzState.filteredOutCompetitors = filtered.removed;
+      cvzState.filteredOutCompetitors = removed;
     } catch (e) {
       console.error('suggest-competitors failed', e);
       document.getElementById('cvz-competitor-list').innerHTML =
@@ -806,19 +844,24 @@ function cvzRenderCompetitorList() {
   const container = document.getElementById('cvz-competitor-list');
   const total = cvzTotalCompetitorCount();
   const atCap = total >= CVZ_MAX_COMPETITORS;
-  const counter = `
-    <p class="cvz-selection-count ${atCap ? 'limit' : ''}">
-      ${total} von ${CVZ_MAX_COMPETITORS} ausgewählt${atCap ? ' – mehr geht nicht' : ' – du kannst weitere ergänzen oder abwählen'}
+  const counter = total === 0
+    ? `<p class="cvz-selection-count">Noch kein Wettbewerber ausgewählt. Mindestens 1 ist nötig, höchstens ${CVZ_MAX_COMPETITORS}.</p>`
+    : `<p class="cvz-selection-count ${atCap ? 'limit' : ''}">
+      ${total} ausgewählt (höchstens ${CVZ_MAX_COMPETITORS})${atCap ? ' – mehr geht nicht' : ' – du kannst weitere ergänzen oder abwählen'}
     </p>`;
+  const notice = cvzCompetitorNotice();
   const suggested = cvzState.competitorSuggestions.map((s, i) => {
     const locked = atCap && !s.selected;
     const badge = s.recommended ? '<span class="cvz-badge">Empfohlen</span>' : '';
+    const origin = s.fromCommercial && cvzState.competitorSearchInfo && cvzState.competitorSearchInfo.commercialQuery
+      ? `<div class="url">gefunden über „${cvzEsc(cvzState.competitorSearchInfo.commercialQuery)}“</div>` : '';
     return `
     <div class="cvz-competitor-item ${s.selected ? 'selected' : ''} ${locked ? 'locked' : ''}" onclick="${locked ? '' : `cvzToggleCompetitor(${i})`}">
       <input type="checkbox" ${s.selected ? 'checked' : ''} ${locked ? 'disabled' : ''} onclick="event.stopPropagation(); cvzToggleCompetitor(${i})">
       <div class="cvz-competitor-body">
         <div class="title">${cvzEsc(s.title)}${badge}</div>
         <div class="url">${cvzEsc(s.url)}</div>
+        ${origin}
       </div>
     </div>
   `;
@@ -830,9 +873,54 @@ function cvzRenderCompetitorList() {
       <button onclick="cvzRemoveManualCompetitor(${i})" style="background:none;border:none;color:var(--cvz-text-muted);cursor:pointer;">×</button>
     </div>
   `).join('');
-  const list = (suggested + manual) || '<p class="cvz-hint">Keine Vorschläge übrig — bitte manuell ergänzen.</p>';
-  container.innerHTML = counter + list;
+  const list = suggested + manual;
+  container.innerHTML = notice + counter + list;
   cvzRenderFilteredBox();
+}
+// Erklärt über der Liste, warum sie so aussieht. Drei Fälle:
+// 1. Keine einzige Angebotsseite gefunden (auch nicht mit "Anbieter"-Zusatz)
+// 2. Vorschläge stammen (teilweise) aus der zweiten Suche
+// 3. Normalfall: kein Hinweis
+function cvzCompetitorNotice() {
+  const info = cvzState.competitorSearchInfo;
+  if (!info) return '';
+  const kw = cvzEsc(info.keyword || cvzState.keyword);
+  const hasSuggestions = cvzState.competitorSuggestions.length > 0;
+  if (!hasSuggestions && cvzState.manualCompetitors.length === 0) {
+    return `<div class="cvz-competitor-notice">
+      <strong>Zu „${kw}“ haben wir keine Angebotsseiten von Wettbewerbern gefunden.</strong>
+      <p>Bei Google ranken dafür vor allem Ratgeber, Blogartikel oder Videos. Die haben wir ausgeblendet, weil sich eine Landingpage damit nicht sinnvoll vergleichen lässt. Das ist auch ein Hinweis auf euer Keyword: Die Suchenden wollen sich eher informieren als einen Anbieter finden.</p>
+      <p>So geht es weiter: Tragt unten 1 bis ${CVZ_MAX_COMPETITORS} Wettbewerber ein, die ihr kennt, oder übernehmt einen der ausgeblendeten Treffer.</p>
+    </div>`;
+  }
+  if (info.commercialQuery && info.validFromKeyword === 0) {
+    return `<div class="cvz-competitor-notice">
+      Zu „${kw}“ ranken fast nur Ratgeber und Blogartikel. Die Vorschläge stammen deshalb aus der Suche nach „${cvzEsc(info.commercialQuery)}“. Prüft kurz, ob das wirklich eure Wettbewerber sind.
+    </div>`;
+  }
+  if (info.commercialQuery) {
+    return `<div class="cvz-competitor-notice">
+      Zu „${kw}“ gab es nur wenige Angebotsseiten. Wir haben zusätzlich nach „${cvzEsc(info.commercialQuery)}“ gesucht.
+    </div>`;
+  }
+  return '';
+}
+// Fasst die Gründe zusammen, statt pauschal "Videos, Blog- und Glossarseiten" zu behaupten.
+function cvzSummarizeFilteredReasons(entries) {
+  const groups = { content: 0, platform: 0, duplicate: 0, other: 0 };
+  entries.forEach(e => {
+    const r = String(e.reason || '');
+    if (r.startsWith('Content-Seite')) groups.content++;
+    else if (r === 'keine Wettbewerber-Seite') groups.platform++;
+    else if (r === 'Domain bereits enthalten') groups.duplicate++;
+    else groups.other++;
+  });
+  const parts = [];
+  if (groups.content) parts.push(`${groups.content} Ratgeber-, Blog- oder Infoseite${groups.content === 1 ? '' : 'n'}`);
+  if (groups.platform) parts.push(`${groups.platform} Plattform${groups.platform === 1 ? '' : 'en'} wie YouTube, Wikipedia oder Vergleichsportale`);
+  if (groups.duplicate) parts.push(`${groups.duplicate} weitere Unterseite${groups.duplicate === 1 ? '' : 'n'} bereits gelisteter Anbieter`);
+  if (groups.other) parts.push(`${groups.other} sonstige (z.B. PDF)`);
+  return parts.join(', ');
 }
 // Aussortierte Vorschlaege bleiben nachvollziehbar und rueckholbar.
 // Ohne das wäre ein Fehlgriff des Filters für den Nutzer unsichtbar.
@@ -847,12 +935,16 @@ function cvzRenderFilteredBox() {
     <li>
       <span>${cvzEsc(entry.url)}</span>
       <span class="reason">${cvzEsc(entry.reason)}</span>
-      <button onclick="cvzRestoreFilteredCompetitor(${i})">Trotzdem prüfen</button>
+      <button onclick="cvzRestoreFilteredCompetitor(${i})">Trotzdem übernehmen</button>
     </li>
   `).join('');
+  const n = cvzState.filteredOutCompetitors.length;
+  // Gibt es keine Vorschläge, ist diese Liste das Einzige, womit man arbeiten kann: dann offen.
+  const open = cvzState.competitorSuggestions.length === 0 ? 'open' : '';
   box.innerHTML = `
-    <details class="cvz-filtered-box">
-      <summary>${cvzState.filteredOutCompetitors.length} Vorschläge ausgeblendet (Videos, Blog- und Glossarseiten)</summary>
+    <details class="cvz-filtered-box" ${open}>
+      <summary>${n} Treffer ausgeblendet, weil sie keine Angebotsseiten sind</summary>
+      <p class="cvz-hint" style="margin:10px 0 0;">${cvzEsc(cvzSummarizeFilteredReasons(cvzState.filteredOutCompetitors))}. Passt einer doch, übernimm ihn.</p>
       <ul class="cvz-filtered-list">${rows}</ul>
     </details>
   `;
@@ -867,7 +959,7 @@ function cvzRestoreFilteredCompetitor(i) {
     host: info.host,
     title: info.host || entry.url,
     score: 0,
-    selected: false,
+    selected: cvzTotalCompetitorCount() < CVZ_MAX_COMPETITORS,
     recommended: false
   });
   cvzRenderCompetitorList();
@@ -951,16 +1043,8 @@ function cvzSyncStep2Fields() {
     cvzState.customer_reasons = document.getElementById('cvz-in-customer-reasons').value.trim();
   }
 }
-function cvzSyncBrandColorFromPicker(hex) {
-  cvzState.brand_color = hex;
-  document.getElementById('cvz-in-brand-color').value = hex;
-}
 function cvzSyncBrandColorFromText(value) {
   cvzState.brand_color = value.trim();
-  const picker = document.getElementById('cvz-in-brand-color-picker');
-  if (picker && /^#([0-9a-fA-F]{6})$/.test(cvzState.brand_color)) {
-    picker.value = cvzState.brand_color;
-  }
 }
 function cvzToggleNoCustomerReasons(checked) {
   cvzState.no_customer_reasons = checked;
@@ -975,7 +1059,12 @@ function cvzBuildExistingContent() {
   const parts = [];
   if (cvzState.page_type === 'pillar' && cvzState.strategy_context) parts.push(cvzState.strategy_context);
   if (cvzState.existing_content) parts.push(cvzState.existing_content);
-  if (cvzState.reference_urls.length > 0) parts.push('Referenz-Links:\n' + cvzState.reference_urls.join('\n'));
+  if (cvzState.reference_urls.length > 0) {
+    const refLabel = cvzState.page_type === 'pillar'
+      ? 'Quellen für die Seite (eigene oder externe, vom Nutzer angegeben)'
+      : 'Eigene Inhalte als Quelle (Seiten des Anbieters mit Fakten zum Angebot, vom Nutzer angegeben)';
+    parts.push(refLabel + ':\n' + cvzState.reference_urls.join('\n'));
+  }
   cvzState.pdfExtracts.forEach(p => parts.push(`[PDF: ${p.filename}]\n${p.text}`));
   return parts.join('\n\n');
 }
@@ -992,7 +1081,7 @@ function cvzValidateLpStep(key) {
   if (key === 'goal') {
     cvzSyncStep1Fields();
     if (!cvzState.conversion_goal) return 'Bitte ein Conversion-Ziel angeben.';
-    if (!cvzState.funnel_stage) return 'Bitte eine Funnel-Stage auswählen.';
+    if (!cvzState.funnel_stage) return 'Bitte eine Phase auswählen.';
   }
   if (key === 'offer') {
     cvzSyncStep2Fields();
@@ -1115,6 +1204,22 @@ function cvzRenderPillarTopic() {
   `;
   cvzRenderStrategyBox();
 }
+// Phasen der Pillar Page. Der Text geht wörtlich in den Prompt (type_brief.messy_middle_phase).
+// Entscheidung fehlt bewusst: Eine Pillar Page informiert, sie verkauft nicht.
+const CVZ_PILLAR_PHASES = {
+  exploration: 'Erforschung (Leser lernt das Thema erst kennen und sucht Orientierung)',
+  evaluation: 'Bewertung (Leser prüft, ob sich die Lösungsart für ihn lohnt)',
+  comparison: 'Vergleich (Leser stellt Optionen oder Anbieter gegenüber)'
+};
+// Erkennt auch die alten englischen Werte (Exploration/Evaluation) aus gespeicherten Entwürfen.
+function cvzPillarPhaseKey(value) {
+  const v = String(value || '');
+  if (/^(Erforschung|Exploration)/i.test(v)) return 'exploration';
+  if (/^Bewertung/i.test(v)) return 'evaluation';
+  if (/^Evaluation/i.test(v)) return 'comparison';
+  if (/^Vergleich/i.test(v)) return 'comparison';
+  return '';
+}
 function cvzRenderPillarGoal() {
   const phase = cvzState.messy_middle_phase;
   const fromStrategy = !!(cvzState.strategy && cvzState.strategy.pillar_index !== null && cvzState.conversion_target_value);
@@ -1128,11 +1233,12 @@ function cvzRenderPillarGoal() {
     <div class="cvz-select-wrap">
       <select class="cvz-input" id="cvz-in-phase">
         <option value="" ${!phase ? 'selected' : ''}>Keine Angabe</option>
-        <option value="Exploration (Leser sucht Orientierung und versteht das Thema noch)" ${phase.startsWith('Exploration') ? 'selected' : ''}>Informieren: Leser lernt das Thema erst kennen</option>
-        <option value="Evaluation (Leser vergleicht Optionen und Anbieter)" ${phase.startsWith('Evaluation') ? 'selected' : ''}>Vergleichen: Leser wägt Optionen oder Anbieter ab</option>
+        <option value="${CVZ_PILLAR_PHASES.exploration}" ${cvzPillarPhaseKey(phase) === 'exploration' ? 'selected' : ''}>Erforschung: Leser lernt das Thema erst kennen</option>
+        <option value="${CVZ_PILLAR_PHASES.evaluation}" ${cvzPillarPhaseKey(phase) === 'evaluation' ? 'selected' : ''}>Bewertung: Leser prüft, ob sich die Lösungsart lohnt</option>
+        <option value="${CVZ_PILLAR_PHASES.comparison}" ${cvzPillarPhaseKey(phase) === 'comparison' ? 'selected' : ''}>Vergleich: Leser stellt Optionen oder Anbieter gegenüber</option>
       </select>
     </div>
-    <p class="cvz-hint">Bestimmt Tiefe und Tonfall: Wer das Thema erst kennenlernt, braucht Grundlagen, wer vergleicht, braucht Kriterien.</p>
+    <p class="cvz-hint">Bestimmt Tiefe und Tonfall: Wer das Thema erst kennenlernt, braucht Grundlagen, wer bewertet, braucht Nutzen und Kriterien, wer vergleicht, eine faire Gegenüberstellung.</p>
     <label class="cvz-label">Autor / Absender (optional)</label>
     <input class="cvz-input" id="cvz-in-sender" placeholder="z.B. Name und Rolle des Experten, der die Seite verantwortet" value="${cvzEsc(cvzState.sender_name)}">
     <label class="cvz-label">Bereits vorhandene Unterseiten (optional)</label>
@@ -1150,18 +1256,20 @@ function cvzRenderPillarContext() {
       <input type="checkbox" id="cvz-in-no-customer-reasons" ${cvzState.no_customer_reasons ? 'checked' : ''} onchange="cvzToggleNoCustomerReasons(this.checked)">
       Keine Informationen vorhanden
     </label>
-    <label class="cvz-label">Referenz-Links (optional)</label>
+    <label class="cvz-label">Quellen für die Seite (optional)</label>
     <input class="cvz-input" id="cvz-in-refurl" placeholder="URL eingeben, Enter drücken (Seite oder YouTube-Video)" onkeydown="cvzAddRefUrlOnEnter(event)">
     <div class="cvz-chip-row" id="cvz-refurl-chips">${cvzRenderRefUrlChips()}</div>
-    <p class="cvz-hint">Bis zu 3 Links werden vom Assistenten tatsächlich abgerufen. Gut sind eigene Fachartikel, Studien oder Projektberichte.</p>
+    <p class="cvz-hint">Eigene und fremde Quellen sind möglich: eure Fachartikel und Projektberichte oder externe Studien, Normen und Fachbeiträge, auf die sich die Seite stützen soll. Sie erscheinen am Ende unter „Quellen“. Wettbewerber-Ratgeber müsst ihr nicht eintragen, die findet der Assistent selbst. Bis zu 3 Links werden tatsächlich abgerufen.</p>
     <label class="cvz-label">PDF hochladen (optional)</label>
     <input type="file" accept="application/pdf" id="cvz-in-pdf" onchange="cvzUploadPdf(event)">
     <div id="cvz-pdf-status" style="margin-top:8px;"></div>
     <div class="cvz-chip-row" id="cvz-pdf-chips">${cvzRenderPdfChips()}</div>
     <label class="cvz-label">Eure Markenfarbe (optional)</label>
     <input class="cvz-input" id="cvz-in-brand-color" placeholder="#4f46e5" value="${cvzEsc(cvzState.brand_color)}" oninput="cvzSyncBrandColorFromText(this.value)">
+    <p class="cvz-hint">Nur ausfüllen, wenn die Akzentfarbe von eurer Website abweichen soll. Eine Farbe hier hat Vorrang.</p>
     <label class="cvz-label">Eure Website für den Marken-Look (optional)</label>
     <input class="cvz-input" id="cvz-in-brand-url" placeholder="https://eure-website.de" value="${cvzEsc(cvzState.brand_reference_url)}">
+    <p class="cvz-hint">Die Vorschau übernimmt Farben, Schrift, Button-Form und Logo eurer Startseite. Sie ist an eure Marke angelehnt, keine exakte Kopie.</p>
     <label class="cvz-label">Sonstiger Kontext (optional)</label>
     <textarea class="cvz-input" id="cvz-in-existing" placeholder="Weitere Hinweise für den Assistenten">${cvzEsc(cvzState.existing_content)}</textarea>
   `;
@@ -1281,7 +1389,7 @@ const CVZ_KICKOFF_MESSAGES = [
   { at: 8,   text: 'Hier wird die nächsten Minuten malocht. Hol dir in der Zeit gerne einen Kaffee' },
   { at: 30,  text: 'Keyword-Daten und Suchintent werden geprüft' },
   { at: 70,  text: 'Kaffee schon geholt? Wir wühlen noch in Wettbewerber-Seiten' },
-  { at: 120, text: 'Suchintent, Funnel-Stage und Ziel werden abgeglichen' },
+  { at: 120, text: 'Suchintent, Journey-Phase und Ziel werden abgeglichen' },
   { at: 180, text: 'Die Landingpage wird aufgebaut' },
   { at: 260, text: 'Headlines, Belege und FAQ werden ausformuliert' },
   { at: 340, text: 'Headline-Varianten und Messplan entstehen' },
@@ -1338,13 +1446,44 @@ function cvzStartProgressTicker(baseText, messages, onUpdate) {
   return () => { clearInterval(tickTimer); };
 }
 let cvzLoadingStopTicker = null;
+// Beendet alles, was nur während der Wartezeit läuft: Ticker und Spiel.
+function cvzStopLoadingExtras() {
+  if (cvzLoadingStopTicker) { cvzLoadingStopTicker(); cvzLoadingStopTicker = null; }
+  if (window.CVZGame) window.CVZGame.unmount();
+}
+// Hinweise, die nach einigen Minuten unter dem Spiel erscheinen: Die Wartezeit
+// lässt sich nutzen, um genau das Material zu holen, nach dem die Platzhalter fragen.
+const CVZ_GAME_PREP_HINTS = {
+  landingpage: 'Während du wartest: Leg dir Kundenlogos, ein echtes Kundenzitat und belegbare Zahlen (z.B. Kundenanzahl, Zeitersparnis) bereit. Genau danach fragen die meisten Platzhalter auf der fertigen Seite.',
+  pillar: 'Während du wartest: Überleg dir, wer im Unternehmen die Expertenfragen beantworten kann, zum Beispiel aus Vertrieb, Projektleitung oder Support. Die Fragen kannst du später als Liste exportieren und weitergeben.'
+};
+// Startet das Headline-Duell im Ladebildschirm, sofern cvz-game.js geladen ist.
+// Fehlt die Datei (altes Embed), läuft alles wie bisher ohne Spiel.
+function cvzMountLoadingGame() {
+  if (!window.CVZGame || window.CVZGame.isMounted()) return;
+  const loading = document.getElementById('cvz-loading');
+  if (!loading) return;
+  const set = cvzState.page_type === 'pillar' ? 'pillar' : 'landingpage';
+  try {
+    window.CVZGame.mount(loading, { set, rounds: 10, prepHint: { afterMs: 150000, text: CVZ_GAME_PREP_HINTS[set] } });
+  } catch (e) {
+    console.warn('Spiel konnte nicht gestartet werden:', e.message);
+  }
+}
 function cvzShowLoading(text) {
   document.getElementById('cvz-form-card').style.display = 'none';
   document.getElementById('cvz-loading').style.display = 'block';
   if (cvzLoadingStopTicker) cvzLoadingStopTicker();
-  cvzLoadingStopTicker = cvzStartProgressTicker(text, cvzState.page_type === 'pillar' ? CVZ_PILLAR_KICKOFF_MESSAGES : CVZ_KICKOFF_MESSAGES, t => {
+  const baseMessages = cvzState.page_type === 'pillar' ? CVZ_PILLAR_KICKOFF_MESSAGES : CVZ_KICKOFF_MESSAGES;
+  // Die Stil-Übernahme läuft ganz am Anfang (ca. 5 bis 20 Sekunden), deshalb ein
+  // eigener Hinweis zwischen der ersten und zweiten Meldung.
+  const messages = cvzState.brand_reference_url
+    ? [...baseMessages, { at: 16, text: 'Der Marken-Look eurer Website wird übernommen' }].sort((a, b) => a.at - b.at)
+    : baseMessages;
+  cvzLoadingStopTicker = cvzStartProgressTicker(text, messages, t => {
     document.getElementById('cvz-loading-text').textContent = t;
   });
+  cvzMountLoadingGame();
 }
 // NEU: Ladezustand fuer die allererste Sekunde nach Seitenaufruf, bevor
 // feststeht, ob ueberhaupt ein Formular gezeigt wird (neues Projekt) oder
@@ -1477,7 +1616,7 @@ async function cvzLaunch() {
     }
     cvzOpenChat(finalSessionData);
   } catch (err) {
-    if (cvzLoadingStopTicker) { cvzLoadingStopTicker(); cvzLoadingStopTicker = null; }
+    cvzStopLoadingExtras();
     document.getElementById('cvz-loading').style.display = 'none';
     document.getElementById('cvz-form-card').style.display = 'block';
     cvzShowError(err.message);
@@ -1506,7 +1645,7 @@ async function cvzRecoverKickoff(pageProjectId) {
     return true;
   } catch (e) {
     console.error('Neustart der Analyse fehlgeschlagen:', e.message);
-    if (cvzLoadingStopTicker) { cvzLoadingStopTicker(); cvzLoadingStopTicker = null; }
+    cvzStopLoadingExtras();
     return false;
   }
 }
@@ -1576,7 +1715,7 @@ async function cvzTryResume() {
 }
 // ==================== CHAT ====================
 function cvzOpenChat(sessionData) {
-  if (cvzLoadingStopTicker) { cvzLoadingStopTicker(); cvzLoadingStopTicker = null; }
+  cvzStopLoadingExtras();
   document.getElementById('cvz-form-app').style.display = 'none';
   document.getElementById('cvz-workspace').style.display = 'flex';
   cvzUpdateQuota(sessionData.sessions_remaining, sessionData.sessions_limit);
@@ -2347,11 +2486,7 @@ function cvzMapStrategyPillar(result, pillarIndex) {
   return {
     keyword: pillar.keyword,
     target_audience: pillar.primary_audience || '',
-    messy_middle_phase: pillar.messy_middle_phase === 'exploration'
-      ? 'Exploration (Leser sucht Orientierung und versteht das Thema noch)'
-      : pillar.messy_middle_phase === 'evaluation'
-        ? 'Evaluation (Leser vergleicht Optionen und Anbieter)'
-        : '',
+    messy_middle_phase: CVZ_PILLAR_PHASES[pillar.messy_middle_phase] || '',
     conversion_target_kind: 'text',
     conversion_target_value: conv ? conv.topic : '',
     cluster_text: clusterLines.join('\n'),
