@@ -199,6 +199,17 @@ const cvzState = {
   ads: [{ headline: '', text: '', cta: '', visual: '' }],
   // '' = automatisch ableiten, sonst ein Phasen-Key, der die Ableitung überschreibt.
   ad_stage_override: '',
+  // NEU: Belege (alle optional). Nur Freigegebenes darf auf die Seite, der Rest
+  // wird zum Platzhalter mit dem Hinweis "Freigabe einholen".
+  proof_names: [],
+  proof_names_approved: false,
+  quote_text: '',
+  quote_name: '',
+  quote_role: '',
+  quote_company: '',
+  quote_approved: false,
+  // [{ value: '99,99 % Verfügbarkeit', source: 'SLA 2026' }]
+  proof_metrics: [],
   usps: [],
   features: [],
   existing_content: '',
@@ -704,12 +715,14 @@ function cvzRenderStep2() {
       Keine Informationen vorhanden
     </label>
     <p class="cvz-hint">Das ist die Kundenperspektive, nicht eure eigene - oft aussagekräftiger als USPs/Features fürs Storytelling.</p>
+    ${cvzRenderProofBlock()}
     <label class="cvz-label">Eigene Inhalte als Quelle (optional)</label>
     <input class="cvz-input" id="cvz-in-refurl" placeholder="URL eurer Seite eingeben, Enter drücken (Seite oder YouTube-Video)" onkeydown="cvzAddRefUrlOnEnter(event)">
     <div class="cvz-chip-row" id="cvz-refurl-chips">${cvzRenderRefUrlChips()}</div>
-    <p class="cvz-hint">Eure eigenen Seiten mit Fakten zum Angebot: Produktseite, Case Study, Referenzprojekt, Webinar. Zahlen und Aussagen daraus darf der Assistent auf die Landingpage übernehmen. Wettbewerber gehören nicht hierher, die tragt ihr im Wettbewerber-Schritt ein. Bis zu 3 Links werden tatsächlich abgerufen.</p>
+    <p class="cvz-hint">Eure eigenen Seiten mit Fakten zum Angebot: Produktseite, Case Study mit Kennzahlen, Referenzprojekt, Referenzliste, Webinar. Zahlen und Aussagen daraus darf der Assistent auf die Landingpage übernehmen. Wettbewerber gehören nicht hierher, die tragt ihr im Wettbewerber-Schritt ein. Bis zu 3 Links werden tatsächlich abgerufen.</p>
     <label class="cvz-label">PDF hochladen (optional)</label>
     <input type="file" accept="application/pdf" id="cvz-in-pdf" onchange="cvzUploadPdf(event)">
+    <p class="cvz-hint">Zum Beispiel Case Study, Referenzliste, Zertifikat oder Projektbericht. Belege daraus nutzt der Assistent, ohne dass du sie abtippen musst.</p>
     <div id="cvz-pdf-status" style="margin-top:8px;"></div>
     <div class="cvz-chip-row" id="cvz-pdf-chips">${cvzRenderPdfChips()}</div>
     <label class="cvz-label">Eure Markenfarbe (optional)</label>
@@ -721,6 +734,116 @@ function cvzRenderStep2() {
     <label class="cvz-label">Sonstiger Kontext (optional)</label>
     <textarea class="cvz-input" id="cvz-in-existing" placeholder="Weitere Hinweise für den Assistenten, die nicht in ein Feld oben passen">${cvzEsc(cvzState.existing_content)}</textarea>
   `;
+}
+// ==================== BELEGE (Kundenlogos, Kundenzitat, Kennzahlen) ====================
+// Eingeklappt, damit das Formular für Erstnutzer nicht länger wirkt. Sind schon
+// Belege eingetragen (Zurück-Navigation), bleibt der Block offen.
+function cvzHasProofInput() {
+  return cvzState.proof_names.length > 0 || !!cvzState.quote_text || cvzState.proof_metrics.length > 0;
+}
+function cvzRenderProofNameChips() {
+  return cvzState.proof_names.map((n, i) => `
+    <span class="cvz-chip">${cvzEsc(n)} <button type="button" onclick="cvzRemoveProofName(${i})">×</button></span>
+  `).join('');
+}
+function cvzRenderProofMetricList() {
+  return cvzState.proof_metrics.map((m, i) => `
+    <span class="cvz-chip">${cvzEsc(m.value)} (Quelle: ${cvzEsc(m.source)}) <button type="button" onclick="cvzRemoveProofMetric(${i})">×</button></span>
+  `).join('');
+}
+function cvzRenderProofBlock() {
+  return `
+    <details class="cvz-filtered-box" id="cvz-proof-block" style="margin-top:20px;" ${cvzHasProofInput() ? 'open' : ''}>
+      <summary>Belege (optional, spart Platzhalter auf der Seite)</summary>
+      <p class="cvz-hint" style="margin:10px 0 0;">Kundenlogos, ein Kundenzitat und belegbare Zahlen sind die Inhalte, die auf fertigen Seiten am häufigsten fehlen. Was du hier einträgst, muss später nicht als Platzhalter nachgereicht werden. Trag nur ein, was stimmt.</p>
+
+      <label class="cvz-label">Kunden für Logos</label>
+      <input class="cvz-input" id="cvz-in-proof-name" maxlength="80" placeholder="Kundenname eingeben, Enter drücken" onkeydown="cvzAddProofNameOnEnter(event)">
+      <div class="cvz-chip-row" id="cvz-proof-name-chips">${cvzRenderProofNameChips()}</div>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:0.85rem; color:var(--cvz-text-muted); cursor:pointer; font-weight:400;">
+        <input type="checkbox" id="cvz-in-proof-names-approved" ${cvzState.proof_names_approved ? 'checked' : ''}>
+        Die Kunden haben der Nennung bzw. ihrem Logo zugestimmt
+      </label>
+      <p class="cvz-hint">Ohne Zustimmung kommen die Namen nicht auf die Seite. Der Assistent setzt dann einen Platzhalter mit dem Hinweis, die Freigabe einzuholen.</p>
+
+      <label class="cvz-label">Kundenzitat</label>
+      <textarea class="cvz-input" id="cvz-in-quote-text" maxlength="600" rows="3" placeholder="Das Zitat wörtlich, so wie es freigegeben ist">${cvzEsc(cvzState.quote_text)}</textarea>
+      <input class="cvz-input" id="cvz-in-quote-name" maxlength="80" placeholder="Name der Person" value="${cvzEsc(cvzState.quote_name)}">
+      <input class="cvz-input" id="cvz-in-quote-role" maxlength="80" placeholder="Rolle, z.B. IT-Leiterin (optional)" value="${cvzEsc(cvzState.quote_role)}">
+      <input class="cvz-input" id="cvz-in-quote-company" maxlength="80" placeholder="Unternehmen (optional)" value="${cvzEsc(cvzState.quote_company)}">
+      <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:0.85rem; color:var(--cvz-text-muted); cursor:pointer; font-weight:400;">
+        <input type="checkbox" id="cvz-in-quote-approved" ${cvzState.quote_approved ? 'checked' : ''}>
+        Die Person hat dem Zitat mit Namen zugestimmt
+      </label>
+
+      <label class="cvz-label">Belegbare Zahlen</label>
+      <input class="cvz-input" id="cvz-in-metric-value" maxlength="120" placeholder="Kennzahl, z.B. 99,99 % Verfügbarkeit oder 30 % geringere Stromkosten">
+      <input class="cvz-input" id="cvz-in-metric-source" maxlength="160" placeholder="Quelle, z.B. SLA 2026, Kundenprojekt X, Geschäftsbericht" onkeydown="if (event.key === 'Enter') { event.preventDefault(); cvzAddProofMetric(); }">
+      <button type="button" class="cvz-btn-secondary" style="margin-top:8px;" onclick="cvzAddProofMetric()">Zahl hinzufügen</button>
+      <div class="cvz-chip-row" id="cvz-proof-metric-chips">${cvzRenderProofMetricList()}</div>
+      <p class="cvz-hint">Ohne Quelle keine Zahl: Die Quelle erscheint nicht auf der Seite, sie belegt die Zahl für dich und den Assistenten. Besonders wertvoll für Entscheider: Einsparung, ROI, Amortisationszeit, Verfügbarkeit, Kundenanzahl.</p>
+    </details>
+  `;
+}
+function cvzAddProofNameOnEnter(event) {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  const val = event.target.value.trim().slice(0, 80);
+  if (!val) return;
+  if (cvzState.proof_names.length >= 12) { cvzShowError('Höchstens 12 Kunden.'); return; }
+  if (!cvzState.proof_names.some(n => n.toLowerCase() === val.toLowerCase())) cvzState.proof_names.push(val);
+  cvzShowError(null);
+  event.target.value = '';
+  document.getElementById('cvz-proof-name-chips').innerHTML = cvzRenderProofNameChips();
+}
+function cvzRemoveProofName(i) {
+  cvzState.proof_names.splice(i, 1);
+  document.getElementById('cvz-proof-name-chips').innerHTML = cvzRenderProofNameChips();
+}
+// Liefert eine Fehlermeldung oder null. Wird auch beim Verlassen des Schritts
+// aufgerufen, damit eine fertig getippte, aber nicht hinzugefügte Zahl nicht verloren geht.
+function cvzAddProofMetric() {
+  const valueEl = document.getElementById('cvz-in-metric-value');
+  const sourceEl = document.getElementById('cvz-in-metric-source');
+  if (!valueEl || !sourceEl) return null;
+  const value = valueEl.value.trim();
+  const source = sourceEl.value.trim();
+  if (!value && !source) return null;
+  if (!value) { const e = 'Bitte die Kennzahl eintragen oder die Quelle leeren.'; cvzShowError(e); return e; }
+  if (!source) { const e = `Bitte eine Quelle für "${value}" angeben. Ohne Quelle keine Zahl auf der Seite.`; cvzShowError(e); return e; }
+  if (cvzState.proof_metrics.length >= 8) { const e = 'Höchstens 8 Kennzahlen.'; cvzShowError(e); return e; }
+  cvzState.proof_metrics.push({ value, source });
+  valueEl.value = '';
+  sourceEl.value = '';
+  cvzShowError(null);
+  document.getElementById('cvz-proof-metric-chips').innerHTML = cvzRenderProofMetricList();
+  return null;
+}
+function cvzRemoveProofMetric(i) {
+  cvzState.proof_metrics.splice(i, 1);
+  document.getElementById('cvz-proof-metric-chips').innerHTML = cvzRenderProofMetricList();
+}
+function cvzSyncProofFields() {
+  const approvedNames = document.getElementById('cvz-in-proof-names-approved');
+  if (!approvedNames) return;
+  cvzState.proof_names_approved = approvedNames.checked;
+  cvzState.quote_text = document.getElementById('cvz-in-quote-text').value.trim();
+  cvzState.quote_name = document.getElementById('cvz-in-quote-name').value.trim();
+  cvzState.quote_role = document.getElementById('cvz-in-quote-role').value.trim();
+  cvzState.quote_company = document.getElementById('cvz-in-quote-company').value.trim();
+  cvzState.quote_approved = document.getElementById('cvz-in-quote-approved').checked;
+}
+// Body-Teil für /brief. null = keine Belege.
+function cvzBuildProof() {
+  const proof = {
+    customer_names: cvzState.proof_names,
+    customer_names_approved: cvzState.proof_names_approved,
+    quote: cvzState.quote_text
+      ? { text: cvzState.quote_text, name: cvzState.quote_name, role: cvzState.quote_role, company: cvzState.quote_company, approved: cvzState.quote_approved }
+      : null,
+    metrics: cvzState.proof_metrics
+  };
+  return proof.customer_names.length > 0 || proof.quote || proof.metrics.length > 0 ? proof : null;
 }
 function cvzRenderRefUrlChips() {
   return cvzState.reference_urls.map((url, i) => `
@@ -1278,6 +1401,8 @@ function cvzSyncStep2Fields() {
   if (!cvzState.no_customer_reasons) {
     cvzState.customer_reasons = document.getElementById('cvz-in-customer-reasons').value.trim();
   }
+  // Pillar nutzt dieselbe Funktion, hat den Beleg-Block aber nicht: dann passiert hier nichts.
+  cvzSyncProofFields();
 }
 function cvzSyncBrandColorFromText(value) {
   cvzState.brand_color = value.trim();
@@ -1342,6 +1467,10 @@ function cvzValidateLpStep(key) {
         return `"${cvzState.brand_reference_url}" ist keine gültige URL (mit https:// beginnen) - oder das Feld leer lassen.`;
       }
     }
+    // Belege: getippte, aber nicht hinzugefügte Zahl übernehmen bzw. Quelle einfordern.
+    const metricError = cvzAddProofMetric();
+    if (metricError) return metricError;
+    if (cvzState.quote_text && !cvzState.quote_name) return 'Bitte den Namen der zitierten Person eintragen oder das Zitat leeren.';
   }
   if (key === 'competitors') {
     const total = cvzTotalCompetitorCount();
@@ -1385,6 +1514,7 @@ function cvzGoBack() {
   if (cvzState.step === 0) return;
   // Eingaben im Anzeigen-Schritt sichern, damit sie beim Zurückkommen noch da sind.
   if (cvzCurrentStepKey() === 'ads') cvzSyncAdsFields();
+  if (cvzCurrentStepKey() === 'offer') cvzSyncStep2Fields();
   cvzState.step--;
   cvzShowError(null);
   cvzRenderStep();
@@ -1803,7 +1933,9 @@ function cvzBuildBriefBody(userId, page_project_id, competitorUrls) {
         existing_content: cvzBuildExistingContent() || null,
         brand_reference_url: cvzState.brand_reference_url || null,
         brand_color: cvzState.brand_color || null,
-        customer_reasons: cvzState.no_customer_reasons ? 'Keine Informationen vorhanden' : (cvzState.customer_reasons || null)
+        customer_reasons: cvzState.no_customer_reasons ? 'Keine Informationen vorhanden' : (cvzState.customer_reasons || null),
+        // NEU: Belege aus dem Formular (null = keine). Der Server prüft Quelle und Freigabe.
+        proof: cvzBuildProof()
       };
 }
 async function cvzLaunch() {
