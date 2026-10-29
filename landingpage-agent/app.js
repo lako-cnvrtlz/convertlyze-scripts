@@ -2740,7 +2740,7 @@ function cvzRenderLpStatus() {
 function cvzApplyLpAnswersToPage() {
   if (cvzIsSending) return;
   cvzSetPreviewTab('preview');
-  cvzSendMessage('Ich habe im Tab "Offene Punkte" Antworten ergänzt. Bitte arbeite sie ein und erzeuge eine neue Version. Freigegebene Antworten ersetzen die passenden Platzhalter. Nicht freigegebene Antworten nutzt du nur als Hintergrund, sie kommen nicht auf die Seite. Behebe dabei auch die offenen Prüfpunkte.');
+  cvzSendMessage('Ich habe im Tab "Offene Punkte" Antworten ergänzt. Bitte arbeite sie ein und erzeuge eine neue Version. Freigegebene Antworten ersetzen die passenden Platzhalter. Bei "Bitte prüfen"-Punkten übernimmst du Bestätigung, Korrektur oder Streichung. Nicht freigegebene Antworten nutzt du nur als Hintergrund, sie kommen nicht auf die Seite. Behebe dabei auch die offenen Prüfpunkte.');
 }
 
 function cvzRememberLpDraft(id) {
@@ -2763,7 +2763,7 @@ function cvzRenderLpQuestions() {
   }
   const questions = points.filter(p => p.kind !== 'pruefpunkt');
   const checks = points.filter(p => p.kind === 'pruefpunkt');
-  const intro = '<p class="cvz-hint">Hier stehen die Angaben, die der Seite noch fehlen. Trag ein, was du weißt, und speichere jede Antwort. Nur Antworten mit Haken bei „Darf so auf die Seite“ werden als Aussage oder Zahl verwendet, alles andere dient dem Assistenten nur als Hintergrund. Mit „Antworten in die Seite einarbeiten“ entsteht danach eine neue Version.</p>';
+  const intro = '<p class="cvz-hint">Hier stehen die Angaben, die der Seite noch fehlen, und Aussagen, die du vor der Veröffentlichung prüfen solltest („Bitte prüfen“). Trag ein, was du weißt, und speichere jede Antwort. Nur Antworten mit Haken bei „Darf so auf die Seite“ werden als Aussage oder Zahl verwendet, alles andere dient dem Assistenten nur als Hintergrund. Mit „Antworten in die Seite einarbeiten“ entsteht danach eine neue Version.</p>';
   const qHtml = questions.map(p => {
     const id = cvzEsc(p.id);
     const d = cvzLpDrafts[p.id];
@@ -2773,14 +2773,16 @@ function cvzRenderLpQuestions() {
     return `
     <div class="cvz-iv-item ${answered ? 'answered' : ''}" id="cvz-lp-${id}">
       <div class="cvz-iv-head">
+        ${p.verify ? '<span class="cvz-iv-badge must">Bitte prüfen</span>' : ''}
         ${p.section_label ? `<span class="cvz-iv-badge">${cvzEsc(p.section_label)}</span>` : ''}
         ${p.severity ? `<span class="cvz-iv-badge ${p.severity === 'kritisch' || p.severity === 'hoch' ? 'must' : ''}">${cvzEsc(CVZ_LP_SEVERITY_LABELS[p.severity] || p.severity)}</span>` : ''}
         ${answered ? `<span class="cvz-iv-badge ok">${p.answer.approved === false ? 'Beantwortet, nur Hintergrund' : 'Beantwortet'}</span>` : ''}
       </div>
       <div class="cvz-iv-question">${cvzEsc(p.what_is_missing)}</div>
       ${p.why_it_matters ? `<div class="cvz-iv-why">${cvzEsc(p.why_it_matters)}</div>` : ''}
-      ${p.how_to_close ? `<div class="cvz-iv-why">So schließt du die Lücke: ${cvzEsc(p.how_to_close)}</div>` : ''}
-      <textarea class="cvz-input" id="cvz-lp-text-${id}" rows="3" maxlength="2000" placeholder="Deine Angabe, z.B. Kundennamen, Zahl mit Zeitraum, Reaktionszeit" oninput="cvzRememberLpDraft('${id}')">${cvzEsc(text)}</textarea>
+      ${p.verify ? '<div class="cvz-iv-why">Diese Aussage steht schon so auf der Seite, ist aber nicht belegt. Bestätige sie, korrigiere sie oder schreib „streichen“.</div>' : ''}
+      ${p.how_to_close ? `<div class="cvz-iv-why">${p.verify ? 'Wer das prüfen kann' : 'So schließt du die Lücke'}: ${cvzEsc(p.how_to_close)}</div>` : ''}
+      <textarea class="cvz-input" id="cvz-lp-text-${id}" rows="3" maxlength="2000" placeholder="${p.verify ? 'z.B. „stimmt so“, die korrigierte Angabe oder „streichen“' : 'Deine Angabe, z.B. Kundennamen, Zahl mit Zeitraum, Reaktionszeit'}" oninput="cvzRememberLpDraft('${id}')">${cvzEsc(text)}</textarea>
       <label class="cvz-iv-appr"><input type="checkbox" id="cvz-lp-appr-${id}" ${approved ? 'checked' : ''} onchange="cvzRememberLpDraft('${id}')"> Darf so auf die Seite</label>
       <div class="cvz-iv-actions">
         <button type="button" class="cvz-btn-secondary" id="cvz-lp-save-${id}" onclick="cvzSaveLpAnswer('${id}')">Speichern</button>
