@@ -188,6 +188,17 @@ const cvzState = {
   target_audience: '',
   conversion_goal: '',
   funnel_stage: '',
+  // NEU (Message Match): Woher kommen die Besucher?
+  //   'organic' = Suche, Empfehlung, direkt: Phase wählt der User wie bisher.
+  //   'ads'     = Anzeigen: eigener Schritt "Anzeige", die Phase leitet der
+  //               Server aus Plattform, Zielgruppe und Anzeigentext ab.
+  traffic_source: 'organic',
+  ad_platform: '',
+  ad_temperature: '',
+  // Bis zu 3 Anzeigen. Die erste ist die Hauptanzeige, ihr folgt der Hero.
+  ads: [{ headline: '', text: '', cta: '', visual: '' }],
+  // '' = automatisch ableiten, sonst ein Phasen-Key, der die Ableitung überschreibt.
+  ad_stage_override: '',
   usps: [],
   features: [],
   existing_content: '',
@@ -221,16 +232,20 @@ const cvzState = {
 };
 // Die Schritte hängen vom Seitentyp ab. cvzState.step bleibt ein Index, der
 // Inhalt kommt über den Schritt-Schlüssel. Die Landingpage-Schritte sind
-// unverändert, nur 'type' kommt davor, wenn mehr als ein Typ aktiv ist.
+// unverändert, nur 'type' kommt davor, wenn mehr als ein Typ aktiv ist, und
+// 'ads' kommt nach 'goal', wenn die Besucher über Anzeigen kommen.
 const CVZ_STEP_LABELS = {
   type: 'Seitentyp',
-  topic: 'Thema', goal: 'Ziel', offer: 'Angebot', competitors: 'Wettbewerber',
+  topic: 'Thema', goal: 'Ziel', ads: 'Anzeige', offer: 'Angebot', competitors: 'Wettbewerber',
   p_topic: 'Thema', p_goal: 'Ziel & Cluster', p_context: 'Kontext'
 };
+function cvzUsesAds() {
+  return cvzState.page_type !== 'pillar' && cvzState.traffic_source === 'ads';
+}
 function cvzStepKeys() {
   const keys = cvzState.page_type === 'pillar'
     ? ['p_topic', 'p_goal', 'p_context']
-    : ['topic', 'goal', 'offer', 'competitors'];
+    : ['topic', 'goal', ...(cvzUsesAds() ? ['ads'] : []), 'offer', 'competitors'];
   if (cvzPageTypes.length > 1) keys.unshift('type');
   return keys;
 }
@@ -273,6 +288,25 @@ let cvzFunnelStages = [];
 // [{ key, label, has_interview, preview_title, download_base_name }] aus
 // /form-options. Fehlt das Feld (altes Backend), bleibt es bei der Landingpage.
 let cvzPageTypes = [];
+// NEU: Plattformen und Zielgruppen für Anzeigen-Traffic aus /form-options
+// (gleiche Quelle wie die Prüfung in /brief). Der Fallback greift nur bei
+// einem alten Backend, die Keys sind identisch mit services/adContext.ts.
+const CVZ_AD_OPTIONS_FALLBACK = {
+  platforms: [
+    { key: 'google_search', label: 'Google Ads (Suchanzeige)' },
+    { key: 'google_display', label: 'Google Ads (Display, Performance Max, YouTube)' },
+    { key: 'linkedin', label: 'LinkedIn Ads' },
+    { key: 'meta', label: 'Meta Ads (Facebook, Instagram)' },
+    { key: 'other', label: 'Andere Plattform' }
+  ],
+  temperatures: [
+    { key: 'cold', label: 'Neue Zielgruppe (kennt euch noch nicht)' },
+    { key: 'retargeting', label: 'Retargeting (war schon auf eurer Website)' },
+    { key: 'customers', label: 'Bestandskunden' }
+  ],
+  max_ads: 3
+};
+let cvzAdOptions = CVZ_AD_OPTIONS_FALLBACK;
 // Fallback, falls /form-options nicht erreichbar ist. Bewusst nur die
 // Funnel-Stages: ohne sie wäre Schritt 1 komplett unbedienbar. Für
 // business_type gibt es KEINEN Fallback – eine geratene Liste ist genau
@@ -302,11 +336,13 @@ async function cvzLoadFormOptions() {
       ? data.funnel_stages
       : CVZ_FUNNEL_STAGES_FALLBACK;
     cvzPageTypes = Array.isArray(data.page_types) ? data.page_types : [];
+    cvzAdOptions = data.ad_options && Array.isArray(data.ad_options.platforms) ? data.ad_options : CVZ_AD_OPTIONS_FALLBACK;
   } catch (e) {
     console.error('form-options konnten nicht geladen werden:', e.message);
     cvzBusinessTypeGroups = [];
     cvzFunnelStages = CVZ_FUNNEL_STAGES_FALLBACK;
     cvzPageTypes = [];
+    cvzAdOptions = CVZ_AD_OPTIONS_FALLBACK;
   }
 }
 // true, wenn der aktuell gewählte Typ ein Freitextfeld verlangt.
@@ -426,7 +462,8 @@ function cvzUpdateStageGoalWarning() {
   if (!box) return;
   const goalEl = document.getElementById('cvz-in-goal');
   const goal = goalEl ? goalEl.value : cvzState.conversion_goal;
-  const show = cvzState.funnel_stage === 'exploration' && cvzIsHighCommitmentGoal(goal);
+  // Bei Anzeigen-Traffic steht die Phase hier noch nicht fest, der Server leitet sie ab.
+  const show = !cvzUsesAds() && cvzState.funnel_stage === 'exploration' && cvzIsHighCommitmentGoal(goal);
   box.hidden = !show;
   if (show) {
     box.innerHTML = `<strong>Passt das Ziel zur Phase?</strong><p>Besucher, die das Thema erst kennenlernen, gehen selten sofort den Schritt „${cvzEsc(goal)}“. Meist konvertiert ein Lead-Magnet als Hauptziel besser, zum Beispiel „Content Download (Lead Magnet)“ oder „Webinar-Anmeldung“, mit deinem Ziel als zweitem Weg auf der Seite. Du kannst trotzdem so weitermachen.</p>`;
@@ -436,6 +473,17 @@ function cvzOnFunnelStageChange(value) {
   cvzState.funnel_stage = value;
   const hint = document.getElementById('cvz-funnel-stage-hint');
   if (hint) hint.textContent = cvzFunnelStageHint(value);
+  cvzUpdateStageGoalWarning();
+}
+// NEU: Wechsel der Traffic-Quelle blendet die Phasen-Auswahl ein oder aus und
+// fügt den Schritt "Anzeige" in die Schrittleiste ein bzw. entfernt ihn.
+function cvzOnTrafficSourceChange(value) {
+  cvzState.traffic_source = value === 'ads' ? 'ads' : 'organic';
+  const phaseBlock = document.getElementById('cvz-phase-block');
+  const adsNote = document.getElementById('cvz-ads-phase-note');
+  if (phaseBlock) phaseBlock.hidden = cvzUsesAds();
+  if (adsNote) adsNote.hidden = !cvzUsesAds();
+  cvzRenderSteps();
   cvzUpdateStageGoalWarning();
 }
 function cvzRenderStep1() {
@@ -450,9 +498,10 @@ function cvzRenderStep1() {
   const funnelOptions = cvzFunnelStages.map(s => `
     <option value="${cvzEsc(s.key)}" ${cvzState.funnel_stage === s.key ? 'selected' : ''}>${cvzEsc(s.label)}</option>
   `).join('');
+  const ads = cvzUsesAds();
   document.getElementById('cvz-step-content').innerHTML = `
     <h1 class="cvz-title">Was soll auf der Seite passieren?</h1>
-    <p class="cvz-subtitle">Conversion-Ziel und Phase in der Customer Journey.</p>
+    <p class="cvz-subtitle">Conversion-Ziel, Herkunft der Besucher und Phase in der Customer Journey.</p>
     <label class="cvz-label">Conversion-Ziel</label>
     <div class="cvz-select-wrap">
       <select class="cvz-input" id="cvz-in-goal" onchange="cvzState.conversion_goal = this.value; cvzUpdateStageGoalWarning()">
@@ -460,17 +509,182 @@ function cvzRenderStep1() {
         ${optgroups}
       </select>
     </div>
-    <label class="cvz-label">In welcher Phase sind die Besucher dieser Seite?</label>
+    <label class="cvz-label">Woher kommen die meisten Besucher?</label>
     <div class="cvz-select-wrap">
-      <select class="cvz-input" id="cvz-in-funnel-stage" onchange="cvzOnFunnelStageChange(this.value)">
-        <option value="" disabled ${!cvzState.funnel_stage ? 'selected' : ''}>Phase auswählen …</option>
-        ${funnelOptions}
+      <select class="cvz-input" id="cvz-in-traffic-source" onchange="cvzOnTrafficSourceChange(this.value)">
+        <option value="organic" ${!ads ? 'selected' : ''}>Google-Suche, Empfehlung oder direkter Aufruf</option>
+        <option value="ads" ${ads ? 'selected' : ''}>Über Anzeigen (Google Ads, LinkedIn, Meta …)</option>
       </select>
     </div>
-    <p class="cvz-hint" id="cvz-funnel-stage-hint">${cvzEsc(cvzFunnelStageHint(cvzState.funnel_stage))}</p>
+    <p class="cvz-hint">Bei Anzeigen fragen wir im nächsten Schritt nach der Anzeige selbst. Die Seite greift dann ihre Worte, ihr Angebot und ihr Bild auf, damit Besucher nach dem Klick sofort sehen, dass sie richtig sind (Message Match).</p>
+    <div id="cvz-phase-block" ${ads ? 'hidden' : ''}>
+      <label class="cvz-label">In welcher Phase sind die Besucher dieser Seite?</label>
+      <div class="cvz-select-wrap">
+        <select class="cvz-input" id="cvz-in-funnel-stage" onchange="cvzOnFunnelStageChange(this.value)">
+          <option value="" disabled ${!cvzState.funnel_stage ? 'selected' : ''}>Phase auswählen …</option>
+          ${funnelOptions}
+        </select>
+      </div>
+      <p class="cvz-hint" id="cvz-funnel-stage-hint">${cvzEsc(cvzFunnelStageHint(cvzState.funnel_stage))}</p>
+    </div>
+    <p class="cvz-hint" id="cvz-ads-phase-note" ${ads ? '' : 'hidden'}>Die Phase musst du hier nicht wählen: Wir leiten sie aus Plattform, Zielgruppe und Anzeigentext ab. Im nächsten Schritt kannst du sie bei Bedarf selbst festlegen.</p>
     <div class="cvz-competitor-notice" id="cvz-stage-goal-warning" hidden></div>
   `;
   cvzUpdateStageGoalWarning();
+}
+// ==================== SCHRITT "ANZEIGE" (nur bei Anzeigen-Traffic) ====================
+// Pro Anzeige: Screenshot (optional, wird serverseitig ausgelesen und füllt die
+// Felder vor) plus Headline, Text, Button und Bildbeschreibung. Der User sieht
+// und korrigiert, was gelesen wurde, bevor es ins Briefing geht. Gespeichert
+// wird nur Text, kein Bild.
+function cvzEmptyAd() {
+  return { headline: '', text: '', cta: '', visual: '' };
+}
+function cvzMaxAds() {
+  return (cvzAdOptions && cvzAdOptions.max_ads) || 3;
+}
+function cvzRenderAdCard(ad, i) {
+  const canRemove = cvzState.ads.length > 1;
+  return `
+    <div class="cvz-strategy-card" style="margin-top:16px;" id="cvz-ad-card-${i}">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+        <strong>${i === 0 ? 'Hauptanzeige' : `Anzeige ${i + 1}`}</strong>
+        ${canRemove ? `<button type="button" class="cvz-btn-secondary" onclick="cvzRemoveAd(${i})">Entfernen</button>` : ''}
+      </div>
+      ${i === 0 ? '<p class="cvz-hint" style="margin-top:4px;">Der Hero der Seite folgt dieser Anzeige. Weitere Anzeigen bekommen eigene Headline-Varianten.</p>' : ''}
+      <label class="cvz-label">Screenshot der Anzeige (optional)</label>
+      <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" id="cvz-in-ad-shot-${i}" onchange="cvzUploadAdScreenshot(event, ${i})">
+      <p class="cvz-hint" id="cvz-ad-shot-status-${i}">Wir lesen Texte und Bildmotiv aus und tragen sie unten ein. Prüfe das Ergebnis kurz.</p>
+      <label class="cvz-label">Headline der Anzeige</label>
+      <input class="cvz-input" id="cvz-in-ad-headline-${i}" maxlength="300" placeholder="z.B. Rechenzentrum auslagern, ohne die Kontrolle abzugeben" value="${cvzEsc(ad.headline)}">
+      <label class="cvz-label">Anzeigentext (optional)</label>
+      <textarea class="cvz-input" id="cvz-in-ad-text-${i}" maxlength="1500" rows="3" placeholder="Beschreibung oder Intro-Text der Anzeige">${cvzEsc(ad.text)}</textarea>
+      <label class="cvz-label">Button-Text (optional)</label>
+      <input class="cvz-input" id="cvz-in-ad-cta-${i}" maxlength="80" placeholder="z.B. Leitfaden herunterladen" value="${cvzEsc(ad.cta)}">
+      <label class="cvz-label">Was zeigt das Bild? (optional)</label>
+      <input class="cvz-input" id="cvz-in-ad-visual-${i}" maxlength="600" placeholder="z.B. IT-Leiterin vor Serverracks, Farbe Dunkelblau" value="${cvzEsc(ad.visual)}">
+    </div>
+  `;
+}
+function cvzRenderStepAds() {
+  const platformOptions = cvzAdOptions.platforms.map(p => `
+    <option value="${cvzEsc(p.key)}" ${cvzState.ad_platform === p.key ? 'selected' : ''}>${cvzEsc(p.label)}</option>
+  `).join('');
+  const temperatureOptions = cvzAdOptions.temperatures.map(t => `
+    <option value="${cvzEsc(t.key)}" ${cvzState.ad_temperature === t.key ? 'selected' : ''}>${cvzEsc(t.label)}</option>
+  `).join('');
+  const stageOptions = cvzFunnelStages.map(s => `
+    <option value="${cvzEsc(s.key)}" ${cvzState.ad_stage_override === s.key ? 'selected' : ''}>${cvzEsc(s.label)}</option>
+  `).join('');
+  const canAdd = cvzState.ads.length < cvzMaxAds();
+  document.getElementById('cvz-step-content').innerHTML = `
+    <h1 class="cvz-title">Welche Anzeige führt auf die Seite?</h1>
+    <p class="cvz-subtitle">Je genauer die Anzeige, desto besser setzt die Seite sie fort.</p>
+    <label class="cvz-label">Plattform</label>
+    <div class="cvz-select-wrap">
+      <select class="cvz-input" id="cvz-in-ad-platform">
+        <option value="" disabled ${!cvzState.ad_platform ? 'selected' : ''}>Plattform auswählen …</option>
+        ${platformOptions}
+      </select>
+    </div>
+    <label class="cvz-label">Wen erreicht die Anzeige?</label>
+    <div class="cvz-select-wrap">
+      <select class="cvz-input" id="cvz-in-ad-temperature">
+        <option value="" disabled ${!cvzState.ad_temperature ? 'selected' : ''}>Zielgruppe auswählen …</option>
+        ${temperatureOptions}
+      </select>
+    </div>
+    <p class="cvz-hint">Das ist die wichtigste Angabe für die Länge der Seite: Wer euch noch nicht kennt, braucht mehr Erklärung als jemand, der schon auf eurer Website war.</p>
+    <div id="cvz-ad-cards">${cvzState.ads.map((ad, i) => cvzRenderAdCard(ad, i)).join('')}</div>
+    ${canAdd ? `<button type="button" class="cvz-btn-secondary" style="margin-top:12px;" onclick="cvzAddAd()">Weitere Anzeige hinzufügen (A/B-Variante)</button>` : `<p class="cvz-hint">Höchstens ${cvzMaxAds()} Anzeigen pro Seite.</p>`}
+    <label class="cvz-label">Phase in der Customer Journey</label>
+    <div class="cvz-select-wrap">
+      <select class="cvz-input" id="cvz-in-ad-stage">
+        <option value="" ${!cvzState.ad_stage_override ? 'selected' : ''}>Automatisch aus der Anzeige ableiten (empfohlen)</option>
+        ${stageOptions}
+      </select>
+    </div>
+    <p class="cvz-hint">Der Assistent nennt dir im Chat, welche Phase er abgeleitet hat und warum. Wähle selbst nur, wenn du es besser weißt, zum Beispiel weil die Anzeige an eine Liste von Bestandskunden geht.</p>
+  `;
+}
+// Liest alle Felder des Anzeigen-Schritts in den State. Muss vor jedem
+// Neu-Rendern laufen (Hinzufügen, Entfernen, Screenshot), sonst gehen
+// ungespeicherte Eingaben verloren.
+function cvzSyncAdsFields() {
+  const platform = document.getElementById('cvz-in-ad-platform');
+  if (!platform) return;
+  cvzState.ad_platform = platform.value;
+  cvzState.ad_temperature = document.getElementById('cvz-in-ad-temperature').value;
+  cvzState.ad_stage_override = document.getElementById('cvz-in-ad-stage').value;
+  cvzState.ads = cvzState.ads.map((ad, i) => ({
+    headline: (document.getElementById(`cvz-in-ad-headline-${i}`)?.value || '').trim(),
+    text: (document.getElementById(`cvz-in-ad-text-${i}`)?.value || '').trim(),
+    cta: (document.getElementById(`cvz-in-ad-cta-${i}`)?.value || '').trim(),
+    visual: (document.getElementById(`cvz-in-ad-visual-${i}`)?.value || '').trim()
+  }));
+}
+function cvzAddAd() {
+  cvzSyncAdsFields();
+  if (cvzState.ads.length >= cvzMaxAds()) return;
+  cvzState.ads.push(cvzEmptyAd());
+  cvzRenderStepAds();
+}
+function cvzRemoveAd(i) {
+  cvzSyncAdsFields();
+  if (cvzState.ads.length <= 1) return;
+  cvzState.ads.splice(i, 1);
+  cvzRenderStepAds();
+}
+async function cvzUploadAdScreenshot(event, i) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById(`cvz-ad-shot-status-${i}`);
+  if (statusEl) statusEl.textContent = 'Anzeige wird gelesen …';
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const res = await fetch(`${API_BASE}/api/page-agent/read-ad-screenshot`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${cvzMemberstackToken}` },
+      body: formData
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    cvzSyncAdsFields();
+    // Nur leere Felder überschreiben: Was der User schon getippt hat, gewinnt.
+    const ad = cvzState.ads[i] || cvzEmptyAd();
+    cvzState.ads[i] = {
+      headline: ad.headline || data.headline || '',
+      text: ad.text || data.text || '',
+      cta: ad.cta || data.cta || '',
+      visual: ad.visual || data.visual || ''
+    };
+    if (!cvzState.ad_platform && data.platform && data.platform !== 'other') cvzState.ad_platform = data.platform;
+    cvzRenderStepAds();
+    const statusAfter = document.getElementById(`cvz-ad-shot-status-${i}`);
+    if (statusAfter) {
+      statusAfter.style.color = 'var(--cvz-teal)';
+      statusAfter.textContent = 'Ausgelesen. Bitte kurz prüfen und bei Bedarf korrigieren.';
+    }
+  } catch (err) {
+    const el = document.getElementById(`cvz-ad-shot-status-${i}`);
+    if (el) {
+      el.style.color = 'var(--cvz-danger)';
+      el.textContent = err.message;
+    }
+  } finally {
+    event.target.value = '';
+  }
+}
+// Baut ad_context für /brief. null = keine Anzeigen.
+function cvzBuildAdContext() {
+  if (!cvzUsesAds()) return null;
+  return {
+    platform: cvzState.ad_platform,
+    temperature: cvzState.ad_temperature,
+    ads: cvzState.ads.filter(a => a.headline).map(a => ({ headline: a.headline, text: a.text, cta: a.cta, visual: a.visual })),
+    stage_override: cvzState.ad_stage_override || null
+  };
 }
 // ==================== SCHRITT 2: ANGEBOT ====================
 function cvzRenderStep2() {
@@ -1052,6 +1266,8 @@ function cvzSyncStep0Fields() {
 }
 function cvzSyncStep1Fields() {
   cvzState.conversion_goal = document.getElementById('cvz-in-goal').value.trim();
+  const trafficSelect = document.getElementById('cvz-in-traffic-source');
+  if (trafficSelect) cvzState.traffic_source = trafficSelect.value === 'ads' ? 'ads' : 'organic';
   const funnelSelect = document.getElementById('cvz-in-funnel-stage');
   cvzState.funnel_stage = funnelSelect ? funnelSelect.value : '';
 }
@@ -1101,7 +1317,16 @@ function cvzValidateLpStep(key) {
   if (key === 'goal') {
     cvzSyncStep1Fields();
     if (!cvzState.conversion_goal) return 'Bitte ein Conversion-Ziel angeben.';
-    if (!cvzState.funnel_stage) return 'Bitte eine Phase auswählen.';
+    // Bei Anzeigen-Traffic leitet der Server die Phase ab, sie ist hier keine Pflicht.
+    if (!cvzUsesAds() && !cvzState.funnel_stage) return 'Bitte eine Phase auswählen.';
+  }
+  if (key === 'ads') {
+    cvzSyncAdsFields();
+    if (!cvzState.ad_platform) return 'Bitte die Plattform der Anzeige auswählen.';
+    if (!cvzState.ad_temperature) return 'Bitte angeben, wen die Anzeige erreicht.';
+    if (!cvzState.ads[0] || !cvzState.ads[0].headline) return 'Bitte die Headline der Hauptanzeige eintragen oder einen Screenshot hochladen.';
+    const emptyExtra = cvzState.ads.findIndex((a, i) => i > 0 && !a.headline && (a.text || a.cta || a.visual));
+    if (emptyExtra > 0) return `Anzeige ${emptyExtra + 1}: Bitte die Headline eintragen oder die Anzeige entfernen.`;
   }
   if (key === 'offer') {
     cvzSyncStep2Fields();
@@ -1158,6 +1383,8 @@ async function cvzGoNext() {
 }
 function cvzGoBack() {
   if (cvzState.step === 0) return;
+  // Eingaben im Anzeigen-Schritt sichern, damit sie beim Zurückkommen noch da sind.
+  if (cvzCurrentStepKey() === 'ads') cvzSyncAdsFields();
   cvzState.step--;
   cvzShowError(null);
   cvzRenderStep();
@@ -1168,6 +1395,7 @@ function cvzRenderStep() {
   if (key === 'type') cvzRenderStepType();
   if (key === 'topic') cvzRenderStep0();
   if (key === 'goal') cvzRenderStep1();
+  if (key === 'ads') cvzRenderStepAds();
   if (key === 'offer') cvzRenderStep2();
   if (key === 'competitors') cvzRenderStep3();
   if (key === 'p_topic') cvzRenderPillarTopic();
@@ -1497,9 +1725,12 @@ function cvzShowLoading(text) {
   const baseMessages = cvzState.page_type === 'pillar' ? CVZ_PILLAR_KICKOFF_MESSAGES : CVZ_KICKOFF_MESSAGES;
   // Die Stil-Übernahme läuft ganz am Anfang (ca. 5 bis 20 Sekunden), deshalb ein
   // eigener Hinweis zwischen der ersten und zweiten Meldung.
-  const messages = cvzState.brand_reference_url
-    ? [...baseMessages, { at: 16, text: 'Der Marken-Look eurer Website wird übernommen' }].sort((a, b) => a.at - b.at)
-    : baseMessages;
+  let messages = cvzState.brand_reference_url
+    ? [...baseMessages, { at: 16, text: 'Der Marken-Look eurer Website wird übernommen' }]
+    : [...baseMessages];
+  // NEU: Bei Anzeigen-Traffic eine eigene Meldung zum Abgleich mit der Anzeige.
+  if (cvzUsesAds()) messages.push({ at: 150, text: 'Headline und Angebot werden auf eure Anzeige abgestimmt' });
+  messages = messages.sort((a, b) => a.at - b.at);
   cvzLoadingStopTicker = cvzStartProgressTicker(text, messages, t => {
     document.getElementById('cvz-loading-text').textContent = t;
   });
@@ -1526,7 +1757,9 @@ function cvzHideInitialLoading() {
   const loading = document.getElementById('cvz-loading');
   if (loading) loading.style.display = 'none';
 }
-// Briefing-Body je Seitentyp. Die Landingpage bleibt exakt wie bisher.
+// Briefing-Body je Seitentyp. Die Landingpage bleibt exakt wie bisher, ergänzt
+// um ad_context (null ohne Anzeigen). Mit Anzeigen geht KEINE funnel_stage mit:
+// der Server leitet sie ab bzw. nimmt ad_context.stage_override.
 function cvzBuildBriefBody(userId, page_project_id, competitorUrls) {
   if (cvzState.page_type === 'pillar') {
     const body = {
@@ -1550,9 +1783,11 @@ function cvzBuildBriefBody(userId, page_project_id, competitorUrls) {
     if (pages.length > 0) body.type_brief.cluster_context = { source: cvzState.strategy && cvzState.strategy.pillar_index !== null ? 'strategie' : 'manuell', supporting_pages: pages };
     return body;
   }
+  const adContext = cvzBuildAdContext();
   return {
         user_id: userId, page_project_id,
-        funnel_stage: cvzState.funnel_stage,
+        ...(adContext ? {} : { funnel_stage: cvzState.funnel_stage }),
+        ad_context: adContext,
         conversion_goal: cvzState.conversion_goal,
         target_audience: cvzState.target_audience,
         // Immer ein key aus /form-options, nie ein Anzeigetext und nie
