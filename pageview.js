@@ -69,7 +69,29 @@
     const t = String(s || '').replace(/\s+/g, ' ').trim();
     return max && t.length > max ? t.slice(0, max - 1) + '…' : t;
   }
-  function changeId(elementId, nachher) {
+  // Arten einer Änderung (gleich wie in der Agent-API, services/pageChanges.js)
+  const ARTS = ['text', 'neu_danach', 'entfernen'];
+  const artOf = (c) => (c && ARTS.indexOf(c.art) !== -1 ? c.art : 'text');
+  const ART_LABEL = { text: 'ersetzen', neu_danach: 'neue Zeile darunter', entfernen: 'entfernen' };
+  // Prüft, ob eine Änderung überhaupt etwas ändert (Ersetzen mit demselben Text = nichts)
+  const norm = (t) => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  function isNoOp(c, el) {
+    const art = artOf(c);
+    if (art === 'entfernen') return false;
+    if (!String(c.nachher || '').trim()) return true;
+    return art === 'text' && el && norm(c.nachher) === norm(el.text);
+  }
+
+  // Kurzer Titel einer Änderung: "Button ändern", "Neue Zeile unter Button", "Button entfernen"
+  function artTitle(art, el) {
+    const k = kindLabel(el);
+    if (art === 'neu_danach') return 'Neue Zeile unter ' + k;
+    if (art === 'entfernen') return k + ' entfernen';
+    return k + ' ändern';
+  }
+
+  function changeId(elementId, nachher, art) {
+    if (art && art !== 'text') return art + '\n' + String(elementId) + '\n' + String(nachher || '').trim();
     return String(elementId) + '\n' + String(nachher || '').trim();
   }
   function formatDate(d) {
@@ -166,7 +188,16 @@
       .cvz-pv-tag{position:absolute;transform:translateY(-100%);max-width:70%;background:#4fd1c5;color:#0d1117;
         font:600 11px/1.3 'Geist',sans-serif;padding:3px 7px;pointer-events:none;z-index:1;
         white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-      .cvz-pv-hide-after .cvz-pv-after,.cvz-pv-hide-after .cvz-pv-tag{display:none;}
+      .cvz-pv-hide-after .cvz-pv-after,.cvz-pv-hide-after .cvz-pv-tag,.cvz-pv-hide-after .cvz-pv-remove{display:none;}
+      .cvz-pv-hide-after .cvz-pv-draft{display:block;}
+      .cvz-pv-after.cvz-pv-insert{font-weight:500;outline-color:#22c55e;background:#f0fdf4;}
+      .cvz-pv-after.cvz-pv-insert::before{content:'NEU';position:absolute;left:-2px;top:-15px;background:#22c55e;color:#052e16;
+        font:700 9px/1 'Geist',sans-serif;letter-spacing:.08em;padding:3px 5px;}
+      .cvz-pv-remove{position:absolute;pointer-events:none;z-index:1;outline:2px solid #ef4444;
+        background:repeating-linear-gradient(135deg,rgba(239,68,68,.32) 0 8px,rgba(239,68,68,.08) 8px 16px);}
+      .cvz-pv-remove-tag{position:absolute;left:-2px;top:-17px;background:#ef4444;color:#fff;font:700 10px/1 'Geist',sans-serif;padding:3px 6px;}
+      .cvz-pv-draft{outline:2px dashed #f59e0b!important;outline-offset:2px;z-index:2;}
+      .cvz-pv-after.cvz-pv-draft{box-shadow:0 0 0 4px rgba(245,158,11,.25),0 4px 14px rgba(0,0,0,.18);}
       .cvz-pv-legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:#94a3b8;margin:0 0 0 auto;}
       .cvz-pv-legend span{display:inline-flex;align-items:center;gap:6px;}
       .cvz-pv-legend i{width:10px;height:10px;border-radius:50%;display:inline-block;}
@@ -244,6 +275,16 @@
       .cvz-pv-tabs button.cvz-pv-on{color:#4fd1c5;border-bottom-color:#4fd1c5;}
       .cvz-pv-tools{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px;align-items:center;}
       .cvz-pv-tools .cvz-pv-hint{font-size:12px;color:#718096;flex:1 1 100%;}
+      .cvz-pv-tools .cvz-pv-hint:empty{display:none;}
+      .cvz-pv-zoom{display:inline-flex;}
+      .cvz-pv-zoom .cvz-pv-btn{padding:9px 10px;min-width:34px;justify-content:center;}
+      .cvz-pv-zoom .cvz-pv-btn + .cvz-pv-btn{border-left:0;}
+      .cvz-pv-zoom .cvz-pv-zval{min-width:62px;font-family:'DM Mono',monospace;}
+      .cvz-pv-grip{position:absolute;left:0;top:0;bottom:0;width:10px;cursor:col-resize;z-index:3;touch-action:none;}
+      .cvz-pv-grip::after{content:'';position:absolute;left:2px;top:50%;width:2px;height:48px;margin-top:-24px;background:rgba(79,209,197,.5);}
+      .cvz-pv-grip:hover::after,.cvz-pv-resizing .cvz-pv-grip::after,.cvz-pv-grip:focus-visible::after{background:#4fd1c5;height:100%;top:0;margin-top:0;}
+      .cvz-pv-drawer.cvz-pv-resizing{transition:none;}
+      @media(max-width:900px){.cvz-pv-grip{display:none;}}
       .cvz-pv-dbody{flex:1;min-height:0;display:flex;flex-direction:column;}
       .cvz-pv-dbody > .cvz-pv{flex:1 1 56%;min-height:160px;display:flex;flex-direction:column;margin:0 16px;}
       .cvz-pv-dbody .cvz-pv-stage{flex:1 1 auto;min-height:0;}
@@ -253,6 +294,17 @@
          begrenzen, sonst ragt es rechts heraus und verschiebt beim Scrollen das ganze Panel */
       .cvz-pv-export .cvz-xp-wrap{position:static;}
       .cvz-pv-export .cvz-xp-pop{left:0;right:0;width:auto;max-width:none;transform:none;}
+      .cvz-pv-editor{display:flex;flex-direction:column;gap:8px;}
+      .cvz-pv-ed-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:4px;}
+      .cvz-pv-ed-title{font:700 15px/1.3 'Syne','Geist',sans-serif;color:#f0f4f8;}
+      .cvz-pv-ed-current{font-size:13px;color:#a3b5c4;line-height:1.5;padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);overflow-wrap:anywhere;}
+      .cvz-pv-ed-arts{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;}
+      .cvz-pv-ed-input{width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.15);color:#e8edf5;
+        font:400 14px/1.45 'Geist','DM Sans',sans-serif;padding:10px 12px;border-radius:0;resize:vertical;}
+      .cvz-pv-ed-input:focus{outline:none;border-color:#4fd1c5;box-shadow:0 0 0 3px rgba(79,209,197,.15);}
+      .cvz-pv-ed-hint{font-size:12px;color:#94a3b8;min-height:0;}
+      .cvz-pv-ed-hint:empty{display:none;}
+      label.cvz-chg-lbl{display:block;margin-top:6px;}
       .cvz-pv-selbar{display:flex;align-items:center;gap:14px;padding:0 0 10px;font-size:12px;color:#94a3b8;}
       .cvz-pv-check{display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:#e2e8f0;font-weight:600;}
       .cvz-pv-check input,.cvz-pv-cb{width:16px;height:16px;accent-color:#4fd1c5;margin:4px 0 0;flex-shrink:0;cursor:pointer;}
@@ -268,6 +320,7 @@
       .cvz-chg-lbl{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#718096;margin-bottom:2px;}
       .cvz-chg-old{font-size:13px;color:#94a3b8;text-decoration:line-through;text-decoration-color:rgba(239,68,68,.6);overflow-wrap:anywhere;}
       .cvz-chg-new{font-size:15px;font-weight:600;color:inherit;overflow-wrap:anywhere;}
+      .cvz-chg-keep{font-size:13px;color:#94a3b8;overflow-wrap:anywhere;}
       .cvz-chg-why{font-size:12px;color:#94a3b8;padding:8px 12px 0;line-height:1.5;}
       .cvz-chg-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px 12px;}
       .cvz-chg-state{font-size:12px;font-weight:600;}
@@ -310,6 +363,8 @@
     root.appendChild(stage);
 
     let changes = [];
+    let draft = null; // Entwurf aus dem Element-Editor, noch nicht gespeichert
+    let zoom = 1; // 1 = Screenshot so breit wie die Ansicht
     let pickMode = false;
     let selected = { marker: null, element: null };
 
@@ -338,7 +393,10 @@
       // Große Elemente zuerst zeichnen, kleine danach: So liegen kleine Elemente (Button, Überschrift)
       // oben und bleiben anklickbar, auch wenn ein großer Abschnitt sie umschließt.
       const area = (id) => { const e = snap.byId.get(id); return e ? e.box.w * e.box.h : 0; };
-      const elementIds = (showPick ? snap.elements.map((e) => e.id) : [...markersByEl.keys()]).sort((a, b) => area(b) - area(a));
+      const ids = showPick ? snap.elements.map((e) => e.id) : [...markersByEl.keys()];
+      // Ein ausgewähltes Element ohne Marker (z.B. im Editor) trotzdem hervorheben
+      if (selected.element && ids.indexOf(selected.element) === -1 && snap.byId.has(selected.element)) ids.push(selected.element);
+      const elementIds = ids.sort((a, b) => area(b) - area(a));
 
       elementIds.forEach((id) => {
         const el = snap.byId.get(id);
@@ -384,34 +442,63 @@
         });
       }
 
-      // Vorschau übernommener Texte
-      changes.filter((c) => c.status === 'accepted').forEach((c) => {
-        const el = snap.byId.get(c.element_id);
-        if (!el) return;
-        if (INLINE_PREVIEW_KINDS[el.kind]) {
-          const ov = h('div', 'cvz-pv-after' + (el.kind === 'cta' ? ' cvz-pv-cta' : el.kind === 'headline' ? ' cvz-pv-head' : ''), c.nachher);
-          ov.dataset.el = el.id;
-          ov.dataset.kind = el.kind;
-          ov.style.left = pct(el.box.x);
-          ov.style.top = pct(el.box.y);
-          if (el.kind === 'cta') {
-            // Button wächst wie ein echter Button mit längerem Text in die Breite
-            ov.style.minWidth = pct(el.box.w);
-            ov.style.height = pct(el.box.h);
-          } else {
-            // Text wächst wie echter Text nach unten, wenn er länger ist als vorher
-            ov.style.width = pct(el.box.w);
-            ov.style.minHeight = pct(el.box.h);
-          }
-          layer.appendChild(ov);
-        } else {
-          const tag = h('div', 'cvz-pv-tag', 'Neu: ' + oneLine(c.nachher, 90));
-          tag.style.left = pct(el.box.x);
-          tag.style.top = pct(el.box.y);
-          layer.appendChild(tag);
-        }
-      });
+      // Vorschau übernommener Änderungen, dazu der Entwurf aus dem Editor (gestrichelt orange)
+      changes.filter((c) => c.status === 'accepted').forEach((c) => drawChange(c, false));
+      if (draft) drawChange(draft, true);
       fitPreviews();
+    }
+
+    // Zeichnet eine Änderung auf den Screenshot:
+    //   text        neuer Text liegt über dem alten (Überschrift, Button, Absatz), bei großen
+    //               Bereichen (Hero, Formular) nur ein Etikett "Neu: ..."
+    //   neu_danach  neuer Text erscheint direkt unter dem Element, das Element bleibt sichtbar
+    //   entfernen   Element wird rot schraffiert
+    function drawChange(c, isDraft) {
+      const el = snap.byId.get(c.element_id);
+      if (!el) return;
+      const art = artOf(c);
+      const extra = isDraft ? ' cvz-pv-draft' : '';
+      if (art === 'entfernen') {
+        const ov = h('div', 'cvz-pv-remove' + extra);
+        place(ov, el.box);
+        ov.appendChild(h('span', 'cvz-pv-remove-tag', 'Entfernen'));
+        layer.appendChild(ov);
+        return;
+      }
+      if (!String(c.nachher || '').trim()) return;
+      if (art === 'neu_danach') {
+        const ov = h('div', 'cvz-pv-after cvz-pv-insert' + extra, c.nachher);
+        ov.dataset.el = el.id;
+        ov.dataset.kind = el.kind;
+        ov.dataset.art = 'neu_danach';
+        ov.style.left = pct(el.box.x);
+        ov.style.top = 'calc(' + pct(el.box.y + el.box.h) + ' + 6px)';
+        ov.style.width = pct(Math.min(Math.max(el.box.w, 0.3), 1 - el.box.x));
+        layer.appendChild(ov);
+        return;
+      }
+      if (INLINE_PREVIEW_KINDS[el.kind]) {
+        const ov = h('div', 'cvz-pv-after' + (el.kind === 'cta' ? ' cvz-pv-cta' : el.kind === 'headline' ? ' cvz-pv-head' : '') + extra, c.nachher);
+        ov.dataset.el = el.id;
+        ov.dataset.kind = el.kind;
+        ov.style.left = pct(el.box.x);
+        ov.style.top = pct(el.box.y);
+        if (el.kind === 'cta') {
+          // Button wächst wie ein echter Button mit längerem Text in die Breite
+          ov.style.minWidth = pct(el.box.w);
+          ov.style.height = pct(el.box.h);
+        } else {
+          // Text wächst wie echter Text nach unten, wenn er länger ist als vorher
+          ov.style.width = pct(el.box.w);
+          ov.style.minHeight = pct(el.box.h);
+        }
+        layer.appendChild(ov);
+      } else {
+        const tag = h('div', 'cvz-pv-tag' + extra, 'Neu: ' + oneLine(c.nachher, 90));
+        tag.style.left = pct(el.box.x);
+        tag.style.top = pct(el.box.y);
+        layer.appendChild(tag);
+      }
     }
 
     // Schriftgröße der Vorschau aus dem Original schätzen: Fläche des alten Elements geteilt
@@ -428,7 +515,15 @@
         const bw = el.box.w * W;
         const bh = el.box.h * H;
         let size;
-        if (ov.dataset.kind === 'cta') {
+        if (ov.dataset.art === 'neu_danach') {
+          // Neue Zeile unter einem Button: kleine Zusatzzeile. Unter Text: so groß wie der Text.
+          if (ov.dataset.kind === 'cta') size = bh * 0.3;
+          else {
+            const len = Math.max(8, String(el.text || '').length);
+            size = Math.min(Math.sqrt((bw * bh) / (len * 0.62)), bh * 0.9);
+            if (ov.dataset.kind === 'headline') size *= 0.5; // Unterzeile unter einer Überschrift
+          }
+        } else if (ov.dataset.kind === 'cta') {
           size = bh * 0.42;
         } else {
           const len = Math.max(8, String(el.text || '').length);
@@ -446,12 +541,41 @@
       stage.appendChild(h('div', 'cvz-pv-empty', 'Der Screenshot konnte nicht geladen werden.'));
     });
 
+    // ── Zoom ── Die Breite des Bildes wird vervielfacht, die Ansicht scrollt in beide Richtungen.
+    // Alle Marker und Vorschauen sind in Prozent positioniert und wandern automatisch mit.
+    const ZOOM_MIN = 0.5;
+    const ZOOM_MAX = 4;
+    function setZoom(next, anchorX, anchorY) {
+      const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(next * 100) / 100));
+      if (z === zoom) return zoom;
+      // Punkt unter der Maus (oder Mitte) soll nach dem Zoomen an derselben Stelle bleiben
+      const ax = anchorX === undefined ? stage.clientWidth / 2 : anchorX;
+      const ay = anchorY === undefined ? stage.clientHeight / 2 : anchorY;
+      const fx = (stage.scrollLeft + ax) / (canvas.clientWidth || 1);
+      const fy = (stage.scrollTop + ay) / (canvas.clientHeight || 1);
+      zoom = z;
+      canvas.style.width = zoom * 100 + '%';
+      stage.scrollLeft = fx * canvas.clientWidth - ax;
+      stage.scrollTop = fy * canvas.clientHeight - ay;
+      fitPreviews();
+      if (opts.onZoom) opts.onZoom(zoom);
+      return zoom;
+    }
+    // Strg/Cmd + Mausrad (und Pinch auf dem Trackpad) zoomt, normales Mausrad scrollt
+    stage.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const r = stage.getBoundingClientRect();
+      setZoom(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX - r.left, e.clientY - r.top);
+    }, { passive: false });
+
     function scrollToElement(id, smooth) {
       const el = snap.byId.get(id);
       if (!el) return;
       const doScroll = () => {
         const top = el.box.y * canvas.clientHeight - stage.clientHeight * 0.3;
-        stage.scrollTo({ top: Math.max(0, top), behavior: smooth === false ? 'auto' : 'smooth' });
+        const left = zoom > 1 ? el.box.x * canvas.clientWidth - stage.clientWidth * 0.1 : 0;
+        stage.scrollTo({ top: Math.max(0, top), left: Math.max(0, left), behavior: smooth === false ? 'auto' : 'smooth' });
       };
       if (img.complete && img.naturalWidth) doScroll();
       else img.addEventListener('load', doScroll, { once: true });
@@ -478,6 +602,13 @@
       setShowAfter(on) {
         root.classList.toggle('cvz-pv-hide-after', !on);
       },
+      setDraft(d) {
+        draft = d || null;
+        render();
+      },
+      setZoom: (z) => setZoom(z),
+      zoomBy: (f) => setZoom(zoom * f),
+      getZoom: () => zoom,
       scrollToElement,
     };
   }
@@ -645,11 +776,16 @@
   // ══════════════════════════════════════════════════════════════════════════
   // MODUS 2: AGENT
   // ══════════════════════════════════════════════════════════════════════════
+  const WIDTH_KEY = 'cvz-pv-width';
+  const PANEL_MIN = 360; // schmalstes Panel
+  const CHAT_MIN = 340; // so viel Platz bleibt mindestens für den Chat
+
   const agent = {
     analysisId: null,
     analysis: null,
     snap: null,
     changes: new Map(), // changeId -> {element_id, vorher, nachher, begruendung, status}
+    editing: null, // { el, art, nachher, warum } während "Element bearbeiten"
     deselected: new Set(), // changeIds, die beim Export nicht mitsollen (Standard: alle mit)
     branding: null, // White-Label-Einstellungen, einmal pro Seitenaufruf geladen
     libPromise: null, // Ladevorgang von cvz-export.js
@@ -689,7 +825,7 @@
     injectStyles();
     try {
       const res = await api('/api/agent/page-changes?analysis_id=' + encodeURIComponent(agent.analysisId));
-      (res.changes || []).forEach((c) => agent.changes.set(changeId(c.element_id, c.nachher), c));
+      (res.changes || []).forEach((c) => agent.changes.set(changeId(c.element_id, c.nachher, artOf(c)), c));
     } catch (e) {
       console.warn('[CVZ Seitenansicht] Entscheidungen nicht ladbar:', e.message);
     }
@@ -761,15 +897,28 @@
     agent.tChanges = tChanges;
 
     const tools = h('div', 'cvz-pv-tools');
-    const pick = h('button', 'cvz-pv-btn', 'Element wählen');
+    const pick = h('button', 'cvz-pv-btn', 'Element bearbeiten');
     pick.type = 'button';
     pick.setAttribute('aria-pressed', 'false');
     const after = h('button', 'cvz-pv-btn cvz-pv-on', 'Neue Texte zeigen');
     after.type = 'button';
     after.setAttribute('aria-pressed', 'true');
     const hint = h('div', 'cvz-pv-hint', '');
+    // Zoom: Minus, Prozentanzeige (Klick = zurück auf Breite), Plus
+    const zoomBox = h('div', 'cvz-pv-zoom');
+    const zOut = h('button', 'cvz-pv-btn', '−');
+    const zVal = h('button', 'cvz-pv-btn cvz-pv-zval', '100 %');
+    const zIn = h('button', 'cvz-pv-btn', '+');
+    zOut.setAttribute('aria-label', 'Verkleinern');
+    zIn.setAttribute('aria-label', 'Vergrößern');
+    zVal.title = 'Auf Panelbreite zurücksetzen (Strg + Mausrad zoomt ebenfalls)';
+    [zOut, zVal, zIn].forEach((b) => { b.type = 'button'; zoomBox.appendChild(b); });
+    zOut.addEventListener('click', () => agent.viewer.zoomBy(1 / 1.25));
+    zIn.addEventListener('click', () => agent.viewer.zoomBy(1.25));
+    zVal.addEventListener('click', () => agent.viewer.setZoom(1));
     tools.appendChild(pick);
     tools.appendChild(after);
+    tools.appendChild(zoomBox);
     tools.appendChild(legend());
     tools.appendChild(hint);
     d.appendChild(tools);
@@ -778,10 +927,10 @@
     agent.viewer = createViewer(snap, {
       onSelectMarker: selectMarker,
       onPickElement: (el) => {
-        prefill('[Element ' + el.id + ': ' + kindLabel(el) + (el.text ? ' "' + oneLine(el.text, 80) + '"' : '') + '] ');
         setPick(false);
-        if (window.innerWidth <= 900) closeDrawer();
+        openEditor(el);
       },
+      onZoom: (z) => { zVal.textContent = Math.round(z * 100) + ' %'; },
     });
     body.appendChild(agent.viewer.root);
     const dlist = h('div', 'cvz-pv-dlist');
@@ -794,8 +943,9 @@
       pick.classList.toggle('cvz-pv-on', on);
       pick.setAttribute('aria-pressed', on ? 'true' : 'false');
       agent.viewer.setPickMode(on);
-      hint.textContent = on ? 'Klick auf ein Element. Es wird in dein Eingabefeld übernommen, dann schreibst du deine Frage dazu.' : '';
+      hint.textContent = on ? 'Klick auf das Element, das du ändern willst. Du kannst den Text selbst anpassen oder den Agenten fragen.' : '';
     };
+    agent.setPick = setPick;
     pick.addEventListener('click', () => setPick(!pick.classList.contains('cvz-pv-on')));
     after.addEventListener('click', () => {
       const on = !after.classList.contains('cvz-pv-on');
@@ -819,12 +969,62 @@
       ],
     });
 
+    // Ziehgriff am linken Rand: Panel breiter oder schmaler ziehen (Desktop). Breite wird pro
+    // Browser gemerkt. Doppelklick wechselt zwischen Standard und breit.
+    const grip = h('div', 'cvz-pv-grip');
+    grip.setAttribute('role', 'separator');
+    grip.setAttribute('aria-orientation', 'vertical');
+    grip.setAttribute('aria-label', 'Panelbreite ändern');
+    grip.tabIndex = 0;
+    grip.title = 'Ziehen, um das Panel breiter oder schmaler zu machen (Doppelklick: breit)';
+    d.appendChild(grip);
+    const setWidth = (px, save) => {
+      if (window.innerWidth <= 900) { d.style.width = ''; return; }
+      const w = Math.round(Math.max(PANEL_MIN, Math.min(window.innerWidth - CHAT_MIN, px)));
+      d.style.width = w + 'px';
+      applyPush();
+      if (save) { try { window.localStorage.setItem(WIDTH_KEY, String(w)); } catch (e) { /* egal */ } }
+    };
+    agent.setWidth = setWidth;
+    let dragging = false;
+    grip.addEventListener('pointerdown', (e) => {
+      if (window.innerWidth <= 900) return;
+      dragging = true;
+      grip.setPointerCapture(e.pointerId);
+      d.classList.add('cvz-pv-resizing');
+      document.body.style.userSelect = 'none';
+    });
+    grip.addEventListener('pointermove', (e) => { if (dragging) setWidth(window.innerWidth - e.clientX, false); });
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      d.classList.remove('cvz-pv-resizing');
+      document.body.style.userSelect = '';
+      setWidth(d.offsetWidth, true);
+    };
+    grip.addEventListener('pointerup', endDrag);
+    grip.addEventListener('pointercancel', endDrag);
+    grip.addEventListener('dblclick', () => {
+      const wide = Math.round(window.innerWidth * 0.66);
+      setWidth(d.offsetWidth < wide - 20 ? wide : Math.min(600, window.innerWidth * 0.46), true);
+    });
+    grip.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') { setWidth(d.offsetWidth + 40, true); e.preventDefault(); }
+      if (e.key === 'ArrowRight') { setWidth(d.offsetWidth - 40, true); e.preventDefault(); }
+    });
+    try {
+      const saved = Number(window.localStorage.getItem(WIDTH_KEY));
+      if (saved) setWidth(saved, false);
+    } catch (e) { /* Speicher gesperrt: Standardbreite */ }
+
     document.body.appendChild(d);
     agent.drawer = d;
     agent.viewer.setChanges(acceptedChanges());
     renderList();
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || !d.classList.contains('cvz-pv-open')) return;
+      // Offener Editor: Escape schließt zuerst den Editor
+      if (agent.editing && !(e.target && e.target.closest && e.target.closest('.cvz-xp-wrap'))) { closeEditor(); return; }
       // Escape im Aufgaben-Menü schließt nur das Menü, nicht das ganze Panel
       // (Nach einem Export liegt der Fokus nicht mehr im Menü, dann schließen wir es hier.)
       // Fokus im Menü: cvz-export.js hat es eben selbst geschlossen (läuft vor diesem Handler)
@@ -837,7 +1037,10 @@
       }
       closeDrawer();
     });
-    window.addEventListener('resize', applyPush);
+    window.addEventListener('resize', () => {
+      if (d.style.width) setWidth(d.offsetWidth, false);
+      applyPush();
+    });
   }
 
   function switchTab(tab) {
@@ -856,9 +1059,153 @@
     if (agent.tChanges) agent.tChanges.textContent = 'Änderungen (' + n + ')';
   }
 
+  // ── Element selbst bearbeiten ───────────────────────────────────────────────
+  // Öffnet sich nach "Element bearbeiten" + Klick auf ein Element. Der Nutzer wählt die Art
+  // (Text ersetzen, neue Zeile darunter, entfernen), sieht den Entwurf sofort auf dem
+  // Screenshot und übernimmt ihn ins Briefing. Oder er schickt das Element an den Agenten.
+  const TEXT_KINDS = { headline: 1, cta: 1, text: 1, testimonial: 1 };
+
+  function openEditor(el) {
+    agent.editing = { el, art: TEXT_KINDS[el.kind] ? 'text' : 'neu_danach', nachher: null, warum: '' };
+    agent.viewer.select(null, el.id, true);
+    renderList();
+  }
+
+  function closeEditor() {
+    agent.editing = null;
+    agent.viewer.setDraft(null);
+    agent.viewer.select(null, null, false);
+    renderList();
+  }
+
+  function renderEditor(box) {
+    const ed = agent.editing;
+    const el = ed.el;
+    const wrap = h('div', 'cvz-pv-editor');
+
+    const head = h('div', 'cvz-pv-ed-head');
+    const ttl = h('div');
+    ttl.appendChild(h('div', 'cvz-pv-kicker', 'Element bearbeiten'));
+    ttl.appendChild(h('div', 'cvz-pv-ed-title', kindLabel(el) + ' (' + positionText(el) + ')'));
+    head.appendChild(ttl);
+    const back = h('button', 'cvz-pv-btn', 'Abbrechen');
+    back.type = 'button';
+    back.addEventListener('click', closeEditor);
+    head.appendChild(back);
+    wrap.appendChild(head);
+
+    if (el.text) {
+      wrap.appendChild(h('div', 'cvz-chg-lbl', 'Aktueller Text'));
+      wrap.appendChild(h('div', 'cvz-pv-ed-current', oneLine(el.text, 400)));
+    }
+
+    // Art der Änderung
+    const arts = h('div', 'cvz-pv-ed-arts');
+    arts.setAttribute('role', 'radiogroup');
+    arts.setAttribute('aria-label', 'Art der Änderung');
+    [['text', 'Text ersetzen'], ['neu_danach', 'Neue Zeile darunter'], ['entfernen', 'Entfernen']].forEach(([key, label]) => {
+      const b = h('button', 'cvz-pv-btn' + (ed.art === key ? ' cvz-pv-on' : ''), label);
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', ed.art === key ? 'true' : 'false');
+      b.addEventListener('click', () => {
+        if (ed.art === key) return;
+        ed.art = key;
+        ed.nachher = null; // neues Vorbefüllen passend zur Art
+        renderList();
+      });
+      arts.appendChild(b);
+    });
+    wrap.appendChild(arts);
+
+    let ta = null;
+    if (ed.art !== 'entfernen') {
+      if (ed.nachher === null) ed.nachher = ed.art === 'text' ? oneLine(el.text, 1000) : '';
+      const lbl = h('label', 'cvz-chg-lbl', ed.art === 'text' ? 'Neuer Text' : 'Text der neuen Zeile');
+      ta = h('textarea', 'cvz-pv-ed-input');
+      ta.rows = ed.art === 'text' && el.kind !== 'cta' ? 4 : 2;
+      ta.value = ed.nachher;
+      ta.placeholder = ed.art === 'text' ? 'Neuer Text für dieses Element' : 'z.B. "Keine Kreditkarte nötig. In 2 Minuten startklar."';
+      ta.maxLength = 1000;
+      lbl.htmlFor = ta.id = 'cvz-pv-ed-input';
+      wrap.appendChild(lbl);
+      wrap.appendChild(ta);
+    } else {
+      wrap.appendChild(h('div', 'cvz-pv-ed-hint', 'Das Element wird im Briefing als "entfernen" aufgeführt.'));
+    }
+
+    const whyLbl = h('label', 'cvz-chg-lbl', 'Warum? (optional, steht im Briefing)');
+    const why = h('input', 'cvz-pv-ed-input');
+    why.type = 'text';
+    why.maxLength = 400;
+    why.value = ed.warum;
+    whyLbl.htmlFor = why.id = 'cvz-pv-ed-why';
+    wrap.appendChild(whyLbl);
+    wrap.appendChild(why);
+
+    const note = h('div', 'cvz-pv-ed-hint', '');
+    const actions = h('div', 'cvz-pv-actions');
+    const ok = h('button', 'cvz-pv-btn cvz-pv-primary', 'Übernehmen');
+    const ask = h('button', 'cvz-pv-btn', 'Agent fragen');
+    ok.type = 'button';
+    ask.type = 'button';
+    actions.appendChild(ok);
+    actions.appendChild(ask);
+    wrap.appendChild(actions);
+    wrap.appendChild(note);
+
+    const current = () => ({
+      element_id: el.id,
+      art: ed.art,
+      vorher: el.text || '',
+      nachher: ed.art === 'entfernen' ? '' : String(ed.nachher || '').trim(),
+      begruendung: String(ed.warum || '').trim() || 'Eigene Änderung',
+    });
+    const update = () => {
+      const c = current();
+      const noop = isNoOp(c, el);
+      ok.disabled = noop;
+      note.textContent = noop ? (ed.art === 'text' && c.nachher ? 'Der Text ist noch unverändert.' : 'Bitte einen Text eingeben.') : '';
+      agent.viewer.setDraft(noop ? null : c);
+    };
+    if (ta) ta.addEventListener('input', () => { ed.nachher = ta.value; update(); });
+    why.addEventListener('input', () => { ed.warum = why.value; });
+    ok.addEventListener('click', async () => {
+      const c = current();
+      if (isNoOp(c, el)) return;
+      ok.disabled = true;
+      const saved = await setChangeStatus(c, 'accepted');
+      if (!saved) { ok.disabled = false; return; }
+      agent.editing = null;
+      agent.viewer.setDraft(null);
+      switchTab('changes');
+      agent.viewer.select(null, el.id, true);
+    });
+    ask.addEventListener('click', () => {
+      const c = current();
+      let text = '[Element ' + el.id + ': ' + kindLabel(el) + (el.text ? ' "' + oneLine(el.text, 80) + '"' : '') + '] ';
+      if (!isNoOp(c, el)) {
+        text += c.art === 'entfernen' ? 'Ich überlege, das zu entfernen. Was meinst du? '
+          : c.art === 'neu_danach' ? 'Ich möchte darunter ergänzen: "' + c.nachher + '". Was meinst du? '
+          : 'Mein Entwurf: "' + c.nachher + '". Was meinst du? ';
+      }
+      closeEditor();
+      prefill(text);
+      if (window.innerWidth <= 900) closeDrawer();
+    });
+
+    box.appendChild(wrap);
+    update();
+    if (ta) setTimeout(() => { try { ta.focus({ preventScroll: true }); } catch (e) { ta.focus(); } }, 0);
+  }
+
   function renderList() {
     const box = agent.dlist;
     box.textContent = '';
+    if (agent.editing) {
+      renderEditor(box);
+      return;
+    }
     if (agent.tab === 'marker') {
       box.appendChild(agent.list.root);
       return;
@@ -871,7 +1218,7 @@
     }
 
     // Auswahl für den Export: standardmäßig alles, abgewählte merken wir uns
-    const keyOf = (c) => changeId(c.element_id, c.nachher);
+    const keyOf = (c) => changeId(c.element_id, c.nachher, artOf(c));
     const selected = () => acc.filter((c) => !agent.deselected.has(keyOf(c)));
 
     const bar = h('div', 'cvz-pv-selbar');
@@ -951,17 +1298,20 @@
       head.appendChild(cb);
       head.appendChild(h('span', 'cvz-pv-num', i + 1));
       const txt = h('span');
-      txt.appendChild(h('div', 'cvz-pv-meta', kindLabel(el)));
-      txt.appendChild(h('div', 'cvz-pv-prob', c.nachher));
+      const art = artOf(c);
+      txt.appendChild(h('div', 'cvz-pv-meta', artTitle(art, el)));
+      txt.appendChild(h('div', 'cvz-pv-prob', art === 'entfernen' ? oneLine(c.vorher || (el && el.text) || '', 160) : c.nachher));
       head.appendChild(txt);
       item.appendChild(head);
       const body = h('div', 'cvz-pv-body');
-      if (c.vorher) body.appendChild(h('div', 'cvz-chg-old', c.vorher));
+      if (art === 'text' && c.vorher) body.appendChild(h('div', 'cvz-chg-old', c.vorher));
+      if (art === 'neu_danach' && c.vorher) body.appendChild(h('div', 'cvz-chg-keep', 'Unter: ' + oneLine(c.vorher, 160)));
       const actions = h('div', 'cvz-pv-actions');
       const show = h('button', 'cvz-pv-btn', 'Auf der Seite zeigen');
       show.type = 'button';
       show.addEventListener('click', () => agent.viewer.select(null, c.element_id, true));
-      const rm = h('button', 'cvz-pv-btn', 'Entfernen');
+      // Bewusst nicht "Entfernen": das ist schon die Art "Element entfernen"
+      const rm = h('button', 'cvz-pv-btn', 'Aus Briefing nehmen');
       rm.type = 'button';
       rm.addEventListener('click', () => setChangeStatus(c, 'open'));
       actions.appendChild(show);
@@ -1032,26 +1382,56 @@
         return;
       }
       const el = agent.snap.byId.get(data && data.element_id);
-      if (!el || !data.nachher) {
+      if (!el || (!data.nachher && data.art !== 'entfernen')) {
         code.parentElement.remove();
         return;
       }
-      const key = changeId(data.element_id, data.nachher);
+      const art = artOf(data);
+      if (isNoOp({ art, nachher: data.nachher }, el)) {
+        code.parentElement.remove(); // Vorschlag ohne Änderung (z.B. gleicher Button-Text) nicht anzeigen
+        return;
+      }
+      const key = changeId(data.element_id, data.nachher, art);
       const card = buildChangeCard({
         element_id: data.element_id,
+        art,
         vorher: data.vorher || el.text || '',
-        nachher: String(data.nachher),
+        nachher: art === 'entfernen' ? '' : String(data.nachher),
         begruendung: data.begruendung || '',
       }, el, key);
       code.parentElement.replaceWith(card);
     });
   }
 
+  // Zeilen einer Änderung, je nach Art: ersetzen (Jetzt/Neu), neu darunter (Bleibt/Neu darunter),
+  // entfernen (Wird entfernt). Wird in den Karten im Chat und im Editor-Vorschau benutzt.
+  function appendChangeRows(card, change, el) {
+    const art = artOf(change);
+    const row = (label, text, cls) => {
+      if (!text) return;
+      const r = h('div', 'cvz-chg-row');
+      r.appendChild(h('div', 'cvz-chg-lbl', label));
+      r.appendChild(h('div', cls, text));
+      card.appendChild(r);
+    };
+    const vorher = oneLine(change.vorher || (el && el.text) || '', 300);
+    if (art === 'text') {
+      row('Jetzt', vorher, 'cvz-chg-old');
+      row('Neu', change.nachher, 'cvz-chg-new');
+    } else if (art === 'neu_danach') {
+      row('Bleibt', vorher, 'cvz-chg-keep');
+      row('Neu darunter', change.nachher, 'cvz-chg-new');
+    } else {
+      row('Wird entfernt', vorher || kindLabel(el), 'cvz-chg-old');
+    }
+  }
+
   function buildChangeCard(change, el, key) {
     const card = h('div', 'cvz-chg');
     card.dataset.key = key;
     const head = h('div', 'cvz-chg-head');
-    head.appendChild(h('span', 'cvz-chg-kind', 'Vorschlag: ' + kindLabel(el)));
+    const art = artOf(change);
+    head.appendChild(h('span', 'cvz-chg-kind', 'Vorschlag: ' + artTitle(art, el)));
     const show = h('button', 'cvz-chg-show', 'Auf der Seite zeigen');
     show.type = 'button';
     show.addEventListener('click', () => {
@@ -1061,16 +1441,7 @@
     head.appendChild(show);
     card.appendChild(head);
 
-    if (change.vorher) {
-      const r1 = h('div', 'cvz-chg-row');
-      r1.appendChild(h('div', 'cvz-chg-lbl', 'Jetzt'));
-      r1.appendChild(h('div', 'cvz-chg-old', oneLine(change.vorher, 300)));
-      card.appendChild(r1);
-    }
-    const r2 = h('div', 'cvz-chg-row');
-    r2.appendChild(h('div', 'cvz-chg-lbl', 'Neu'));
-    r2.appendChild(h('div', 'cvz-chg-new', change.nachher));
-    card.appendChild(r2);
+    appendChangeRows(card, change, el);
     if (change.begruendung) card.appendChild(h('div', 'cvz-chg-why', change.begruendung));
 
     const actions = h('div', 'cvz-chg-actions');
@@ -1104,13 +1475,15 @@
 
   async function setChangeStatus(change, status, buttons) {
     (buttons || []).forEach((b) => (b.disabled = true));
-    const key = changeId(change.element_id, change.nachher);
+    const key = changeId(change.element_id, change.nachher, artOf(change));
+    let ok = false;
     try {
       await api('/api/agent/page-changes', {
         method: 'POST',
         body: {
           analysis_id: agent.analysisId,
           element_id: change.element_id,
+          art: artOf(change),
           vorher: change.vorher,
           nachher: change.nachher,
           begruendung: change.begruendung,
@@ -1120,6 +1493,7 @@
       if (status === 'open') agent.changes.delete(key);
       else agent.changes.set(key, Object.assign({}, change, { status: status }));
       if (status === 'accepted') toast('Übernommen. Du findest es unter "Änderungen".');
+      ok = true;
     } catch (e) {
       toast('Speichern fehlgeschlagen: ' + e.message);
     }
@@ -1128,6 +1502,7 @@
     agent.viewer.setChanges(acceptedChanges());
     updateTabBadge();
     if (agent.tab === 'changes') renderList();
+    return ok;
   }
 
   // ── Briefing-Export ─────────────────────────────────────────────────────────
@@ -1145,9 +1520,17 @@
     md += 'Die Positionsangaben beziehen sich auf den Screenshot vom ' + formatDate(agent.snap.captured_at) + '.\n\n---\n\n';
     acc.forEach((c, i) => {
       const el = agent.snap.byId.get(c.element_id);
-      md += '## ' + (i + 1) + '. ' + kindLabel(el) + ' (' + positionText(el) + ')\n\n';
-      if (c.vorher) md += '**Aktuell:** ' + oneLine(c.vorher) + '\n\n';
-      md += '**Neu:** ' + c.nachher + '\n\n';
+      const art = artOf(c);
+      md += '## ' + (i + 1) + '. ' + artTitle(art, el) + ' (' + positionText(el) + ')\n\n';
+      if (art === 'text') {
+        if (c.vorher) md += '**Aktuell:** ' + oneLine(c.vorher) + '\n\n';
+        md += '**Neu:** ' + c.nachher + '\n\n';
+      } else if (art === 'neu_danach') {
+        md += '**Einfügen direkt unter:** ' + (oneLine(c.vorher) || kindLabel(el)) + '\n\n';
+        md += '**Neuer Text:** ' + c.nachher + '\n\n';
+      } else {
+        md += '**Entfernen:** ' + (oneLine(c.vorher) || kindLabel(el)) + '\n\n';
+      }
       if (c.begruendung) md += '**Warum:** ' + c.begruendung + '\n\n';
       md += '---\n\n';
     });
@@ -1225,13 +1608,15 @@
       tasks.push({
         id: 'c' + (i + 1),
         parentId: parent.id,
-        title: X.truncate(kindLabel(el) + ' ändern: ' + c.nachher, 110),
+        title: X.truncate(artTitle(artOf(c), el) + ': ' + (artOf(c) === 'entfernen' ? oneLine(c.vorher) || kindLabel(el) : c.nachher), 110),
         priority,
         filterId: 'change',
         description: [
           'Element: ' + kindLabel(el) + ' (' + positionText(el) + ')',
-          c.vorher ? 'Aktuell:\n' + oneLine(c.vorher) : '',
-          'Neu:\n' + c.nachher,
+          artOf(c) === 'text' && c.vorher ? 'Aktuell:\n' + oneLine(c.vorher) : '',
+          artOf(c) === 'text' ? 'Neu:\n' + c.nachher : '',
+          artOf(c) === 'neu_danach' ? 'Einfügen direkt unter:\n' + (oneLine(c.vorher) || kindLabel(el)) + '\n\nNeuer Text:\n' + c.nachher : '',
+          artOf(c) === 'entfernen' ? 'Entfernen:\n' + (oneLine(c.vorher) || kindLabel(el)) : '',
           c.begruendung ? 'Warum:\n' + c.begruendung : '',
           'Seite: ' + (a.landing_page_url || ''),
         ].filter(Boolean).join('\n\n'),
@@ -1520,7 +1905,7 @@
       doc.setLineWidth(0.2);
       doc.line(ML, y, PW - MR, y);
       y += 7;
-      para((i + 1) + '. ' + kindLabel(el) + '  (' + positionText(el) + ')', 11.5, C.text, true);
+      para((i + 1) + '. ' + artTitle(artOf(c), el) + '  (' + positionText(el) + ')', 11.5, C.text, true);
       y += 1.5;
       if (crop) {
         doc.addImage(crop.data, 'JPEG', ML, y, imgW, imgH, undefined, 'FAST');
@@ -1539,8 +1924,16 @@
         para(text, bold ? 10.5 : 9.5, color, bold);
         y += 2.5;
       };
-      row('Aktuell', c.vorher ? oneLine(c.vorher, 600) : '', C.mid, false);
-      row('Neu', c.nachher, C.text, true);
+      const art = artOf(c);
+      if (art === 'text') {
+        row('Aktuell', c.vorher ? oneLine(c.vorher, 600) : '', C.mid, false);
+        row('Neu', c.nachher, C.text, true);
+      } else if (art === 'neu_danach') {
+        row('Einfügen direkt unter', oneLine(c.vorher, 600) || kindLabel(el), C.mid, false);
+        row('Neu', c.nachher, C.text, true);
+      } else {
+        row('Entfernen', oneLine(c.vorher, 600) || kindLabel(el), C.text, true);
+      }
       row('Warum', c.begruendung, C.mid, false);
       y += 3;
     });
