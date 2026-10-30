@@ -305,6 +305,9 @@
       .cvz-pv-ed-hint{font-size:12px;color:#94a3b8;min-height:0;}
       .cvz-pv-ed-hint:empty{display:none;}
       label.cvz-chg-lbl{display:block;margin-top:6px;}
+      .cvz-pv-opt{align-items:flex-start;font-weight:600;font-size:13px;margin:4px 0;}
+      .cvz-pv-opt input{margin-top:2px;}
+      .cvz-pv-opt-hint{display:block;font-weight:400;color:#94a3b8;font-size:12px;margin-top:2px;}
       .cvz-pv-selbar{display:flex;align-items:center;gap:14px;padding:0 0 10px;font-size:12px;color:#94a3b8;}
       .cvz-pv-check{display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:#e2e8f0;font-weight:600;}
       .cvz-pv-check input,.cvz-pv-cb{width:16px;height:16px;accent-color:#4fd1c5;margin:4px 0 0;flex-shrink:0;cursor:pointer;}
@@ -786,6 +789,7 @@
     snap: null,
     changes: new Map(), // changeId -> {element_id, vorher, nachher, begruendung, status}
     editing: null, // { el, art, nachher, warum } während "Element bearbeiten"
+    pdfDialog: null, // { withMarkers, withChanges } während der Auswahl für "Seite als PDF"
     deselected: new Set(), // changeIds, die beim Export nicht mitsollen (Standard: alle mit)
     branding: null, // White-Label-Einstellungen, einmal pro Seitenaufruf geladen
     libPromise: null, // Ladevorgang von cvz-export.js
@@ -916,9 +920,18 @@
     zOut.addEventListener('click', () => agent.viewer.zoomBy(1 / 1.25));
     zIn.addEventListener('click', () => agent.viewer.zoomBy(1.25));
     zVal.addEventListener('click', () => agent.viewer.setZoom(1));
+    const pdfBtn = h('button', 'cvz-pv-btn', 'Seite als PDF');
+    pdfBtn.type = 'button';
+    pdfBtn.addEventListener('click', () => {
+      agent.editing = null;
+      agent.viewer.setDraft(null);
+      agent.pdfDialog = agent.pdfDialog ? null : { withMarkers: agent.snap.markers.length > 0, withChanges: selectedChanges().length > 0 };
+      renderList();
+    });
     tools.appendChild(pick);
     tools.appendChild(after);
     tools.appendChild(zoomBox);
+    tools.appendChild(pdfBtn);
     tools.appendChild(legend());
     tools.appendChild(hint);
     d.appendChild(tools);
@@ -1025,6 +1038,7 @@
       if (e.key !== 'Escape' || !d.classList.contains('cvz-pv-open')) return;
       // Offener Editor: Escape schließt zuerst den Editor
       if (agent.editing && !(e.target && e.target.closest && e.target.closest('.cvz-xp-wrap'))) { closeEditor(); return; }
+      if (agent.pdfDialog) { agent.pdfDialog = null; renderList(); return; }
       // Escape im Aufgaben-Menü schließt nur das Menü, nicht das ganze Panel
       // (Nach einem Export liegt der Fokus nicht mehr im Menü, dann schließen wir es hier.)
       // Fokus im Menü: cvz-export.js hat es eben selbst geschlossen (läuft vor diesem Handler)
@@ -1045,6 +1059,7 @@
 
   function switchTab(tab) {
     agent.tab = tab;
+    agent.pdfDialog = null;
     agent.tMarker.classList.toggle('cvz-pv-on', tab === 'marker');
     agent.tChanges.classList.toggle('cvz-pv-on', tab === 'changes');
     renderList();
@@ -1066,6 +1081,7 @@
   const TEXT_KINDS = { headline: 1, cta: 1, text: 1, testimonial: 1 };
 
   function openEditor(el) {
+    agent.pdfDialog = null;
     agent.editing = { el, art: TEXT_KINDS[el.kind] ? 'text' : 'neu_danach', nachher: null, warum: '' };
     agent.viewer.select(null, el.id, true);
     renderList();
@@ -1204,6 +1220,10 @@
     box.textContent = '';
     if (agent.editing) {
       renderEditor(box);
+      return;
+    }
+    if (agent.pdfDialog) {
+      renderPdfDialog(box);
       return;
     }
     if (agent.tab === 'marker') {
@@ -1773,15 +1793,18 @@
     }
   }
 
-  async function exportPdf(acc) {
+  // ── Gemeinsames PDF-Gerüst (Briefing und Seitenansicht) ─────────────────────
+  // Kopf, Titelbereich, Folgeseiten-Kopf, Fußzeile und Branding an einer Stelle. White-Label:
+  // helles Theme mit Logo und Akzentfarbe des Kunden, ohne jeden Hinweis auf Convertlyze.
+  async function startPdf(title) {
     if (!window.jspdf || !window.jspdf.jsPDF) {
       toast('PDF-Export nicht verfügbar, nutze Markdown oder CSV');
-      return;
+      return null;
     }
     const br = await getBranding().catch(() => null);
     if (!br) {
       toast('Export abgebrochen: Branding konnte nicht geladen werden. Bitte erneut versuchen.');
-      return;
+      return null;
     }
     toast('PDF wird erstellt ...');
     const WL = br.whiteLabel;
@@ -1791,169 +1814,531 @@
     ]);
 
     const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
-    const PW = 210, PH = 297, ML = 18, MR = 18, MB = 18;
-    const CW = PW - ML - MR;
-    // White-Label: helles, neutrales Theme mit der Akzentfarbe des Kunden (Fallback Blau wie im
-    // Server-Export). Convertlyze: dunkle Kopfzeile mit Teal wie beim Chat-Export.
-    const accent = WL ? (hexToRgb(br.accent) || [37, 99, 235]) : [79, 209, 197];
-    const accentHex = WL ? (br.accent || '#2563eb') : '#4fd1c5';
-    const C = { dark: [31, 41, 55], text: [17, 24, 39], mid: [75, 85, 99], light: [156, 163, 175], border: [229, 231, 235] };
-    let y = 0;
+    const P = {
+      doc, br, WL, shot,
+      PW: 210, PH: 297, ML: 18, MR: 18, MB: 18, CW: 174,
+      // Akzent: Kundenfarbe (Fallback Blau wie im Server-Export) bzw. Convertlyze-Teal
+      accent: WL ? (hexToRgb(br.accent) || [37, 99, 235]) : [79, 209, 197],
+      accentHex: WL ? (br.accent || '#2563eb') : '#4fd1c5',
+      C: { dark: [31, 41, 55], text: [17, 24, 39], mid: [75, 85, 99], light: [156, 163, 175], border: [229, 231, 235] },
+      y: 0,
+    };
     const a = agent.analysis || {};
 
     // Logo in eine Box einpassen, Seitenverhältnis bleibt erhalten
     const drawLogo = (x, top, maxW, maxH) => {
       if (!logo) return 0;
       let w = maxW;
-      let h = w / logo.ratio;
-      if (h > maxH) { h = maxH; w = h * logo.ratio; }
-      doc.addImage(logo.data, 'PNG', x, top + (maxH - h) / 2, w, h, undefined, 'FAST');
+      let hh = w / logo.ratio;
+      if (hh > maxH) { hh = maxH; w = hh * logo.ratio; }
+      doc.addImage(logo.data, 'PNG', x, top + (maxH - hh) / 2, w, hh, undefined, 'FAST');
       return w;
     };
-
-    const runningHeader = () => {
+    P.runningHeader = () => {
       if (WL) {
-        doc.setFillColor.apply(doc, accent);
-        doc.rect(0, 0, PW, 1.2, 'F');
-        drawLogo(ML, 4, 34, 9);
-        doc.setDrawColor.apply(doc, C.border);
+        doc.setFillColor.apply(doc, P.accent);
+        doc.rect(0, 0, P.PW, 1.2, 'F');
+        drawLogo(P.ML, 4, 34, 9);
+        doc.setDrawColor.apply(doc, P.C.border);
         doc.setLineWidth(0.2);
-        doc.line(ML, 16, PW - MR, 16);
-        doc.setTextColor.apply(doc, C.light);
+        doc.line(P.ML, 16, P.PW - P.MR, 16);
+        doc.setTextColor.apply(doc, P.C.light);
       } else {
-        doc.setFillColor.apply(doc, C.dark);
-        doc.rect(0, 0, PW, 16, 'F');
-        doc.setFillColor.apply(doc, accent);
-        doc.rect(0, 16, PW, 0.6, 'F');
-        drawLogo(ML, 3, 36, 10);
+        doc.setFillColor.apply(doc, P.C.dark);
+        doc.rect(0, 0, P.PW, 16, 'F');
+        doc.setFillColor.apply(doc, P.accent);
+        doc.rect(0, 16, P.PW, 0.6, 'F');
+        drawLogo(P.ML, 3, 36, 10);
         doc.setTextColor(200, 200, 200);
       }
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7.5);
-      doc.text(pdfText('Änderungs-Briefing'), PW - MR, 10, { align: 'right' });
-      y = 26;
+      doc.text(pdfText(title), P.PW - P.MR, 10, { align: 'right' });
+      P.y = 26;
     };
-    const ensure = (need) => {
-      if (y + need > PH - MB) {
-        doc.addPage();
-        runningHeader();
-      }
-    };
-    const para = (text, size, color, bold, indent) => {
+    P.newPage = () => { doc.addPage(); P.runningHeader(); };
+    P.ensure = (need) => { if (P.y + need > P.PH - P.MB) P.newPage(); };
+    P.para = (text, size, color, bold, indent) => {
       doc.setFont('helvetica', bold ? 'bold' : 'normal');
       doc.setFontSize(size);
       doc.setTextColor.apply(doc, color);
-      const lines = doc.splitTextToSize(pdfText(text), CW - (indent || 0));
+      const lines = doc.splitTextToSize(pdfText(text), P.CW - (indent || 0));
       lines.forEach((ln) => {
-        ensure(size * 0.5);
-        doc.text(ln, ML + (indent || 0), y);
-        y += size * 0.45;
+        P.ensure(size * 0.5);
+        doc.text(ln, P.ML + (indent || 0), P.y);
+        P.y += size * 0.45;
       });
     };
+    // Beschriftete Zeile (kleines Label in Großbuchstaben, darunter Text)
+    P.row = (label, text, color, bold, indent) => {
+      if (!text) return;
+      P.ensure(10);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor.apply(doc, label === 'Neu' ? P.accent : P.C.light);
+      doc.text(pdfText(label.toUpperCase()), P.ML + (indent || 0), P.y);
+      P.y += 4.2;
+      P.para(text, bold ? 10.5 : 9.5, color, bold, indent);
+      P.y += 2.5;
+    };
+    P.rule = () => {
+      doc.setDrawColor.apply(doc, P.C.border);
+      doc.setLineWidth(0.2);
+      doc.line(P.ML, P.y, P.PW - P.MR, P.y);
+    };
+    // Zeilen einer Änderung je nach Art (gleiche Wörter wie im Markdown-Briefing)
+    P.changeRows = (c, el, indent) => {
+      const art = artOf(c);
+      if (art === 'text') {
+        P.row('Aktuell', c.vorher ? oneLine(c.vorher, 600) : '', P.C.mid, false, indent);
+        P.row('Neu', c.nachher, P.C.text, true, indent);
+      } else if (art === 'neu_danach') {
+        P.row('Einfügen direkt unter', oneLine(c.vorher, 600) || kindLabel(el), P.C.mid, false, indent);
+        P.row('Neu', c.nachher, P.C.text, true, indent);
+      } else {
+        P.row('Entfernen', oneLine(c.vorher, 600) || kindLabel(el), P.C.text, true, indent);
+      }
+      P.row('Warum', c.begruendung, P.C.mid, false, indent);
+    };
 
-    // Titelbereich
+    // Titelbereich der ersten Seite
     if (WL) {
-      doc.setFillColor.apply(doc, accent);
-      doc.rect(0, 0, PW, 2, 'F');
-      const lw = drawLogo(ML, 10, 60, 16);
+      doc.setFillColor.apply(doc, P.accent);
+      doc.rect(0, 0, P.PW, 2, 'F');
+      const lw = drawLogo(P.ML, 10, 60, 16);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(18);
-      doc.setTextColor.apply(doc, C.text);
-      doc.text(pdfText('Änderungs-Briefing'), ML, lw ? 38 : 24);
+      doc.setTextColor.apply(doc, P.C.text);
+      doc.text(pdfText(title), P.ML, lw ? 38 : 24);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9.5);
-      doc.setTextColor.apply(doc, C.mid);
-      doc.text(pdfText(oneLine(a.landing_page_url || '', 95)), ML, lw ? 45 : 31);
-      doc.setDrawColor.apply(doc, accent);
+      doc.setTextColor.apply(doc, P.C.mid);
+      doc.text(pdfText(oneLine(a.landing_page_url || '', 95)), P.ML, lw ? 45 : 31);
+      doc.setDrawColor.apply(doc, P.accent);
       doc.setLineWidth(0.6);
-      doc.line(ML, lw ? 50 : 36, ML + 24, lw ? 50 : 36);
-      y = lw ? 60 : 46;
+      doc.line(P.ML, lw ? 50 : 36, P.ML + 24, lw ? 50 : 36);
+      P.y = lw ? 60 : 46;
     } else {
-      doc.setFillColor.apply(doc, C.dark);
-      doc.rect(0, 0, PW, 50, 'F');
-      doc.setFillColor.apply(doc, accent);
-      doc.rect(0, 49, PW, 1, 'F');
-      if (!drawLogo(ML, 9, 52, 14)) {
+      doc.setFillColor.apply(doc, P.C.dark);
+      doc.rect(0, 0, P.PW, 50, 'F');
+      doc.setFillColor.apply(doc, P.accent);
+      doc.rect(0, 49, P.PW, 1, 'F');
+      if (!drawLogo(P.ML, 9, 52, 14)) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(20);
         doc.setTextColor(255, 255, 255);
-        doc.text('Convertlyze', ML, 20);
+        doc.text('Convertlyze', P.ML, 20);
       }
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(16);
       doc.setTextColor(255, 255, 255);
-      doc.text(pdfText('Änderungs-Briefing'), ML, 36);
+      doc.text(pdfText(title), P.ML, 36);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(200, 205, 214);
-      doc.text(pdfText(oneLine(a.landing_page_url || '', 95)), ML, 43);
-      y = 60;
+      doc.text(pdfText(oneLine(a.landing_page_url || '', 95)), P.ML, 43);
+      P.y = 60;
     }
 
-    para('Erstellt am ' + new Date().toLocaleDateString('de-DE') + '. ' + acc.length + (acc.length === 1 ? ' Änderung' : ' Änderungen') +
-      '. Die Markierung im Ausschnitt zeigt die Stelle auf der Seite (Screenshot vom ' + formatDate(agent.snap.captured_at) + ').', 9.5, C.mid, false);
-    y += 4;
+    // Fußzeilen setzen und speichern
+    P.finish = (fileName) => {
+      const pages = doc.internal.getNumberOfPages();
+      for (let p = 1; p <= pages; p++) {
+        doc.setPage(p);
+        doc.setDrawColor.apply(doc, P.C.border);
+        doc.setLineWidth(0.3);
+        doc.line(P.ML, P.PH - 11, P.PW - P.MR, P.PH - 11);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor.apply(doc, P.C.light);
+        // White-Label: kein Hinweis auf Convertlyze, nur Seitenzahlen
+        if (!WL) doc.text('Erstellt mit Convertlyze  -  convertlyze.com', P.ML, P.PH - 5);
+        if (pages > 1) doc.text(p + ' / ' + pages, P.PW - P.MR, P.PH - 5, { align: 'right' });
+      }
+      doc.setProperties({ title: pdfText(title), creator: WL ? '' : 'Convertlyze', author: WL ? '' : 'Convertlyze' });
+      doc.save(fileName);
+    };
+    return P;
+  }
+
+  async function exportPdf(acc) {
+    const P = await startPdf('Änderungs-Briefing');
+    if (!P) return;
+    const doc = P.doc;
+    P.para('Erstellt am ' + new Date().toLocaleDateString('de-DE') + '. ' + acc.length + (acc.length === 1 ? ' Änderung' : ' Änderungen') +
+      '. Die Markierung im Ausschnitt zeigt die Stelle auf der Seite (Screenshot vom ' + formatDate(agent.snap.captured_at) + ').', 9.5, P.C.mid, false);
+    P.y += 4;
 
     acc.forEach((c, i) => {
       const el = agent.snap.byId.get(c.element_id);
-      const crop = shot ? cropAround(shot, el, accentHex) : null;
-      const imgH = crop ? Math.min(78, CW * crop.ratio) : 0;
+      const crop = P.shot ? cropAround(P.shot, el, P.accentHex) : null;
+      const imgH = crop ? Math.min(78, P.CW * crop.ratio) : 0;
       const imgW = crop ? imgH / crop.ratio : 0;
-      ensure(14 + imgH + 30);
-
-      doc.setDrawColor.apply(doc, C.border);
-      doc.setLineWidth(0.2);
-      doc.line(ML, y, PW - MR, y);
-      y += 7;
-      para((i + 1) + '. ' + artTitle(artOf(c), el) + '  (' + positionText(el) + ')', 11.5, C.text, true);
-      y += 1.5;
+      P.ensure(14 + imgH + 30);
+      P.rule();
+      P.y += 7;
+      P.para((i + 1) + '. ' + artTitle(artOf(c), el) + '  (' + positionText(el) + ')', 11.5, P.C.text, true);
+      P.y += 1.5;
       if (crop) {
-        doc.addImage(crop.data, 'JPEG', ML, y, imgW, imgH, undefined, 'FAST');
-        doc.setDrawColor.apply(doc, C.border);
-        doc.rect(ML, y, imgW, imgH);
-        y += imgH + 6;
+        doc.addImage(crop.data, 'JPEG', P.ML, P.y, imgW, imgH, undefined, 'FAST');
+        doc.setDrawColor.apply(doc, P.C.border);
+        doc.rect(P.ML, P.y, imgW, imgH);
+        P.y += imgH + 6;
       }
-      const row = (label, text, color, bold) => {
-        if (!text) return;
-        ensure(10);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(7.5);
-        doc.setTextColor.apply(doc, label === 'Neu' ? accent : C.light);
-        doc.text(label.toUpperCase(), ML, y);
-        y += 4.2;
-        para(text, bold ? 10.5 : 9.5, color, bold);
-        y += 2.5;
-      };
-      const art = artOf(c);
-      if (art === 'text') {
-        row('Aktuell', c.vorher ? oneLine(c.vorher, 600) : '', C.mid, false);
-        row('Neu', c.nachher, C.text, true);
-      } else if (art === 'neu_danach') {
-        row('Einfügen direkt unter', oneLine(c.vorher, 600) || kindLabel(el), C.mid, false);
-        row('Neu', c.nachher, C.text, true);
-      } else {
-        row('Entfernen', oneLine(c.vorher, 600) || kindLabel(el), C.text, true);
-      }
-      row('Warum', c.begruendung, C.mid, false);
-      y += 3;
+      P.changeRows(c, el);
+      P.y += 3;
     });
 
-    const pages = doc.internal.getNumberOfPages();
-    for (let p = 1; p <= pages; p++) {
-      doc.setPage(p);
-      doc.setDrawColor.apply(doc, C.border);
-      doc.setLineWidth(0.3);
-      doc.line(ML, PH - 11, PW - MR, PH - 11);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-      doc.setTextColor.apply(doc, C.light);
-      // White-Label: kein Hinweis auf Convertlyze, nur Seitenzahlen
-      if (!WL) doc.text('Erstellt mit Convertlyze  -  convertlyze.com', ML, PH - 5);
-      if (pages > 1) doc.text(p + ' / ' + pages, PW - MR, PH - 5, { align: 'right' });
+    P.finish(fileBase(P.br) + '.pdf');
+    toast(P.shot ? 'PDF exportiert' : 'PDF exportiert (ohne Ausschnitte, Bild nicht ladbar)');
+  }
+
+  // ── Seitenansicht als PDF ───────────────────────────────────────────────────
+  // Die ganze Seite als Bild über mehrere A4-Seiten, wahlweise mit eingezeichneten Markern
+  // und/oder den übernommenen Änderungen. Danach die Texte zu den Markern und Änderungen.
+  // Gezeichnet wird auf ein Canvas (nicht per DOM), damit das PDF unabhängig von Zoom und
+  // Panelbreite immer gleich aussieht.
+
+  const SEV_ORDER = { critical: 0, high: 1, medium: 2 };
+
+  function wrapLines(ctx, text, maxW) {
+    const words = String(text || '').split(/\s+/).filter(Boolean);
+    const lines = [];
+    let line = '';
+    words.forEach((w) => {
+      const test = line ? line + ' ' + w : w;
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; } else line = test;
+    });
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  function estimateFont(el, bw, bh) {
+    const len = Math.max(8, String(el.text || '').length);
+    return Math.max(9, Math.min(Math.sqrt((bw * bh) / (len * 0.62)), bh * 0.9, 72));
+  }
+
+  // Zeichnet Screenshot plus Ebenen auf ein Canvas (in Bildpixeln)
+  function renderAnnotated(img, opt) {
+    const W = img.naturalWidth;
+    const H = img.naturalHeight;
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const FONT = 'Helvetica, Arial, sans-serif';
+    const px = (el) => ({ x: el.box.x * W, y: el.box.y * H, w: el.box.w * W, h: el.box.h * H });
+    const badge = (x, y, label, bg, fg) => {
+      ctx.font = 'bold 13px ' + FONT;
+      const w = ctx.measureText(label).width + 12;
+      ctx.fillStyle = bg;
+      ctx.fillRect(x, y - 18, w, 18);
+      ctx.fillStyle = fg;
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, x + 6, y - 9);
+      return w;
+    };
+
+    // 1) Änderungen
+    (opt.changes || []).forEach((ch, i) => {
+      const el = agent.snap.byId.get(ch.element_id);
+      if (!el) return;
+      const b = px(el);
+      const art = artOf(ch);
+      const tag = 'Ä' + (i + 1);
+      if (art === 'entfernen') {
+        ctx.save();
+        ctx.fillStyle = 'rgba(239,68,68,0.18)';
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.beginPath();
+        ctx.rect(b.x, b.y, b.w, b.h);
+        ctx.clip();
+        ctx.strokeStyle = 'rgba(239,68,68,0.55)';
+        ctx.lineWidth = 4;
+        for (let d = -b.h; d < b.w; d += 16) {
+          ctx.beginPath();
+          ctx.moveTo(b.x + d, b.y + b.h);
+          ctx.lineTo(b.x + d + b.h, b.y);
+          ctx.stroke();
+        }
+        ctx.restore();
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
+        badge(b.x, b.y, tag + ' Entfernen', '#ef4444', '#ffffff');
+        return;
+      }
+      if (!String(ch.nachher || '').trim()) return;
+      let box;
+      let fs;
+      let bg = '#ffffff';
+      let fg = '#111827';
+      let weight = el.kind === 'headline' ? 'bold' : 'normal';
+      let border = opt.accentHex;
+      if (art === 'neu_danach') {
+        fs = el.kind === 'cta' ? Math.max(11, b.h * 0.3) : estimateFont(el, b.w, b.h) * (el.kind === 'headline' ? 0.5 : 1);
+        box = { x: b.x, y: b.y + b.h + 8, w: Math.min(Math.max(b.w, W * 0.3), W - b.x) };
+        bg = '#f0fdf4';
+        border = '#22c55e';
+        weight = 'normal';
+      } else if (el.kind === 'cta') {
+        fs = Math.max(11, b.h * 0.42);
+        box = { x: b.x, y: b.y, w: b.w, h: b.h, cta: true };
+        bg = opt.accentHex;
+        fg = '#0d1117';
+        border = '#0d1117';
+        weight = 'bold';
+      } else if (INLINE_PREVIEW_KINDS[el.kind]) {
+        fs = estimateFont(el, b.w, b.h);
+        box = { x: b.x, y: b.y, w: b.w };
+      } else {
+        // Großer Bereich (Hero, Formular ...): nur ein Etikett mit dem neuen Text
+        fs = 14;
+        box = { x: b.x, y: b.y, w: Math.min(W * 0.6, W - b.x), label: true };
+      }
+      ctx.font = weight + ' ' + fs + 'px ' + FONT;
+      const pad = Math.max(4, fs * 0.3);
+      const lineH = fs * 1.2;
+      let lines;
+      if (box.cta) {
+        const tw = ctx.measureText(ch.nachher).width + pad * 4;
+        box.w = Math.min(Math.max(box.w, tw), W - box.x);
+        lines = [ch.nachher];
+      } else {
+        lines = wrapLines(ctx, box.label ? 'Neu: ' + ch.nachher : ch.nachher, box.w - pad * 2);
+        box.h = Math.max(art === 'text' && !box.label ? b.h : 0, lines.length * lineH + pad * 2);
+      }
+      ctx.fillStyle = bg;
+      ctx.fillRect(box.x, box.y, box.w, box.h);
+      ctx.setLineDash([8, 5]);
+      ctx.strokeStyle = border;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(box.x, box.y, box.w, box.h);
+      ctx.setLineDash([]);
+      ctx.fillStyle = fg;
+      ctx.textBaseline = 'top';
+      lines.forEach((ln, k) => {
+        if (box.cta) {
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(ln, box.x + box.w / 2, box.y + box.h / 2);
+          ctx.textAlign = 'left';
+        } else {
+          ctx.fillText(ln, box.x + pad, box.y + pad + k * lineH);
+        }
+      });
+      badge(box.x, box.y, art === 'neu_danach' ? tag + ' Neu' : tag, art === 'neu_danach' ? '#22c55e' : opt.accentHex, '#0d1117');
+    });
+
+    // 2) Marker
+    if (opt.markers) {
+      const perEl = new Map();
+      agent.snap.markers.forEach((m) => {
+        const el = agent.snap.byId.get(m.element_id);
+        if (!el) return;
+        const b = px(el);
+        const col = sevOf(m.severity).color;
+        const k = perEl.get(el.id) || 0;
+        perEl.set(el.id, k + 1);
+        if (k === 0) {
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 3;
+          ctx.strokeRect(b.x, b.y, b.w, b.h);
+        }
+        const r = 15;
+        const cx = Math.max(r + 2, b.x) + k * (r * 2 + 4);
+        const cy = Math.max(r + 2, b.y);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#0d1117';
+        ctx.stroke();
+        ctx.fillStyle = '#0d1117';
+        ctx.font = 'bold 15px ' + FONT;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(m.n), cx, cy + 1);
+        ctx.textAlign = 'left';
+      });
     }
-    doc.setProperties({ title: 'Änderungs-Briefing', creator: WL ? '' : 'Convertlyze', author: WL ? '' : 'Convertlyze' });
-    doc.save(fileBase(br) + '.pdf');
-    toast(shot ? 'PDF exportiert' : 'PDF exportiert (ohne Ausschnitte, Bild nicht ladbar)');
+    return c;
+  }
+
+  async function exportPagePdf(opt) {
+    const changes = opt.withChanges ? selectedChanges() : [];
+    const title = opt.withChanges && changes.length ? 'Seitenansicht mit Änderungen' : 'Seitenansicht';
+    const P = await startPdf(title);
+    if (!P) return;
+    if (!P.shot) {
+      toast('Der Screenshot konnte nicht geladen werden, PDF abgebrochen.');
+      return;
+    }
+    const doc = P.doc;
+    let canvas;
+    try {
+      canvas = renderAnnotated(P.shot, { markers: opt.withMarkers, changes, accentHex: P.accentHex });
+      canvas.getContext('2d').getImageData(0, 0, 1, 1); // wirft, falls das Bild das Canvas sperrt (CORS)
+    } catch (e) {
+      toast('Der Screenshot darf nicht ins PDF (Speicher-Einstellung). Bitte melden.');
+      return;
+    }
+
+    const parts = [];
+    if (opt.withMarkers && agent.snap.markers.length) parts.push(agent.snap.markers.length + ' Marker');
+    if (changes.length) parts.push(changes.length + (changes.length === 1 ? ' Änderung' : ' Änderungen'));
+    P.para('Erstellt am ' + new Date().toLocaleDateString('de-DE') + '. Screenshot vom ' + formatDate(agent.snap.captured_at) + '.' +
+      (parts.length ? ' Eingezeichnet: ' + parts.join(' und ') + ', Erklärungen nach dem Screenshot.' : ' Ist-Zustand ohne Markierungen.') +
+      (agent.snap.cropped ? ' Sehr lange Seite: Der untere Teil ist abgeschnitten.' : ''), 9.5, P.C.mid, false);
+    P.y += 2;
+    if (opt.withMarkers && agent.snap.markers.length) {
+      // Legende der Farben
+      let lx = P.ML;
+      ['critical', 'high', 'medium'].forEach((k) => {
+        doc.setFillColor.apply(doc, hexToRgb(SEV[k].color));
+        doc.circle(lx + 1.5, P.y + 0.5, 1.5, 'F');
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor.apply(doc, P.C.mid);
+        doc.text(SEV[k].label, lx + 4.5, P.y + 1.6);
+        lx += 25;
+      });
+      P.y += 6;
+    }
+    P.y += 2;
+
+    // Bild in Streifen über die Seiten verteilen
+    const W = canvas.width;
+    const mmPerPx = P.CW / W;
+    let srcY = 0;
+    while (srcY < canvas.height) {
+      let avail = P.PH - P.MB - 4 - P.y;
+      if (avail < 40) { P.newPage(); avail = P.PH - P.MB - 4 - P.y; }
+      const sliceH = Math.min(canvas.height - srcY, Math.floor(avail / mmPerPx));
+      const part = document.createElement('canvas');
+      part.width = W;
+      part.height = sliceH;
+      part.getContext('2d').drawImage(canvas, 0, srcY, W, sliceH, 0, 0, W, sliceH);
+      const hmm = sliceH * mmPerPx;
+      doc.addImage(part.toDataURL('image/jpeg', 0.85), 'JPEG', P.ML, P.y, P.CW, hmm, undefined, 'FAST');
+      doc.setDrawColor.apply(doc, P.C.border);
+      doc.setLineWidth(0.2);
+      doc.rect(P.ML, P.y, P.CW, hmm);
+      srcY += sliceH;
+      P.y += hmm + 4;
+      if (srcY < canvas.height) P.newPage();
+    }
+
+    // Texte zu den Markern
+    if (opt.withMarkers && agent.snap.markers.length) {
+      P.newPage();
+      P.para('Marker', 14, P.C.text, true);
+      P.y += 3;
+      agent.snap.markers.forEach((m) => {
+        const el = agent.snap.byId.get(m.element_id);
+        const sev = sevOf(m.severity);
+        P.ensure(24);
+        P.rule();
+        P.y += 6;
+        doc.setFillColor.apply(doc, hexToRgb(sev.color));
+        doc.circle(P.ML + 3, P.y - 1.2, 3, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(13, 17, 23);
+        doc.text(String(m.n), P.ML + 3, P.y, { align: 'center' });
+        doc.setFontSize(7.5);
+        doc.setTextColor.apply(doc, P.C.light);
+        doc.text(pdfText((catName(m.category) + '  ·  ' + sev.label + '  ·  ' + kindLabel(el)).toUpperCase()), P.ML + 9, P.y);
+        P.y += 5;
+        P.para(m.problem, 10, P.C.text, true, 9);
+        P.y += 1.5;
+        if (m.loesung) P.row('Lösung', m.loesung, P.C.mid, false, 9);
+        P.y += 2;
+      });
+    }
+
+    // Texte zu den Änderungen
+    if (changes.length) {
+      P.newPage();
+      P.para('Änderungen', 14, P.C.text, true);
+      P.y += 3;
+      changes.forEach((c, i) => {
+        const el = agent.snap.byId.get(c.element_id);
+        P.ensure(28);
+        P.rule();
+        P.y += 6;
+        P.para('Ä' + (i + 1) + '  ' + artTitle(artOf(c), el) + '  (' + positionText(el) + ')', 11, P.C.text, true);
+        P.y += 1.5;
+        P.changeRows(c, el);
+        P.y += 2;
+      });
+    }
+
+    P.finish(fileBase(P.br).replace('briefing', 'seitenansicht') + (changes.length ? '-mit-aenderungen' : '') + '.pdf');
+    toast('PDF exportiert');
+  }
+
+  // Für Exporte: übernommene Änderungen, die im Reiter "Änderungen" angehakt sind
+  function selectedChanges() {
+    return acceptedChanges().filter((c) => !agent.deselected.has(changeId(c.element_id, c.nachher, artOf(c))));
+  }
+
+  // Auswahl-Dialog im Panel (statt Popup, funktioniert auch auf dem Handy)
+  function renderPdfDialog(box) {
+    const opt = agent.pdfDialog;
+    const nChanges = selectedChanges().length;
+    if (!nChanges) opt.withChanges = false;
+    const wrap = h('div', 'cvz-pv-editor');
+    const head = h('div', 'cvz-pv-ed-head');
+    const ttl = h('div');
+    ttl.appendChild(h('div', 'cvz-pv-kicker', 'Export'));
+    ttl.appendChild(h('div', 'cvz-pv-ed-title', 'Seite als PDF'));
+    head.appendChild(ttl);
+    const back = h('button', 'cvz-pv-btn', 'Abbrechen');
+    back.type = 'button';
+    back.addEventListener('click', () => { agent.pdfDialog = null; renderList(); });
+    head.appendChild(back);
+    wrap.appendChild(head);
+
+    const check = (label, key, disabled, hint) => {
+      const l = h('label', 'cvz-pv-check cvz-pv-opt');
+      const cb = h('input');
+      cb.type = 'checkbox';
+      cb.checked = !!opt[key];
+      cb.disabled = !!disabled;
+      cb.addEventListener('change', () => { opt[key] = cb.checked; });
+      l.appendChild(cb);
+      const t = h('span');
+      t.appendChild(h('span', null, label));
+      if (hint) t.appendChild(h('small', 'cvz-pv-opt-hint', hint));
+      l.appendChild(t);
+      wrap.appendChild(l);
+    };
+    check('Marker einzeichnen und erklären', 'withMarkers', !agent.snap.markers.length,
+      agent.snap.markers.length ? agent.snap.markers.length + ' Marker, mit Problem und Lösung im Anhang' : 'Keine Marker vorhanden');
+    check('Übernommene Änderungen einzeichnen', 'withChanges', !nChanges,
+      nChanges ? nChanges + (nChanges === 1 ? ' Änderung' : ' Änderungen') + ' (Auswahl aus dem Reiter "Änderungen"), mit Texten im Anhang'
+        : 'Noch keine Änderungen übernommen oder ausgewählt');
+    wrap.appendChild(h('div', 'cvz-pv-ed-hint', 'Ohne beide Häkchen enthält das PDF nur den Ist-Zustand der Seite.'));
+
+    const actions = h('div', 'cvz-pv-actions');
+    const go = h('button', 'cvz-pv-btn cvz-pv-primary', 'PDF erstellen');
+    go.type = 'button';
+    go.addEventListener('click', async () => {
+      go.disabled = true;
+      try {
+        await exportPagePdf(opt);
+      } catch (e) {
+        console.error('[CVZ Seitenansicht] Seiten-PDF:', e);
+        toast('PDF-Export fehlgeschlagen');
+      }
+      go.disabled = false;
+    });
+    actions.appendChild(go);
+    wrap.appendChild(actions);
+    box.appendChild(wrap);
   }
 
   // ── Start ───────────────────────────────────────────────────────────────────
