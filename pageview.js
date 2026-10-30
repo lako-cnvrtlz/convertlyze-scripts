@@ -45,6 +45,8 @@
   // Anzeigenamen wie im Report
   const CAT_DISPLAY = { Wettbewerb: 'Differenzierung', 'Search Intent': 'Suchabsicht', 'AI Readiness': 'KI-Sichtbarkeit' };
   const catName = (c) => CAT_DISPLAY[c] || c || '';
+  // "Betrifft auch: Content, Zielgruppe" für zusammengefasste Findings (gleiches Problem)
+  const alsoText = (m) => (m && Array.isArray(m.also) && m.also.length ? 'Betrifft auch: ' + m.also.map((a) => catName(a.category)).join(', ') : '');
 
 
 
@@ -113,6 +115,8 @@
     s.markers = Array.isArray(s.markers) ? s.markers : [];
     s.byId = new Map(s.elements.map((e) => [e.id, e]));
     s.markers = s.markers.filter((m) => s.byId.has(m.element_id));
+    // Empfehlungen ohne festen Platz. null = alte Seitenansicht ohne diese Angabe (dann kein Hinweis)
+    s.unplaced = Array.isArray(s.unplaced) ? s.unplaced : null;
     return s;
   }
 
@@ -214,6 +218,15 @@
       .cvz-pv-meta{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#a3b5c4;margin-bottom:3px;}
       .cvz-pv-prob{font-size:14px;font-weight:600;color:#e8edf5;line-height:1.45;overflow-wrap:anywhere;}
       .cvz-pv-body{display:none;padding:0 14px 14px 48px;}
+      .cvz-pv-also{font-size:12px;color:#a78bfa;margin-top:4px;}
+      .cvz-pv-unplaced{border:1px dashed rgba(255,255,255,.15);padding:10px 14px;margin-top:4px;}
+      .cvz-pv-unplaced > summary{cursor:pointer;font-size:13px;font-weight:600;color:#cbd5e1;}
+      .cvz-pv-unplaced > summary:focus-visible{outline:2px solid #4fd1c5;outline-offset:2px;}
+      .cvz-pv-unplaced .cvz-pv-ed-hint{margin:8px 0;}
+      .cvz-pv-up{border-left:3px solid var(--c,#718096);padding:6px 0 8px 10px;margin-top:8px;}
+      .cvz-pv-up-prob{font-size:13px;color:#e2e8f0;line-height:1.45;margin-bottom:6px;overflow-wrap:anywhere;}
+      .cvz-pv-more-link{display:inline-block;font-size:13px;color:#94a3b8;margin:-4px 0 14px;text-decoration:underline;text-decoration-color:rgba(148,163,184,.4);}
+      .cvz-pv-more-link:hover{color:#4fd1c5;}
       .cvz-pv-item.cvz-pv-sel .cvz-pv-body{display:block;}
       .cvz-pv-sol{font-size:13px;color:#c4cdd6;line-height:1.6;overflow-wrap:anywhere;}
       .cvz-pv-sol b{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#4fd1c5;margin-right:6px;}
@@ -641,6 +654,7 @@
       const txt = h('span');
       txt.appendChild(h('div', 'cvz-pv-meta', catName(m.category) + ' · ' + sev.label + ' · ' + kindLabel(el)));
       txt.appendChild(h('div', 'cvz-pv-prob', m.problem));
+      if (alsoText(m)) txt.appendChild(h('div', 'cvz-pv-also', alsoText(m)));
       head.appendChild(txt);
       head.addEventListener('click', () => opts.onSelectMarker(m.n, 'list'));
 
@@ -663,6 +677,27 @@
       list.appendChild(item);
       items.set(m.n, item);
     });
+    // Empfehlungen ohne festen Platz (fehlende Inhalte, Technik, Performance ...)
+    if (snap.unplaced && snap.unplaced.length) {
+      const det = h('details', 'cvz-pv-unplaced');
+      det.appendChild(h('summary', null, snap.unplaced.length + (snap.unplaced.length === 1 ? ' weitere Empfehlung' : ' weitere Empfehlungen') + ' ohne festen Platz auf der Seite'));
+      det.appendChild(h('div', 'cvz-pv-ed-hint', 'Zum Beispiel fehlende Inhalte oder technische Punkte. Sie stehen vollständig im Deep Dive des Reports.'));
+      snap.unplaced.forEach((u) => {
+        const row = h('div', 'cvz-pv-up');
+        row.style.setProperty('--c', sevOf(u.severity).color);
+        row.appendChild(h('div', 'cvz-pv-meta', catName(u.category) + ' · ' + sevOf(u.severity).label +
+          (u.also_categories && u.also_categories.length ? ' · auch ' + u.also_categories.map(catName).join(', ') : '')));
+        row.appendChild(h('div', 'cvz-pv-up-prob', u.problem));
+        if (opts.onDiscussUnplaced) {
+          const b = h('button', 'cvz-pv-btn', 'Im Chat besprechen');
+          b.type = 'button';
+          b.addEventListener('click', () => opts.onDiscussUnplaced(u));
+          row.appendChild(b);
+        }
+        det.appendChild(row);
+      });
+      list.appendChild(det);
+    }
     return {
       root: list,
       select(n, scroll) {
@@ -759,6 +794,17 @@
       chips.appendChild(chip);
     });
     info.appendChild(chips);
+    if (snap.unplaced && snap.unplaced.length) {
+      const n2 = snap.unplaced.length;
+      const more = h('a', 'cvz-pv-more-link', '+ ' + n2 + (n2 === 1 ? ' weitere Empfehlung' : ' weitere Empfehlungen') + ' ohne festen Platz auf der Seite, im Deep Dive');
+      more.href = '#';
+      more.addEventListener('click', (e) => {
+        e.preventDefault();
+        const dd = document.querySelector('.section-deep-dive-hero');
+        if (dd) dd.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      info.appendChild(more);
+    }
     info.appendChild(h('p', 'cvz-pv-ttext', isCreator
       ? 'Im KI-Agenten siehst du jede Stelle auf dem Screenshot deiner Seite, lässt dir neue Texte vorschlagen und gibst die Änderungen als Briefing an deine Agentur.'
       : 'Die Seitenansicht mit Änderungsvorschlägen ist im KI-Agenten des Erstellers dieser Analyse verfügbar. Die markierte Seite kannst du hier als PDF herunterladen.'));
@@ -961,7 +1007,7 @@
     agent.viewer = createViewer(snap, {
       onSelectMarker: selectMarker,
       onPickElement: (el) => {
-        setPick(false);
+        // Bearbeiten-Modus bleibt an: Ein Klick auf ein anderes Element wechselt direkt dorthin
         openEditor(el);
       },
       onZoom: (z) => { zVal.textContent = Math.round(z * 100) + ' %'; },
@@ -977,7 +1023,9 @@
       pick.classList.toggle('cvz-pv-on', on);
       pick.setAttribute('aria-pressed', on ? 'true' : 'false');
       agent.viewer.setPickMode(on);
-      hint.textContent = on ? 'Klick auf das Element, das du ändern willst. Du kannst den Text selbst anpassen oder den Agenten fragen.' : '';
+      hint.textContent = on ? 'Klick auf das Element, das du ändern willst. Ein Klick auf ein anderes Element wechselt direkt dorthin.' : '';
+      // Bearbeiten-Modus ausschalten schließt auch einen offenen Editor
+      if (!on && agent.editing) closeEditor(true);
     };
     agent.setPick = setPick;
     pick.addEventListener('click', () => setPick(!pick.classList.contains('cvz-pv-on')));
@@ -990,6 +1038,10 @@
 
     agent.list = createMarkerList(snap, {
       onSelectMarker: selectMarker,
+      onDiscussUnplaced: (u) => {
+        prefill('Lass uns diese Empfehlung angehen (' + catName(u.category) + '): ' + oneLine(u.problem, 200) + ' Was schlägst du konkret vor, und wo auf der Seite gehört das hin?');
+        if (window.innerWidth <= 900) closeDrawer();
+      },
       actions: [
         (m) => {
           const b = h('button', 'cvz-pv-btn cvz-pv-primary', 'Im Chat besprechen');
@@ -1101,17 +1153,31 @@
   // Screenshot und übernimmt ihn ins Briefing. Oder er schickt das Element an den Agenten.
   const TEXT_KINDS = { headline: 1, cta: 1, link: 1, text: 1, testimonial: 1 };
 
+  // Hat der Nutzer im offenen Editor schon etwas geändert, das noch nicht übernommen ist?
+  function editorDirty() {
+    const ed = agent.editing;
+    if (!ed) return false;
+    const start = ed.art === 'text' ? oneLine(ed.el.text, 1000) : '';
+    return (ed.nachher !== null && String(ed.nachher).trim() !== start.trim()) || !!String(ed.warum || '').trim() || ed.art === 'entfernen';
+  }
+
   function openEditor(el) {
+    if (agent.editing && agent.editing.el.id === el.id) return; // gleiches Element: nichts tun
+    if (editorDirty()) toast('Entwurf für "' + kindLabel(agent.editing.el) + '" verworfen.');
     agent.pdfDialog = null;
     agent.editing = { el, art: TEXT_KINDS[el.kind] ? 'text' : 'neu_danach', nachher: null, warum: '' };
-    agent.viewer.select(null, el.id, true);
+    agent.viewer.setDraft(null);
+    agent.viewer.select(null, el.id, false);
     renderList();
   }
 
-  function closeEditor() {
+  // Abbrechen/Escape beendet das Bearbeiten ganz (Editor zu, Bearbeiten-Modus aus).
+  // fromPick: Aufruf aus setPick selbst, dann nicht noch einmal setPick auslösen.
+  function closeEditor(fromPick) {
     agent.editing = null;
     agent.viewer.setDraft(null);
     agent.viewer.select(null, null, false);
+    if (!fromPick && agent.setPick) agent.setPick(false);
     renderList();
   }
 
@@ -1127,7 +1193,7 @@
     head.appendChild(ttl);
     const back = h('button', 'cvz-pv-btn', 'Abbrechen');
     back.type = 'button';
-    back.addEventListener('click', closeEditor);
+    back.addEventListener('click', () => closeEditor());
     head.appendChild(back);
     wrap.appendChild(head);
 
@@ -2229,6 +2295,7 @@
     if (changes.length) parts.push(changes.length + (changes.length === 1 ? ' Änderung' : ' Änderungen'));
     P.para('Erstellt am ' + new Date().toLocaleDateString('de-DE') + '. Screenshot vom ' + formatDate(agent.snap.captured_at) + '.' +
       (parts.length ? ' Eingezeichnet: ' + parts.join(' und ') + ', Erklärungen nach dem Screenshot.' : ' Ist-Zustand ohne Markierungen.') +
+      (opt.withMarkers && agent.snap.unplaced && agent.snap.unplaced.length ? ' Dazu ' + agent.snap.unplaced.length + ' Empfehlungen ohne festen Platz auf der Seite (im Anhang).' : '') +
       (agent.snap.cropped ? ' Sehr lange Seite: Der untere Teil ist abgeschnitten.' : ''), 9.5, P.C.mid, false);
     P.y += 2;
     if (opt.withMarkers && agent.snap.markers.length) {
@@ -2307,10 +2374,32 @@
         doc.text(pdfText((catName(m.category) + '  ·  ' + sev.label + '  ·  ' + kindLabel(el)).toUpperCase()), P.ML + 9, P.y);
         P.y += 5;
         P.para(m.problem, 10, P.C.text, true, 9);
+        if (alsoText(m)) P.para(alsoText(m), 8.5, P.C.mid, false, 9);
         P.y += 1.5;
         if (m.loesung) P.row('Lösung', m.loesung, P.C.mid, false, 9);
         P.y += 2;
       });
+      // Empfehlungen ohne festen Platz: nur aufgelistet, damit nichts unterschlagen wird
+      if (agent.snap.unplaced && agent.snap.unplaced.length) {
+        P.ensure(30);
+        P.y += 6;
+        P.para('Weitere Empfehlungen ohne festen Platz auf der Seite', 12, P.C.text, true);
+        P.para('Zum Beispiel fehlende Inhalte oder technische Punkte. Details stehen im Report.', 9, P.C.mid, false);
+        P.y += 2;
+        agent.snap.unplaced.forEach((u) => {
+          const sev = sevOf(u.severity);
+          P.ensure(14);
+          doc.setFillColor.apply(doc, hexToRgb(sev.color));
+          doc.circle(P.ML + 1.5, P.y + 1.5, 1.5, 'F');
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(7.5);
+          doc.setTextColor.apply(doc, P.C.light);
+          doc.text(pdfText((catName(u.category) + '  ·  ' + sev.label).toUpperCase()), P.ML + 5, P.y + 2.4);
+          P.y += 6;
+          P.para(u.problem, 9.5, P.C.text, false, 5);
+          P.y += 3;
+        });
+      }
     }
 
     // Texte zu den Änderungen
