@@ -5,7 +5,7 @@
   }
   window.convertlyzeAgentInit = true;
 
-  console.log('Convertlyze Agent V2.35 - JWT Auth');
+  console.log('Convertlyze Agent V2.36 - Seitenansicht');
 
   // ==================== MARKED.JS KONFIGURATION ====================
 
@@ -464,6 +464,23 @@
       }
     }
 
+    // Vorschlags-Bloecke (```cvz-change```, siehe pageview.js) fuer den Export in lesbaren
+    // Text umwandeln. Im Chat stehen sie als Karte, im gespeicherten Rohtext als JSON.
+    function changeBlocksToMarkdown(rawText) {
+      if (!rawText || rawText.indexOf('cvz-change') === -1) return rawText;
+      return rawText.replace(/```[ \t]*cvz-change[ \t]*\r?\n([\s\S]*?)```/g, function(_m, body) {
+        try {
+          const c = JSON.parse(String(body).trim());
+          let md = '**Vorschlag:** ' + (c.nachher || '');
+          if (c.vorher)      md = '**Jetzt:** ' + c.vorher + '\n' + md;
+          if (c.begruendung) md += '\n**Warum:** ' + c.begruendung;
+          return md;
+        } catch (e) {
+          return '';
+        }
+      });
+    }
+
     function getSelectedContent() {
       const includeUser = document.getElementById('export-include-user') ? document.getElementById('export-include-user').checked : true;
       const messages    = messagesDiv.querySelectorAll('.message');
@@ -477,6 +494,8 @@
         let rawText = msg.dataset.rawText || msg.textContent.replace(/^[\s\n]+|[\s\n]+$/g, '');
         // Hebel-Karten in lesbares Markdown wandeln (nur Assistant-Nachrichten betroffen)
         rawText = cardsToMarkdown(rawText);
+        // Vorschlags-Karten (Seitenansicht) als lesbaren Text exportieren
+        rawText = changeBlocksToMarkdown(rawText);
         collected.push({ index, role: isUser ? 'user' : 'assistant', text: rawText });
       });
       collected.sort((a, b) => a.index - b.index);
@@ -839,6 +858,11 @@
 
       messagesDiv.appendChild(div);
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+      // pageview.js macht aus Vorschlags-Bloecken des Agenten Karten mit "Uebernehmen"
+      try {
+        document.dispatchEvent(new CustomEvent('cvz:message-added', { detail: { el: div, role: role, text: text } }));
+      } catch (e) { /* aeltere Browser: pageview.js nutzt dann den MutationObserver */ }
 
       if (isExportMode) {
         const index        = messagesDiv.querySelectorAll('.message').length - 1;
