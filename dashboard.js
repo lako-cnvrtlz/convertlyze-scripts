@@ -9,6 +9,14 @@
  * Embedding: jsDelivr (<script src=".../dashboard-v12.js">)
  * Dependencies: window.$memberstackDom (Supabase wird hier nicht mehr benoetigt)
  *
+ * ÄNDERUNGEN ggü. v12.2 (Fehlgeschlagene Analysen, 30.10.2026, "v12.3"):
+ *   - Fehlgeschlagene Analysen (Status failed/error) sind in "Zuletzt aktiv" rot markiert
+ *     (Warn-Icon, Label "Fehlgeschlagen", Hinweis zum Neustart), laufende gelb ("In Bearbeitung") und nicht klickbar,
+ *     weil es noch keinen Report gibt.
+ *   - In der Analysen-Liste steht bei fehlgeschlagenen Analysen ein roter Hinweis in der Meta-Zeile.
+ *   - Polling: "failed" wird wie "error" behandelt (Zeile wird neu gebaut), "Zuletzt aktiv"
+ *     aktualisiert sich bei jeder Statusaenderung mit (rerenderRecentActivity).
+ *
  * ÄNDERUNGEN ggü. v12.1, Stufe 2 (Sicherheit, 23.10.2026, "v12.2"):
  *   - Keine direkten Supabase-Abfragen und keine RPCs mehr. Konto, Team-Abrechnung, Analysen-Liste,
  *     Tracker-Kontingent, "Zuletzt aktiv", Credit-Reset und Plan-Limits kommen von der Railway-API
@@ -769,6 +777,18 @@
       '.cvz-ract-type{font-size:12px;font-weight:600;color:var(--cvz-teal);text-transform:uppercase;letter-spacing:.03em;}' +
       '.cvz-ract-context{font-size:14px;color:var(--cvz-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
       '.cvz-ract-time{font-size:13px;color:var(--cvz-muted);flex-shrink:0;white-space:nowrap;}' +
+      '.cvz-ract-item.cvz-ract-failed{border-color:rgba(239,68,68,0.45);}' +
+      '.cvz-ract-item.cvz-ract-failed:hover{border-color:#ef4444;background:rgba(239,68,68,0.06);}' +
+      '.cvz-ract-failed .cvz-ract-type{color:#ef4444;}' +
+      '.cvz-ract-failed .cvz-ract-icon{background:rgba(239,68,68,0.12);}' +
+      '.cvz-ract-running .cvz-ract-type{color:#f59e0b;}' +
+      '.cvz-ract-item.cvz-ract-running{cursor:default;}' +
+      '.cvz-ract-item.cvz-ract-running:hover{border-color:var(--cvz-border);background:var(--cvz-card);}' +
+      '.cvz-ract-note{font-size:12px;color:#f87171;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+      '.cvz-ract-status{font-size:11px;font-weight:600;padding:4px 10px;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;flex-shrink:0;}' +
+      '.cvz-ract-status-failed{color:#ef4444;background:rgba(239,68,68,0.12);}' +
+      '.cvz-ract-status-running{color:#f59e0b;background:rgba(245,158,11,0.12);}' +
+      '.cvz-p-meta-error{color:#f87171;}' +
       '.cvz-ract-item.cvz-ract-skel{height:56px;background:linear-gradient(90deg,#1a2133 25%,#252d3d 50%,#1a2133 75%);' +
         'background-size:400px 100%;animation:cvz-shimmer 1.4s infinite;pointer-events:none;}' +
       // -- NEU: Tab-Leiste (Analysen/Strategien/Aufbau) -------------------------
@@ -872,6 +892,7 @@
     aufbau:    '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="1.5" stroke="#4fd1c5" stroke-width="2"/><path d="M3.5 9.5h17" stroke="#4fd1c5" stroke-width="2"/><path d="M8 9.5V20" stroke="#4fd1c5" stroke-width="2"/></svg>',
     strategy:  '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19V9.5l8-5 8 5V19" stroke="#4fd1c5" stroke-width="2" stroke-linejoin="round"/><path d="M9 19v-6h6v6" stroke="#4fd1c5" stroke-width="2" stroke-linejoin="round"/><path d="M4 12h16" stroke="#4fd1c5" stroke-width="2"/></svg>',
     tracker:   '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" stroke="#4fd1c5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    alert:     '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3.5L2.5 20h19L12 3.5z" stroke="#ef4444" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4.5" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17.2" r="1.2" fill="#ef4444"/></svg>',
   };
 
   function toolCardHtml(o) {
@@ -1583,11 +1604,21 @@
   // -- UI: Analysen-Tabelle -------------------------------------------------------
 
   var STATUS_STYLES = {
-    completed:  { text: 'Abgeschlossen',  color: '#4fd1c5', bg: 'rgba(79,209,197,0.15)' },
-    processing: { text: 'In Bearbeitung', color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
-    error:      { text: 'Fehler',         color: '#ef4444', bg: 'rgba(239,68,68,0.15)'  },
-    failed:     { text: 'Fehler',         color: '#ef4444', bg: 'rgba(239,68,68,0.15)'  },
+    completed:  { text: 'Abgeschlossen',    color: '#4fd1c5', bg: 'rgba(79,209,197,0.15)' },
+    processing: { text: 'In Bearbeitung',   color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
+    error:      { text: 'Fehlgeschlagen',   color: '#ef4444', bg: 'rgba(239,68,68,0.15)'  },
+    failed:     { text: 'Fehlgeschlagen',   color: '#ef4444', bg: 'rgba(239,68,68,0.15)'  },
   };
+
+  // NEU (v12.3): Status in drei Phasen. Die Datenbank kennt mehrere Werte fuer "laeuft" und
+  // "fehlgeschlagen", die Oberflaeche braucht nur diese drei.
+  var FAILED_STATUSES  = ['failed', 'error'];
+  var RUNNING_STATUSES = ['processing'];
+  function analysisPhase(status) {
+    if (FAILED_STATUSES.indexOf(status) !== -1) return 'failed';
+    if (RUNNING_STATUSES.indexOf(status) !== -1) return 'running';
+    return 'done';
+  }
 
   // 8-10 = gruen, 6-7.9 = tuerkis, 4-5.9 = orange, 0-3.9 = rot
   function getScoreColor(score) {
@@ -1655,6 +1686,10 @@
     metaEl.className = 'cvz-p-meta';
     var kw = analysis.keyword ? truncate(analysis.keyword, 50) : '';
     metaEl.textContent = (kw ? kw + ' · ' : '') + formattedDate;
+    if (analysisPhase(analysis.status) === 'failed') {
+      metaEl.textContent += ' · Analyse fehlgeschlagen, bitte neu starten';
+      metaEl.classList.add('cvz-p-meta-error');
+    }
     main.appendChild(nameEl);
     main.appendChild(metaEl);
     row.appendChild(main);
@@ -1692,7 +1727,7 @@
       // a[aria-disabled="true"]{pointer-events:none !important;}. Nur ein ebenfalls mit
       // !important gesetzter Inline-Wert gewinnt zuverlaessig dagegen.
       viewBtn.style.setProperty('pointer-events', 'auto', 'important');
-      viewBtn.title = 'Analyse ist noch nicht abgeschlossen';
+      viewBtn.title = analysisPhase(analysis.status) === 'failed' ? 'Analyse ist fehlgeschlagen' : 'Analyse ist noch nicht abgeschlossen';
       viewBtn.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
@@ -1980,18 +2015,23 @@
 
   // state.analysesData ist bereits geladen (siehe loadAndRenderAnalyses) - hier
   // kein weiterer Netzwerk-Call noetig, nur sortieren und die ersten `limit` nehmen.
+  // v12.3: Status mitgeben, damit fehlgeschlagene und laufende Analysen erkennbar sind.
   function buildAnalyseActivityItems(limit) {
     var sorted = state.analysesData.slice().sort(function (a, b) {
       return new Date(b.created_at) - new Date(a.created_at);
     });
     return sorted.slice(0, limit).map(function (a) {
+      var phase = analysisPhase(a.status);
       return {
-        type:      'analyse',
-        iconKey:   'barChart',
-        title:     'Analyse',
-        context:   truncate(a.landing_page_url || a.keyword || '-', 60),
-        timestamp: a.created_at,
-        href:      '/analyse/resultat?id=' + encodeURIComponent(a.id),
+        type:       'analyse',
+        iconKey:    phase === 'failed' ? 'alert' : 'barChart',
+        title:      'Analyse',
+        context:    truncate(a.landing_page_url || a.keyword || '-', 60),
+        timestamp:  a.created_at,
+        href:       '/analyse/resultat?id=' + encodeURIComponent(a.id),
+        phase:      phase,
+        statusText: phase === 'failed' ? 'Fehlgeschlagen' : (phase === 'running' ? 'In Bearbeitung' : ''),
+        note:       phase === 'failed' ? 'Konnte nicht abgeschlossen werden. Bitte neu starten.' : '',
       };
     });
   }
@@ -2068,18 +2108,33 @@
     wrap.style.display = '';
     var html = '<h2 class="cvz-d-title" style="margin-bottom:12px;">Zuletzt aktiv</h2><div class="cvz-ract-list">';
     items.forEach(function (item) {
+      // v12.3: fehlgeschlagene (rot) und laufende (gelb) Eintraege sichtbar markieren
+      var phaseClass = item.phase === 'failed' ? ' cvz-ract-failed' : (item.phase === 'running' ? ' cvz-ract-running' : '');
       html +=
-        '<a class="cvz-ract-item" href="' + item.href + '" target="_blank" rel="noopener">' +
+        // Laufende Analysen haben noch keinen Report: kein Link, nur eine Zeile ohne Klick
+        (item.phase === 'running'
+          ? '<div class="cvz-ract-item cvz-ract-running" aria-disabled="true" title="Der Report ist verfügbar, sobald die Analyse fertig ist">'
+          : '<a class="cvz-ract-item' + phaseClass + '" href="' + item.href + '" target="_blank" rel="noopener">') +
           '<div class="cvz-ract-icon">' + ICONS[item.iconKey] + '</div>' +
           '<div class="cvz-ract-main">' +
             '<div class="cvz-ract-type">' + escapeHtml(item.title) + '</div>' +
             '<div class="cvz-ract-context">' + escapeHtml(item.context) + '</div>' +
+            (item.note ? '<div class="cvz-ract-note">' + escapeHtml(item.note) + '</div>' : '') +
           '</div>' +
+          (item.statusText ? '<span class="cvz-ract-status cvz-ract-status-' + item.phase + '">' + escapeHtml(item.statusText) + '</span>' : '') +
           '<div class="cvz-ract-time">' + escapeHtml(formatRelativeTime(item.timestamp)) + '</div>' +
-        '</a>';
+        (item.phase === 'running' ? '</div>' : '</a>');
     });
     html += '</div>';
     wrap.innerHTML = html;
+  }
+
+  // v12.3: "Zuletzt aktiv" neu zeichnen, ohne alles neu zu laden. Die Analysen kommen frisch aus
+  // state.analysesData, die anderen Quellen aus dem letzten Laden (state.recentOtherItems).
+  function rerenderRecentActivity() {
+    if (!state.recentOtherItems) return;
+    var analyseItems = buildAnalyseActivityItems(CONFIG.RECENT_ACTIVITY_LIMIT);
+    renderRecentActivity(mergeActivityItems([analyseItems].concat(state.recentOtherItems), CONFIG.RECENT_ACTIVITY_LIMIT));
   }
 
   // Orchestriert das Laden der "Zuletzt aktiv"-Section: Skeleton anzeigen,
@@ -2123,6 +2178,7 @@
     state.strategyLoadFailed = state.hasStrategyAccess && results[2] === null;
     state.strategySessions   = results[2] || [];
     var strategyItems = state.hasStrategyAccess ? buildStrategyActivityItems(CONFIG.RECENT_ACTIVITY_LIMIT) : [];
+    state.recentOtherItems = [aufbauItems, agentItems, strategyItems];
     var merged = mergeActivityItems([analyseItems, aufbauItems, agentItems, strategyItems], CONFIG.RECENT_ACTIVITY_LIMIT);
     renderRecentActivity(merged);
     // Strategien-Tab kann jetzt (falls sichtbar) direkt aus dem Cache rendern -
@@ -2328,7 +2384,7 @@
   // WHY Polling als Fallback: Supabase Realtime kann bei Verbindungsproblemen
   // ausfallen. Polling alle 10s stellt sicher dass Status-Updates ankommen.
   function hasProcessingAnalyses() {
-    return state.analysesData.some(function (a) { return a.status === 'processing'; });
+    return state.analysesData.some(function (a) { return analysisPhase(a.status) === 'running'; });
   }
 
   async function silentRefresh() {
@@ -2352,9 +2408,9 @@
 
       state.analysesData[idx] = fresh;
       changed = true;
-      if (fresh.status === 'completed' || fresh.status === 'error' || fresh.status === 'failed') {
-        creditsAffected = true;
-      }
+      // v12.3: "failed" und "error" gleich behandeln (vorher wurde bei "failed" die Zeile nicht neu gebaut)
+      var finished = fresh.status === 'completed' || analysisPhase(fresh.status) === 'failed';
+      if (finished) creditsAffected = true;
 
       var row = state.container
         ? state.container.querySelector('[data-analysis-id="' + fresh.id + '"]')
@@ -2368,7 +2424,7 @@
         badge.style.color = newInfo.color;
       }
       // Bei Abschluss oder Fehler: Row neu aufbauen um Buttons zu aktivieren
-      if (fresh.status === 'completed' || fresh.status === 'error') {
+      if (finished) {
         var newRow = createAnalysisRow(fresh);
         row.parentNode.replaceChild(newRow, row);
       }
@@ -2377,6 +2433,7 @@
     if (changed) {
       state.totalPages = Math.max(1, Math.ceil(state.analysesData.length / CONFIG.PAGE_SIZE));
       updatePaginationInfo();
+      rerenderRecentActivity();
     }
     if (creditsAffected) refreshCredits();
     if (!hasProcessingAnalyses()) stopPolling();
