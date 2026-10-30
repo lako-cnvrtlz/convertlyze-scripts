@@ -15,6 +15,10 @@
  *     ausgewählte Änderungen als Briefing für die Agentur (PDF, Markdown) oder als Aufgaben
  *     für ClickUp, Asana, Jira und Excel (über cvz-export.js, wird bei Bedarf nachgeladen).
  *
+ * Pakete (V3.24 der Agent-API): Vorschläge mit gleicher "gruppe" (z.B. Überschrift und Unterzeile
+ * im Hero) erscheinen als eine Karte mit "Alles übernehmen". Hinweise der API (zu lang, neue Zahlen,
+ * Platzhalter, gleicher Text an anderer Stelle) stehen gelb auf der Karte.
+ *
  * Daten: analyses.page_snapshot (Analysis-Worker), Entscheidungen über
  * GET/POST /api/agent/page-changes (Agent-API). Fehlt die Seitenansicht (alte Analysen),
  * tut das Script nichts.
@@ -344,6 +348,13 @@
       .cvz-chg[data-state=accepted]{border-color:#4fd1c5;}
       .cvz-chg[data-state=accepted] .cvz-chg-state{color:#4fd1c5;}
       .cvz-chg[data-state=rejected]{opacity:.6;border-style:dashed;}
+      .cvz-chg-warn{margin:8px 12px 0;padding:8px 10px;border-left:3px solid #f59e0b;background:rgba(245,158,11,.08);font-size:12px;line-height:1.5;color:#fbbf24;}
+      .cvz-chg-warn div+div{margin-top:4px;}
+      .cvz-chg-pack{border-color:rgba(79,209,197,.55);}
+      .cvz-chg-pack > .cvz-chg{margin:10px 12px;padding-bottom:12px;background:rgba(0,0,0,.12);}
+      .cvz-chg-pack > .cvz-chg .cvz-chg-actions{display:none;}
+      .cvz-chg-pack > .cvz-chg-actions{padding-top:4px;}
+      .cvz-chg-pack[data-state=accepted] > .cvz-chg{border-color:#4fd1c5;}
       .cvz-chg-undo{background:none;border:0;color:#94a3b8;font:500 12px/1 'Geist',sans-serif;cursor:pointer;text-decoration:underline;padding:0;}
 
       .cvz-pv-toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,20px);opacity:0;z-index:10000;
@@ -1480,6 +1491,7 @@
   // <pre><code class="language-cvz-change">. Den ersetzen wir durch eine Karte.
   function enhanceMessage(msgEl) {
     if (!agent.snap || !msgEl || !msgEl.querySelectorAll) return;
+    const packs = new Map();
     msgEl.querySelectorAll('pre > code.language-cvz-change').forEach((code) => {
       let data;
       try {
@@ -1499,15 +1511,70 @@
         return;
       }
       const key = changeId(data.element_id, data.nachher, art);
-      const card = buildChangeCard({
+      const change = {
         element_id: data.element_id,
         art,
         vorher: data.vorher || el.text || '',
         nachher: art === 'entfernen' ? '' : String(data.nachher),
         begruendung: data.begruendung || '',
-      }, el, key);
+      };
+      const card = buildChangeCard(change, el, key, Array.isArray(data.hinweise) ? data.hinweise : []);
       code.parentElement.replaceWith(card);
+      if (data.gruppe) {
+        if (!packs.has(data.gruppe)) packs.set(data.gruppe, { title: data.gruppe_titel || 'Paket', items: [] });
+        packs.get(data.gruppe).items.push({ card, change });
+      }
     });
+    // Zusammengehörige Vorschläge (gleiche "gruppe", z.B. Überschrift + Unterzeile im Hero)
+    // werden in eine Paket-Karte gesteckt und gemeinsam übernommen.
+    packs.forEach((pack) => {
+      if (pack.items.length < 2) return;
+      const first = pack.items[0].card;
+      const wrap = buildPackCard(pack.title, pack.items.map((i) => i.change));
+      first.parentNode.insertBefore(wrap, first);
+      const actions = wrap.querySelector(':scope > .cvz-chg-actions');
+      pack.items.forEach((i) => wrap.insertBefore(i.card, actions));
+    });
+  }
+
+  // Paket-Karte: ein Kopf, die einzelnen Vorschläge darin, ein gemeinsamer Knopf.
+  function buildPackCard(title, changes) {
+    const wrap = h('div', 'cvz-chg cvz-chg-pack');
+    const head = h('div', 'cvz-chg-head');
+    head.appendChild(h('span', 'cvz-chg-kind', title + ' (' + changes.length + ' Änderungen)'));
+    wrap.appendChild(head);
+    const actions = h('div', 'cvz-chg-actions');
+    wrap.appendChild(actions);
+    const keyOf = (c) => changeId(c.element_id, c.nachher, artOf(c));
+    const renderState = () => {
+      const states = changes.map((c) => (agent.changes.get(keyOf(c)) || { status: 'open' }).status);
+      const all = (s) => states.every((x) => x === s);
+      const state = all('accepted') ? 'accepted' : all('rejected') ? 'rejected' : states.some((x) => x !== 'open') ? 'mixed' : 'open';
+      wrap.dataset.state = state;
+      actions.textContent = '';
+      if (state === 'open') {
+        const ok = h('button', 'cvz-pv-btn cvz-pv-primary', 'Alles übernehmen');
+        const no = h('button', 'cvz-pv-btn', 'Verwerfen');
+        ok.type = 'button';
+        no.type = 'button';
+        ok.addEventListener('click', () => setPackStatus(changes, 'accepted', [ok, no]));
+        no.addEventListener('click', () => setPackStatus(changes, 'rejected', [ok, no]));
+        actions.appendChild(ok);
+        actions.appendChild(no);
+        return;
+      }
+      const label = state === 'accepted' ? 'Paket übernommen, steht im Briefing'
+        : state === 'rejected' ? 'Paket verworfen'
+        : 'Teilweise übernommen';
+      actions.appendChild(h('span', 'cvz-chg-state', label));
+      const undo = h('button', 'cvz-chg-undo', 'Rückgängig');
+      undo.type = 'button';
+      undo.addEventListener('click', () => setPackStatus(changes, 'open', [undo]));
+      actions.appendChild(undo);
+    };
+    wrap._cvzRender = renderState;
+    renderState();
+    return wrap;
   }
 
   // Zeilen einer Änderung, je nach Art: ersetzen (Jetzt/Neu), neu darunter (Bleibt/Neu darunter),
@@ -1533,7 +1600,7 @@
     }
   }
 
-  function buildChangeCard(change, el, key) {
+  function buildChangeCard(change, el, key, hints) {
     const card = h('div', 'cvz-chg');
     card.dataset.key = key;
     const head = h('div', 'cvz-chg-head');
@@ -1550,6 +1617,12 @@
 
     appendChangeRows(card, change, el);
     if (change.begruendung) card.appendChild(h('div', 'cvz-chg-why', change.begruendung));
+    // Hinweise der Agent-API (zu lang, neue Zahlen, Platzhalter, gleicher Text an anderer Stelle)
+    if (hints && hints.length) {
+      const warn = h('div', 'cvz-chg-warn');
+      hints.slice(0, 4).forEach((t) => warn.appendChild(h('div', '', t)));
+      card.appendChild(warn);
+    }
 
     const actions = h('div', 'cvz-chg-actions');
     card.appendChild(actions);
@@ -1580,36 +1653,64 @@
     return card;
   }
 
+  // Speichert eine Entscheidung (ohne Oberfläche). Gibt true/false zurück.
+  async function saveChangeStatus(change, status) {
+    const key = changeId(change.element_id, change.nachher, artOf(change));
+    await api('/api/agent/page-changes', {
+      method: 'POST',
+      body: {
+        analysis_id: agent.analysisId,
+        element_id: change.element_id,
+        art: artOf(change),
+        vorher: change.vorher,
+        nachher: change.nachher,
+        begruendung: change.begruendung,
+        status: status,
+      },
+    });
+    if (status === 'open') agent.changes.delete(key);
+    else agent.changes.set(key, Object.assign({}, change, { status: status }));
+  }
+
+  function refreshAfterChange() {
+    document.querySelectorAll('.cvz-chg').forEach((c) => c._cvzRender && c._cvzRender());
+    agent.viewer.setChanges(acceptedChanges());
+    updateTabBadge();
+    if (agent.tab === 'changes') renderList();
+  }
+
   async function setChangeStatus(change, status, buttons) {
     (buttons || []).forEach((b) => (b.disabled = true));
-    const key = changeId(change.element_id, change.nachher, artOf(change));
     let ok = false;
     try {
-      await api('/api/agent/page-changes', {
-        method: 'POST',
-        body: {
-          analysis_id: agent.analysisId,
-          element_id: change.element_id,
-          art: artOf(change),
-          vorher: change.vorher,
-          nachher: change.nachher,
-          begruendung: change.begruendung,
-          status: status,
-        },
-      });
-      if (status === 'open') agent.changes.delete(key);
-      else agent.changes.set(key, Object.assign({}, change, { status: status }));
+      await saveChangeStatus(change, status);
       if (status === 'accepted') toast('Übernommen. Du findest es unter "Änderungen".');
       ok = true;
     } catch (e) {
       toast('Speichern fehlgeschlagen: ' + e.message);
     }
     (buttons || []).forEach((b) => (b.disabled = false));
-    document.querySelectorAll('.cvz-chg').forEach((c) => c._cvzRender && c._cvzRender());
-    agent.viewer.setChanges(acceptedChanges());
-    updateTabBadge();
-    if (agent.tab === 'changes') renderList();
+    refreshAfterChange();
     return ok;
+  }
+
+  // Paket: alle Vorschläge nacheinander speichern. Geht einer schief, bleibt der Rest gespeichert
+  // und die Karte zeigt "Teilweise übernommen" mit Rückgängig.
+  async function setPackStatus(changes, status, buttons) {
+    (buttons || []).forEach((b) => (b.disabled = true));
+    let failed = 0;
+    for (const c of changes) {
+      try {
+        await saveChangeStatus(c, status);
+      } catch (e) {
+        failed++;
+      }
+    }
+    if (failed) toast(failed + ' von ' + changes.length + ' Änderungen konnten nicht gespeichert werden.');
+    else if (status === 'accepted') toast('Paket übernommen. Du findest es unter "Änderungen".');
+    (buttons || []).forEach((b) => (b.disabled = false));
+    refreshAfterChange();
+    return !failed;
   }
 
   // ── Briefing-Export ─────────────────────────────────────────────────────────
