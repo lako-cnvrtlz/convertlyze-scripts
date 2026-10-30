@@ -5,7 +5,7 @@
   }
   window.convertlyzeAgentInit = true;
 
-  console.log('Convertlyze Agent V2.36 - Seitenansicht');
+  console.log('Convertlyze Agent V2.37 - Seitenansicht, Pakete');
 
   // ==================== MARKED.JS KONFIGURATION ====================
 
@@ -480,6 +480,9 @@
             md = (c.vorher ? '**Jetzt:** ' + c.vorher + '\n' : '') + '**Vorschlag:** ' + (c.nachher || '');
           }
           if (c.begruendung) md += '\n**Warum:** ' + c.begruendung;
+          // V2.37: Paket (z.B. Überschrift + Unterzeile) und Hinweise der Prüfung mit exportieren
+          if (Array.isArray(c.hinweise)) c.hinweise.forEach(function(h) { md += '\n**Hinweis:** ' + h; });
+          if (c.gruppe_titel) md = '**' + c.gruppe_titel + '**\n' + md;
           return md;
         } catch (e) {
           return '';
