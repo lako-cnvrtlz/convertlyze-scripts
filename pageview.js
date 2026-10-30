@@ -15,6 +15,9 @@
  *     ausgewählte Änderungen als Briefing für die Agentur (PDF, Markdown) oder als Aufgaben
  *     für ClickUp, Asana, Jira und Excel (über cvz-export.js, wird bei Bedarf nachgeladen).
  *
+ * Einschübe: Neue Zeilen und länger gewordene Texte schieben in der Vorschau und im Seiten-PDF
+ * alles darunter nach unten (makeFlow), statt es zu überdecken.
+ *
  * Pakete (V3.24 der Agent-API): Vorschläge mit gleicher "gruppe" (z.B. Überschrift und Unterzeile
  * im Hero) erscheinen als eine Karte mit "Alles übernehmen". Hinweise der API (zu lang, neue Zahlen,
  * Platzhalter, gleicher Text an anderer Stelle) stehen gelb auf der Karte.
@@ -176,6 +179,9 @@
       .cvz-pv-canvas{position:relative;width:100%;line-height:0;}
       .cvz-pv-img{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none;}
       .cvz-pv-layer{position:absolute;inset:0;}
+      .cvz-pv-slices{position:absolute;left:0;top:0;width:100%;pointer-events:none;}
+      .cvz-pv-slice{position:absolute;left:0;width:100%;overflow:hidden;background-repeat:no-repeat;}
+      .cvz-pv-fillrow{position:absolute;left:0;top:0;width:100%;height:1px;transform-origin:0 0;background-repeat:no-repeat;}
       .cvz-pv-box{position:absolute;border:2px solid var(--c,#4fd1c5);background:transparent;cursor:pointer;
         transition:background .15s,box-shadow .15s;padding:0;margin:0;}
       .cvz-pv-box:hover,.cvz-pv-box.cvz-pv-sel{background:color-mix(in srgb,var(--c,#4fd1c5) 14%,transparent);
@@ -199,7 +205,7 @@
       .cvz-pv-hide-after .cvz-pv-after,.cvz-pv-hide-after .cvz-pv-tag,.cvz-pv-hide-after .cvz-pv-remove{display:none;}
       .cvz-pv-hide-after .cvz-pv-draft{display:block;}
       .cvz-pv-after.cvz-pv-insert{font-weight:500;outline-color:#22c55e;background:#f0fdf4;}
-      .cvz-pv-after.cvz-pv-insert::before{content:'NEU';position:absolute;left:-2px;top:-15px;background:#22c55e;color:#052e16;
+      .cvz-pv-after.cvz-pv-insert::before{content:'NEU';display:inline-block;vertical-align:middle;margin-right:.5em;background:#22c55e;color:#052e16;
         font:700 9px/1 'Geist',sans-serif;letter-spacing:.08em;padding:3px 5px;}
       .cvz-pv-remove{position:absolute;pointer-events:none;z-index:1;outline:2px solid #ef4444;
         background:repeating-linear-gradient(135deg,rgba(239,68,68,.32) 0 8px,rgba(239,68,68,.08) 8px 16px);}
@@ -370,6 +376,55 @@
   // ── Viewer: Screenshot mit Markern ──────────────────────────────────────────
   // Positionen kommen als Anteile (0 bis 1) vom Worker. Wir setzen sie als Prozentwerte,
   // dadurch passen die Marker bei jeder Anzeigegröße, ohne dass wir neu rechnen müssen.
+  // ── Einschübe: Platz schaffen statt überlagern ─────────────────────────────
+  // Der Screenshot ist ein Bild, nichts darauf rutscht von selbst nach unten. Eine neue Zeile
+  // unter einem Button oder ein länger gewordener Text würden sonst über dem liegen, was
+  // darunter steht. makeFlow() verschiebt deshalb alles unterhalb einer Einfügestelle um die
+  // benötigte Höhe nach unten, wie auf einer echten Seite. Die Lücke wird mit der Bildzeile an
+  // der Einfügestelle gefüllt (gestreckt), damit der Hintergrund des Abschnitts weiterläuft.
+  //   gaps: [{ cut: Anteil der Bildhöhe, px: benötigte Höhe }], H: Bildhöhe in denselben Pixeln
+  //   top(f):    neue Position einer Oberkante (Elemente ab der Einfügestelle rutschen mit)
+  //   bottom(f): neue Position einer Unterkante (Elemente, die über die Stelle reichen, wachsen)
+  function makeFlow(gaps, H, tolPx) {
+    const tol = (tolPx || 3) / Math.max(1, H);
+    const blocks = [];
+    gaps.filter((g) => g.px > 0).sort((a, b) => a.cut - b.cut).forEach((g) => {
+      let b = blocks[blocks.length - 1];
+      if (!b || g.cut - b.cut > tol) {
+        b = { cut: g.cut, px: 0, items: [] };
+        blocks.push(b);
+      }
+      g.offset = b.px; // mehrere Einschübe an derselben Stelle stehen untereinander
+      b.px += g.px;
+      b.items.push(g);
+    });
+    let acc = 0;
+    blocks.forEach((b) => { b.top = b.cut * H + acc; acc += b.px; });
+    const shift = (f, strict) => blocks.reduce((sum, b) => ((strict ? b.cut < f - tol : b.cut <= f + tol) ? sum + b.px : sum), 0);
+    return {
+      blocks,
+      total: acc,
+      top: (f) => f * H + shift(f, false),
+      bottom: (f) => f * H + shift(f, true),
+      gapTop: (g) => { const b = blocks.find((x) => x.items.indexOf(g) !== -1); return b ? b.top + g.offset : g.cut * H; },
+    };
+  }
+
+  // Abstand zwischen Element und neuer Zeile darunter (Bildschirm-Pixel)
+  const INSERT_PAD = 8;
+
+  // Welche Bildzeile wird für die Füllung gestreckt? Die Mitte zwischen der Einfügestelle und
+  // dem nächsten Element darunter: Dort ist fast immer nur Hintergrund. Direkt an der
+  // Einfügestelle erwischt man sonst Buchstaben von Elementen daneben (z.B. Nachbarkarten).
+  function fillRowFrac(snap, cut) {
+    let next = 1;
+    snap.elements.forEach((e) => {
+      if (!e.box || e.kind === 'hero' || e.kind === 'section' || e.tag === 'footer') return;
+      if (e.box.y > cut + 0.0005 && e.box.y < next) next = e.box.y;
+    });
+    return Math.min(cut + (next - cut) / 2, cut + 0.012);
+  }
+
   function createViewer(snap, opts) {
     opts = opts || {};
     const root = h('div', 'cvz-pv');
@@ -385,7 +440,10 @@
     img.width = snap.image_width || 1200;
     img.height = snap.image_height || 3000;
     const layer = h('div', 'cvz-pv-layer');
+    // Bild in Streifen, sobald Einschübe Platz brauchen (sonst bleibt das ganze Bild sichtbar)
+    const slices = h('div', 'cvz-pv-slices');
     canvas.appendChild(img);
+    canvas.appendChild(slices);
     canvas.appendChild(layer);
     stage.appendChild(canvas);
     root.appendChild(stage);
@@ -397,12 +455,14 @@
     let selected = { marker: null, element: null };
 
     const pct = (v) => (Math.max(0, Math.min(1, Number(v) || 0)) * 100).toFixed(3) + '%';
+    // Waagerecht in Prozent, senkrecht erst in layout() (wegen der Einschübe in Pixeln)
     const place = (node, box) => {
       node.style.left = pct(box.x);
-      node.style.top = pct(box.y);
       node.style.width = pct(box.w);
-      node.style.height = pct(box.h);
+      node._fy = box.y;
+      node._fh = box.h;
     };
+    let flow = null; // aktuelle Verschiebung, gesetzt in layout()
 
     // Marker je Element gruppieren (mehrere Empfehlungen können dasselbe Element betreffen)
     const markersByEl = new Map();
@@ -458,7 +518,7 @@
             pin.dataset.n = String(m.n);
             pin.style.setProperty('--c', sevOf(m.severity).color);
             pin.style.left = 'calc(' + pct(el.box.x) + ' + ' + i * 26 + 'px)';
-            pin.style.top = pct(el.box.y);
+            pin._fy = el.box.y;
             pin.setAttribute('aria-label', 'Marker ' + m.n + ': ' + oneLine(m.problem, 80));
             if (selected.marker === m.n) pin.classList.add('cvz-pv-sel');
             pin.addEventListener('click', (ev) => {
@@ -473,7 +533,7 @@
       // Vorschau übernommener Änderungen, dazu der Entwurf aus dem Editor (gestrichelt orange)
       changes.filter((c) => c.status === 'accepted').forEach((c) => drawChange(c, false));
       if (draft) drawChange(draft, true);
-      fitPreviews();
+      layout();
     }
 
     // Zeichnet eine Änderung auf den Screenshot:
@@ -500,7 +560,6 @@
         ov.dataset.kind = el.kind;
         ov.dataset.art = 'neu_danach';
         ov.style.left = pct(el.box.x);
-        ov.style.top = 'calc(' + pct(el.box.y + el.box.h) + ' + 6px)';
         ov.style.width = pct(Math.min(Math.max(el.box.w, 0.3), 1 - el.box.x));
         layer.appendChild(ov);
         return;
@@ -510,21 +569,20 @@
         ov.dataset.el = el.id;
         ov.dataset.kind = el.kind;
         ov.style.left = pct(el.box.x);
-        ov.style.top = pct(el.box.y);
+        ov._fy = el.box.y;
         if (el.kind === 'cta') {
           // Button wächst wie ein echter Button mit längerem Text in die Breite
           ov.style.minWidth = pct(el.box.w);
-          ov.style.height = pct(el.box.h);
         } else {
-          // Text wächst wie echter Text nach unten, wenn er länger ist als vorher
+          // Text wächst wie echter Text nach unten, wenn er länger ist als vorher.
+          // Was er länger wird, schiebt layout() als Einschub unter das Element.
           ov.style.width = pct(el.box.w);
-          ov.style.minHeight = pct(el.box.h);
         }
         layer.appendChild(ov);
       } else {
         const tag = h('div', 'cvz-pv-tag' + extra, 'Neu: ' + oneLine(c.nachher, 90));
         tag.style.left = pct(el.box.x);
-        tag.style.top = pct(el.box.y);
+        tag._fy = el.box.y;
         layer.appendChild(tag);
       }
     }
@@ -533,9 +591,7 @@
     // durch die Zeichenzahl des alten Textes. So erscheint der neue Text ungefähr in der
     // Größe, die er auf der echten Seite hätte. Ist er länger, wird die Box größer, genau
     // wie auf der echten Seite. Das ist eine Annäherung, kein exaktes Layout.
-    function fitPreviews() {
-      const W = canvas.clientWidth;
-      const H = canvas.clientHeight;
+    function fitPreviews(W, H) {
       if (!W || !H) return;
       layer.querySelectorAll('.cvz-pv-after').forEach((ov) => {
         const el = snap.byId.get(ov.dataset.el);
@@ -562,8 +618,93 @@
       });
     }
 
-    img.addEventListener('load', fitPreviews);
-    if (window.ResizeObserver) new ResizeObserver(() => fitPreviews()).observe(canvas);
+    // Senkrechte Lage aller Ebenen. Schritt 1: Schriftgrößen setzen und Höhen der neuen Texte
+    // messen. Schritt 2: Einschübe berechnen. Schritt 3: Bildstreifen und Ebenen verschieben.
+    let lastSig = '';
+    function layout() {
+      const W = canvas.clientWidth;
+      if (!W) return;
+      const natW = img.naturalWidth || snap.image_width || 1200;
+      const natH = img.naturalHeight || snap.image_height || 3000;
+      const H = (W * natH) / natW; // Bildhöhe in Bildschirm-Pixeln
+      fitPreviews(W, H);
+
+      const gaps = [];
+      layer.querySelectorAll('.cvz-pv-after').forEach((ov) => {
+        const el = snap.byId.get(ov.dataset.el);
+        if (!el) return;
+        if (getComputedStyle(ov).display === 'none') return; // "Neue Texte zeigen" ist aus
+        const cut = el.box.y + el.box.h;
+        if (ov.dataset.art === 'neu_danach') {
+          const g = { cut, px: ov.offsetHeight + INSERT_PAD * 2, ov, insert: true };
+          gaps.push(g);
+        } else if (ov.dataset.kind === 'cta') {
+          ov.style.height = el.box.h * H + 'px';
+        } else {
+          ov.style.minHeight = el.box.h * H + 'px';
+          const grow = ov.offsetHeight - el.box.h * H;
+          if (grow > 2) gaps.push({ cut, px: grow + 4 });
+        }
+      });
+      flow = makeFlow(gaps, H);
+
+      // Ebenen: Oberkante verschieben, Höhe bis zur verschobenen Unterkante
+      layer.childNodes.forEach((n) => {
+        if (n._fy === undefined) return;
+        const top = flow.top(n._fy);
+        n.style.top = top + 'px';
+        if (n._fh !== undefined) n.style.height = Math.max(0, flow.bottom(n._fy + n._fh) - top) + 'px';
+      });
+      gaps.forEach((g) => { if (g.insert) g.ov.style.top = flow.gapTop(g) + INSERT_PAD + 'px'; });
+
+      // Bild: ohne Einschübe das ganze Bild, sonst Streifen plus gestreckte Füllzeilen
+      const sig = W + '|' + flow.blocks.map((b) => b.cut.toFixed(5) + ':' + Math.round(b.px)).join(',');
+      if (sig === lastSig) return;
+      lastSig = sig;
+      slices.textContent = '';
+      if (!flow.blocks.length) {
+        img.style.visibility = '';
+        canvas.style.height = '';
+        return;
+      }
+      img.style.visibility = 'hidden';
+      canvas.style.height = H + flow.total + 'px';
+      const url = 'url("' + String(snap.screenshot_url).replace(/"/g, '%22') + '")';
+      const bounds = [0].concat(flow.blocks.map((b) => b.cut), [1]);
+      for (let i = 0; i < bounds.length - 1; i++) {
+        const y0 = bounds[i];
+        const y1 = bounds[i + 1];
+        const part = h('div', 'cvz-pv-slice');
+        part.style.top = flow.top(y0) + 'px';
+        part.style.height = Math.max(0, (y1 - y0) * H) + 'px';
+        part.style.backgroundImage = url;
+        part.style.backgroundSize = W + 'px ' + H + 'px';
+        part.style.backgroundPosition = '0 ' + -y0 * H + 'px';
+        slices.appendChild(part);
+      }
+      flow.blocks.forEach((b) => {
+        // Füllung: die Bildzeile direkt unter der Einfügestelle, auf die Lückenhöhe gestreckt
+        const fill = h('div', 'cvz-pv-slice');
+        fill.style.top = b.top + 'px';
+        fill.style.height = b.px + 'px';
+        const row = h('div', 'cvz-pv-fillrow');
+        row.style.backgroundImage = url;
+        row.style.backgroundSize = W + 'px ' + H + 'px';
+        row.style.backgroundPosition = '0 ' + -Math.min(H - 1, fillRowFrac(snap, b.cut) * H) + 'px';
+        row.style.transform = 'scaleY(' + b.px + ')';
+        fill.appendChild(row);
+        slices.appendChild(fill);
+      });
+    }
+
+    img.addEventListener('load', () => { lastSig = ''; layout(); });
+    if (window.ResizeObserver) {
+      let lastW = 0;
+      new ResizeObserver(() => {
+        // Nur bei geänderter Breite neu rechnen (die Höhe ändert layout() selbst)
+        if (canvas.clientWidth !== lastW) { lastW = canvas.clientWidth; layout(); }
+      }).observe(canvas);
+    }
     img.addEventListener('error', () => {
       stage.textContent = '';
       stage.appendChild(h('div', 'cvz-pv-empty', 'Der Screenshot konnte nicht geladen werden.'));
@@ -585,7 +726,7 @@
       canvas.style.width = zoom * 100 + '%';
       stage.scrollLeft = fx * canvas.clientWidth - ax;
       stage.scrollTop = fy * canvas.clientHeight - ay;
-      fitPreviews();
+      layout();
       if (opts.onZoom) opts.onZoom(zoom);
       return zoom;
     }
@@ -601,7 +742,7 @@
       const el = snap.byId.get(id);
       if (!el) return;
       const doScroll = () => {
-        const top = el.box.y * canvas.clientHeight - stage.clientHeight * 0.3;
+        const top = (flow ? flow.top(el.box.y) : el.box.y * canvas.clientHeight) - stage.clientHeight * 0.3;
         const left = zoom > 1 ? el.box.x * canvas.clientWidth - stage.clientWidth * 0.1 : 0;
         stage.scrollTo({ top: Math.max(0, top), left: Math.max(0, left), behavior: smooth === false ? 'auto' : 'smooth' });
       };
@@ -629,6 +770,7 @@
       },
       setShowAfter(on) {
         root.classList.toggle('cvz-pv-hide-after', !on);
+        layout();
       },
       setDraft(d) {
         draft = d || null;
@@ -2227,13 +2369,92 @@
   function renderAnnotated(img, opt) {
     const W = img.naturalWidth;
     const H = img.naturalHeight;
+    const FONT = 'Helvetica, Arial, sans-serif';
+    const measure = document.createElement('canvas').getContext('2d');
+    const px = (el) => ({ x: el.box.x * W, y: el.box.y * H, w: el.box.w * W, h: el.box.h * H });
+
+    // 1) Änderungen vorbereiten: Kästen und Zeilen berechnen, noch nicht zeichnen. Neue Zeilen und
+    //    länger gewordene Texte brauchen Platz, der Rest der Seite rutscht dafür nach unten
+    //    (gleiche Logik wie in der Vorschau, makeFlow).
+    const specs = [];
+    const gaps = [];
+    (opt.changes || []).forEach((ch, i) => {
+      const el = agent.snap.byId.get(ch.element_id);
+      if (!el) return;
+      const b = px(el);
+      const art = artOf(ch);
+      const tag = 'Ä' + (i + 1);
+      if (art === 'entfernen') { specs.push({ art, el, b, tag }); return; }
+      if (!String(ch.nachher || '').trim()) return;
+      let box;
+      let fs;
+      let bg = '#ffffff';
+      let fg = '#111827';
+      let weight = el.kind === 'headline' ? 'bold' : 'normal';
+      let border = opt.accentHex;
+      if (art === 'neu_danach') {
+        fs = Math.max(12, el.kind === 'cta' ? b.h * 0.3 : estimateFont(el, b.w, b.h) * (el.kind === 'headline' ? 0.5 : 1));
+        box = { x: b.x, w: Math.min(Math.max(b.w, W * 0.3), W - b.x) };
+        bg = '#f0fdf4';
+        border = '#22c55e';
+        weight = 'normal';
+      } else if (el.kind === 'cta') {
+        fs = Math.max(11, b.h * 0.42);
+        box = { x: b.x, w: b.w, h: b.h, cta: true };
+        bg = opt.accentHex;
+        fg = '#0d1117';
+        border = '#0d1117';
+        weight = 'bold';
+      } else if (INLINE_PREVIEW_KINDS[el.kind]) {
+        fs = estimateFont(el, b.w, b.h);
+        box = { x: b.x, w: b.w };
+      } else {
+        // Großer Bereich (Hero, Formular ...): nur ein Etikett mit dem neuen Text
+        fs = 14;
+        box = { x: b.x, w: Math.min(W * 0.6, W - b.x), label: true };
+      }
+      measure.font = weight + ' ' + fs + 'px ' + FONT;
+      const pad = Math.max(4, fs * 0.3);
+      const lineH = fs * 1.2;
+      let lines;
+      if (box.cta) {
+        const tw = measure.measureText(ch.nachher).width + pad * 4;
+        box.w = Math.min(Math.max(box.w, tw), W - box.x);
+        lines = [ch.nachher];
+      } else {
+        lines = wrapLines(measure, box.label ? 'Neu: ' + ch.nachher : ch.nachher, box.w - pad * 2);
+        box.h = Math.max(art === 'text' && !box.label ? b.h : 0, lines.length * lineH + pad * 2);
+      }
+      const spec = { art, el, b, tag, box, fs, pad, lineH, lines, bg, fg, weight, border };
+      const cut = el.box.y + el.box.h;
+      if (art === 'neu_danach') {
+        // Platz für das Etikett "Ä1 Neu" (18 px) über dem Kasten plus Abstand
+        spec.gap = { cut, px: box.h + 34 };
+        gaps.push(spec.gap);
+      } else if (!box.cta && !box.label && box.h > b.h + 2) {
+        gaps.push({ cut, px: box.h - b.h + 4 });
+      }
+      specs.push(spec);
+    });
+    const flow = makeFlow(gaps, H);
+    const Y = (f) => flow.top(f);
+
+    // 2) Screenshot in Streifen zeichnen, Lücken mit der gestreckten Bildzeile füllen
     const c = document.createElement('canvas');
     c.width = W;
-    c.height = H;
+    c.height = Math.round(H + flow.total);
     const ctx = c.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    const FONT = 'Helvetica, Arial, sans-serif';
-    const px = (el) => ({ x: el.box.x * W, y: el.box.y * H, w: el.box.w * W, h: el.box.h * H });
+    const bounds = [0].concat(flow.blocks.map((bl) => bl.cut), [1]);
+    for (let k = 0; k < bounds.length - 1; k++) {
+      const sy = bounds[k] * H;
+      const sh = (bounds[k + 1] - bounds[k]) * H;
+      if (sh > 0) ctx.drawImage(img, 0, sy, W, sh, 0, Y(bounds[k]), W, sh);
+    }
+    flow.blocks.forEach((bl) => {
+      const row = Math.min(H - 1, Math.round(fillRowFrac(agent.snap, bl.cut) * H));
+      ctx.drawImage(img, 0, row, W, 1, 0, bl.top, W, bl.px);
+    });
+
     const badge = (x, y, label, bg, fg) => {
       ctx.font = 'bold 13px ' + FONT;
       const w = ctx.measureText(label).width + 12;
@@ -2244,15 +2465,17 @@
       ctx.fillText(label, x + 6, y - 9);
       return w;
     };
-
-    // 1) Änderungen
-    (opt.changes || []).forEach((ch, i) => {
-      const el = agent.snap.byId.get(ch.element_id);
-      if (!el) return;
+    // Verschobene Lage eines Elements (Oberkante rutscht, Höhe wächst über Einfügestellen)
+    const moved = (el) => {
       const b = px(el);
-      const art = artOf(ch);
-      const tag = 'Ä' + (i + 1);
-      if (art === 'entfernen') {
+      const top = Y(el.box.y);
+      return { x: b.x, y: top, w: b.w, h: flow.bottom(el.box.y + el.box.h) - top };
+    };
+
+    // 3) Änderungen zeichnen
+    specs.forEach((sp) => {
+      if (sp.art === 'entfernen') {
+        const b = moved(sp.el);
         ctx.save();
         ctx.fillStyle = 'rgba(239,68,68,0.18)';
         ctx.fillRect(b.x, b.y, b.w, b.h);
@@ -2271,78 +2494,41 @@
         ctx.strokeStyle = '#ef4444';
         ctx.lineWidth = 3;
         ctx.strokeRect(b.x, b.y, b.w, b.h);
-        badge(b.x, b.y, tag + ' Entfernen', '#ef4444', '#ffffff');
+        badge(b.x, b.y, sp.tag + ' Entfernen', '#ef4444', '#ffffff');
         return;
       }
-      if (!String(ch.nachher || '').trim()) return;
-      let box;
-      let fs;
-      let bg = '#ffffff';
-      let fg = '#111827';
-      let weight = el.kind === 'headline' ? 'bold' : 'normal';
-      let border = opt.accentHex;
-      if (art === 'neu_danach') {
-        fs = el.kind === 'cta' ? Math.max(11, b.h * 0.3) : estimateFont(el, b.w, b.h) * (el.kind === 'headline' ? 0.5 : 1);
-        box = { x: b.x, y: b.y + b.h + 8, w: Math.min(Math.max(b.w, W * 0.3), W - b.x) };
-        bg = '#f0fdf4';
-        border = '#22c55e';
-        weight = 'normal';
-      } else if (el.kind === 'cta') {
-        fs = Math.max(11, b.h * 0.42);
-        box = { x: b.x, y: b.y, w: b.w, h: b.h, cta: true };
-        bg = opt.accentHex;
-        fg = '#0d1117';
-        border = '#0d1117';
-        weight = 'bold';
-      } else if (INLINE_PREVIEW_KINDS[el.kind]) {
-        fs = estimateFont(el, b.w, b.h);
-        box = { x: b.x, y: b.y, w: b.w };
-      } else {
-        // Großer Bereich (Hero, Formular ...): nur ein Etikett mit dem neuen Text
-        fs = 14;
-        box = { x: b.x, y: b.y, w: Math.min(W * 0.6, W - b.x), label: true };
-      }
-      ctx.font = weight + ' ' + fs + 'px ' + FONT;
-      const pad = Math.max(4, fs * 0.3);
-      const lineH = fs * 1.2;
-      let lines;
-      if (box.cta) {
-        const tw = ctx.measureText(ch.nachher).width + pad * 4;
-        box.w = Math.min(Math.max(box.w, tw), W - box.x);
-        lines = [ch.nachher];
-      } else {
-        lines = wrapLines(ctx, box.label ? 'Neu: ' + ch.nachher : ch.nachher, box.w - pad * 2);
-        box.h = Math.max(art === 'text' && !box.label ? b.h : 0, lines.length * lineH + pad * 2);
-      }
-      ctx.fillStyle = bg;
+      const box = sp.box;
+      box.y = sp.gap ? flow.gapTop(sp.gap) + 26 : Y(sp.el.box.y);
+      ctx.font = sp.weight + ' ' + sp.fs + 'px ' + FONT;
+      ctx.fillStyle = sp.bg;
       ctx.fillRect(box.x, box.y, box.w, box.h);
       ctx.setLineDash([8, 5]);
-      ctx.strokeStyle = border;
+      ctx.strokeStyle = sp.border;
       ctx.lineWidth = 3;
       ctx.strokeRect(box.x, box.y, box.w, box.h);
       ctx.setLineDash([]);
-      ctx.fillStyle = fg;
+      ctx.fillStyle = sp.fg;
       ctx.textBaseline = 'top';
-      lines.forEach((ln, k) => {
+      sp.lines.forEach((ln, k) => {
         if (box.cta) {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(ln, box.x + box.w / 2, box.y + box.h / 2);
           ctx.textAlign = 'left';
         } else {
-          ctx.fillText(ln, box.x + pad, box.y + pad + k * lineH);
+          ctx.fillText(ln, box.x + sp.pad, box.y + sp.pad + k * sp.lineH);
         }
       });
-      badge(box.x, box.y, art === 'neu_danach' ? tag + ' Neu' : tag, art === 'neu_danach' ? '#22c55e' : opt.accentHex, '#0d1117');
+      badge(box.x, box.y, sp.art === 'neu_danach' ? sp.tag + ' Neu' : sp.tag, sp.art === 'neu_danach' ? '#22c55e' : opt.accentHex, '#0d1117');
     });
 
-    // 2) Marker
+    // 4) Marker (an der verschobenen Stelle)
     if (opt.markers) {
       const perEl = new Map();
       agent.snap.markers.forEach((m) => {
         const el = agent.snap.byId.get(m.element_id);
         if (!el) return;
-        const b = px(el);
+        const b = moved(el);
         const col = sevOf(m.severity).color;
         const k = perEl.get(el.id) || 0;
         perEl.set(el.id, k + 1);
