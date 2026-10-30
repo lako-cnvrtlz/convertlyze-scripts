@@ -2,6 +2,10 @@
  * Convertlyze – Report Script v11
  * https://cdn.jsdelivr.net/gh/lako-cnvrtlz/convertlyze-scripts@main/report.js
  *
+ * ÄNDERUNGEN v11.1 (30.10.2026):
+ *   - Fehlgeschlagene oder noch laufende Analysen zeigen einen Hinweis statt eines leeren Reports
+ *     (showStatusNotice). Laufende Analysen: Seite fragt alle 10 Sekunden nach und laedt neu.
+ *
  * ÄNDERUNGEN ggü. v10, Stufe 2 (Sicherheit, 23.10.2026):
  *   - Kein direkter Zugriff auf Supabase mehr. Die Analyse kommt von GET /api/user/analyses/:id
  *     (Railway-API). Der Server prüft das Memberstack-Token und liest mit dem Service-Key. Die
@@ -2018,6 +2022,75 @@
     }
   }
 
+  // ── NEU (v11.1): Hinweis statt leerem Report ───────────────────────────────
+  // Ist die Analyse fehlgeschlagen oder noch nicht fertig, gibt es keine Report-Daten. Statt einer
+  // leeren Seite erscheint ein Hinweis. Bei laufenden Analysen fragt die Seite alle 10 Sekunden nach
+  // und laedt sich neu, sobald sich der Status aendert.
+  const NOTICE_RUNNING_STATUSES = ['processing'];
+  let statusPollTimer = null;
+
+  function showStatusNotice(analysis, analysisId) {
+    const running = NOTICE_RUNNING_STATUSES.includes(analysis.status);
+    const old = document.getElementById('cvz-status-notice');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'cvz-status-notice';
+    overlay.setAttribute('role', running ? 'status' : 'alert');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;' +
+      'padding:16px;background:rgba(13,17,23,0.94);font-family:Geist,"DM Sans","Segoe UI",sans-serif;box-sizing:border-box;';
+
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#161b22;border:1px solid ' + (running ? '#30363d' : 'rgba(239,68,68,0.5)') +
+      ';max-width:520px;width:100%;padding:32px;text-align:center;box-sizing:border-box;';
+
+    const label = document.createElement('div');
+    label.style.cssText = 'font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-bottom:10px;color:' +
+      (running ? '#f59e0b' : '#ef4444') + ';';
+    label.textContent = running ? 'Analyse läuft' : 'Fehlgeschlagen';
+
+    const title = document.createElement('h2');
+    title.style.cssText = 'margin:0 0 12px;font-size:22px;line-height:1.3;color:#e6edf3;';
+    title.textContent = running ? 'Dein Report ist noch nicht fertig' : 'Diese Analyse konnte nicht abgeschlossen werden';
+
+    const url = document.createElement('p');
+    url.style.cssText = 'margin:0 0 12px;font-size:13px;color:#8b98a5;word-break:break-all;';
+    url.textContent = analysis.landing_page_url || '';
+
+    const text = document.createElement('p');
+    text.style.cssText = 'margin:0 0 24px;font-size:14px;line-height:1.6;color:#8b98a5;';
+    text.textContent = running
+      ? 'Der Report erscheint hier automatisch, sobald die Analyse fertig ist. Das dauert meist ein paar Minuten. Du kannst die Seite offen lassen.'
+      : 'Bei der Analyse ist ein technischer Fehler aufgetreten, deshalb gibt es keinen Report. Bitte starte die Analyse neu. Tritt der Fehler erneut auf, melde dich beim Support.';
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;justify-content:center;';
+    const btn = (href, labelText, primary) => {
+      const a = document.createElement('a');
+      a.href = href;
+      a.textContent = labelText;
+      a.style.cssText = 'font-family:inherit;font-size:14px;font-weight:600;padding:12px 22px;text-decoration:none;display:inline-flex;' +
+        (primary ? 'background:#4fd1c5;color:#0d1117;border:1px solid #4fd1c5;' : 'background:transparent;color:#e6edf3;border:1px solid #30363d;');
+      return a;
+    };
+    if (!running) actions.appendChild(btn('/analyse/formular', 'Neue Analyse starten', true));
+    actions.appendChild(btn('/member/dashboard', 'Zum Dashboard', running));
+
+    box.append(label, title, url, text, actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    if (running && !statusPollTimer) {
+      statusPollTimer = setInterval(async () => {
+        const { analysis: fresh } = await loadAnalysis(analysisId);
+        if (fresh && fresh.status !== analysis.status) {
+          clearInterval(statusPollTimer);
+          window.location.reload();
+        }
+      }, 10000);
+    }
+  }
+
   // ── Bootstrap ───────────────────────────────────────────────────────────────
   async function bootstrap() {
     injectStyles();
@@ -2053,6 +2126,14 @@
       }
 
       console.log('✅ Analyse geladen:', analysis);
+
+      // NEU (v11.1): Ohne fertige Analyse gibt es nichts zu rendern -> Hinweis statt leerer Seite
+      if (analysis.status !== 'completed') {
+        hideReportLoader();
+        showStatusNotice(analysis, analysisId);
+        return;
+      }
+
       renderAll(analysis, analysisId, currentUserId);
 
       // Analyse fuer report-export.js bereitstellen. Ohne diese zwei Zeilen muesste report-export.js
