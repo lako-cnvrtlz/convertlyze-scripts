@@ -49,13 +49,13 @@
 
 
   const KIND_LABELS = {
-    hero: 'Hero-Bereich', headline: 'Überschrift', cta: 'Button', form: 'Formular', text: 'Textabsatz',
+    hero: 'Hero-Bereich', headline: 'Überschrift', cta: 'Button', link: 'Link', form: 'Formular', text: 'Text',
     testimonial: 'Kundenstimme', pricing: 'Preisbereich', faq: 'FAQ', trust: 'Logos und Siegel',
     image: 'Bild', video: 'Video', nav: 'Navigation', section: 'Abschnitt',
   };
   // Bei diesen Arten ersetzt die Vorschau den Text direkt im Element. Bei großen Bereichen
   // (Hero, Formular, Abschnitt) wäre das irreführend, dort gibt es nur ein Etikett.
-  const INLINE_PREVIEW_KINDS = { headline: 1, cta: 1, text: 1, testimonial: 1 };
+  const INLINE_PREVIEW_KINDS = { headline: 1, cta: 1, link: 1, text: 1, testimonial: 1 };
   const kindLabel = (el) => (el && KIND_LABELS[el.kind]) || 'Element';
 
   // ── Hilfsfunktionen ─────────────────────────────────────────────────────────
@@ -246,6 +246,7 @@
       .cvz-pv-chip i{width:9px;height:9px;border-radius:50%;display:inline-block;}
       .cvz-pv-ttext{font-size:14px;line-height:1.6;color:#a3b5c4;margin:0 0 16px;}
       .cvz-pv-tbtn{padding:12px 16px;font-size:13px;}
+      .cvz-pv-tbtns{display:flex;flex-wrap:wrap;gap:10px;}
       @media(max-width:760px){
         .cvz-pv-teaser-wrap{padding:8px 16px 24px;}
         .cvz-pv-teaser{grid-template-columns:1fr;padding:16px;}
@@ -760,12 +761,32 @@
     info.appendChild(chips);
     info.appendChild(h('p', 'cvz-pv-ttext', isCreator
       ? 'Im KI-Agenten siehst du jede Stelle auf dem Screenshot deiner Seite, lässt dir neue Texte vorschlagen und gibst die Änderungen als Briefing an deine Agentur.'
-      : 'Die markierte Seitenansicht mit Änderungsvorschlägen ist im KI-Agenten des Erstellers dieser Analyse verfügbar.'));
+      : 'Die Seitenansicht mit Änderungsvorschlägen ist im KI-Agenten des Erstellers dieser Analyse verfügbar. Die markierte Seite kannst du hier als PDF herunterladen.'));
+    const btns = h('div', 'cvz-pv-tbtns');
     if (isCreator) {
       const btn = h('a', 'cvz-pv-btn cvz-pv-primary cvz-pv-tbtn', 'Markierte Seite im Agent öffnen');
       btn.href = agentHref;
-      info.appendChild(btn);
+      btns.appendChild(btn);
     }
+    // Seiten-PDF mit Markern: für alle, die den Report sehen (auch Team-Mitglieder)
+    const pdf = h('button', 'cvz-pv-btn cvz-pv-tbtn' + (isCreator ? '' : ' cvz-pv-primary'), 'Seite als PDF (mit Markern)');
+    pdf.type = 'button';
+    pdf.addEventListener('click', async () => {
+      // Das PDF-Gerüst arbeitet mit dem Zustand des Agent-Modus, den wir hier einmal setzen
+      agent.snap = snap;
+      agent.analysis = analysis;
+      agent.analysisId = analysisId;
+      pdf.disabled = true;
+      try {
+        await exportPagePdf({ withMarkers: true, withChanges: false });
+      } catch (e) {
+        console.error('[CVZ Seitenansicht] Seiten-PDF im Report:', e);
+        toast('PDF-Export fehlgeschlagen');
+      }
+      pdf.disabled = false;
+    });
+    btns.appendChild(pdf);
+    info.appendChild(btns);
     card.appendChild(info);
     wrap.appendChild(card);
 
@@ -1078,7 +1099,7 @@
   // Öffnet sich nach "Element bearbeiten" + Klick auf ein Element. Der Nutzer wählt die Art
   // (Text ersetzen, neue Zeile darunter, entfernen), sieht den Entwurf sofort auf dem
   // Screenshot und übernimmt ihn ins Briefing. Oder er schickt das Element an den Agenten.
-  const TEXT_KINDS = { headline: 1, cta: 1, text: 1, testimonial: 1 };
+  const TEXT_KINDS = { headline: 1, cta: 1, link: 1, text: 1, testimonial: 1 };
 
   function openEditor(el) {
     agent.pdfDialog = null;
@@ -1796,9 +1817,26 @@
   // ── Gemeinsames PDF-Gerüst (Briefing und Seitenansicht) ─────────────────────
   // Kopf, Titelbereich, Folgeseiten-Kopf, Fußzeile und Branding an einer Stelle. White-Label:
   // helles Theme mit Logo und Akzentfarbe des Kunden, ohne jeden Hinweis auf Convertlyze.
+  // jsPDF ist auf der Agent-Seite eingebunden, auf der Report-Seite meist nicht: dann nachladen
+  // (dieselbe Version wie im Webflow-Code der Agent-Seite)
+  const JSPDF_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+  function ensureJsPdf() {
+    if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(true);
+    if (!agent.jspdfPromise) {
+      agent.jspdfPromise = new Promise((resolve) => {
+        const sc = document.createElement('script');
+        sc.src = JSPDF_URL;
+        sc.onload = () => resolve(!!(window.jspdf && window.jspdf.jsPDF));
+        sc.onerror = () => { agent.jspdfPromise = null; resolve(false); };
+        document.head.appendChild(sc);
+      });
+    }
+    return agent.jspdfPromise;
+  }
+
   async function startPdf(title) {
-    if (!window.jspdf || !window.jspdf.jsPDF) {
-      toast('PDF-Export nicht verfügbar, nutze Markdown oder CSV');
+    if (!(await ensureJsPdf())) {
+      toast('PDF-Export nicht verfügbar. Bitte Seite neu laden.');
       return null;
     }
     const br = await getBranding().catch(() => null);
@@ -2209,26 +2247,42 @@
     }
     P.y += 2;
 
-    // Bild in Streifen über die Seiten verteilen
+    // Bild in Streifen über die Seiten verteilen. Hinter jeden Streifen kommt ein Band in der
+    // Randfarbe der analysierten Seite (pro Streifen gemessen, weil viele Seiten zwischen
+    // hellen und dunklen Abschnitten wechseln). So steht eine dunkle Seite nicht mit weißem
+    // Rand auf dem Papier. Helle Seiten bleiben einfach weiß.
     const W = canvas.width;
     const mmPerPx = P.CW / W;
+    const cctx = canvas.getContext('2d');
     let srcY = 0;
+    let firstSlice = true;
     while (srcY < canvas.height) {
       let avail = P.PH - P.MB - 4 - P.y;
-      if (avail < 40) { P.newPage(); avail = P.PH - P.MB - 4 - P.y; }
+      if (avail < 40) { P.newPage(); firstSlice = false; avail = P.PH - P.MB - 4 - P.y; }
       const sliceH = Math.min(canvas.height - srcY, Math.floor(avail / mmPerPx));
       const part = document.createElement('canvas');
       part.width = W;
       part.height = sliceH;
       part.getContext('2d').drawImage(canvas, 0, srcY, W, sliceH, 0, 0, W, sliceH);
       const hmm = sliceH * mmPerPx;
+      const last = srcY + sliceH >= canvas.height;
+      const bg = edgeColor(cctx, W, srcY, sliceH);
+      if (bg) {
+        const top = firstSlice ? P.y - 5 : 17; // Folgeseiten: direkt unter der Kopfzeile
+        const bottom = last ? P.y + hmm + 5 : P.PH - 12.5; // bis knapp über die Fußzeile
+        doc.setFillColor(bg[0], bg[1], bg[2]);
+        doc.rect(0, top, P.PW, bottom - top, 'F');
+      }
       doc.addImage(part.toDataURL('image/jpeg', 0.85), 'JPEG', P.ML, P.y, P.CW, hmm, undefined, 'FAST');
-      doc.setDrawColor.apply(doc, P.C.border);
-      doc.setLineWidth(0.2);
-      doc.rect(P.ML, P.y, P.CW, hmm);
+      if (!bg) {
+        doc.setDrawColor.apply(doc, P.C.border);
+        doc.setLineWidth(0.2);
+        doc.rect(P.ML, P.y, P.CW, hmm);
+      }
       srcY += sliceH;
       P.y += hmm + 4;
-      if (srcY < canvas.height) P.newPage();
+      firstSlice = false;
+      if (!last) P.newPage();
     }
 
     // Texte zu den Markern
@@ -2278,6 +2332,27 @@
 
     P.finish(fileBase(P.br).replace('briefing', 'seitenansicht') + (changes.length ? '-mit-aenderungen' : '') + '.pdf');
     toast('PDF exportiert');
+  }
+
+  // Randfarbe eines Bildstreifens: Median der Pixel am linken und rechten Rand.
+  // Gibt null zurück, wenn der Rand (fast) weiß ist, dann bleibt das Papier weiß.
+  function edgeColor(ctx, W, y0, h) {
+    try {
+      const xs = [1, 4, W - 5, W - 2];
+      const rs = [];
+      const gs = [];
+      const bs = [];
+      xs.forEach((x) => {
+        const d = ctx.getImageData(x, y0, 1, h).data;
+        for (let i = 0; i < d.length; i += 4 * 3) { rs.push(d[i]); gs.push(d[i + 1]); bs.push(d[i + 2]); }
+      });
+      const med = (a) => { a.sort((p, q) => p - q); return a[Math.floor(a.length / 2)]; };
+      const c = [med(rs), med(gs), med(bs)];
+      const lum = (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255;
+      return lum > 0.94 ? null : c;
+    } catch (e) {
+      return null;
+    }
   }
 
   // Für Exporte: übernommene Änderungen, die im Reiter "Änderungen" angehakt sind
