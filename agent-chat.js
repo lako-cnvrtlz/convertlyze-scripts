@@ -471,8 +471,14 @@
       return rawText.replace(/```[ \t]*cvz-change[ \t]*\r?\n([\s\S]*?)```/g, function(_m, body) {
         try {
           const c = JSON.parse(String(body).trim());
-          let md = '**Vorschlag:** ' + (c.nachher || '');
-          if (c.vorher)      md = '**Jetzt:** ' + c.vorher + '\n' + md;
+          let md;
+          if (c.art === 'entfernen') {
+            md = '**Vorschlag: entfernen:** ' + (c.vorher || '');
+          } else if (c.art === 'neu_danach') {
+            md = (c.vorher ? '**Bleibt:** ' + c.vorher + '\n' : '') + '**Vorschlag (neue Zeile darunter):** ' + (c.nachher || '');
+          } else {
+            md = (c.vorher ? '**Jetzt:** ' + c.vorher + '\n' : '') + '**Vorschlag:** ' + (c.nachher || '');
+          }
           if (c.begruendung) md += '\n**Warum:** ' + c.begruendung;
           return md;
         } catch (e) {
