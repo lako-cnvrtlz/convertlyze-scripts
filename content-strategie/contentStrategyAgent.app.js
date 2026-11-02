@@ -614,7 +614,7 @@
       /* ---- KI-Disclaimer ---- */
       '.cvz-cs-ki-disclaimer{margin-top:28px;padding-top:16px;border-top:1px solid var(--cvz-border);',
         'color:var(--cvz-muted);font-size:12px;line-height:1.6;text-align:center;}',
-    ].concat(TOUCHPOINT_STYLES).join('');
+    ].concat(TOUCHPOINT_STYLES, PROFILE_STYLES).join('');
 
     var style = document.createElement('style');
     style.id = 'cvz-cs-styles';
@@ -766,13 +766,14 @@
   // Modus fehlen oder blockiert sein, deshalb läuft jeder Zugriff in try/catch und der Assistent funktioniert auch ohne.
   var DRAFT_KEY = 'cvz-cs-wizard-draft-v1';
   var DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-  var DRAFT_STEP_LABELS = { validation: 'Thema bestätigen', audience: 'Zielgruppe bestätigen', promptplan: 'Fragen auswählen' };
+  var DRAFT_STEP_LABELS = { validation: 'Thema bestätigen', profile: 'Produkt bestätigen', audience: 'Zielgruppe bestätigen', promptplan: 'Fragen auswählen' };
 
   function saveDraft(step, data) {
     if (!state.userId) return;
     // NEU: Strategie-Ziel aus dem Startformular gehört zu jedem Entwurf, sonst fehlt es nach dem Wiederherstellen.
     if (data && state.strategyGoal) data.strategyGoal = state.strategyGoal;
     if (data && state.existingMagnets) data.existingMagnets = state.existingMagnets; // NEU: vorhandene Lead-Magneten
+    if (data && state.productProfile) data.productProfile = state.productProfile; // NEU (Produktprofil): bestätigte Fassung
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ v: 1, userId: state.userId, savedAt: Date.now(), step: step, data: data }));
     } catch (e) { /* Speicher voll oder blockiert: ohne Entwurf weiter */ }
@@ -805,14 +806,19 @@
     var d = draft.data;
     state.strategyGoal = d.strategyGoal || null;
     state.existingMagnets = d.existingMagnets || null;
+    state.productProfile = d.productProfile || null; // NEU (Produktprofil)
     if (draft.step === 'validation') {
-      state.wizardSteps = d.trackerTopicId ? STEPS_TRACKER : STEPS_FULL;
+      state.wizardSteps = wizardStepsFor(d.trackerTopicId, d.domain);
       renderTopicValidationResult(d.result, d.domain, d.originalTopic, d.trackerTopicId);
+    } else if (draft.step === 'profile') {
+      state.productProfile = null; // wird erst beim Bestätigen gesetzt
+      state.wizardSteps = wizardStepsFor(d.ctx && d.ctx.trackerTopicId, d.ctx && d.ctx.domain);
+      renderProfileStep(d.res, d.ctx, d.profile);
     } else if (draft.step === 'audience') {
-      state.wizardSteps = STEPS_FULL;
+      state.wizardSteps = wizardStepsFor(null, d.domain);
       renderAudienceStep(d.audience, d.topic, d.domain, d.validationId, d.originalTopic);
     } else if (draft.step === 'promptplan') {
-      state.wizardSteps = STEPS_FULL;
+      state.wizardSteps = wizardStepsFor(null, d.domain);
       renderPromptPlanStep(d.res, d.topic, d.domain, d.validationId, d.audience, d.originalTopic, d.deselected);
     }
   }
@@ -853,6 +859,11 @@
       var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, [options.backLabel || 'Zurück']);
       backBtn.addEventListener('click', options.back);
       actions.push(backBtn);
+    }
+    if (options.skip) {
+      var skipBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, [options.skipLabel || 'Überspringen']);
+      skipBtn.addEventListener('click', options.skip);
+      actions.push(skipBtn);
     }
     if (options.retry) {
       var retryBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Erneut versuchen']);
@@ -1024,8 +1035,11 @@
   // ==================== SCHRITT-ANZEIGE ====================
   // Zeigt dem Kunden vorab und in jedem Schritt, was noch kommt. Wichtig: Bis zum letzten Schritt
   // gehen Eingaben verloren, wenn die Seite geschlossen wird. Erst die Erstellung läuft im Hintergrund.
-  var STEPS_FULL = ['Thema prüfen und bestätigen', 'Zielgruppe bestätigen', 'Fragen auswählen', 'Strategie wird erstellt'];
-  var STEPS_TRACKER = ['Thema prüfen und bestätigen', 'Strategie wird erstellt'];
+  // NEU (Produktprofil): "Produkt bestätigen" steht nach der Themen-Prüfung. Ohne Domain gibt es den Schritt nicht (siehe wizardStepsFor).
+  var STEPS_FULL = ['Thema prüfen und bestätigen', 'Produkt bestätigen', 'Zielgruppe bestätigen', 'Fragen auswählen', 'Strategie wird erstellt'];
+  var STEPS_FULL_SHORT = ['Thema prüfen und bestätigen', 'Zielgruppe bestätigen', 'Fragen auswählen', 'Strategie wird erstellt'];
+  var STEPS_TRACKER = ['Thema prüfen und bestätigen', 'Produkt bestätigen', 'Strategie wird erstellt'];
+  var STEPS_TRACKER_SHORT = ['Thema prüfen und bestätigen', 'Strategie wird erstellt'];
   var STEP_LAST_HINT = 'ab hier läuft alles im Hintergrund';
   var STEP_LEAVE_WARNING = 'Bitte schließe diese Seite erst, wenn "Strategie wird erstellt" läuft. Bis dahin gehen deine Eingaben verloren.';
 
@@ -1309,7 +1323,8 @@
   }
 
   function startTopicValidation(topic, domain, trackerTopicId) {
-    state.wizardSteps = trackerTopicId ? STEPS_TRACKER : STEPS_FULL;
+    state.wizardSteps = wizardStepsFor(trackerTopicId, domain);
+    state.productProfile = null; // NEU (Produktprofil): ein neuer Start beginnt ohne Profil der vorigen Strategie
     renderValidating(topic);
     // GEÄNDERT: jeder Versuch hat ein eigenes Zeitlimit von 70 Sekunden. Nach einem Verbindungsabbruch wird einmal
     // automatisch wiederholt. Scheitert es endgültig, bleiben Thema und Domain erhalten.
@@ -1347,12 +1362,13 @@
     state.wizardActive = true;
     clear(state.root);
     saveDraft('validation', { result: result, domain: domain, originalTopic: originalTopic, trackerTopicId: trackerTopicId || null });
+    var hasProfileStep = !!profileDomain(domain, trackerTopicId); // NEU (Produktprofil)
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
     wrap.appendChild(renderStepper(state.wizardSteps || STEPS_FULL, 0, true));
     wrap.appendChild(el('p', { class: 'cvz-cs-callout' }, [
       trackerTopicId
-        ? 'Bitte bestätige das Thema. Danach startet die Erstellung der Strategie.'
-        : 'Bitte bestätige das Thema oder wähle eine Alternative. Danach folgt die Zielgruppe, und erst dann geht es in die Erstellung.',
+        ? (hasProfileStep ? 'Bitte bestätige das Thema. Danach prüfst du kurz das Produktprofil, dann startet die Erstellung der Strategie.' : 'Bitte bestätige das Thema. Danach startet die Erstellung der Strategie.')
+        : (hasProfileStep ? 'Bitte bestätige das Thema oder wähle eine Alternative. Danach prüfst du kurz das Produktprofil, dann folgt die Zielgruppe, und erst dann geht es in die Erstellung.' : 'Bitte bestätige das Thema oder wähle eine Alternative. Danach folgt die Zielgruppe, und erst dann geht es in die Erstellung.'),
     ]));
     wrap.appendChild(el('h3', {}, ['Bevor wir loslegen: ist "' + result.seed_topic + '" das richtige Thema?']));
     var seedVolText = topicVolumeText(result.seed_search_volume, result.seed_volume_status);
@@ -1419,16 +1435,16 @@
       wrap.appendChild(trackerErrorLine);
     }
 
-    var confirmBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, [trackerTopicId ? 'Thema bestätigen und Strategie erstellen' : 'Thema bestätigen, weiter zur Zielgruppe']);
+    var confirmBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, [hasProfileStep ? 'Thema bestätigen, weiter zum Produkt' : (trackerTopicId ? 'Thema bestätigen und Strategie erstellen' : 'Thema bestätigen, weiter zur Zielgruppe')]);
     confirmBtn.addEventListener('click', function () {
       var finalTopic = freeTextInput.value.trim() || chosenInput.value;
       if (trackerTopicId) {
         var trackerParsed = parseCustomerQuestions(trackerQuestions ? trackerQuestions.value : '');
         if (trackerParsed.error) { trackerErrorLine.textContent = trackerParsed.error; return; }
         trackerErrorLine.textContent = '';
-        startGeneration(finalTopic, domain, result.validation_id, trackerTopicId, null, trackerParsed.list);
+        startProfileStep({ topic: finalTopic, domain: domain, validationId: result.validation_id, originalTopic: originalTopic, trackerTopicId: trackerTopicId, customerQuestions: trackerParsed.list, validationResult: result });
       } else {
-        startAudienceStep(finalTopic, domain, result.validation_id, originalTopic);
+        startProfileStep({ topic: finalTopic, domain: domain, validationId: result.validation_id, originalTopic: originalTopic, trackerTopicId: null, customerQuestions: [], validationResult: result });
       }
     });
     var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Zurück, Thema/Domain ändern']);
@@ -1466,7 +1482,7 @@
     state.wizardActive = true;
     clear(state.root);
     state.root.appendChild(renderQuotaBanner());
-    state.root.appendChild(renderStepper(STEPS_FULL, stepIndex, true));
+    state.root.appendChild(renderStepper(state.wizardSteps || STEPS_FULL, stepIndex, true));
     state.root.appendChild(el('div', { class: 'cvz-cs-processing' }, [
       el('div', { class: 'cvz-cs-spinner' }),
       el('p', { class: 'cvz-cs-progress-text' }, [title]),
@@ -1475,7 +1491,7 @@
   }
 
   function startAudienceStep(topic, domain, validationId, originalTopic) {
-    renderBusy('Ich überlege, wer bei deinem Thema mitentscheidet …', 'Dauert meist unter einer Minute.', 1);
+    renderBusy('Ich überlege, wer bei deinem Thema mitentscheidet …', 'Dauert meist unter einer Minute.', stepNo('Zielgruppe bestätigen'));
     // GEÄNDERT: einmal automatisch wiederholen, bei endgültigem Fehler zurück zur Themen-Auswahl statt zum leeren Formular.
     var draft = loadDraft();
     withNetworkRetry(function () {
@@ -1487,16 +1503,16 @@
       .then(function (res) { renderAudienceStep(res.audience, topic, domain, validationId, originalTopic); })
       .catch(function (err) {
         renderStepError(err, 'Zielgruppen-Vorschlag', {
-          stepIndex: 1,
+          stepIndex: stepNo('Zielgruppe bestätigen'),
           retry: function () { startAudienceStep(topic, domain, validationId, originalTopic); },
-          back: draft && draft.step === 'validation'
+          back: draft && (draft.step === 'validation' || draft.step === 'profile')
             ? function () { resumeDraft(draft); }
             : function () {
                 clear(state.root);
                 state.root.appendChild(renderQuotaBanner());
                 state.root.appendChild(renderForm({ topic: originalTopic, domain: domain }));
               },
-          backLabel: 'Zurück zur Themen-Auswahl',
+          backLabel: draft && draft.step === 'profile' ? 'Zurück zum Produktprofil' : 'Zurück zur Themen-Auswahl',
         });
       });
   }
@@ -1572,7 +1588,7 @@
     clear(state.root);
     var growAreas = [];
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
-    wrap.appendChild(renderStepper(STEPS_FULL, 1, true));
+    wrap.appendChild(renderStepper(state.wizardSteps || STEPS_FULL, stepNo('Zielgruppe bestätigen'), true));
     wrap.appendChild(el('h3', {}, ['Stimmt diese Zielgruppe?']));
     wrap.appendChild(el('div', { class: 'cvz-cs-callout' }, [
       el('strong', {}, ['Das ist jetzt zu tun: ']),
@@ -1762,7 +1778,7 @@
   }
 
   function startPromptPlan(audience, topic, domain, validationId, originalTopic) {
-    renderBusy('Ich stelle die Fragen deiner Zielgruppe zusammen …', 'Dafür werden echte Suchdaten abgefragt. Das dauert bis zu einer Minute.', 2);
+    renderBusy('Ich stelle die Fragen deiner Zielgruppe zusammen …', 'Dafür werden echte Suchdaten abgefragt. Das dauert bis zu einer Minute.', stepNo('Fragen auswählen'));
     // GEÄNDERT (siehe Chat-Verlauf, "Prompt-Plan fehlgeschlagen: Load failed"): einmal automatisch wiederholen. Scheitert
     // es endgültig, führt "Zurück" zur Zielgruppe MIT allen bearbeiteten Rollen und Kundenfragen, statt zum leeren Formular.
     withNetworkRetry(function () {
@@ -1774,7 +1790,7 @@
       .then(function (res) { renderPromptPlanStep(res, topic, domain, validationId, audience, originalTopic); })
       .catch(function (err) {
         renderStepError(err, 'Prompt-Plan', {
-          stepIndex: 2,
+          stepIndex: stepNo('Fragen auswählen'),
           retry: function () { startPromptPlan(audience, topic, domain, validationId, originalTopic); },
           back: function () { renderAudienceStep(audience, topic, domain, validationId, originalTopic); },
           backLabel: 'Zurück zur Zielgruppe',
@@ -1796,7 +1812,7 @@
       });
     }
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
-    wrap.appendChild(renderStepper(STEPS_FULL, 2, true));
+    wrap.appendChild(renderStepper(state.wizardSteps || STEPS_FULL, stepNo('Fragen auswählen'), true));
     wrap.appendChild(el('h3', {}, ['Diese Fragen messen wir bei ChatGPT und Gemini']));
     wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [
       'Jede Frage wird je Anbieter 3 Mal gestellt. Das ist eine Momentaufnahme, kein Trend. Du kannst Fragen abwählen, mindestens ' + MIN_PROMPTS_KEEP + ' müssen bleiben.',
@@ -1864,6 +1880,8 @@
         strategy_goal: state.strategyGoal || undefined,
         // NEU (Lead-Magneten): was es schon gibt, damit es nicht noch einmal vorgeschlagen wird.
         existing_magnets: state.existingMagnets || undefined,
+        // NEU (Produktprofil): vom Kunden bestätigt. Ohne Profil (übersprungen, keine Domain) läuft alles wie bisher.
+        product_profile: state.productProfile || undefined,
         prompt_plan_id: planExtra ? planExtra.prompt_plan_id : undefined,
         selected_prompts: planExtra ? planExtra.selected_prompts : undefined,
         // NEU: nur im Tracker-Pfad (sonst stecken die Kundenfragen schon in der bestätigten Zielgruppe des Plans)
@@ -3403,7 +3421,7 @@
     wrap.appendChild(anchorNav.nav);
     wrap.appendChild(anchorNav.spacer);
     wrap.appendChild(renderReportSection(secNo.validation, 'Themen-Check', [renderTopicValidationSection(result.topic_validation, result.seed_topic)]));
-    wrap.appendChild(renderReportSection(secNo.ausgangslage, 'Ausgangslage', [renderTrackerSourceNote(session), renderProse(result.ausgangslage)]));
+    wrap.appendChild(renderReportSection(secNo.ausgangslage, 'Ausgangslage', [renderTrackerSourceNote(session), renderProse(result.ausgangslage), renderProfileBox(result)]));
     wrap.appendChild(renderReportSection(secNo.summary, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])]));
     wrap.appendChild(renderReportSection(secNo.state, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
     wrap.appendChild(renderReportSection(secNo.cluster, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
@@ -4650,8 +4668,11 @@
     { id: 'text_hook', label: 'Kurzer Text mit Aufhänger' }, { id: 'kurzvideo', label: 'Kurzvideo' },
     { id: 'erklaervideo', label: 'Erklärvideo' }, { id: 'dokument', label: 'Dokument oder Carousel' },
     { id: 'case', label: 'Kundenfall' }, { id: 'vergleich', label: 'Gegenüberstellung' },
-    { id: 'lead_formular', label: 'Formular mit Gegenwert' }, { id: 'einladung', label: 'Einladung' },
+    { id: 'lead_formular', label: 'Formular mit Gegenwert' }, { id: 'webinar', label: 'Webinar' },
+    { id: 'gespraech', label: 'Persönliches Gespräch oder Demo' }, { id: 'workshop', label: 'Workshop' },
+    { id: 'einladung', label: 'Einladung' }, // älterer Plan
   ];
+  var TP_ASSET_COLOR = '#e879f9';
   var TP_INV_KINDS = [
     { value: 'daten', label: 'Eigene Daten', hint: 'z. B. Auswertung von 140 Projekten aus 2019 bis 2025' },
     { value: 'fall', label: 'Kundenfall', hint: 'z. B. Umstellung in 9 Monaten, Betriebskosten um ein Drittel gesenkt' },
@@ -4664,7 +4685,12 @@
     { value: 'nur_intern', label: 'Nur intern, nie nach draußen' },
   ];
   var TP_BASIS_LABELS = { messung: 'Aus der Messung', kundeneingabe: 'Aus deinen Angaben', annahme: 'Hypothese' };
-  var TP_DEMAND_LABELS = { ja: 'Ja', nein: 'Nein', keine_seiten: 'Keine Seite in dieser Phase' };
+  var TP_DEMAND_LABELS = { ja: 'Ja, messbar', nein: 'Kaum messbar', keine_seiten: 'Keine Seite' };
+  var TP_DEMAND_MEANING = {
+    ja: 'Hier suchen Interessenten selbst. Inhalte für die Suche und Suchanzeigen erreichen sie.',
+    nein: 'Hier sucht kaum jemand selbst (nicht messbar). Erreiche Interessenten über Inhalte und Anzeigen aktiv, oder hole sie per Retargeting und E-Mail ab.',
+    keine_seiten: 'Für diese Phase gibt es keine Seite in der Strategie, deshalb keine Aussage.',
+  };
   var TP_LIMITS = { nodes: 60, edges: 150, label: 160, note: 600, channel: 60, entries: 12, title: 120, detail: 300, restrictions: 400, coord: 5000 };
   var TP_DETAIL_MIN = 25;
   var TP_NODE_W = 230;
@@ -4948,6 +4974,11 @@
       var gated = result.gated_content;
       if (gated) root.appendChild(renderGatedBlock(gated));
       if (result.touchpoint_plan) {
+        // NEU (Wirtschaftlichkeit): Der Plan richtet sich nach dem Wert eines Kunden. Der Hinweis sagt, welche Klasse gilt, woher sie stammt und was sie ausschließt.
+        var vcls = result.touchpoint_plan.value_class;
+        if (vcls && vcls.note) {
+          root.appendChild(el('div', { class: 'cvz-cs-callout cvz-tp-value' }, [el('strong', {}, ['Wirtschaftlichkeit: ']), (vcls.label || '') + '. ' + vcls.note]));
+        }
         root.appendChild(renderDemandBlock(result.touchpoint_plan.search_demand || []));
         root.appendChild(el('h5', {}, ['Touchpoints und E-Mails nach dem Lead']));
         root.appendChild(el('p', { class: 'cvz-cs-hint' }, [result.touchpoint_plan.plan_note || '']));
@@ -5004,18 +5035,24 @@
     return box;
   }
 
+  // Je Phase: Suchen Interessenten dort selbst? Der Server prüft, ob zum Haupt-Keyword der geplanten Seiten ein Suchvolumen gemessen wurde.
+  // Die Spalte "Was das heißt" sagt es in einem Satz (ältere Pläne ohne meaning bekommen den Satz hier ergänzt).
   function renderDemandBlock(demand) {
     var box = el('div', { class: 'cvz-tp-demand' });
-    box.appendChild(el('h5', {}, ['Nachfrage in der Suche je Phase']));
-    box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Eine Tatsache aus dem Suchvolumen der Seiten dieser Strategie, keine Kanalempfehlung. "Nein" heißt: nicht messbar, nicht: niemand fragt. Das Suchvolumen sind gerundete Google-Ads-Werte.']));
+    box.appendChild(el('h5', {}, ['Suchen Interessenten in dieser Phase selbst?']));
+    box.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+      'Für jede Phase prüft der Server, ob zum Haupt-Keyword der geplanten Seiten Google-Suchanfragen gemessen wurden. Das zeigt, wo Interessenten dich selbst finden und wo du sie aktiv erreichen musst. ' +
+      'Die Zahl in der Spalte "Beleg" ist das monatliche Suchvolumen dieses einen Keywords (gerundeter Google-Ads-Wert), nicht die Größe der Phase. Keine Kanalempfehlung.',
+    ]));
     var table = el('table', { class: 'cvz-cs-table cvz-cs-table-cards' });
-    table.appendChild(el('thead', {}, [el('tr', {}, [el('th', {}, ['Phase']), el('th', {}, ['Messbar']), el('th', {}, ['Grundlage'])])]));
+    table.appendChild(el('thead', {}, [el('tr', {}, [el('th', {}, ['Phase']), el('th', {}, ['Suchen sie selbst?']), el('th', {}, ['Was das heißt']), el('th', {}, ['Beleg'])])]));
     var tbody = el('tbody');
     demand.forEach(function (d) {
       tbody.appendChild(el('tr', {}, [
         el('td', { 'data-label': 'Phase' }, [d.phase_label]),
-        el('td', { 'data-label': 'Messbar' }, [TP_DEMAND_LABELS[d.measurable] || d.measurable]),
-        el('td', { 'data-label': 'Grundlage' }, [d.basis]),
+        el('td', { 'data-label': 'Suchen sie selbst?' }, [TP_DEMAND_LABELS[d.measurable] || d.measurable]),
+        el('td', { 'data-label': 'Was das heißt' }, [d.meaning || TP_DEMAND_MEANING[d.measurable] || '']),
+        el('td', { 'data-label': 'Beleg' }, [d.basis]),
       ]));
     });
     table.appendChild(tbody);
@@ -5053,7 +5090,22 @@
         edges.push({ id: ('e-' + tp.id + '-' + k).slice(0, 40), from: f.id, to: tp.id, type: f.kind });
       });
     });
+    // NEU: Lead-Magneten und Gated-Ideen aus dem Plan als eigene Knoten. Touchpoints führen auf sie (target_asset), Gated-Ideen führen in die E-Mails.
+    var assetNodeId = {};
+    (plan.assets || []).forEach(function (a) {
+      var nid = tpAssetNodeId(a.id);
+      assetNodeId[a.id] = nid;
+      nodes.push({ id: nid, kind: 'asset', asset_ref: a.id, label: String(a.title).slice(0, TP_LIMITS.label), phase: a.phase || undefined, channel: null, x: 0, y: 0 });
+    });
+    (plan.touchpoints || []).forEach(function (tp) {
+      if (tp.target_asset && tp.target_asset.kind === 'magnet' && assetNodeId[tp.target_asset.ref]) {
+        edges.push({ id: ('ea-' + tp.id).slice(0, 40), from: tp.id, to: assetNodeId[tp.target_asset.ref], type: 'fuehrt_zu' });
+      }
+    });
     ((nurture && nurture.sequences) || []).forEach(function (seq) {
+      if (seq.entry && seq.entry.kind === 'magnet' && assetNodeId[seq.entry.id] && seq.mails && seq.mails[0]) {
+        edges.push({ id: ('eam-' + seq.mails[0].id).slice(0, 40), from: assetNodeId[seq.entry.id], to: seq.mails[0].id, type: 'fuehrt_zu' });
+      }
       (seq.mails || []).forEach(function (m, mi) {
         nodes.push({ id: m.id, kind: 'mail', mail_ref: m.id, label: String(m.learning_goal).slice(0, TP_LIMITS.label), role: m.role || null, channel: null, day: m.day, x: 0, y: 0 });
         if (mi > 0) edges.push({ id: ('em-' + m.id).slice(0, 40), from: seq.mails[mi - 1].id, to: m.id, type: 'fuehrt_zu' });
@@ -5062,6 +5114,10 @@
     var d = { version: 1, nodes: nodes.slice(0, TP_LIMITS.nodes), edges: edges.slice(0, TP_LIMITS.edges) };
     tpAutoLayout(d);
     return d;
+  }
+
+  function tpAssetNodeId(assetId) {
+    return ('as-' + String(assetId).replace(/[^A-Za-z0-9_-]/g, '_')).slice(0, 40);
   }
 
   function tpSeqIndexOf(node) {
@@ -5074,7 +5130,7 @@
     var colOf = function (n) { for (var i = 0; i < TP_PHASES.length; i++) if (TP_PHASES[i].value === n.phase) return i; return TP_PHASES.length; };
     var perCol = {};
     var maxRows = 0;
-    d.nodes.filter(function (n) { return n.kind !== 'mail'; }).forEach(function (n) {
+    d.nodes.filter(function (n) { return n.kind !== 'mail' && n.kind !== 'asset'; }).forEach(function (n) {
       var c = colOf(n);
       var r = perCol[c] || 0;
       perCol[c] = r + 1;
@@ -5082,7 +5138,15 @@
       n.x = flowClamp(c * (TP_NODE_W + TP_GAP_X));
       n.y = flowClamp(r * (TP_NODE_H + TP_GAP_Y / 2));
     });
-    var laneY = maxRows * (TP_NODE_H + TP_GAP_Y / 2) + 110;
+    // Lead-Magneten: eine Zeile unter den Touchpoints (nach Phase geordnet, höchstens fünf nebeneinander), die E-Mails darunter.
+    var assets = d.nodes.filter(function (n) { return n.kind === 'asset'; });
+    assets.sort(function (a, b) { return colOf(a) - colOf(b); });
+    var assetY = maxRows * (TP_NODE_H + TP_GAP_Y / 2) + 60;
+    assets.forEach(function (n, i) {
+      n.x = flowClamp((i % 5) * (TP_NODE_W + TP_GAP_X));
+      n.y = flowClamp(assetY + Math.floor(i / 5) * (TP_NODE_H + TP_GAP_Y / 2));
+    });
+    var laneY = (assets.length > 0 ? assetY + Math.ceil(assets.length / 5) * (TP_NODE_H + TP_GAP_Y / 2) : maxRows * (TP_NODE_H + TP_GAP_Y / 2)) + 110;
     var rowOfSeq = {};
     var nextRow = 0;
     var mails = d.nodes.filter(function (n) { return n.kind === 'mail'; });
@@ -5103,9 +5167,12 @@
     if (!stored || stored.version !== 1 || !Array.isArray(stored.nodes) || !Array.isArray(stored.edges)) return null;
     var mails = tpMailIndex(nurture);
     var tpCount = (plan.touchpoints || []).length;
+    var assetIds = {};
+    (plan.assets || []).forEach(function (a) { assetIds[a.id] = true; });
     var nodes = stored.nodes.filter(function (n) {
       if (!n || typeof n.id !== 'string') return false;
       if (n.kind === 'touchpoint') return typeof n.touchpoint_ref === 'number' && n.touchpoint_ref < tpCount;
+      if (n.kind === 'asset') return typeof n.asset_ref === 'string' && !!assetIds[n.asset_ref];
       if (n.kind === 'mail') return n.mail_ref == null || !!mails[n.mail_ref];
       return n.kind === 'custom';
     });
@@ -5118,6 +5185,7 @@
   function tpDataFor(node, plan, nurture) {
     if (node.kind === 'touchpoint' && node.touchpoint_ref != null) return (plan.touchpoints || [])[node.touchpoint_ref] || null;
     if (node.kind === 'mail' && node.mail_ref) { var hit = tpMailIndex(nurture)[node.mail_ref]; return hit ? hit.mail : null; }
+    if (node.kind === 'asset' && node.asset_ref) return (plan.assets || []).filter(function (a) { return a.id === node.asset_ref; })[0] || null;
     return null;
   }
 
@@ -5143,6 +5211,7 @@
     return ordered.map(function (n, i) {
       var d = tpDataFor(n, plan, nurture) || {};
       var isMail = n.kind === 'mail';
+      var isAsset = n.kind === 'asset';
       var req = (incoming[n.id] || []).map(function (e) {
         return (e.type === 'retargeting' ? 'Retargeting, wenn gesehen: ' : 'Führt zu diesem Schritt von: ') + (byId[e.from] ? titleOf[e.from] : '?');
       }).join('; ');
@@ -5151,6 +5220,13 @@
       if (isMail && n.mail_ref) { var hit = tpMailIndex(nurture)[n.mail_ref]; if (hit) seqLabel = hit.seq.entry && hit.seq.entry.label ? hit.seq.entry.label : ''; }
       var desc = [];
       if (isMail) desc.push('E-Mail nach dem Lead' + (n.day != null ? ', Tag ' + n.day : '') + (seqLabel ? ' (Einstieg: ' + seqLabel + ')' : ''));
+      if (isAsset) {
+        desc.push((d.origin === 'frei' ? 'Lead-Magnet, frei zugänglich' : 'Gated Content, hinter E-Mail') + (d.effort ? ', Aufwand ' + d.effort : ''));
+        if (d.promise) desc.push('Versprechen: ' + d.promise);
+        if (d.content_points && d.content_points.length) desc.push('Inhalt: ' + d.content_points.join('; '));
+        if (d.conversion_bridge) desc.push('Danach: ' + d.conversion_bridge);
+        (d.notes || []).forEach(function (t) { desc.push(t); });
+      }
       if (d.learning_goal) desc.push('Lernziel: ' + d.learning_goal);
       if (d.message) desc.push('Botschaft: ' + d.message);
       if (d.objection) desc.push('Einwand: ' + d.objection);
@@ -5160,12 +5236,12 @@
       if (n.channel) desc.push('Kanal: ' + n.channel);
       if (n.note) desc.push('Notiz: ' + n.note);
       return {
-        taskId: 'TP' + (i + 1), title: titleOf[n.id], art: isMail ? 'E-Mail' : 'Touchpoint',
+        taskId: 'TP' + (i + 1), title: titleOf[n.id], art: isMail ? 'E-Mail' : (isAsset ? (d.origin === 'frei' ? 'Lead-Magnet' : 'Gated Content') : 'Touchpoint'),
         phase: isMail ? '' : tpPhaseLabel(n.phase), day: isMail && n.day != null ? n.day : '',
         role: n.role || '', format: isMail ? (d.kind_label || '') : (d.format_label || tpFormatLabel(n.format)),
-        channel: n.channel || '', goal: d.learning_goal || '', message: d.message || '', objection: d.objection || '',
+        channel: n.channel || '', goal: d.learning_goal || d.promise || '', message: d.message || '', objection: d.objection || '',
         asset: asset, micro: d.micro_conversion || '', req: req,
-        basis: d.basis ? (TP_BASIS_LABELS[d.basis] || d.basis) : (n.kind === 'custom' ? 'Eigener Eintrag' : ''),
+        basis: d.basis ? (TP_BASIS_LABELS[d.basis] || d.basis) : (isAsset ? (d.origin === 'frei' ? 'Allgemein, frei zugänglich' : 'Mit deiner Substanz') : (n.kind === 'custom' ? 'Eigener Eintrag' : '')),
         note: n.note || '', description: desc.join('\n'),
         tags: [isMail ? 'E-Mail' : tpPhaseLabel(n.phase), isMail ? '' : (d.format_label || tpFormatLabel(n.format)), n.role || ''].filter(Boolean).map(function (t) { return String(t).replace(/[|,]/g, ' '); }).join('|'),
       };
@@ -5322,20 +5398,21 @@
       });
       diagram.nodes.forEach(function (n) {
         var isMail = n.kind === 'mail';
-        var color = isMail ? TP_MAIL_COLOR : (TP_PHASE_COLORS[n.phase] || '#6e7681');
+        var isAsset = n.kind === 'asset';
+        var color = isMail ? TP_MAIL_COLOR : (isAsset ? TP_ASSET_COLOR : (TP_PHASE_COLORS[n.phase] || '#6e7681'));
         var isSel = ui.selected && ui.selected.type === 'node' && ui.selected.id === n.id;
         var d = tpDataFor(n, plan, nurture);
         var g = svgEl('g', {
           'data-node-id': n.id,
-          class: 'cvz-flow-node' + (isSel ? ' is-selected' : '') + (n.kind === 'custom' || (isMail && !n.mail_ref) ? ' is-custom' : '') + (isMail ? ' is-mail' : ''),
+          class: 'cvz-flow-node' + (isSel ? ' is-selected' : '') + (n.kind === 'custom' || (isMail && !n.mail_ref) ? ' is-custom' : '') + (isMail ? ' is-mail' : '') + (isAsset ? ' is-asset' : ''),
           transform: 'translate(' + n.x + ',' + n.y + ')', opacity: dimmed(n) ? '0.25' : '1',
         });
         g.appendChild(svgEl('rect', { class: 'cvz-flow-node-box', width: TP_NODE_W, height: TP_NODE_H, style: 'stroke:' + (isSel ? '#f0f4f8' : 'rgba(255,255,255,.18)') }));
         g.appendChild(svgEl('rect', { width: 5, height: TP_NODE_H, fill: color }));
-        var tag = isMail ? 'E-Mail' + (n.day != null ? ' · Tag ' + n.day : '') : ((d && d.format_label) || tpFormatLabel(n.format) || (n.kind === 'custom' ? 'Eigener Touchpoint' : 'Touchpoint'));
+        var tag = isAsset ? (d && d.origin === 'frei' ? 'Lead-Magnet · frei' : 'Gated Content · hinter E-Mail') : isMail ? 'E-Mail' + (n.day != null ? ' · Tag ' + n.day : '') : ((d && d.format_label) || tpFormatLabel(n.format) || (n.kind === 'custom' ? 'Eigener Touchpoint' : 'Touchpoint'));
         g.appendChild(svgEl('text', { class: 'cvz-flow-node-tag', x: 16, y: 17 }, [String(tag).slice(0, 32)]));
         flowWrapText(n.label, 30, 3).forEach(function (line, i) { g.appendChild(svgEl('text', { class: 'cvz-flow-node-label', x: 16, y: 38 + i * 16 }, [line])); });
-        var foot = isMail ? (n.role || '') : (tpPhaseLabel(n.phase) + (n.role ? ' · ' + n.role : ''));
+        var foot = isMail ? (n.role || '') : isAsset ? (tpPhaseLabel(n.phase) + (d && d.effort ? ' · Aufwand ' + d.effort : '')) : (tpPhaseLabel(n.phase) + (n.role ? ' · ' + n.role : ''));
         if (foot) g.appendChild(svgEl('text', { class: 'cvz-flow-node-phase', x: 16, y: TP_NODE_H - 9, fill: color }, [foot.slice(0, 40)]));
         if (d && d.needs_tracking) g.appendChild(svgEl('circle', { cx: TP_NODE_W - 12, cy: 12, r: 5, fill: '#4fd1c5' }, [svgEl('title', {}, ['Setzt Tracking und Einwilligung voraus'])]));
         if (n.channel) g.appendChild(svgEl('text', { class: 'cvz-flow-node-phase', x: TP_NODE_W - 12, y: TP_NODE_H - 9, 'text-anchor': 'end', fill: '#8b949e' }, [String(n.channel).slice(0, 16)]));
@@ -5410,10 +5487,11 @@
       if (!sel) {
         panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, ['Touchpoint-Plan']));
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Klicke einen Schritt oder eine Verbindung an, um sie zu bearbeiten. Ziehe Schritte mit der Maus, ziehe den Hintergrund, um den Ausschnitt zu bewegen. Strg/Cmd + Mausrad zoomt.']));
-        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Oben stehen die Touchpoints je Phase, darunter die E-Mails nach dem Lead. Die Pfeile zeigen, was zu was führt. Der Weg im B2B ist eine Schleife, keine feste Reihenfolge. Gestrichelt: "Retargeting, wenn gesehen", das setzt Tracking und Einwilligung voraus. Den Kanal trägst du pro Schritt selbst ein.']));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Oben stehen die Touchpoints je Phase, darunter die Lead-Magneten und Gated-Content-Ideen, ganz unten die E-Mails nach dem Lead. Die Pfeile zeigen, was zu was führt. Der Weg im B2B ist eine Schleife, keine feste Reihenfolge. Gestrichelt: "Retargeting, wenn gesehen", das setzt Tracking und Einwilligung voraus. Den Kanal trägst du pro Schritt selbst ein.']));
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Änderungen werden gespeichert und verändern den Bericht nicht.']));
         var legend = el('div', { class: 'cvz-flow-legend' });
         TP_PHASES.forEach(function (ph) { legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [el('i', { style: 'background:' + TP_PHASE_COLORS[ph.value] }), ph.label])); });
+        legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [el('i', { style: 'background:' + TP_ASSET_COLOR }), 'Lead-Magnet oder Gated Content']));
         legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [el('i', { style: 'background:' + TP_MAIL_COLOR }), 'E-Mail nach dem Lead']));
         panel.appendChild(legend);
         return;
@@ -5433,8 +5511,16 @@
       if (!node) return;
       var d = tpDataFor(node, plan, nurture);
       var isMail = node.kind === 'mail';
-      panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [isMail ? 'E-Mail nach dem Lead' : (node.kind === 'custom' ? 'Eigener Touchpoint' : 'Touchpoint')]));
-      if (d) {
+      var isAsset = node.kind === 'asset';
+      panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [isAsset ? (d && d.origin === 'frei' ? 'Lead-Magnet' : 'Gated Content') : isMail ? 'E-Mail nach dem Lead' : (node.kind === 'custom' ? 'Eigener Touchpoint' : 'Touchpoint')]));
+      if (d && isAsset) {
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [[d.phase_label, d.format_label, d.effort ? 'Aufwand ' + d.effort : '', d.origin === 'frei' ? 'frei zugänglich' : 'hinter E-Mail, mit deiner Substanz'].filter(Boolean).join(' · ')]));
+        if (d.promise) panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, ['Versprechen: ' + d.promise]));
+        if (d.content_points && d.content_points.length) panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, ['Inhalt: ' + d.content_points.join('; ')]));
+        if (d.conversion_bridge) panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, ['Danach: ' + d.conversion_bridge]));
+        (d.notes || []).forEach(function (t) { panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, [t])); });
+      }
+      if (d && !isAsset) {
         if (isMail) {
           panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [(d.kind_label || '') + ' · Tag ' + d.day + ' (Vorschlag)']));
         } else {
@@ -5452,7 +5538,7 @@
       labelInput.value = node.label;
       labelInput.addEventListener('focus', pushUndoOnce(node.id + ':label'));
       labelInput.addEventListener('input', function () { var v = labelInput.value.trim(); if (!v) return; node.label = v.slice(0, TP_LIMITS.label); renderCanvas(); scheduleSave(); });
-      panel.appendChild(field(isMail ? 'Lernziel' : 'Titel (Lernziel)', labelInput));
+      panel.appendChild(field(isAsset ? 'Titel' : isMail ? 'Lernziel' : 'Titel (Lernziel)', labelInput));
       if (node.kind === 'custom') {
         var phaseSel = el('select', { class: 'cvz-flow-input' }, [el('option', { value: '' }, ['Keine Phase'])].concat(TP_PHASES.map(function (p) { return el('option', { value: p.value }, [p.label]); })));
         phaseSel.value = node.phase || '';
@@ -5485,7 +5571,7 @@
         roleControl.addEventListener('focus', pushUndoOnce(node.id + ':role'));
         roleControl.addEventListener('input', function () { node.role = roleControl.value.trim().slice(0, 120) || null; renderCanvas(); scheduleSave(); });
       }
-      panel.appendChild(field('Rolle', roleControl));
+      if (!isAsset) panel.appendChild(field('Rolle', roleControl));
       var channelInput = el('input', { type: 'text', class: 'cvz-flow-input', maxlength: String(TP_LIMITS.channel), placeholder: 'z. B. LinkedIn, Google Search, Newsletter' });
       channelInput.value = node.channel || '';
       channelInput.addEventListener('focus', pushUndoOnce(node.id + ':channel'));
@@ -5663,6 +5749,7 @@
 
   var TOUCHPOINT_STYLES = [
     '#cvz-content-strategy-agent .cvz-tp-flow .cvz-flow-node.is-mail .cvz-flow-node-box{fill:#0f2321;}',
+    '#cvz-content-strategy-agent .cvz-tp-flow .cvz-flow-node.is-asset .cvz-flow-node-box{fill:#241329;}',
     '#cvz-content-strategy-agent .cvz-tp-zone{fill:rgba(79,209,197,.04);stroke:rgba(79,209,197,.35);stroke-dasharray:4 4;pointer-events:none;}',
     '#cvz-content-strategy-agent .cvz-tp-zone-label{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;fill:#4fd1c5;font-family:inherit;pointer-events:none;}',
     '#cvz-content-strategy-agent .cvz-tp-rolefilter{width:auto;max-width:200px;padding:5px 8px;}',
@@ -5679,6 +5766,265 @@
     '#cvz-content-strategy-agent .cvz-tp-gated,#cvz-content-strategy-agent .cvz-tp-demand{margin:0 0 24px;}',
   ];
   // ==== TOUCHPOINT-ENDE ====
+
+  // ==== PROFIL-ANFANG ====
+  // NEU (Produktprofil): Schritt "Produkt bestätigen" nach der Themen-Prüfung. Der Server liest die eigene Domain und leitet einen Entwurf
+  // ab (POST /suggest-profile), der Kunde prüft und bestätigt ihn. Bestätigt wird pro Domain gespeichert, beim nächsten Mal ist der Schritt
+  // vorbelegt. Ohne Domain oder bei einem Fehler lässt sich der Schritt überspringen, die Strategie läuft dann wie bisher ohne Profil.
+  var PROFILE_LIMITS = { items: 6, competitors: 8, item: 140, desc: 500, category: 100 };
+  var PROFILE_FIELD_DEFS = [
+    { key: 'kann', label: 'Was kann dein Angebot?', hint: 'Eine Fähigkeit pro Zeile.', max: 6, placeholder: 'z. B. Landingpage aus einem Briefing erzeugen' },
+    { key: 'kann_nicht', label: 'Was kann es NICHT?', hint: 'Besonders wichtig. Die Strategie empfiehlt nichts, was hier steht. Zum Beispiel "veröffentlicht keine Seiten" oder "kein Hosting".', max: 6, placeholder: 'z. B. veröffentlicht keine Seiten', flag: true },
+    { key: 'ergaenzt', label: 'Womit arbeitet es zusammen? (kein Wettbewerb)', hint: 'Dinge, mit denen dein Angebot zusammenspielt oder zu denen es führt, zum Beispiel ein CMS. Dagegen wird nie verglichen.', max: 6, placeholder: 'z. B. CMS (WordPress, Webflow)', flag: true },
+    { key: 'ersetzt', label: 'Gegen wen tritt es an?', hint: 'Alternativen, die deine Kunden stattdessen wählen würden. Nur dagegen wird verglichen.', max: 6, placeholder: 'z. B. Agentur' },
+    { key: 'konkurrenten', label: 'Direkte Wettbewerber (optional)', hint: 'Namen oder Domains. Sie bekommen nie eine Off-Site-Maßnahme.', max: 8, placeholder: 'z. B. unbounce.com' },
+  ];
+
+  // NEU (Wirtschaftlichkeit): grobe Klasse für den Wert eines Kunden. Leer = aus Angebotstyp und Endziel ableiten.
+  var PROFILE_VALUE_OPTIONS = [
+    { value: '', label: 'Aus Angebotstyp und Endziel ableiten' },
+    { value: 'klein', label: 'Klein: bis ca. 2.000 € pro Kunde und Jahr (meist Selbstbedienung)' },
+    { value: 'mittel', label: 'Mittel: ca. 2.000 bis 20.000 € pro Kunde und Jahr' },
+    { value: 'gross', label: 'Groß: über ca. 20.000 € pro Kunde und Jahr (Vertrieb mit persönlichem Kontakt)' },
+  ];
+  var PROFILE_VALUE_LABELS = { klein: 'Klein (bis ca. 2.000 € pro Kunde und Jahr)', mittel: 'Mittel (ca. 2.000 bis 20.000 €)', gross: 'Groß (über ca. 20.000 €)' };
+
+  // Domain für den Entwurf: die eingegebene, sonst die des gewählten Tracker-Themas. Leer = kein Profil-Schritt.
+  function profileDomain(domain, trackerTopicId) {
+    var d = String(domain || '').trim();
+    if (!d && trackerTopicId) {
+      var t = (state.trackerTopics || []).filter(function (x) { return x.id === trackerTopicId; })[0];
+      d = t && t.own_domain ? String(t.own_domain).trim() : '';
+    }
+    d = d.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0];
+    return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(d) ? d : '';
+  }
+
+  // Schritte des Assistenten. Ohne Domain entfällt "Produkt bestätigen" auch in der Anzeige.
+  function wizardStepsFor(trackerTopicId, domain) {
+    var withProfile = !!profileDomain(domain, trackerTopicId);
+    if (trackerTopicId) return withProfile ? STEPS_TRACKER : STEPS_TRACKER_SHORT;
+    return withProfile ? STEPS_FULL : STEPS_FULL_SHORT;
+  }
+  function stepNo(label) {
+    var steps = state.wizardSteps || STEPS_FULL;
+    var i = steps.indexOf(label);
+    return i < 0 ? 0 : i;
+  }
+
+  // Eine Zeile pro Eintrag, gleiche Grenzen wie im Backend (ProductProfileSchema). Zu viel oder Zu langes wird gemeldet statt still gekürzt.
+  function parseProfileLines(text, max) {
+    var seen = {};
+    var list = [];
+    String(text || '').split(/\r?\n/).forEach(function (line) {
+      var q = line.replace(/^\s*(?:[-*\u2022\u2013\u2014]+|\d{1,2}[.)])\s+/, '').replace(/\s+/g, ' ').trim();
+      if (q.length < 2) return;
+      var key = q.toLowerCase();
+      if (seen[key]) return;
+      seen[key] = true;
+      list.push(q);
+    });
+    if (list.length > max) return { list: list, error: 'Höchstens ' + max + ' Einträge, aktuell ' + list.length + '. Nimm die wichtigsten.' };
+    var tooLong = list.filter(function (q) { return q.length > PROFILE_LIMITS.item; })[0];
+    if (tooLong) return { list: list, error: 'Ein Eintrag ist zu lang (höchstens ' + PROFILE_LIMITS.item + ' Zeichen): "' + tooLong.slice(0, 40) + '…". Bitte kürzen.' };
+    return { list: list, error: '' };
+  }
+
+  function profileDateText(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? '' : d.toLocaleDateString('de-DE');
+  }
+
+  function continueAfterProfile(ctx) {
+    if (ctx.trackerTopicId) startGeneration(ctx.topic, ctx.domain, ctx.validationId, ctx.trackerTopicId, null, ctx.customerQuestions);
+    else startAudienceStep(ctx.topic, ctx.domain, ctx.validationId, ctx.originalTopic);
+  }
+
+  // ctx: { topic, domain, validationId, originalTopic, trackerTopicId, customerQuestions, validationResult }
+  function startProfileStep(ctx, options) {
+    var host = profileDomain(ctx.domain, ctx.trackerTopicId);
+    if (!host) { state.productProfile = null; continueAfterProfile(ctx); return; }
+    var refresh = !!(options && options.refresh);
+    renderBusy(
+      refresh ? 'Ich lese deine Website noch einmal …' : 'Ich lese deine Website und leite ab, was dein Angebot kann …',
+      'Das dauert meist unter einer Minute. Du bestätigst das Ergebnis gleich.',
+      stepNo('Produkt bestätigen')
+    );
+    withNetworkRetry(function () {
+      return apiFetch('/api/content-strategy/suggest-profile', {
+        method: 'POST',
+        body: JSON.stringify({ user_id: state.userId, topic: ctx.topic, domain: host, strategy_goal: state.strategyGoal || undefined, refresh: refresh || undefined }),
+      });
+    }, 1, noteRetrying)
+      .then(function (res) {
+        if (!res || !res.profile) { state.productProfile = null; continueAfterProfile(ctx); return; }
+        renderProfileStep(res, ctx, null);
+      })
+      .catch(function (err) {
+        renderStepError(err, 'Produktprofil', {
+          stepIndex: stepNo('Produkt bestätigen'),
+          retry: function () { startProfileStep(ctx, options); },
+          back: function () { renderTopicValidationResult(ctx.validationResult, ctx.domain, ctx.originalTopic, ctx.trackerTopicId); },
+          backLabel: 'Zurück zur Themen-Auswahl',
+          skip: function () { state.productProfile = null; continueAfterProfile(ctx); },
+          skipLabel: 'Ohne Produktprofil fortfahren',
+        });
+      });
+  }
+
+  // saved: bereits bearbeitete Eingaben (aus dem Entwurf im Browser), sonst gilt der Entwurf des Servers.
+  function renderProfileStep(res, ctx, saved) {
+    state.wizardActive = true;
+    clear(state.root);
+    var base = saved || res.profile;
+    var growAreas = [];
+    var wrap = el('div', { class: 'cvz-cs-topic-check' });
+    wrap.appendChild(renderStepper(state.wizardSteps || STEPS_FULL, stepNo('Produkt bestätigen'), true));
+    wrap.appendChild(el('h3', {}, ['Stimmt dieses Produktprofil?']));
+
+    var host = profileDomain(ctx.domain, ctx.trackerTopicId);
+    var sourceText;
+    if (res.source === 'gespeichert') {
+      var when = profileDateText(res.confirmed_at);
+      sourceText = 'Das ist die Fassung, die du für ' + host + (when ? ' am ' + when : '') + ' bestätigt hast. Prüfe nur, ob sie noch stimmt.';
+    } else if (res.source === 'ohne_seite') {
+      sourceText = 'Deine Website war nicht abrufbar. Ich konnte nur aus Thema und Angebotstyp ableiten. Bitte ergänze, was dein Angebot kann und was nicht.';
+    } else {
+      var n = (res.pages || []).length;
+      sourceText = 'Das habe ich aus ' + (n === 1 ? 'einer Seite' : n + ' Seiten') + ' von ' + host + ' abgeleitet. Prüfe es und ändere, was nicht stimmt.';
+    }
+    wrap.appendChild(el('div', { class: 'cvz-cs-callout' }, [
+      el('strong', {}, ['Das ist jetzt zu tun: ']),
+      sourceText + ' Mit diesem Profil vergleicht und empfiehlt die Strategie nur, was zu deinem Angebot passt. Es genügt, zu bestätigen.',
+    ]));
+
+    var descInput = makeGrowArea(base.beschreibung || '', 'Was ist dein Angebot, und für wen? Ein bis zwei Sätze.', growAreas);
+    descInput.setAttribute('maxlength', String(PROFILE_LIMITS.desc));
+    wrap.appendChild(field('Dein Angebot in ein bis zwei Sätzen', descInput));
+    var catInput = el('input', { type: 'text', maxlength: String(PROFILE_LIMITS.category), placeholder: 'z. B. Landingpage-Generator' });
+    catInput.value = base.kategorie || '';
+    wrap.appendChild(field('Kategorie', catInput));
+
+    var inputs = {};
+    PROFILE_FIELD_DEFS.forEach(function (def) {
+      var area = makeGrowArea((base[def.key] || []).join('\n'), def.placeholder, growAreas);
+      inputs[def.key] = area;
+      var empty = (base[def.key] || []).length === 0;
+      var f = field(def.label, area);
+      if (def.flag && empty) f.classList.add('cvz-pf-check');
+      f.appendChild(el('span', { class: 'cvz-cs-hint' }, [def.hint + (def.flag && empty ? ' Dazu stand auf der Seite nichts. Bitte prüfen.' : '')]));
+      wrap.appendChild(f);
+    });
+
+    var valueSel = el('select', { name: 'kundenwert' }, PROFILE_VALUE_OPTIONS.map(function (o) { return el('option', { value: o.value }, [o.label]); }));
+    valueSel.value = base.kundenwert || '';
+    var valueField = field('Was ist ein Kunde pro Jahr ungefähr wert?', valueSel);
+    valueField.appendChild(el('span', { class: 'cvz-cs-hint' }, ['Bestimmt, welche Formate sich lohnen. Bei kleinem Kundenwert schlägt die Strategie keine Webinare, Workshops oder persönlichen Gespräche vor, weil sie sich nicht rechnen. Eine grobe Einordnung, keine Prognose.']));
+    wrap.appendChild(valueField);
+
+    var annahmen = (res.profile && res.profile.annahmen) || [];
+    if (annahmen.length > 0) {
+      var ul = el('ul', { class: 'cvz-cs-topic-alt-list' });
+      annahmen.forEach(function (a) { ul.appendChild(el('li', {}, [a])); });
+      wrap.appendChild(el('div', { class: 'cvz-cs-callout cvz-pf-assumptions' }, [el('strong', {}, ['Bitte besonders prüfen: ']), 'Das stand nicht klar auf deiner Seite.', ul]));
+    }
+
+    var errorLine = el('p', { class: 'cvz-cs-quota-empty' });
+    wrap.appendChild(errorLine);
+
+    function collect() {
+      var out = { beschreibung: descInput.value, kategorie: catInput.value, kundenwert: valueSel.value || null, annahmen: annahmen };
+      PROFILE_FIELD_DEFS.forEach(function (def) { out[def.key] = String(inputs[def.key].value || '').split(/\r?\n/); });
+      return out;
+    }
+    var draftTimer = null;
+    function saveProfileDraft() {
+      saveDraft('profile', { res: res, ctx: ctx, profile: collect() });
+    }
+    wrap.addEventListener('input', function () { clearTimeout(draftTimer); draftTimer = setTimeout(saveProfileDraft, 400); });
+
+    function build() {
+      var desc = descInput.value.replace(/\s+/g, ' ').trim();
+      if (desc.length < 10) return { error: 'Bitte beschreibe dein Angebot in ein bis zwei Sätzen.' };
+      var profile = { beschreibung: desc.slice(0, PROFILE_LIMITS.desc), kategorie: catInput.value.trim().slice(0, PROFILE_LIMITS.category), kundenwert: valueSel.value || null, annahmen: annahmen };
+      for (var i = 0; i < PROFILE_FIELD_DEFS.length; i++) {
+        var def = PROFILE_FIELD_DEFS[i];
+        var parsed = parseProfileLines(inputs[def.key].value, def.max);
+        if (parsed.error) return { error: def.label + ': ' + parsed.error };
+        profile[def.key] = parsed.list;
+      }
+      return { profile: profile };
+    }
+
+    var confirmBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Profil bestätigen, ' + (ctx.trackerTopicId ? 'Strategie erstellen' : 'weiter zur Zielgruppe')]);
+    confirmBtn.addEventListener('click', function () {
+      clearTimeout(draftTimer);
+      var built = build();
+      if (built.error) { errorLine.textContent = built.error; return; }
+      errorLine.textContent = '';
+      state.productProfile = built.profile;
+      continueAfterProfile(ctx);
+    });
+    var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Zurück zur Themen-Auswahl']);
+    backBtn.addEventListener('click', function () { renderTopicValidationResult(ctx.validationResult, ctx.domain, ctx.originalTopic, ctx.trackerTopicId); });
+    var skipBtn = el('button', { type: 'button', class: 'cvz-cs-link-btn' }, ['Ohne Profil weitermachen (weniger genau)']);
+    skipBtn.addEventListener('click', function () { clearTimeout(draftTimer); state.productProfile = null; continueAfterProfile(ctx); });
+    var actions = [backBtn];
+    if (res.source !== 'ohne_seite') {
+      var refreshBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Neu aus der Website ableiten']);
+      refreshBtn.addEventListener('click', function () { clearTimeout(draftTimer); startProfileStep(ctx, { refresh: true }); });
+      actions.push(refreshBtn);
+    }
+    actions.push(confirmBtn);
+    wrap.appendChild(el('div', { class: 'cvz-cs-topic-check-actions' }, actions));
+    wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [skipBtn]));
+    state.root.appendChild(renderQuotaBanner());
+    state.root.appendChild(wrap);
+    growAllLater(growAreas);
+    saveProfileDraft();
+  }
+
+  // Bericht: das berücksichtigte Profil (aufklappbar) und Widersprüche, die nach den Korrekturen blieben.
+  function renderProfileBox(result) {
+    var p = result && result.product_profile;
+    var warns = (result && result.profile_warnings) || [];
+    if (!p && warns.length === 0) return null;
+    var box = el('div', { class: 'cvz-pf-box' });
+    if (p) {
+      var body = el('div', { class: 'cvz-pf-body' });
+      body.appendChild(el('p', {}, [p.beschreibung]));
+      var valueRow = p.kundenwert ? [['Wert eines Kunden', [PROFILE_VALUE_LABELS[p.kundenwert] || p.kundenwert]]] : [];
+      valueRow.concat([['Kann', p.kann], ['Kann nicht', p.kann_nicht], ['Ergänzt, kein Wettbewerb', p.ergaenzt], ['Wettbewerb (Ersetzt)', p.ersetzt], ['Direkte Wettbewerber', p.konkurrenten]]).forEach(function (row) {
+        if (row[1] && row[1].length > 0) body.appendChild(el('p', {}, [el('strong', {}, [row[0] + ': ']), row[1].join('; ')]));
+      });
+      box.appendChild(el('details', { class: 'cvz-cs-expand' }, [
+        el('summary', {}, ['Aufklappen: Produktprofil, nach dem diese Strategie arbeitet']),
+        body,
+        el('p', { class: 'cvz-cs-hint' }, ['Du hast es vor dem Start bestätigt. Vergleiche, Zwischenziele und Off-Site-Maßnahmen richten sich danach.']),
+      ]));
+    }
+    if (warns.length > 0) {
+      var ul = el('ul', { class: 'cvz-cs-brief-list' });
+      warns.slice(0, 6).forEach(function (w) { ul.appendChild(el('li', {}, [w])); });
+      box.appendChild(el('div', { class: 'cvz-cs-gsc-hint cvz-pf-warn' }, [
+        el('strong', {}, ['Bitte prüfen: ']),
+        'Diese Stellen widersprechen deinem Produktprofil. Die Strategie hat sie trotz Korrektur nicht ganz bereinigt.',
+        ul,
+      ]));
+    }
+    return box;
+  }
+
+  var PROFILE_STYLES = [
+    '#cvz-content-strategy-agent .cvz-pf-check .cvz-cs-field-label{color:var(--cvz-amber);}',
+    '#cvz-content-strategy-agent .cvz-pf-check textarea{border-color:rgba(245,158,11,.6);}',
+    '#cvz-content-strategy-agent .cvz-pf-assumptions ul{margin:6px 0 0;}',
+    '#cvz-content-strategy-agent .cvz-pf-box{margin:14px 0 0;}',
+    '#cvz-content-strategy-agent .cvz-pf-body p{margin:0 0 6px;font-size:14px;}',
+    '#cvz-content-strategy-agent .cvz-pf-warn{padding:12px 16px;margin-top:10px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.06);}',
+  ];
+  // ==== PROFIL-ENDE ====
 
   // ==================== APP-LEBENSZYKLUS ====================
   function getParam(key) {
