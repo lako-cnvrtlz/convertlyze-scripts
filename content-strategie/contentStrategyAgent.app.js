@@ -614,7 +614,7 @@
       /* ---- KI-Disclaimer ---- */
       '.cvz-cs-ki-disclaimer{margin-top:28px;padding-top:16px;border-top:1px solid var(--cvz-border);',
         'color:var(--cvz-muted);font-size:12px;line-height:1.6;text-align:center;}',
-    ].join('');
+    ].concat(TOUCHPOINT_STYLES).join('');
 
     var style = document.createElement('style');
     style.id = 'cvz-cs-styles';
@@ -3395,7 +3395,7 @@
     wrap.appendChild(renderReportHeader(result, session, sessionId));
     // NEU: Sprungleiste direkt unter dem Kopf. Wird erst aktiv, wenn der Bericht im DOM steht (siehe unten).
     // NEU: Abschnittsnummern aus dem Inhalt des Berichts (der Funnel-Abschnitt fehlt bei älteren Berichten).
-    var navItems = buildReportNavItems(result);
+    var navItems = buildReportNavItems(result, session);
     var secNo = {};
     navItems.forEach(function (it) { secNo[it.key] = it.n; });
     var anchorNav = buildAnchorNav(navItems);
@@ -3409,6 +3409,7 @@
     wrap.appendChild(renderReportSection(secNo.cluster, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
     wrap.appendChild(renderReportSection(secNo.flow, 'Content-Flow: Themen-Baum bearbeiten', [renderFlowSection(sessionId, result, session)]));
     if (secNo.funnel) wrap.appendChild(renderReportSection(secNo.funnel, 'Funnel und Lead-Magneten', [renderFunnelSection(result)]));
+    if (secNo.touchpoints) wrap.appendChild(renderReportSection(secNo.touchpoints, 'Touchpoint-Plan', [renderTouchpointSection(sessionId, result, session)]));
     wrap.appendChild(renderReportSection(secNo.geo, 'GEO-Strategie', [renderVisibilitySection(session), renderOffsiteSection(result.offsite_measures, result.offsite_sources), renderGeoSection(result.geo_strategy)]));
     wrap.appendChild(renderReportSection(secNo.roadmap, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]));
     var fundingText = fundedBy
@@ -3447,15 +3448,16 @@
     { key: 'cluster', label: 'Cluster' },
     { key: 'flow', label: 'Content-Flow' },
     { key: 'funnel', label: 'Funnel', optional: true },
+    { key: 'touchpoints', label: 'Touchpoints', optional: true },
     { key: 'geo', label: 'GEO' },
     { key: 'roadmap', label: 'Roadmap' },
   ];
 
-  function buildReportNavItems(result) {
+  function buildReportNavItems(result, session) {
     var n = 0;
     var out = [];
     REPORT_NAV_BASE.forEach(function (item) {
-      if (item.optional && !hasFunnelSection(result)) return;
+      if (item.optional && !(item.key === 'touchpoints' ? hasTouchpointSection(result, session) : hasFunnelSection(result))) return;
       n++;
       out.push({ key: item.key, n: n, label: item.label });
     });
@@ -3688,7 +3690,7 @@
       el('span', { class: 'cvz-cs-badge' }, ['Aufwand ' + m.effort]),
     ];
     // Immer angelegt und nur ein- oder ausgeblendet: Ändert sich der Befund (eigene Seite im Flow), zieht die Karte mit.
-    var gapBadge = el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--schwach cvz-cs-magnet-gapbadge', 'data-phase': m.phase }, ['Schließt Lücke']);
+    var gapBadge = el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--schwach cvz-cs-magnet-gapbadge', 'data-phase': m.phase, 'data-counts': m.counts_as_step === false ? '0' : '1' }, ['Schließt Lücke']);
     if (!m.closes_gap) gapBadge.style.display = 'none';
     badges.push(gapBadge);
     card.appendChild(el('summary', {}, [el('div', { class: 'cvz-cs-page-acc-head' }, [
@@ -3699,6 +3701,9 @@
     var body = el('div', { class: 'cvz-cs-page-acc-body' });
     card.appendChild(body);
     body.appendChild(magnetLine('Ergebnis für den Nutzer:', m.promise));
+    if (m.grounding && m.grounding.source_text) body.appendChild(magnetLine('Beantwortet (' + m.grounding.kind_label + '):', m.grounding.source_text));
+    if (m.gate_requirement && m.gate_requirement.need) body.appendChild(magnetLine('Als Gated Content erst, wenn ihr habt (' + m.gate_requirement.kind_label + '):', m.gate_requirement.need));
+    if (m.counts_as_step === false) body.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Zählt im Funnel-Befund nicht als Zwischenschritt: Es gibt kein persönliches Ergebnis und kein Produkt-Erlebnis, nur Inhalt. Eine Lücke schließt das allein nicht.']));
     if (m.content_points && m.content_points.length > 0) {
       var cp = el('ul', { class: 'cvz-cs-brief-list' });
       m.content_points.forEach(function (pt) { cp.appendChild(el('li', {}, [pt])); });
@@ -3762,13 +3767,14 @@
       fillCheck(funnel);
       var gaps = funnel.gap_phases || [];
       Array.prototype.forEach.call(box.querySelectorAll('.cvz-cs-magnet-gapbadge'), function (b) {
-        b.style.display = gaps.indexOf(b.getAttribute('data-phase')) !== -1 ? '' : 'none';
+        b.style.display = gaps.indexOf(b.getAttribute('data-phase')) !== -1 && b.getAttribute('data-counts') !== '0' ? '' : 'none';
       });
     };
     var magnets = result.lead_magnets || [];
     if (magnets.length > 0) {
       box.appendChild(el('h5', {}, ['Vorgeschlagene Lead-Magneten und kostenlose Tools']));
       box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Tippe auf einen Vorschlag für Inhalte, Abgrenzung, den Übergang zum Endziel und den Aufwand. Vorschläge, die eine Lücke schließen, stehen zuerst.']));
+      if (result.lead_magnets_substance_note) box.appendChild(el('p', { class: 'cvz-cs-callout' }, [result.lead_magnets_substance_note]));
       magnets.forEach(function (m) { box.appendChild(renderLeadMagnetCard(m)); });
       if (result.lead_magnets_tracking_note) {
         box.appendChild(el('div', { class: 'cvz-cs-goal-box' }, [
@@ -4621,6 +4627,1058 @@
     loadChatHistory(sessionId);
     return section;
   }
+
+  // ==== TOUCHPOINT-ANFANG ====
+  // NEU (Touchpoint-Plan, nachgelagert): Abschnitt nach dem Bericht. Ablauf:
+  //   1. Substanz-Inventar ausfüllen (Vorprüfung im Browser, spiegelt die Regeln des Servers),
+  //   2. Lauf starten (POST /:id/touchpoint-plan), der Status steht in der Session, der Browser fragt GET /:id ab,
+  //   3. Ergebnis: Gated-Content-Verdikt, Fakt "Nachfrage in der Suche" je Phase, Editor (Touchpoints und E-Mails
+  //      nach dem Lead) und Export.
+  // Der Plan ist kanalfrei: Der Kanal ist ein Freifeld, das die Nutzer im Editor setzen.
+  // Benötigt aus dem Widget: el, clear, svgEl, apiFetch, state, flowNewId, flowClone, flowClamp, flowWrapText,
+  // flowToCsv, flowDownload, flowSlug und die flow-CSS-Klassen. Der Editor-Zustand liegt getrennt vom Content Flow
+  // (PUT /:id/touchpoints), der Bericht selbst wird dadurch nie verändert.
+  var TP_PHASES = [
+    { value: 'exploration', label: 'Erforschung' },
+    { value: 'evaluation', label: 'Bewertung' },
+    { value: 'comparison', label: 'Vergleich' },
+    { value: 'decision', label: 'Entscheidung' },
+  ];
+  var TP_PHASE_COLORS = { exploration: '#3b82f6', evaluation: '#f59e0b', comparison: '#a78bfa', decision: '#34d399' };
+  var TP_MAIL_COLOR = '#4fd1c5';
+  var TP_FORMATS = [
+    { id: 'text_hook', label: 'Kurzer Text mit Aufhänger' }, { id: 'kurzvideo', label: 'Kurzvideo' },
+    { id: 'erklaervideo', label: 'Erklärvideo' }, { id: 'dokument', label: 'Dokument oder Carousel' },
+    { id: 'case', label: 'Kundenfall' }, { id: 'vergleich', label: 'Gegenüberstellung' },
+    { id: 'lead_formular', label: 'Formular mit Gegenwert' }, { id: 'einladung', label: 'Einladung' },
+  ];
+  var TP_INV_KINDS = [
+    { value: 'daten', label: 'Eigene Daten', hint: 'z. B. Auswertung von 140 Projekten aus 2019 bis 2025' },
+    { value: 'fall', label: 'Kundenfall', hint: 'z. B. Umstellung in 9 Monaten, Betriebskosten um ein Drittel gesenkt' },
+    { value: 'methode', label: 'Methode oder Erfahrungswerte', hint: 'z. B. Bewertungsraster mit 12 Kriterien, nach dem wir intern arbeiten' },
+    { value: 'werkzeug', label: 'Vorhandenes Werkzeug', hint: 'z. B. Skript, das Berechtigungen in 12 Punkten prüft' },
+  ];
+  var TP_RELEASES = [
+    { value: 'frei', label: 'Darf genannt werden' },
+    { value: 'anonymisiert', label: 'Nur anonymisiert' },
+    { value: 'nur_intern', label: 'Nur intern, nie nach draußen' },
+  ];
+  var TP_BASIS_LABELS = { messung: 'Aus der Messung', kundeneingabe: 'Aus deinen Angaben', annahme: 'Hypothese' };
+  var TP_DEMAND_LABELS = { ja: 'Ja', nein: 'Nein', keine_seiten: 'Keine Seite in dieser Phase' };
+  var TP_LIMITS = { nodes: 60, edges: 150, label: 160, note: 600, channel: 60, entries: 12, title: 120, detail: 300, restrictions: 400, coord: 5000 };
+  var TP_DETAIL_MIN = 25;
+  var TP_NODE_W = 230;
+  var TP_NODE_H = 100;
+  var TP_GAP_X = 36;
+  var TP_GAP_Y = 70;
+  var TP_POLL_MS = 3000;
+  var TP_STALE_MS = 8 * 60 * 1000; // wie im Backend: ein "läuft" älter als das gilt als abgebrochen
+
+  function hasTouchpointSection(result, session) {
+    return !!(session && session.id);
+  }
+
+  function tpPhaseLabel(value) {
+    for (var i = 0; i < TP_PHASES.length; i++) if (TP_PHASES[i].value === value) return TP_PHASES[i].label;
+    return '';
+  }
+  function tpFormatLabel(id) {
+    for (var i = 0; i < TP_FORMATS.length; i++) if (TP_FORMATS[i].id === id) return TP_FORMATS[i].label;
+    return id || '';
+  }
+
+  // ---------- Vorprüfung des Inventars (gleiche Regeln wie normalizeInventory im Backend) ----------
+  function tpCheckEntry(e) {
+    var detail = String(e.detail || '').trim();
+    if (e.release === 'nur_intern') return { state: 'intern', text: 'Nicht nutzbar: nur intern freigegeben.' };
+    if (detail.length < TP_DETAIL_MIN) return { state: 'vague', text: 'Zu knapp. Nenne Umfang, Zeitraum und Herkunft (mindestens ' + TP_DETAIL_MIN + ' Zeichen).' };
+    if (e.kind === 'daten' && !/\d/.test(detail)) return { state: 'vague', text: 'Bei Daten fehlt ein Umfang oder Zeitraum, zum Beispiel Anzahl Projekte, Jahre oder Messpunkte.' };
+    return { state: 'ok', text: e.release === 'anonymisiert' ? 'Nutzbar. Vor Veröffentlichung wird anonymisiert.' : 'Nutzbar.' };
+  }
+
+  function tpDraftKey(sessionId) { return 'cvz-cs-inventory-draft-' + sessionId; }
+  function tpLoadDraft(sessionId) {
+    try {
+      var raw = localStorage.getItem(tpDraftKey(sessionId));
+      var d = raw ? JSON.parse(raw) : null;
+      if (d && Array.isArray(d.entries)) return d;
+    } catch (e) { /* ohne Entwurf weiter */ }
+    return null;
+  }
+  function tpSaveDraft(sessionId, data) {
+    try { localStorage.setItem(tpDraftKey(sessionId), JSON.stringify(data)); } catch (e) { /* egal */ }
+  }
+  function tpClearDraft(sessionId) {
+    try { localStorage.removeItem(tpDraftKey(sessionId)); } catch (e) { /* egal */ }
+  }
+
+  // Voraussetzungen für Gated Content, die der Hauptlauf bei seinen Lead-Magnet-Vorschlägen genannt hat (ohne Doppelte).
+  function tpGateNeeds(result) {
+    var seen = {};
+    var out = [];
+    ((result && result.lead_magnets) || []).forEach(function (m) {
+      var g = m && m.gate_requirement;
+      if (!g || !g.need) return;
+      var text = (g.kind_label || g.kind) + ': ' + g.need;
+      if (seen[text.toLowerCase()]) return;
+      seen[text.toLowerCase()] = true;
+      out.push(text);
+    });
+    return out.slice(0, 6);
+  }
+
+  function tpLine(label, text) {
+    return el('p', { class: 'cvz-cs-magnet-line' }, [el('strong', {}, [label + ' ']), text]);
+  }
+  function tpList(items) {
+    var ul = el('ul', { class: 'cvz-cs-brief-list' });
+    items.forEach(function (t) { ul.appendChild(el('li', {}, [t])); });
+    return ul;
+  }
+
+  // ==================== ABSCHNITT ====================
+  function renderTouchpointSection(sessionId, result, session) {
+    var root = el('div', { class: 'cvz-cs-tp' });
+    var isCreator = !session || session.user_id === state.userId;
+    var pollTimer = null;
+    var startError = '';
+
+    function stopPoll() { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } }
+    function jobOf() { return (session && session.touchpoint_job) || null; }
+    function hasResult() { return !!(result.gated_content || result.touchpoint_plan); }
+
+    function paint() {
+      stopPoll();
+      clear(root);
+      if (hasResult()) { renderResult(); return; }
+      var job = jobOf();
+      var staleRunning = job && job.status === 'running' && job.started_at && Date.now() - new Date(job.started_at).getTime() >= TP_STALE_MS;
+      if (job && job.status === 'running' && !staleRunning) { renderRunning(); poll(); return; }
+      if (staleRunning && !startError) startError = 'Die letzte Erstellung wurde abgebrochen. Bitte starte sie erneut.';
+      if (job && job.status === 'error' && !startError) startError = 'Die Erstellung ist fehlgeschlagen' + (job.error ? ': ' + job.error : '.') + ' Deine Angaben sind noch da, bitte starte erneut.';
+      renderIntro();
+    }
+
+    function poll() {
+      pollTimer = setTimeout(function () {
+        if (!root.isConnected) return; // Bericht verlassen: nicht weiter abfragen
+        apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId))
+          .then(function (fresh) {
+            if (!fresh) return;
+            session.touchpoint_job = fresh.touchpoint_job || null;
+            var status = fresh.touchpoint_job && fresh.touchpoint_job.status;
+            if (status === 'done' && fresh.result) {
+              ['inventory', 'gated_content', 'touchpoint_plan', 'nurture_plan'].forEach(function (k) {
+                if (fresh.result[k] !== undefined) result[k] = fresh.result[k]; else delete result[k];
+              });
+              session.touchpoint_diagram = fresh.touchpoint_diagram || null;
+              tpClearDraft(sessionId);
+              paint();
+              return;
+            }
+            if (status === 'error') { paint(); return; }
+            poll();
+          })
+          .catch(function () { poll(); }); // kurzer Netzausfall: weiter versuchen
+      }, TP_POLL_MS);
+    }
+
+    // ---------- Einstieg und Inventar ----------
+    function renderIntro() {
+      root.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+        'Der Touchpoint-Plan zeigt, welche Information welche Rolle in welcher Phase braucht, damit aus Interessenten Leads werden, und was danach per E-Mail folgt. ' +
+        'Er nennt keinen Kanal: Wo deine Zielgruppe erreichbar ist, entscheidest du im Editor. Gated Content, also Inhalt gegen E-Mail-Adresse, empfehlen wir nur, wenn du etwas hast, das es frei im Netz nicht gibt.',
+      ]));
+      if (!isCreator) {
+        root.appendChild(el('p', { class: 'cvz-cs-callout' }, ['Den Touchpoint-Plan kann nur die Person erstellen, die diese Strategie angelegt hat.']));
+        return;
+      }
+      if (startError) root.appendChild(el('div', { class: 'cvz-cs-error' }, [el('p', {}, [startError])]));
+      var needs = tpGateNeeds(result);
+      if (needs.length > 0) {
+        root.appendChild(el('div', { class: 'cvz-cs-callout cvz-tp-needs' }, [
+          el('strong', {}, ['Aus dem Bericht: ']),
+          'Bei den Lead-Magneten im Abschnitt Funnel steht, welche Substanz sie als Gated Content tragen würde. Trage unten ein, was davon ihr wirklich habt:',
+          tpList(needs),
+        ]));
+      }
+      root.appendChild(renderInventoryForm());
+    }
+
+    function renderInventoryForm() {
+      var wrap = el('div', { class: 'cvz-tp-form' });
+      var draft = tpLoadDraft(sessionId);
+      var entries = draft && draft.entries.length ? draft.entries.slice(0, TP_LIMITS.entries) : [];
+      var restrictions = draft && draft.restrictions ? draft.restrictions : '';
+      wrap.appendChild(el('h4', { class: 'cvz-cs-section-title' }, ['Was habt ihr, das andere nicht haben?']));
+      wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+        'Eigene Daten, Kundenfälle, Methoden oder Werkzeuge, die sich als Gegenwert für eine E-Mail-Adresse eignen. Je konkreter, desto besser: Umfang, Zeitraum, Herkunft. ' +
+        'Hast du nichts davon, lass die Liste leer. Dann entsteht der Plan ohne Gated Content.',
+      ]));
+      var list = el('div', {});
+      var summary = el('p', { class: 'cvz-cs-hint cvz-tp-summary' });
+      var warn = el('div', {});
+      var formError = el('p', { class: 'cvz-cs-quota-empty' });
+      var rows = [];
+
+      function persist() {
+        tpSaveDraft(sessionId, { entries: collect(), restrictions: restrictionsInput.value });
+      }
+      function collect() {
+        return rows.map(function (r) { return { kind: r.kind.value, title: r.title.value, detail: r.detail.value, release: r.release.value }; });
+      }
+      function refresh() {
+        var data = collect();
+        var usable = 0;
+        data.forEach(function (e, i) {
+          var c = tpCheckEntry(e);
+          if (c.state === 'ok') usable++;
+          rows[i].status.textContent = c.text;
+          rows[i].status.className = 'cvz-tp-status cvz-tp-status-' + c.state;
+          rows[i].num.textContent = 'Eintrag ' + (i + 1);
+        });
+        addBtn.style.display = rows.length >= TP_LIMITS.entries ? 'none' : '';
+        summary.textContent = rows.length === 0 ? 'Noch keine Einträge.' : usable + ' von ' + rows.length + (rows.length === 1 ? ' Eintrag' : ' Einträgen') + ' nutzbar.';
+        clear(warn);
+        if (usable === 0) {
+          warn.appendChild(el('p', { class: 'cvz-cs-callout' }, [
+            'Ohne nutzbare Substanz empfehlen wir kein Gated Content. Der Plan entsteht trotzdem, dann ohne Gated-Content-Ideen. Frei zugängliche Inhalte und ein Newsletter tragen hier mehr.',
+          ]));
+        }
+      }
+      function addRow(e) {
+        e = e || { kind: 'daten', title: '', detail: '', release: 'anonymisiert' };
+        var kind = el('select', {}, TP_INV_KINDS.map(function (k) { return el('option', { value: k.value }, [k.label]); }));
+        kind.value = e.kind;
+        var title = el('input', { type: 'text', maxlength: String(TP_LIMITS.title), placeholder: 'Kurzer Titel, z. B. Projektdaten 2019 bis 2025' });
+        title.value = e.title || '';
+        var detail = el('textarea', { class: 'cvz-cs-autogrow', rows: '2', maxlength: String(TP_LIMITS.detail), placeholder: TP_INV_KINDS[0].hint });
+        detail.value = e.detail || '';
+        var release = el('select', {}, TP_RELEASES.map(function (r) { return el('option', { value: r.value }, [r.label]); }));
+        release.value = e.release || 'anonymisiert';
+        var num = el('span', { class: 'cvz-tp-entry-num' });
+        var status = el('p', { class: 'cvz-tp-status' });
+        var remove = el('button', { type: 'button', class: 'cvz-cs-link-btn' }, ['Entfernen']);
+        var card = el('div', { class: 'cvz-tp-entry' }, [
+          el('div', { class: 'cvz-cs-role-head' }, [num, remove]),
+          el('div', { class: 'cvz-cs-role-grid' }, [
+            el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, ['Art']), kind]),
+            el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, ['Freigabe']), release]),
+          ]),
+          el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, ['Titel']), title]),
+          el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, ['Was genau? Umfang, Zeitraum, Herkunft']), detail]),
+          status,
+        ]);
+        var row = { card: card, kind: kind, title: title, detail: detail, release: release, num: num, status: status };
+        kind.addEventListener('change', function () {
+          for (var i = 0; i < TP_INV_KINDS.length; i++) if (TP_INV_KINDS[i].value === kind.value) detail.setAttribute('placeholder', TP_INV_KINDS[i].hint);
+          refresh(); persist();
+        });
+        [title, detail, release].forEach(function (c) { c.addEventListener('input', function () { refresh(); persist(); }); c.addEventListener('change', function () { refresh(); persist(); }); });
+        detail.addEventListener('input', function () { detail.style.height = 'auto'; detail.style.height = Math.max(detail.scrollHeight + 2, 54) + 'px'; });
+        remove.addEventListener('click', function () {
+          rows = rows.filter(function (r) { return r !== row; });
+          list.removeChild(card);
+          refresh(); persist();
+        });
+        rows.push(row);
+        list.appendChild(card);
+      }
+
+      var addBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['+ Eintrag hinzufügen']);
+      addBtn.addEventListener('click', function () { addRow(); refresh(); persist(); });
+      var restrictionsInput = el('textarea', { class: 'cvz-cs-autogrow', rows: '2', maxlength: String(TP_LIMITS.restrictions), placeholder: 'z. B. Keine Kundennamen, keine Preise, keine Vertragsdetails' });
+      restrictionsInput.value = restrictions;
+      restrictionsInput.addEventListener('input', persist);
+
+      entries.forEach(addRow);
+      wrap.appendChild(list);
+      wrap.appendChild(el('div', { class: 'cvz-cs-role-add' }, [addBtn]));
+      wrap.appendChild(summary);
+      wrap.appendChild(el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, ['Was darf nie nach draußen? (optional)']), restrictionsInput]));
+      wrap.appendChild(warn);
+      wrap.appendChild(formError);
+      wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Der Plan wird einmal erstellt. Prüfe deine Angaben vor dem Start. Das dauert etwa zwei Minuten, du kannst die Seite währenddessen offen lassen.']));
+      var startBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Touchpoint-Plan erstellen']);
+      startBtn.addEventListener('click', function () {
+        var data = collect();
+        var filled = data.filter(function (e) { return String(e.title).trim().length >= 2; });
+        var orphan = data.filter(function (e) { return String(e.title).trim().length < 2 && String(e.detail).trim().length > 0; });
+        if (orphan.length > 0) { formError.textContent = 'Mindestens ein Eintrag hat eine Beschreibung, aber keinen Titel.'; return; }
+        formError.textContent = '';
+        startBtn.setAttribute('disabled', 'disabled');
+        var payload = { entries: filled.map(function (e) { return { kind: e.kind, title: String(e.title).trim().slice(0, TP_LIMITS.title), detail: String(e.detail).trim().slice(0, TP_LIMITS.detail), release: e.release }; }) };
+        var r = restrictionsInput.value.trim();
+        if (r) payload.restrictions = r.slice(0, TP_LIMITS.restrictions);
+        apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId) + '/touchpoint-plan', { method: 'POST', body: JSON.stringify({ inventory: payload }) })
+          .then(function () {
+            startError = '';
+            session.touchpoint_job = { status: 'running', started_at: new Date().toISOString() };
+            paint();
+          })
+          .catch(function (err) {
+            startBtn.removeAttribute('disabled');
+            var code = err && err.body && err.body.code;
+            if (code === 'laeuft' || code === 'bereits_erstellt') {
+              // Läuft schon oder liegt schon vor (zweiter Tab, Doppelklick): Stand neu laden statt Fehler oder Formular zu zeigen.
+              startError = '';
+              session.touchpoint_job = { status: 'running', started_at: new Date().toISOString() };
+              paint();
+              return;
+            }
+            formError.textContent = err && err.network ? 'Die Verbindung wurde unterbrochen. Bitte versuche es in ein paar Sekunden erneut. Deine Angaben sind gespeichert.' : (err && err.message ? err.message : 'Start fehlgeschlagen.');
+          });
+      });
+      wrap.appendChild(startBtn);
+      refresh();
+      setTimeout(function () { rows.forEach(function (r) { r.detail.style.height = 'auto'; r.detail.style.height = Math.max(r.detail.scrollHeight + 2, 54) + 'px'; }); }, 50);
+      return wrap;
+    }
+
+    function renderRunning() {
+      root.appendChild(el('div', { class: 'cvz-cs-processing' }, [
+        el('div', { class: 'cvz-cs-spinner' }),
+        el('p', { class: 'cvz-cs-progress-text' }, ['Der Touchpoint-Plan wird erstellt …']),
+        el('p', { class: 'cvz-cs-hint' }, ['Das dauert etwa zwei Minuten. Du kannst diese Seite schließen, der Plan liegt danach in dieser Strategie.']),
+      ]));
+    }
+
+    // ---------- Ergebnis ----------
+    function renderResult() {
+      var gated = result.gated_content;
+      if (gated) root.appendChild(renderGatedBlock(gated));
+      if (result.touchpoint_plan) {
+        root.appendChild(renderDemandBlock(result.touchpoint_plan.search_demand || []));
+        root.appendChild(el('h5', {}, ['Touchpoints und E-Mails nach dem Lead']));
+        root.appendChild(el('p', { class: 'cvz-cs-hint' }, [result.touchpoint_plan.plan_note || '']));
+        root.appendChild(renderTouchpointEditor(sessionId, result, session));
+        if (result.touchpoint_plan.consent_note) root.appendChild(el('p', { class: 'cvz-cs-callout' }, [result.touchpoint_plan.consent_note]));
+        if (result.nurture_plan && result.nurture_plan.note) root.appendChild(el('p', { class: 'cvz-cs-hint' }, [result.nurture_plan.note]));
+      } else {
+        root.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für diesen Lauf liegt kein Touchpoint-Plan vor, die Auswertung ergab keine belastbaren Touchpoints.']));
+      }
+      if (result.inventory && result.inventory.entries && result.inventory.entries.length > 0) root.appendChild(renderInventorySummary(result.inventory));
+    }
+
+    paint();
+    return root;
+  }
+
+  function renderGatedBlock(gated) {
+    var box = el('div', { class: 'cvz-tp-gated' });
+    box.appendChild(el('h5', {}, ['Gated Content auf Basis eurer Substanz']));
+    if (gated.note) box.appendChild(el('p', { class: 'cvz-cs-hint' }, [gated.note]));
+    if (gated.verdict !== 'ideen' || !gated.ideas || gated.ideas.length === 0) {
+      box.appendChild(el('div', { class: 'cvz-tp-verdict-none' }, [
+        el('p', { class: 'cvz-cs-brief-label' }, ['Ergebnis']),
+        el('p', { class: 'cvz-tp-verdict-title' }, ['Kein Gated Content empfohlen']),
+        el('p', {}, [gated.reason || '']),
+      ]));
+      return box;
+    }
+    gated.ideas.forEach(function (idea) {
+      var card = el('details', { class: 'cvz-cs-page-card cvz-cs-fold cvz-cs-page-acc' });
+      card.appendChild(el('summary', {}, [el('div', { class: 'cvz-cs-page-acc-head' }, [
+        el('div', { class: 'cvz-cs-page-card-badges' }, [
+          el('span', { class: 'cvz-cs-badge' }, [idea.phase_label]),
+          el('span', { class: 'cvz-cs-badge' }, [idea.format_label]),
+          el('span', { class: 'cvz-cs-badge' }, [idea.gate_mode_label]),
+          el('span', { class: 'cvz-cs-badge' }, ['Aufwand ' + idea.effort]),
+        ]),
+        el('h4', { class: 'cvz-cs-page-card-topic' }, [idea.title]),
+        el('p', { class: 'cvz-cs-page-acc-teaser' }, [idea.promise]),
+      ])]));
+      var body = el('div', { class: 'cvz-cs-page-acc-body' });
+      body.appendChild(tpLine('Ergebnis für den Nutzer:', idea.promise));
+      body.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Das steckt konkret drin:']));
+      body.appendChild(tpList(idea.content_points || []));
+      body.appendChild(tpLine('Warum es das frei nicht gibt:', idea.why_not_free));
+      body.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Gestützt auf eure Angaben:']));
+      body.appendChild(tpList(idea.substance_labels || []));
+      if (idea.release_note) body.appendChild(el('p', { class: 'cvz-cs-commodity-note' }, [idea.release_note]));
+      body.appendChild(tpLine('Das braucht ihr dafür:', idea.prerequisites));
+      body.appendChild(tpLine('Danach:', idea.conversion_bridge));
+      card.appendChild(body);
+      box.appendChild(card);
+    });
+    return box;
+  }
+
+  function renderDemandBlock(demand) {
+    var box = el('div', { class: 'cvz-tp-demand' });
+    box.appendChild(el('h5', {}, ['Nachfrage in der Suche je Phase']));
+    box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Eine Tatsache aus dem Suchvolumen der Seiten dieser Strategie, keine Kanalempfehlung. "Nein" heißt: nicht messbar, nicht: niemand fragt. Das Suchvolumen sind gerundete Google-Ads-Werte.']));
+    var table = el('table', { class: 'cvz-cs-table cvz-cs-table-cards' });
+    table.appendChild(el('thead', {}, [el('tr', {}, [el('th', {}, ['Phase']), el('th', {}, ['Messbar']), el('th', {}, ['Grundlage'])])]));
+    var tbody = el('tbody');
+    demand.forEach(function (d) {
+      tbody.appendChild(el('tr', {}, [
+        el('td', { 'data-label': 'Phase' }, [d.phase_label]),
+        el('td', { 'data-label': 'Messbar' }, [TP_DEMAND_LABELS[d.measurable] || d.measurable]),
+        el('td', { 'data-label': 'Grundlage' }, [d.basis]),
+      ]));
+    });
+    table.appendChild(tbody);
+    box.appendChild(el('div', { class: 'cvz-cs-table-wrap' }, [table]));
+    return box;
+  }
+
+  function renderInventorySummary(inventory) {
+    var list = el('ul', { class: 'cvz-cs-brief-list' });
+    inventory.entries.forEach(function (e) {
+      var kindLabel = (TP_INV_KINDS.filter(function (k) { return k.value === e.kind; })[0] || {}).label || e.kind;
+      var relLabel = (TP_RELEASES.filter(function (r) { return r.value === e.release; })[0] || {}).label || e.release;
+      list.appendChild(el('li', {}, [kindLabel + ': ' + e.title + ' (' + relLabel + ')' + (e.vague ? ' · zu ungenau, nicht genutzt' : '')]));
+    });
+    return el('div', { class: 'cvz-cs-method' }, [el('details', {}, [el('summary', {}, ['Grundlage: deine Angaben zur Substanz']), list])]);
+  }
+
+  // ==================== DIAGRAMM: AUFBAU ====================
+  function tpMailIndex(plan) {
+    var map = {};
+    ((plan && plan.sequences) || []).forEach(function (seq, si) {
+      (seq.mails || []).forEach(function (m, mi) { map[m.id] = { mail: m, seq: seq, si: si, mi: mi }; });
+    });
+    return map;
+  }
+
+  function tpBuildDiagram(plan, nurture) {
+    var nodes = [];
+    var edges = [];
+    (plan.touchpoints || []).forEach(function (tp, i) {
+      nodes.push({ id: tp.id, kind: 'touchpoint', touchpoint_ref: i, label: String(tp.learning_goal).slice(0, TP_LIMITS.label), phase: tp.phase, role: tp.role || null, format: tp.format, channel: null, x: 0, y: 0 });
+    });
+    (plan.touchpoints || []).forEach(function (tp) {
+      (tp.from || []).forEach(function (f, k) {
+        edges.push({ id: ('e-' + tp.id + '-' + k).slice(0, 40), from: f.id, to: tp.id, type: f.kind });
+      });
+    });
+    ((nurture && nurture.sequences) || []).forEach(function (seq) {
+      (seq.mails || []).forEach(function (m, mi) {
+        nodes.push({ id: m.id, kind: 'mail', mail_ref: m.id, label: String(m.learning_goal).slice(0, TP_LIMITS.label), role: m.role || null, channel: null, day: m.day, x: 0, y: 0 });
+        if (mi > 0) edges.push({ id: ('em-' + m.id).slice(0, 40), from: seq.mails[mi - 1].id, to: m.id, type: 'fuehrt_zu' });
+      });
+    });
+    var d = { version: 1, nodes: nodes.slice(0, TP_LIMITS.nodes), edges: edges.slice(0, TP_LIMITS.edges) };
+    tpAutoLayout(d);
+    return d;
+  }
+
+  function tpSeqIndexOf(node) {
+    var m = /^nm-(\d+)-/.exec(String(node.mail_ref || ''));
+    return m ? Number(m[1]) : 99;
+  }
+
+  // Touchpoints in Spalten je Phase (Custom ohne Phase rechts daneben), E-Mails darunter, eine Zeile je Sequenz.
+  function tpAutoLayout(d) {
+    var colOf = function (n) { for (var i = 0; i < TP_PHASES.length; i++) if (TP_PHASES[i].value === n.phase) return i; return TP_PHASES.length; };
+    var perCol = {};
+    var maxRows = 0;
+    d.nodes.filter(function (n) { return n.kind !== 'mail'; }).forEach(function (n) {
+      var c = colOf(n);
+      var r = perCol[c] || 0;
+      perCol[c] = r + 1;
+      maxRows = Math.max(maxRows, r + 1);
+      n.x = flowClamp(c * (TP_NODE_W + TP_GAP_X));
+      n.y = flowClamp(r * (TP_NODE_H + TP_GAP_Y / 2));
+    });
+    var laneY = maxRows * (TP_NODE_H + TP_GAP_Y / 2) + 110;
+    var rowOfSeq = {};
+    var nextRow = 0;
+    var mails = d.nodes.filter(function (n) { return n.kind === 'mail'; });
+    mails.sort(function (a, b) { return tpSeqIndexOf(a) - tpSeqIndexOf(b) || (a.day || 0) - (b.day || 0); });
+    var posInRow = {};
+    mails.forEach(function (n) {
+      var si = tpSeqIndexOf(n);
+      if (rowOfSeq[si] === undefined) rowOfSeq[si] = nextRow++;
+      var r = rowOfSeq[si];
+      var p = posInRow[r] || 0;
+      posInRow[r] = p + 1;
+      n.x = flowClamp(p * (TP_NODE_W + TP_GAP_X));
+      n.y = flowClamp(laneY + r * (TP_NODE_H + TP_GAP_Y));
+    });
+  }
+
+  function tpSanitizeStored(stored, plan, nurture) {
+    if (!stored || stored.version !== 1 || !Array.isArray(stored.nodes) || !Array.isArray(stored.edges)) return null;
+    var mails = tpMailIndex(nurture);
+    var tpCount = (plan.touchpoints || []).length;
+    var nodes = stored.nodes.filter(function (n) {
+      if (!n || typeof n.id !== 'string') return false;
+      if (n.kind === 'touchpoint') return typeof n.touchpoint_ref === 'number' && n.touchpoint_ref < tpCount;
+      if (n.kind === 'mail') return n.mail_ref == null || !!mails[n.mail_ref];
+      return n.kind === 'custom';
+    });
+    var ids = {};
+    nodes.forEach(function (n) { ids[n.id] = true; });
+    var edges = stored.edges.filter(function (e) { return e && ids[e.from] && ids[e.to] && (e.type === 'fuehrt_zu' || e.type === 'retargeting'); });
+    return { version: 1, nodes: flowClone(nodes), edges: flowClone(edges) };
+  }
+
+  function tpDataFor(node, plan, nurture) {
+    if (node.kind === 'touchpoint' && node.touchpoint_ref != null) return (plan.touchpoints || [])[node.touchpoint_ref] || null;
+    if (node.kind === 'mail' && node.mail_ref) { var hit = tpMailIndex(nurture)[node.mail_ref]; return hit ? hit.mail : null; }
+    return null;
+  }
+
+  // ==================== EXPORT ====================
+  function tpExportRows(diagram, plan, nurture) {
+    var byId = {};
+    diagram.nodes.forEach(function (n) { byId[n.id] = n; });
+    var phaseIdx = function (n) { for (var i = 0; i < TP_PHASES.length; i++) if (TP_PHASES[i].value === n.phase) return i; return 9; };
+    var tps = diagram.nodes.filter(function (n) { return n.kind !== 'mail'; }).sort(function (a, b) { return phaseIdx(a) - phaseIdx(b) || a.x - b.x || a.y - b.y; });
+    var mails = diagram.nodes.filter(function (n) { return n.kind === 'mail'; }).sort(function (a, b) { return tpSeqIndexOf(a) - tpSeqIndexOf(b) || (a.day || 0) - (b.day || 0); });
+    var ordered = tps.concat(mails);
+    var incoming = {};
+    diagram.edges.forEach(function (e) { (incoming[e.to] = incoming[e.to] || []).push(e); });
+    var used = {};
+    var titleOf = {};
+    ordered.forEach(function (n) {
+      var base = String(n.label || 'Eintrag').trim() || 'Eintrag';
+      var c = base; var k = 2;
+      while (used[c.toLowerCase()]) c = base + ' (' + k++ + ')';
+      used[c.toLowerCase()] = true;
+      titleOf[n.id] = c;
+    });
+    return ordered.map(function (n, i) {
+      var d = tpDataFor(n, plan, nurture) || {};
+      var isMail = n.kind === 'mail';
+      var req = (incoming[n.id] || []).map(function (e) {
+        return (e.type === 'retargeting' ? 'Retargeting, wenn gesehen: ' : 'Führt zu diesem Schritt von: ') + (byId[e.from] ? titleOf[e.from] : '?');
+      }).join('; ');
+      var asset = d.target_asset ? d.target_asset.label : '';
+      var seqLabel = '';
+      if (isMail && n.mail_ref) { var hit = tpMailIndex(nurture)[n.mail_ref]; if (hit) seqLabel = hit.seq.entry && hit.seq.entry.label ? hit.seq.entry.label : ''; }
+      var desc = [];
+      if (isMail) desc.push('E-Mail nach dem Lead' + (n.day != null ? ', Tag ' + n.day : '') + (seqLabel ? ' (Einstieg: ' + seqLabel + ')' : ''));
+      if (d.learning_goal) desc.push('Lernziel: ' + d.learning_goal);
+      if (d.message) desc.push('Botschaft: ' + d.message);
+      if (d.objection) desc.push('Einwand: ' + d.objection);
+      if (asset) desc.push('Ziel-Asset: ' + asset);
+      if (d.micro_conversion) desc.push('Mikro-Conversion: ' + d.micro_conversion);
+      if (req) desc.push('Verknüpfung: ' + req);
+      if (n.channel) desc.push('Kanal: ' + n.channel);
+      if (n.note) desc.push('Notiz: ' + n.note);
+      return {
+        taskId: 'TP' + (i + 1), title: titleOf[n.id], art: isMail ? 'E-Mail' : 'Touchpoint',
+        phase: isMail ? '' : tpPhaseLabel(n.phase), day: isMail && n.day != null ? n.day : '',
+        role: n.role || '', format: isMail ? (d.kind_label || '') : (d.format_label || tpFormatLabel(n.format)),
+        channel: n.channel || '', goal: d.learning_goal || '', message: d.message || '', objection: d.objection || '',
+        asset: asset, micro: d.micro_conversion || '', req: req,
+        basis: d.basis ? (TP_BASIS_LABELS[d.basis] || d.basis) : (n.kind === 'custom' ? 'Eigener Eintrag' : ''),
+        note: n.note || '', description: desc.join('\n'),
+        tags: [isMail ? 'E-Mail' : tpPhaseLabel(n.phase), isMail ? '' : (d.format_label || tpFormatLabel(n.format)), n.role || ''].filter(Boolean).map(function (t) { return String(t).replace(/[|,]/g, ' '); }).join('|'),
+      };
+    });
+  }
+
+  function tpBuildExport(kind, diagram, plan, nurture, seedTopic) {
+    var rows = tpExportRows(diagram, plan, nurture);
+    var base = 'touchpoint-plan-' + flowSlug(seedTopic);
+    if (kind === 'clickup') {
+      return { filename: base + '-clickup.csv', rows: rows.length, text: flowToCsv(['Task ID', 'Task Name', 'Description', 'Tags', 'Subtask IDs'], rows.map(function (r) { return [r.taskId, r.title, r.description, r.tags, '']; }), ',', false) };
+    }
+    if (kind === 'asana') {
+      return { filename: base + '-asana.csv', rows: rows.length, text: flowToCsv(['Name', 'Description', 'Parent Task'], rows.map(function (r) { return [r.title, r.description, '']; }), ',', false) };
+    }
+    var headers = ['ID', 'Art', 'Phase', 'Tag nach dem Lead', 'Titel', 'Rolle', 'Format', 'Kanal', 'Lernziel', 'Botschaft', 'Einwand', 'Ziel-Asset', 'Mikro-Conversion', 'Verknüpfung', 'Grundlage', 'Notiz'];
+    return {
+      filename: base + '-tabelle.csv', rows: rows.length,
+      text: flowToCsv(headers, rows.map(function (r) { return [r.taskId, r.art, r.phase, r.day, r.title, r.role, r.format, r.channel, r.goal, r.message, r.objection, r.asset, r.micro, r.req, r.basis, r.note]; }), ';', true),
+    };
+  }
+
+  // ==================== EDITOR ====================
+  function renderTouchpointEditor(sessionId, result, session) {
+    var plan = result.touchpoint_plan;
+    var nurture = result.nurture_plan || null;
+    var diagram = tpSanitizeStored(session && session.touchpoint_diagram, plan, nurture) || tpBuildDiagram(plan, nurture);
+    var ui = { selected: null, mode: null, roleFilter: '', view: { x: 40, y: 40, k: 1 }, undo: [], drag: null, saveState: sessionId ? 'idle' : 'unsaved', saveTimer: null, saveError: '', fullscreen: false, exportOpen: false, lastUndoKey: null };
+    var roles = (plan.role_coverage || []).map(function (r) { return r.role; });
+
+    var root = el('div', { class: 'cvz-flow cvz-tp-flow' });
+    var toolbar = el('div', { class: 'cvz-flow-toolbar' });
+    var stage = el('div', { class: 'cvz-flow-stage' });
+    var canvasWrap = el('div', { class: 'cvz-flow-canvas-wrap' });
+    var panel = el('div', { class: 'cvz-flow-panel' });
+    var banner = el('div', { class: 'cvz-flow-banner', style: 'display:none' });
+    var svg = svgEl('svg', { class: 'cvz-flow-svg', tabindex: '0', role: 'application', 'aria-label': 'Touchpoint-Diagramm' });
+    var defs = svgEl('defs', {}, [
+      svgEl('marker', { id: 'cvz-tp-arrow', viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' }, [svgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'rgba(226,232,240,.75)' })]),
+      svgEl('marker', { id: 'cvz-tp-arrow-retarget', viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '6', markerHeight: '6', orient: 'auto-start-reverse' }, [svgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'rgba(79,209,197,.9)' })]),
+    ]);
+    var viewport = svgEl('g', {});
+    var zoneLayer = svgEl('g', {});
+    var edgeLayer = svgEl('g', {});
+    var nodeLayer = svgEl('g', {});
+    viewport.appendChild(zoneLayer); viewport.appendChild(edgeLayer); viewport.appendChild(nodeLayer);
+    svg.appendChild(defs); svg.appendChild(viewport);
+    canvasWrap.appendChild(svg); canvasWrap.appendChild(banner);
+    stage.appendChild(canvasWrap); stage.appendChild(panel);
+    root.appendChild(toolbar); root.appendChild(stage);
+
+    function nodeById(id) { for (var i = 0; i < diagram.nodes.length; i++) if (diagram.nodes[i].id === id) return diagram.nodes[i]; return null; }
+    function edgeById(id) { for (var i = 0; i < diagram.edges.length; i++) if (diagram.edges[i].id === id) return diagram.edges[i]; return null; }
+    function takenIds() { var t = {}; diagram.nodes.forEach(function (n) { t[n.id] = true; }); diagram.edges.forEach(function (e) { t[e.id] = true; }); return t; }
+    function pushUndo() { ui.lastUndoKey = null; ui.undo.push(flowClone({ nodes: diagram.nodes, edges: diagram.edges })); if (ui.undo.length > 30) ui.undo.shift(); }
+    function undo() {
+      var prev = ui.undo.pop();
+      if (!prev) return;
+      diagram.nodes = prev.nodes; diagram.edges = prev.edges;
+      if (ui.selected && ui.selected.type === 'node' && !nodeById(ui.selected.id)) ui.selected = null;
+      if (ui.selected && ui.selected.type === 'edge' && !edgeById(ui.selected.id)) ui.selected = null;
+      changed();
+    }
+    function pushUndoOnce(key) { return function () { if (ui.lastUndoKey !== key) { pushUndo(); ui.lastUndoKey = key; } }; }
+    function notice(text) {
+      banner.textContent = text; banner.style.display = 'block';
+      clearTimeout(notice._t);
+      notice._t = setTimeout(function () { if (!ui.mode) banner.style.display = 'none'; }, 3500);
+    }
+    function setMode(mode) {
+      ui.mode = mode;
+      canvasWrap.className = 'cvz-flow-canvas-wrap' + (mode ? ' cvz-flow-connecting' : '');
+      if (mode) {
+        var from = ui.selected && nodeById(ui.selected.id);
+        banner.textContent = 'Klicke den Schritt, ' + (mode === 'connect-retargeting' ? 'der nach "hat gesehen" als Nächstes folgt' : 'zu dem „' + (from ? from.label : '') + '“ führt') + '. Esc bricht ab.';
+        banner.style.display = 'block';
+      } else banner.style.display = 'none';
+    }
+
+    // ---------- Speichern ----------
+    function scheduleSave() {
+      if (!sessionId) { ui.saveState = 'unsaved'; renderToolbar(); return; }
+      ui.saveState = 'dirty'; renderToolbar();
+      clearTimeout(ui.saveTimer);
+      ui.saveTimer = setTimeout(function () { save(); }, 900);
+    }
+    function save(keepalive) {
+      if (!sessionId) return Promise.resolve();
+      clearTimeout(ui.saveTimer);
+      ui.saveState = 'saving'; renderToolbar();
+      var options = { method: 'PUT', body: JSON.stringify({ version: 1, nodes: diagram.nodes, edges: diagram.edges }) };
+      if (keepalive === true) options.keepalive = true;
+      return apiFetch('/api/content-strategy/' + sessionId + '/touchpoints', options)
+        .then(function () { ui.saveState = 'saved'; if (session) session.touchpoint_diagram = flowClone(diagram); renderToolbar(); })
+        .catch(function (err) { ui.saveState = 'error'; ui.saveError = err && err.message ? err.message : 'Unbekannter Fehler'; renderToolbar(); });
+    }
+    if (state.tpFlushHandler) document.removeEventListener('visibilitychange', state.tpFlushHandler);
+    state.tpFlushHandler = function () { if (document.visibilityState === 'hidden' && ui.saveState === 'dirty') save(true); };
+    document.addEventListener('visibilitychange', state.tpFlushHandler);
+    if (state.tpMenuCloser) document.removeEventListener('click', state.tpMenuCloser);
+    state.tpMenuCloser = function () { if (ui.exportOpen) { ui.exportOpen = false; renderToolbar(); } };
+    document.addEventListener('click', state.tpMenuCloser);
+
+    function changed() { renderCanvas(); renderPanel(); scheduleSave(); }
+
+    // ---------- Zeichnen ----------
+    function applyView() { viewport.setAttribute('transform', 'translate(' + ui.view.x + ',' + ui.view.y + ') scale(' + ui.view.k + ')'); }
+    function edgePath(a, b) {
+      var fx = a.x + TP_NODE_W / 2, tx = b.x + TP_NODE_W / 2;
+      var down = b.y >= a.y;
+      var fy = down ? a.y + TP_NODE_H : a.y;
+      var ty = down ? b.y : b.y + TP_NODE_H;
+      if (Math.abs(b.y - a.y) < TP_NODE_H) {
+        var right = b.x > a.x;
+        fx = right ? a.x + TP_NODE_W : a.x; tx = right ? b.x : b.x + TP_NODE_W;
+        fy = a.y + TP_NODE_H / 2; ty = b.y + TP_NODE_H / 2;
+        var mx = (fx + tx) / 2;
+        return 'M' + fx + ',' + fy + ' C' + mx + ',' + fy + ' ' + mx + ',' + ty + ' ' + tx + ',' + ty;
+      }
+      var dy = Math.max(30, Math.abs(ty - fy) / 2);
+      var sign = down ? 1 : -1;
+      return 'M' + fx + ',' + fy + ' C' + fx + ',' + (fy + sign * dy) + ' ' + tx + ',' + (ty - sign * dy) + ' ' + tx + ',' + ty;
+    }
+    function dimmed(n) { return !!ui.roleFilter && !!n.role && n.role !== ui.roleFilter; }
+    function renderZones() {
+      var groups = {};
+      diagram.nodes.forEach(function (n) {
+        if (n.kind !== 'mail') return;
+        var si = tpSeqIndexOf(n);
+        var g = groups[si] = groups[si] || { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity, ref: n.mail_ref };
+        g.minX = Math.min(g.minX, n.x); g.minY = Math.min(g.minY, n.y); g.maxX = Math.max(g.maxX, n.x + TP_NODE_W); g.maxY = Math.max(g.maxY, n.y + TP_NODE_H);
+      });
+      var idx = tpMailIndex(nurture);
+      Object.keys(groups).forEach(function (k) {
+        var g = groups[k];
+        var hit = g.ref ? idx[g.ref] : null;
+        var label = 'Nach dem Lead' + (hit && hit.seq.entry && hit.seq.entry.label ? ': ' + hit.seq.entry.label : ': eigene E-Mails');
+        zoneLayer.appendChild(svgEl('rect', { class: 'cvz-tp-zone', x: g.minX - 14, y: g.minY - 34, width: g.maxX - g.minX + 28, height: g.maxY - g.minY + 48 }));
+        zoneLayer.appendChild(svgEl('text', { class: 'cvz-tp-zone-label', x: g.minX - 6, y: g.minY - 18 }, [label.slice(0, 90)]));
+      });
+    }
+    function renderCanvas() {
+      clear(zoneLayer); clear(edgeLayer); clear(nodeLayer);
+      renderZones();
+      diagram.edges.forEach(function (e) {
+        var a = nodeById(e.from), b = nodeById(e.to);
+        if (!a || !b) return;
+        var isSel = ui.selected && ui.selected.type === 'edge' && ui.selected.id === e.id;
+        var d = edgePath(a, b);
+        var g = svgEl('g', { 'data-edge-id': e.id, class: 'cvz-flow-edge' + (isSel ? ' is-selected' : ''), opacity: dimmed(a) || dimmed(b) ? '0.25' : '1' });
+        g.appendChild(svgEl('path', { d: d, class: 'cvz-flow-edge-hit', fill: 'none' }));
+        g.appendChild(svgEl('path', { d: d, fill: 'none', class: 'cvz-flow-edge-line ' + (e.type === 'retargeting' ? 'is-link' : 'is-hierarchy'), 'marker-end': e.type === 'retargeting' ? 'url(#cvz-tp-arrow-retarget)' : 'url(#cvz-tp-arrow)' }));
+        edgeLayer.appendChild(g);
+      });
+      diagram.nodes.forEach(function (n) {
+        var isMail = n.kind === 'mail';
+        var color = isMail ? TP_MAIL_COLOR : (TP_PHASE_COLORS[n.phase] || '#6e7681');
+        var isSel = ui.selected && ui.selected.type === 'node' && ui.selected.id === n.id;
+        var d = tpDataFor(n, plan, nurture);
+        var g = svgEl('g', {
+          'data-node-id': n.id,
+          class: 'cvz-flow-node' + (isSel ? ' is-selected' : '') + (n.kind === 'custom' || (isMail && !n.mail_ref) ? ' is-custom' : '') + (isMail ? ' is-mail' : ''),
+          transform: 'translate(' + n.x + ',' + n.y + ')', opacity: dimmed(n) ? '0.25' : '1',
+        });
+        g.appendChild(svgEl('rect', { class: 'cvz-flow-node-box', width: TP_NODE_W, height: TP_NODE_H, style: 'stroke:' + (isSel ? '#f0f4f8' : 'rgba(255,255,255,.18)') }));
+        g.appendChild(svgEl('rect', { width: 5, height: TP_NODE_H, fill: color }));
+        var tag = isMail ? 'E-Mail' + (n.day != null ? ' · Tag ' + n.day : '') : ((d && d.format_label) || tpFormatLabel(n.format) || (n.kind === 'custom' ? 'Eigener Touchpoint' : 'Touchpoint'));
+        g.appendChild(svgEl('text', { class: 'cvz-flow-node-tag', x: 16, y: 17 }, [String(tag).slice(0, 32)]));
+        flowWrapText(n.label, 30, 3).forEach(function (line, i) { g.appendChild(svgEl('text', { class: 'cvz-flow-node-label', x: 16, y: 38 + i * 16 }, [line])); });
+        var foot = isMail ? (n.role || '') : (tpPhaseLabel(n.phase) + (n.role ? ' · ' + n.role : ''));
+        if (foot) g.appendChild(svgEl('text', { class: 'cvz-flow-node-phase', x: 16, y: TP_NODE_H - 9, fill: color }, [foot.slice(0, 40)]));
+        if (d && d.needs_tracking) g.appendChild(svgEl('circle', { cx: TP_NODE_W - 12, cy: 12, r: 5, fill: '#4fd1c5' }, [svgEl('title', {}, ['Setzt Tracking und Einwilligung voraus'])]));
+        if (n.channel) g.appendChild(svgEl('text', { class: 'cvz-flow-node-phase', x: TP_NODE_W - 12, y: TP_NODE_H - 9, 'text-anchor': 'end', fill: '#8b949e' }, [String(n.channel).slice(0, 16)]));
+        if (n.note) g.appendChild(svgEl('text', { class: 'cvz-flow-node-note', x: TP_NODE_W - 12, y: 30, 'text-anchor': 'end' }, ['✎']));
+        nodeLayer.appendChild(g);
+      });
+      applyView();
+    }
+
+    // ---------- Toolbar ----------
+    function tbButton(label, title, onClick, extra) {
+      var b = el('button', { type: 'button', class: 'cvz-flow-btn' + (extra ? ' ' + extra : ''), title: title || label }, [label]);
+      b.addEventListener('click', onClick);
+      return b;
+    }
+    function renderToolbar() {
+      clear(toolbar);
+      toolbar.appendChild(tbButton('+ Touchpoint', 'Eigenen Touchpoint anlegen', function () { addNode('custom'); }));
+      toolbar.appendChild(tbButton('+ E-Mail', 'Eigene E-Mail nach dem Lead anlegen', function () { addNode('mail'); }));
+      toolbar.appendChild(tbButton('Rückgängig', 'Letzte Änderung zurücknehmen (Strg/Cmd+Z)', undo, ui.undo.length ? '' : 'is-disabled'));
+      if (roles.length > 0) {
+        var sel = el('select', { class: 'cvz-flow-input cvz-tp-rolefilter', title: 'Nach Rolle filtern' }, [el('option', { value: '' }, ['Alle Rollen'])].concat(roles.map(function (r) { return el('option', { value: r }, [r]); })));
+        sel.value = ui.roleFilter;
+        sel.addEventListener('change', function () { ui.roleFilter = sel.value; renderCanvas(); });
+        toolbar.appendChild(sel);
+      }
+      toolbar.appendChild(tbButton('Automatisch ordnen', 'Alle Knoten neu anordnen', function () { pushUndo(); tpAutoLayout(diagram); changed(); fitView(); }));
+      toolbar.appendChild(tbButton('Aus Plan neu aufbauen', 'Verwirft alle Änderungen am Diagramm', function () {
+        if (!window.confirm('Alle Änderungen am Diagramm verwerfen und neu aus dem Plan aufbauen?')) return;
+        pushUndo(); diagram = tpBuildDiagram(plan, nurture); ui.selected = null; changed(); fitView();
+      }));
+      toolbar.appendChild(el('span', { class: 'cvz-flow-spacer' }));
+      toolbar.appendChild(tbButton('−', 'Verkleinern', function () { zoomBy(0.8); }, 'cvz-flow-btn-icon'));
+      toolbar.appendChild(tbButton('+', 'Vergrößern', function () { zoomBy(1.25); }, 'cvz-flow-btn-icon'));
+      toolbar.appendChild(renderExportMenu());
+      toolbar.appendChild(tbButton('Einpassen', 'Ganzes Diagramm anzeigen', fitView));
+      toolbar.appendChild(tbButton(ui.fullscreen ? 'Vollbild beenden' : 'Vollbild', 'Vollbild umschalten', toggleFullscreen));
+      var labels = { idle: '', dirty: 'Ungespeicherte Änderungen …', saving: 'Speichert …', saved: 'Gespeichert', error: 'Speichern fehlgeschlagen: ' + (ui.saveError || ''), unsaved: 'Wird nicht gespeichert (keine Session)' };
+      var status = el('span', { class: 'cvz-flow-save cvz-flow-save-' + ui.saveState }, [labels[ui.saveState] || '']);
+      if (ui.saveState === 'error') { status.appendChild(document.createTextNode(' ')); status.appendChild(tbButton('Erneut versuchen', '', function () { save(); })); }
+      toolbar.appendChild(status);
+    }
+    function renderExportMenu() {
+      var wrap = el('span', { class: 'cvz-flow-menu-wrap' });
+      var button = tbButton('Exportieren ▾', 'Plan als Datei herunterladen', function (evt) { evt.stopPropagation(); ui.exportOpen = !ui.exportOpen; renderToolbar(); });
+      button.setAttribute('aria-haspopup', 'true');
+      wrap.appendChild(button);
+      if (ui.exportOpen) {
+        var menu = el('div', { class: 'cvz-flow-menu', role: 'menu' });
+        [{ kind: 'table', label: 'Tabelle (CSV)', hint: 'Excel, Google Sheets, Airtable, Notion' }, { kind: 'clickup', label: 'ClickUp (CSV)', hint: 'Aufgaben mit Tags' }, { kind: 'asana', label: 'Asana (CSV)', hint: 'Aufgaben' }].forEach(function (item) {
+          var entry = el('button', { type: 'button', class: 'cvz-flow-menu-item', role: 'menuitem' }, [el('span', {}, [item.label]), el('small', {}, [item.hint])]);
+          entry.addEventListener('click', function (evt) {
+            evt.stopPropagation();
+            var out = tpBuildExport(item.kind, diagram, plan, nurture, result.seed_topic);
+            flowDownload(out.filename, out.text);
+            ui.exportOpen = false; renderToolbar();
+            notice(out.rows + ' Einträge exportiert: ' + out.filename);
+          });
+          menu.appendChild(entry);
+        });
+        wrap.appendChild(menu);
+      }
+      return wrap;
+    }
+
+    // ---------- Seitenleiste ----------
+    function field(labelText, control) { return el('label', { class: 'cvz-flow-field' }, [el('span', { class: 'cvz-flow-field-label' }, [labelText]), control]); }
+    function labelOfId(id) { var n = nodeById(id); return n ? n.label : '?'; }
+    function renderPanel() {
+      clear(panel);
+      var sel = ui.selected;
+      if (!sel) {
+        panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, ['Touchpoint-Plan']));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Klicke einen Schritt oder eine Verbindung an, um sie zu bearbeiten. Ziehe Schritte mit der Maus, ziehe den Hintergrund, um den Ausschnitt zu bewegen. Strg/Cmd + Mausrad zoomt.']));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Oben stehen die Touchpoints je Phase, darunter die E-Mails nach dem Lead. Die Pfeile zeigen, was zu was führt. Der Weg im B2B ist eine Schleife, keine feste Reihenfolge. Gestrichelt: "Retargeting, wenn gesehen", das setzt Tracking und Einwilligung voraus. Den Kanal trägst du pro Schritt selbst ein.']));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Änderungen werden gespeichert und verändern den Bericht nicht.']));
+        var legend = el('div', { class: 'cvz-flow-legend' });
+        TP_PHASES.forEach(function (ph) { legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [el('i', { style: 'background:' + TP_PHASE_COLORS[ph.value] }), ph.label])); });
+        legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [el('i', { style: 'background:' + TP_MAIL_COLOR }), 'E-Mail nach dem Lead']));
+        panel.appendChild(legend);
+        return;
+      }
+      if (sel.type === 'edge') {
+        var edge = edgeById(sel.id);
+        if (!edge) return;
+        panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [edge.type === 'retargeting' ? 'Retargeting, wenn gesehen' : 'Führt zu']));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [labelOfId(edge.from) + ' → ' + labelOfId(edge.to)]));
+        if (edge.type === 'retargeting') panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Setzt voraus, dass der erste Schritt erfasst wird (Pixel, Tag, Liste) und eine wirksame Einwilligung vorliegt.']));
+        panel.appendChild(tbButton(edge.type === 'retargeting' ? 'In "führt zu" umwandeln' : 'In Retargeting umwandeln', '', function () { pushUndo(); edge.type = edge.type === 'retargeting' ? 'fuehrt_zu' : 'retargeting'; changed(); }));
+        panel.appendChild(tbButton('Umkehren', 'Richtung tauschen', function () { pushUndo(); var t = edge.from; edge.from = edge.to; edge.to = t; changed(); }));
+        panel.appendChild(tbButton('Verbindung löschen', '', function () { pushUndo(); diagram.edges = diagram.edges.filter(function (x) { return x.id !== edge.id; }); ui.selected = null; changed(); }, 'cvz-flow-btn-danger'));
+        return;
+      }
+      var node = nodeById(sel.id);
+      if (!node) return;
+      var d = tpDataFor(node, plan, nurture);
+      var isMail = node.kind === 'mail';
+      panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [isMail ? 'E-Mail nach dem Lead' : (node.kind === 'custom' ? 'Eigener Touchpoint' : 'Touchpoint')]));
+      if (d) {
+        if (isMail) {
+          panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [(d.kind_label || '') + ' · Tag ' + d.day + ' (Vorschlag)']));
+        } else {
+          panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [tpPhaseLabel(d.phase) + ' · ' + d.format_label + ' · ' + (TP_BASIS_LABELS[d.basis] || d.basis)]));
+        }
+        panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, ['Botschaft: ' + d.message]));
+        if (d.objection) panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, ['Räumt aus (' + (d.objection_source === 'rolle' ? 'Einwand der Rolle' : d.objection_source === 'kundenfrage' ? 'Kundenfrage' : 'Vermutung') + '): ' + d.objection]));
+        if (d.target_asset) panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, ['Führt auf: ' + d.target_asset.label]));
+        if (d.micro_conversion) panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, ['Mikro-Conversion: ' + d.micro_conversion]));
+        (d.from || []).forEach(function (f) { panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, [(f.kind === 'retargeting' ? 'Retargeting, wenn gesehen: ' : 'Folgt auf: ') + labelOfId(f.id)])); });
+        (d.exclude_seen || []).forEach(function (id) { panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, ['Ausgeschlossen, wer schon gesehen hat: ' + labelOfId(id)])); });
+        if (d.needs_tracking) panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Setzt Tracking und eine wirksame Einwilligung voraus.']));
+      }
+      var labelInput = el('textarea', { class: 'cvz-flow-input', rows: '2', maxlength: String(TP_LIMITS.label) });
+      labelInput.value = node.label;
+      labelInput.addEventListener('focus', pushUndoOnce(node.id + ':label'));
+      labelInput.addEventListener('input', function () { var v = labelInput.value.trim(); if (!v) return; node.label = v.slice(0, TP_LIMITS.label); renderCanvas(); scheduleSave(); });
+      panel.appendChild(field(isMail ? 'Lernziel' : 'Titel (Lernziel)', labelInput));
+      if (node.kind === 'custom') {
+        var phaseSel = el('select', { class: 'cvz-flow-input' }, [el('option', { value: '' }, ['Keine Phase'])].concat(TP_PHASES.map(function (p) { return el('option', { value: p.value }, [p.label]); })));
+        phaseSel.value = node.phase || '';
+        phaseSel.addEventListener('change', function () { pushUndo(); node.phase = phaseSel.value || undefined; changed(); });
+        panel.appendChild(field('Phase', phaseSel));
+        var fmtSel = el('select', { class: 'cvz-flow-input' }, [el('option', { value: '' }, ['Kein Format'])].concat(TP_FORMATS.map(function (f) { return el('option', { value: f.id }, [f.label]); })));
+        fmtSel.value = node.format || '';
+        fmtSel.addEventListener('change', function () { pushUndo(); node.format = fmtSel.value || undefined; changed(); });
+        panel.appendChild(field('Format', fmtSel));
+      }
+      if (isMail) {
+        var dayInput = el('input', { type: 'number', class: 'cvz-flow-input', min: '0', max: '365', step: '1' });
+        dayInput.value = node.day != null ? String(node.day) : '';
+        dayInput.addEventListener('focus', pushUndoOnce(node.id + ':day'));
+        dayInput.addEventListener('input', function () {
+          var v = parseInt(dayInput.value, 10);
+          node.day = isFinite(v) ? Math.max(0, Math.min(365, v)) : null;
+          renderCanvas(); scheduleSave();
+        });
+        panel.appendChild(field('Tage nach dem Lead (Vorschlag)', dayInput));
+      }
+      var roleControl;
+      if (roles.length > 0) {
+        roleControl = el('select', { class: 'cvz-flow-input' }, [el('option', { value: '' }, ['Keine Rolle'])].concat(roles.map(function (r) { return el('option', { value: r }, [r]); })));
+        roleControl.value = node.role || '';
+        roleControl.addEventListener('change', function () { pushUndo(); node.role = roleControl.value || null; changed(); });
+      } else {
+        roleControl = el('input', { type: 'text', class: 'cvz-flow-input', maxlength: '120' });
+        roleControl.value = node.role || '';
+        roleControl.addEventListener('focus', pushUndoOnce(node.id + ':role'));
+        roleControl.addEventListener('input', function () { node.role = roleControl.value.trim().slice(0, 120) || null; renderCanvas(); scheduleSave(); });
+      }
+      panel.appendChild(field('Rolle', roleControl));
+      var channelInput = el('input', { type: 'text', class: 'cvz-flow-input', maxlength: String(TP_LIMITS.channel), placeholder: 'z. B. LinkedIn, Google Search, Newsletter' });
+      channelInput.value = node.channel || '';
+      channelInput.addEventListener('focus', pushUndoOnce(node.id + ':channel'));
+      channelInput.addEventListener('input', function () { node.channel = channelInput.value.trim().slice(0, TP_LIMITS.channel) || null; renderCanvas(); scheduleSave(); });
+      panel.appendChild(field('Kanal (du entscheidest)', channelInput));
+      var noteInput = el('textarea', { class: 'cvz-flow-input', rows: '3', maxlength: String(TP_LIMITS.note), placeholder: 'Eigene Notiz, z. B. Verantwortliche Person, Deadline, Idee' });
+      noteInput.value = node.note || '';
+      noteInput.addEventListener('focus', pushUndoOnce(node.id + ':note'));
+      noteInput.addEventListener('input', function () { node.note = noteInput.value.slice(0, TP_LIMITS.note) || undefined; renderCanvas(); scheduleSave(); });
+      panel.appendChild(field('Notiz', noteInput));
+      var actions = el('div', { class: 'cvz-flow-actions' });
+      actions.appendChild(tbButton('Führt zu …', 'Von diesem Schritt zu einem anderen', function () { setMode('connect-fuehrt'); }));
+      actions.appendChild(tbButton('Retargeting zu …', 'Wer diesen Schritt gesehen hat, bekommt den nächsten', function () { setMode('connect-retargeting'); }));
+      actions.appendChild(tbButton('Aus Diagramm entfernen', 'Entfernt nur den Knoten im Diagramm, nicht aus dem Plan', function () { removeNode(node.id); }, 'cvz-flow-btn-danger'));
+      panel.appendChild(actions);
+    }
+
+    // ---------- Aktionen ----------
+    function addNode(kind) {
+      if (diagram.nodes.length >= TP_LIMITS.nodes) { notice('Maximal ' + TP_LIMITS.nodes + ' Schritte im Diagramm.'); return; }
+      pushUndo();
+      var id = flowNewId('n', takenIds());
+      var rect = svg.getBoundingClientRect();
+      var x = (rect.width / 2 - ui.view.x) / ui.view.k - TP_NODE_W / 2;
+      var y = (rect.height / 2 - ui.view.y) / ui.view.k - TP_NODE_H / 2;
+      var node = kind === 'mail'
+        ? { id: id, kind: 'mail', mail_ref: null, label: 'Neue E-Mail', day: 7, role: null, channel: null, x: flowClamp(Math.round(x)), y: flowClamp(Math.round(y)) }
+        : { id: id, kind: 'custom', label: 'Neuer Touchpoint', role: null, channel: null, x: flowClamp(Math.round(x)), y: flowClamp(Math.round(y)) };
+      diagram.nodes.push(node);
+      ui.selected = { type: 'node', id: id };
+      changed();
+      var input = panel.querySelector('textarea');
+      if (input) { input.focus(); input.select(); }
+    }
+    function removeNode(id) {
+      pushUndo();
+      diagram.nodes = diagram.nodes.filter(function (n) { return n.id !== id; });
+      diagram.edges = diagram.edges.filter(function (e) { return e.from !== id && e.to !== id; });
+      ui.selected = null;
+      changed();
+    }
+    function connect(fromId, toId, type) {
+      if (fromId === toId) { notice('Ein Schritt kann nicht auf sich selbst zeigen.'); return; }
+      if (diagram.edges.length >= TP_LIMITS.edges) { notice('Maximal ' + TP_LIMITS.edges + ' Verbindungen im Diagramm.'); return; }
+      var exists = diagram.edges.some(function (e) { return e.from === fromId && e.to === toId && e.type === type; });
+      if (exists) { notice('Diese Verbindung gibt es schon.'); return; }
+      pushUndo();
+      diagram.edges.push({ id: flowNewId('e', takenIds()), from: fromId, to: toId, type: type });
+      changed(); renderToolbar();
+    }
+
+    // ---------- Ansicht ----------
+    function zoomBy(factor, cx, cy) {
+      var rect = svg.getBoundingClientRect();
+      var px = cx != null ? cx : rect.width / 2, py = cy != null ? cy : rect.height / 2;
+      var nk = Math.max(0.25, Math.min(2.5, ui.view.k * factor));
+      var real = nk / ui.view.k;
+      ui.view.x = px - (px - ui.view.x) * real; ui.view.y = py - (py - ui.view.y) * real; ui.view.k = nk;
+      applyView();
+    }
+    function fitView() {
+      var rect = svg.getBoundingClientRect();
+      if (!rect.width || !rect.height || diagram.nodes.length === 0) return;
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      diagram.nodes.forEach(function (n) { minX = Math.min(minX, n.x); minY = Math.min(minY, n.y - 36); maxX = Math.max(maxX, n.x + TP_NODE_W); maxY = Math.max(maxY, n.y + TP_NODE_H); });
+      var pad = 32;
+      var k = Math.max(0.25, Math.min((rect.width - pad * 2) / (maxX - minX), (rect.height - pad * 2) / (maxY - minY), 1.2));
+      ui.view.k = k;
+      ui.view.x = pad + (rect.width - pad * 2 - (maxX - minX) * k) / 2 - minX * k;
+      ui.view.y = pad + (rect.height - pad * 2 - (maxY - minY) * k) / 2 - minY * k;
+      applyView();
+    }
+    function toggleFullscreen() {
+      ui.fullscreen = !ui.fullscreen;
+      root.className = 'cvz-flow cvz-tp-flow' + (ui.fullscreen ? ' is-fullscreen' : '');
+      renderToolbar();
+      setTimeout(fitView, 30);
+    }
+
+    // ---------- Maus / Touch ----------
+    function toLocal(evt) { var rect = svg.getBoundingClientRect(); return { x: evt.clientX - rect.left, y: evt.clientY - rect.top }; }
+    svg.addEventListener('pointerdown', function (evt) {
+      if (evt.button !== undefined && evt.button !== 0) return;
+      var nodeG = evt.target.closest ? evt.target.closest('[data-node-id]') : null;
+      var edgeG = evt.target.closest ? evt.target.closest('[data-edge-id]') : null;
+      if (svg.focus) svg.focus({ preventScroll: true });
+      var pt = toLocal(evt);
+      if (ui.mode && nodeG) {
+        var from = ui.selected && ui.selected.type === 'node' ? ui.selected.id : null;
+        var type = ui.mode === 'connect-retargeting' ? 'retargeting' : 'fuehrt_zu';
+        setMode(null);
+        if (from) connect(from, nodeG.getAttribute('data-node-id'), type);
+        evt.preventDefault();
+        return;
+      }
+      if (nodeG) {
+        var id = nodeG.getAttribute('data-node-id');
+        var n = nodeById(id);
+        ui.selected = { type: 'node', id: id };
+        ui.drag = { kind: 'node', id: id, startX: pt.x, startY: pt.y, origX: n.x, origY: n.y, moved: false };
+        renderCanvas(); renderPanel();
+      } else if (edgeG) {
+        ui.selected = { type: 'edge', id: edgeG.getAttribute('data-edge-id') };
+        renderCanvas(); renderPanel();
+        return;
+      } else {
+        if (ui.mode) setMode(null);
+        ui.selected = null;
+        ui.drag = { kind: 'pan', startX: pt.x, startY: pt.y, origX: ui.view.x, origY: ui.view.y, moved: false };
+        renderCanvas(); renderPanel();
+      }
+      try { svg.setPointerCapture(evt.pointerId); } catch (e) { /* ältere Browser */ }
+      evt.preventDefault();
+    });
+    svg.addEventListener('pointermove', function (evt) {
+      if (!ui.drag) return;
+      var pt = toLocal(evt);
+      var dx = pt.x - ui.drag.startX, dy = pt.y - ui.drag.startY;
+      if (!ui.drag.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+      if (ui.drag.kind === 'node') {
+        if (!ui.drag.moved) pushUndo();
+        ui.drag.moved = true;
+        var n = nodeById(ui.drag.id);
+        if (!n) return;
+        n.x = flowClamp(Math.round(ui.drag.origX + dx / ui.view.k));
+        n.y = flowClamp(Math.round(ui.drag.origY + dy / ui.view.k));
+        renderCanvas();
+      } else {
+        ui.drag.moved = true;
+        ui.view.x = ui.drag.origX + dx; ui.view.y = ui.drag.origY + dy;
+        applyView();
+      }
+    });
+    function endDrag(evt) {
+      if (!ui.drag) return;
+      var wasNodeMove = ui.drag.kind === 'node' && ui.drag.moved;
+      ui.drag = null;
+      try { svg.releasePointerCapture(evt.pointerId); } catch (e) { /* egal */ }
+      if (wasNodeMove) { renderToolbar(); scheduleSave(); }
+    }
+    svg.addEventListener('pointerup', endDrag);
+    svg.addEventListener('pointercancel', endDrag);
+    svg.addEventListener('wheel', function (evt) {
+      if (!(evt.ctrlKey || evt.metaKey) && !ui.fullscreen) return;
+      evt.preventDefault();
+      var pt = toLocal(evt);
+      zoomBy(evt.deltaY < 0 ? 1.12 : 1 / 1.12, pt.x, pt.y);
+    }, { passive: false });
+    svg.addEventListener('keydown', function (evt) {
+      if ((evt.ctrlKey || evt.metaKey) && (evt.key === 'z' || evt.key === 'Z')) { evt.preventDefault(); undo(); return; }
+      if (evt.key === 'Escape') {
+        if (ui.exportOpen) { ui.exportOpen = false; renderToolbar(); return; }
+        if (ui.mode) setMode(null); else if (ui.fullscreen) toggleFullscreen();
+        return;
+      }
+      if ((evt.key === 'Delete' || evt.key === 'Backspace') && ui.selected) {
+        evt.preventDefault();
+        if (ui.selected.type === 'node') removeNode(ui.selected.id);
+        else { var eid = ui.selected.id; pushUndo(); diagram.edges = diagram.edges.filter(function (x) { return x.id !== eid; }); ui.selected = null; changed(); }
+      }
+    });
+
+    renderToolbar(); renderCanvas(); renderPanel();
+    var fitTries = 0;
+    (function tryFit() {
+      var rect = svg.getBoundingClientRect();
+      if ((rect.width > 0 && rect.height > 0) || fitTries++ > 20) { if (rect.width > 0) fitView(); return; }
+      setTimeout(tryFit, 100);
+    })();
+    // Für Tests und spätere Erweiterungen: Zugriff auf den aktuellen Stand.
+    root.cvzGetDiagram = function () { return diagram; };
+    root.cvzSave = save;
+    return root;
+  }
+
+  var TOUCHPOINT_STYLES = [
+    '#cvz-content-strategy-agent .cvz-tp-flow .cvz-flow-node.is-mail .cvz-flow-node-box{fill:#0f2321;}',
+    '#cvz-content-strategy-agent .cvz-tp-zone{fill:rgba(79,209,197,.04);stroke:rgba(79,209,197,.35);stroke-dasharray:4 4;pointer-events:none;}',
+    '#cvz-content-strategy-agent .cvz-tp-zone-label{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;fill:#4fd1c5;font-family:inherit;pointer-events:none;}',
+    '#cvz-content-strategy-agent .cvz-tp-rolefilter{width:auto;max-width:200px;padding:5px 8px;}',
+    '#cvz-content-strategy-agent .cvz-tp-form{margin:0 0 20px;}',
+    '#cvz-content-strategy-agent .cvz-tp-entry{border:1px solid var(--cvz-border-strong);background:var(--cvz-surface);padding:14px 16px;margin-bottom:12px;text-align:left;}',
+    '#cvz-content-strategy-agent .cvz-tp-entry-num{font-family:"Syne",sans-serif;font-weight:700;color:var(--cvz-heading);}',
+    '#cvz-content-strategy-agent .cvz-tp-status{font-size:13px;margin:4px 0 0;}',
+    '#cvz-content-strategy-agent .cvz-tp-status-ok{color:var(--cvz-teal);}',
+    '#cvz-content-strategy-agent .cvz-tp-status-vague{color:var(--cvz-amber);}',
+    '#cvz-content-strategy-agent .cvz-tp-status-intern{color:#fca5a5;}',
+    '#cvz-content-strategy-agent .cvz-tp-summary{font-weight:600;color:var(--cvz-text);}',
+    '#cvz-content-strategy-agent .cvz-tp-verdict-none{padding:14px 18px;border:1px solid rgba(245,158,11,.35);border-left:4px solid var(--cvz-amber);background:rgba(245,158,11,.06);margin:0 0 16px;}',
+    '#cvz-content-strategy-agent .cvz-tp-verdict-title{font-family:"Syne",sans-serif;font-weight:700;font-size:1.05rem;color:var(--cvz-heading);margin:0 0 6px;}',
+    '#cvz-content-strategy-agent .cvz-tp-gated,#cvz-content-strategy-agent .cvz-tp-demand{margin:0 0 24px;}',
+  ];
+  // ==== TOUCHPOINT-ENDE ====
 
   // ==================== APP-LEBENSZYKLUS ====================
   function getParam(key) {
