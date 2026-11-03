@@ -5905,10 +5905,9 @@
     var r = btn.getBoundingClientRect();
     var vw = window.innerWidth || document.documentElement.clientWidth || 360;
     var vh = window.innerHeight || document.documentElement.clientHeight || 700;
-    bubble.style.maxWidth = Math.max(160, Math.min(340, vw - 24)) + 'px';
     var w = bubble.offsetWidth || 0;
     var h = bubble.offsetHeight || 0;
-    var left = Math.max(12, Math.min(r.left - 10, vw - w - 12));
+    var left = Math.max(8, Math.min(r.left - 10, vw - w - 8));
     var top = r.bottom + 8;
     if (h && top + h > vh - 8 && r.top - 8 - h > 8) top = r.top - 8 - h; // unten kein Platz: über dem Symbol
     bubble.style.left = left + 'px';
@@ -5944,7 +5943,7 @@
   function tip(text, label) {
     tipWire();
     var id = 'cvz-tip-' + (++tipSeq);
-    var btn = el('button', { type: 'button', class: 'cvz-tip-btn', 'aria-label': label || 'Erklärung anzeigen', 'aria-expanded': 'false', 'aria-describedby': id }, ['i']);
+    var btn = el('button', { type: 'button', class: 'cvz-tip-btn', 'aria-label': label || 'Erklärung anzeigen', 'aria-expanded': 'false', 'aria-describedby': id }, ['?']);
     var bubble = el('span', { class: 'cvz-tip-bubble', role: 'tooltip', id: id }, [text]);
     var wrap = el('span', { class: 'cvz-tip' }, [btn, bubble]);
     wrap._pinned = false;
@@ -5962,13 +5961,20 @@
     return wrap;
   }
 
+  // GEÄNDERT: Aussehen wie beim Journey Tracker (.cvz-tip und das gemeinsame Popup .cvz-float-tip): kleiner runder Knopf mit "?", Popup auf
+  // #1e2a36 mit Rahmen #232b36, eckig, Schrift Geist 13 px, weicher Schatten, Einblenden in 0,15 s, ohne Mauszeiger-Fang. Auf Touch-Geräten ist
+  // die Tippfläche größer (der Knopf selbst bleibt 16 px).
   var TIP_STYLES = [
-    '#cvz-content-strategy-agent .cvz-tip{display:inline-block;position:relative;margin-left:6px;vertical-align:middle;line-height:1;text-transform:none;letter-spacing:normal;font-weight:400;}',
-    '#cvz-content-strategy-agent .cvz-tip-btn{width:17px;height:17px;padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.32);background:transparent;color:#8b949e;font:italic 700 11px/15px Georgia,serif;cursor:help;display:inline-flex;align-items:center;justify-content:center;}',
-    '#cvz-content-strategy-agent .cvz-tip-btn:hover,#cvz-content-strategy-agent .cvz-tip-btn:focus-visible,#cvz-content-strategy-agent .cvz-tip.is-open .cvz-tip-btn{color:#4fd1c5;border-color:#4fd1c5;outline:none;}',
-    '#cvz-content-strategy-agent .cvz-tip-bubble{display:none;position:fixed;z-index:10000;width:max-content;max-width:340px;padding:10px 12px;background:#1c2128;border:1px solid rgba(255,255,255,.16);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.45);color:#e6edf3;font-size:13px;line-height:1.5;font-style:normal;font-weight:400;text-transform:none;letter-spacing:normal;white-space:normal;text-align:left;}',
-    '#cvz-content-strategy-agent .cvz-tip.is-open .cvz-tip-bubble{display:block;}',
+    '#cvz-content-strategy-agent .cvz-tip{position:relative;display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;margin-left:5px;flex-shrink:0;line-height:1;text-transform:none;letter-spacing:normal;font-weight:400;}',
+    '#cvz-content-strategy-agent .cvz-tip-btn{position:relative;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;padding:0;border:1px solid var(--cvz-border,#232b36);background:var(--cvz-navy-raised,#141b24);color:var(--cvz-text-muted,#8b98a5);font:700 11px/1 "Geist",sans-serif;font-style:normal;text-align:center;cursor:pointer;user-select:none;}',
+    // Rund trotz der globalen Regel "alles eckig" (siehe oben, * {border-radius:0 !important}): eigenes !important mit höherer Spezifität.
+    '#cvz-content-strategy-agent .cvz-tip-btn{border-radius:50% !important;}',
+    '#cvz-content-strategy-agent .cvz-tip-btn:focus{outline:1px solid var(--cvz-teal,#4fd1c5);outline-offset:1px;}',
+    '@media (pointer: coarse){#cvz-content-strategy-agent .cvz-tip-btn::before{content:"";position:absolute;top:-12px;right:-12px;bottom:-12px;left:-12px;}}',
+    '#cvz-content-strategy-agent .cvz-tip-bubble{position:fixed;left:0;top:0;z-index:100000;width:max-content;min-width:0;max-width:min(300px, calc(100vw - 16px));box-sizing:border-box;padding:8px 10px;background:#1e2a36;border:1px solid #232b36;border-radius:0;font-family:"Geist",sans-serif;font-size:13px;font-weight:400;font-style:normal;line-height:1.5;letter-spacing:normal;text-transform:none;color:#e6edf3;text-align:left;white-space:normal;box-shadow:0 4px 16px rgba(0,0,0,.4);pointer-events:none;opacity:0;visibility:hidden;transition:opacity .15s ease;}',
+    '#cvz-content-strategy-agent .cvz-tip.is-open .cvz-tip-bubble{opacity:1;visibility:visible;}',
   ];
+
   // ==== TOOLTIP-ENDE ====
 
   // ==== PROFIL-ANFANG ====
@@ -5992,6 +5998,23 @@
     { value: 'gross', label: 'Groß: über ca. 20.000 € pro Kunde und Jahr (Vertrieb mit persönlichem Kontakt)' },
   ];
   var PROFILE_VALUE_LABELS = { klein: 'Klein (bis ca. 2.000 € pro Kunde und Jahr)', mittel: 'Mittel (ca. 2.000 bis 20.000 €)', gross: 'Groß (über ca. 20.000 €)' };
+
+  // NEU: Produktseite des Angebots prüfen (gleiche Regeln wie im Backend, normalizeProductUrl): nur die Domain des Kunden oder eine Subdomain,
+  // ohne Anker. Leer ist erlaubt. Der Server prüft noch einmal.
+  function checkProductUrl(input, host) {
+    var raw = String(input || '').trim();
+    if (!raw) return { url: '', error: '' };
+    var u;
+    try { u = new URL(/^https?:\/\//i.test(raw) ? raw : 'https://' + raw); } catch (e) { return { url: '', error: 'Das ist keine gültige Adresse.' }; }
+    if (!/^https?:$/.test(u.protocol)) return { url: '', error: 'Die Adresse muss mit http oder https beginnen.' };
+    var h = u.hostname.toLowerCase().replace(/^www\./, '');
+    var d = String(host || '').toLowerCase();
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(h)) return { url: '', error: 'Das ist keine gültige Adresse.' };
+    if (d && h !== d && h.slice(-(d.length + 1)) !== '.' + d) return { url: '', error: 'Die Seite muss zu ' + d + ' gehören (oder zu einer Subdomain davon).' };
+    u.hash = '';
+    return { url: u.protocol + '//' + u.host + u.pathname.replace(/\/+$/, '') + u.search, error: '' };
+  }
+  function shortUrl(u) { return String(u || '').replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '').slice(0, 70); }
 
   // Domain für den Entwurf: die eingegebene, sonst die des gewählten Tracker-Themas. Leer = kein Profil-Schritt.
   function profileDomain(domain, trackerTopicId) {
@@ -6050,15 +6073,18 @@
     var host = profileDomain(ctx.domain, ctx.trackerTopicId);
     if (!host) { state.productProfile = null; continueAfterProfile(ctx); return; }
     var refresh = !!(options && options.refresh);
+    // NEU: Produktseite des Angebots (optional). Sie wird gelesen statt der Startseite und merkt sich der Schritt für Zurück, Neu ableiten und Entwurf.
+    var productUrl = options && options.productUrl !== undefined ? options.productUrl : ctx.productUrl;
+    ctx.productUrl = productUrl || '';
     renderBusy(
-      refresh ? 'Ich lese deine Website noch einmal …' : 'Ich lese deine Website und leite ab, was dein Angebot kann …',
+      productUrl ? 'Ich lese deine Produktseite und leite ab, was dein Angebot kann …' : (refresh ? 'Ich lese deine Website noch einmal …' : 'Ich suche die Seite zu deinem Angebot und leite ab, was es kann …'),
       'Das dauert meist unter einer Minute. Du bestätigst das Ergebnis gleich.',
       stepNo('Produkt bestätigen')
     );
     withNetworkRetry(function () {
       return apiFetch('/api/content-strategy/suggest-profile', {
         method: 'POST',
-        body: JSON.stringify({ user_id: state.userId, topic: ctx.topic, domain: host, strategy_goal: state.strategyGoal || undefined, refresh: refresh || undefined }),
+        body: JSON.stringify({ user_id: state.userId, topic: ctx.topic, domain: host, strategy_goal: state.strategyGoal || undefined, refresh: refresh || undefined, product_url: productUrl || undefined }),
       });
     }, 1, noteRetrying)
       .then(function (res) {
@@ -6091,14 +6117,36 @@
     var sourceText;
     if (res.source === 'gespeichert') {
       var when = profileDateText(res.confirmed_at);
-      sourceText = 'Von dir für ' + host + (when ? ' am ' + when : '') + ' bestätigt. Prüfe nur, ob es noch stimmt.';
+      sourceText = 'Von dir für ' + (res.product_url && res.profile && res.profile.produktseite ? shortUrl(res.product_url) : host) + (when ? ' am ' + when : '') + ' bestätigt. Prüfe nur, ob es noch stimmt.';
     } else if (res.source === 'ohne_seite') {
       sourceText = 'Deine Website war nicht abrufbar. Bitte ergänze, was dein Angebot kann und was nicht.';
     } else {
       var n = (res.pages || []).length;
-      sourceText = 'Aus ' + (n === 1 ? 'einer Seite' : n + ' Seiten') + ' von ' + host + ' abgeleitet.';
+      var more = n > 1 ? ' und ' + (n - 1) + (n === 2 ? ' weitere Seite' : ' weitere Seiten') : '';
+      if (res.mode === 'produktseite') sourceText = 'Aus deiner Produktseite abgeleitet: ' + shortUrl(res.product_url) + more + '.';
+      else if (res.mode === 'thema') sourceText = 'Zum Thema habe ich diese Seite gefunden: ' + shortUrl(res.product_url) + more + '. Ist es die falsche, trage unten die richtige Produktseite ein.';
+      else if (res.mode === 'startseite') sourceText = 'Nur die Startseite von ' + host + ' gelesen.';
+      else sourceText = 'Aus ' + (n === 1 ? 'einer Seite' : n + ' Seiten') + ' von ' + host + ' abgeleitet.';
     }
     wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [sourceText]));
+
+    // NEU: Produktseite. Bei einer Domain mit mehreren Angeboten beschreibt die Startseite das ganze Unternehmen. Mit der Adresse des Angebots wird das
+    // Profil aus dieser Seite abgeleitet. Nur die Startseite lag vor, oder die angegebene Seite war nicht abrufbar: Das Feld ist dann hervorgehoben.
+    var urlInput = el('input', { type: 'text', name: 'produktseite', maxlength: '300', placeholder: 'z. B. https://' + host + '/produkte/dein-angebot' });
+    urlInput.value = ctx.productUrl || '';
+    var urlError = el('span', { class: 'cvz-cs-hint cvz-pf-urlerror' });
+    var urlBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Aus dieser Seite ableiten']);
+    urlBtn.addEventListener('click', function () {
+      var chk = checkProductUrl(urlInput.value, host);
+      if (chk.error) { urlError.textContent = chk.error; return; }
+      if (!chk.url) { urlError.textContent = 'Trage zuerst die Adresse deiner Produktseite ein.'; return; }
+      urlError.textContent = '';
+      startProfileStep(ctx, { refresh: true, productUrl: chk.url });
+    });
+    var urlField = fieldTip('Produktseite deines Angebots (optional)', el('div', { class: 'cvz-pf-urlrow' }, [urlInput, urlBtn]), 'Hat dein Angebot eine eigene Seite, trage sie hier ein. Das Profil wird dann aus dieser Seite abgeleitet statt aus der Startseite. Bei Domains mit mehreren Angeboten ist das wichtig, denn die Startseite beschreibt dort das ganze Unternehmen.');
+    if (res.mode === 'startseite' || res.product_url_failed) urlField.classList.add('cvz-pf-check');
+    urlField.appendChild(urlError);
+    wrap.appendChild(urlField);
 
     // GEÄNDERT (Übersicht): Zuerst das, was zu prüfen ist (Prüffragen und die zwei Felder, zu denen die Seite meist schweigt). Alles andere liegt
     // zugeklappt darunter. So genügt in der Regel ein Blick und ein Klick auf "bestätigen".
@@ -6149,7 +6197,7 @@
     wrap.appendChild(errorLine);
 
     function collect() {
-      var out = { beschreibung: descInput.value, kategorie: catInput.value, kundenwert: valueSel.value || null, annahmen: annahmen };
+      var out = { beschreibung: descInput.value, kategorie: catInput.value, kundenwert: valueSel.value || null, produktseite: base.produktseite || null, annahmen: annahmen };
       PROFILE_FIELD_DEFS.forEach(function (def) { out[def.key] = String(inputs[def.key].value || '').split(/\r?\n/); });
       return out;
     }
@@ -6160,9 +6208,13 @@
     wrap.addEventListener('input', function () { clearTimeout(draftTimer); draftTimer = setTimeout(saveProfileDraft, 400); });
 
     function build() {
+      // Eine eingetragene Produktseite, aus der der Entwurf nicht entstanden ist, würde das Profil falsch beschriften. Erst ableiten oder das Feld leeren.
+      var typed = checkProductUrl(urlInput.value, host);
+      if (typed.error) return { error: 'Produktseite: ' + typed.error };
+      if (typed.url && typed.url !== (ctx.productUrl || '')) return { error: 'Du hast eine Produktseite eingetragen. Klicke auf "Aus dieser Seite ableiten", damit das Profil daraus entsteht, oder leere das Feld.' };
       var desc = descInput.value.replace(/\s+/g, ' ').trim();
       if (desc.length < 10) return { error: 'Bitte beschreibe dein Angebot in ein bis zwei Sätzen.' };
-      var profile = { beschreibung: desc.slice(0, PROFILE_LIMITS.desc), kategorie: catInput.value.trim().slice(0, PROFILE_LIMITS.category), kundenwert: valueSel.value || null, annahmen: annahmen };
+      var profile = { beschreibung: desc.slice(0, PROFILE_LIMITS.desc), kategorie: catInput.value.trim().slice(0, PROFILE_LIMITS.category), kundenwert: valueSel.value || null, produktseite: base.produktseite || null, annahmen: annahmen };
       for (var i = 0; i < PROFILE_FIELD_DEFS.length; i++) {
         var def = PROFILE_FIELD_DEFS[i];
         var parsed = parseProfileLines(inputs[def.key].value, def.max);
@@ -6208,7 +6260,7 @@
     var box = el('div', { class: 'cvz-pf-box' });
     var body = el('div', { class: 'cvz-pf-body' });
     body.appendChild(el('p', {}, [p.beschreibung]));
-    var valueRow = p.kundenwert ? [['Wert eines Kunden', [PROFILE_VALUE_LABELS[p.kundenwert] || p.kundenwert]]] : [];
+    var valueRow = (p.produktseite ? [['Produktseite', [shortUrl(p.produktseite)]]] : []).concat(p.kundenwert ? [['Wert eines Kunden', [PROFILE_VALUE_LABELS[p.kundenwert] || p.kundenwert]]] : []);
     valueRow.concat([['Kann', p.kann], ['Kann nicht', p.kann_nicht], ['Ergänzt, kein Wettbewerb', p.ergaenzt], ['Wettbewerb (Ersetzt)', p.ersetzt], ['Direkte Wettbewerber', p.konkurrenten]]).forEach(function (row) {
       if (row[1] && row[1].length > 0) body.appendChild(el('p', {}, [el('strong', {}, [row[0] + ': ']), row[1].join('; ')]));
     });
@@ -6233,10 +6285,13 @@
 
   var PROFILE_STYLES = [
     '#cvz-content-strategy-agent .cvz-pf-check .cvz-cs-field-label{color:var(--cvz-amber);}',
-    '#cvz-content-strategy-agent .cvz-pf-check textarea{border-color:rgba(245,158,11,.6);}',
+    '#cvz-content-strategy-agent .cvz-pf-check textarea,#cvz-content-strategy-agent .cvz-pf-check input{border-color:rgba(245,158,11,.6);}',
     '#cvz-content-strategy-agent .cvz-pf-assumptions ul{margin:6px 0 0;}',
     '#cvz-content-strategy-agent .cvz-cs-volproxy{border-left:2px solid rgba(255,255,255,.2);padding:2px 0 2px 12px;margin:8px 0;}',
     '#cvz-content-strategy-agent .cvz-pf-box{margin:14px 0 0;}',
+    '#cvz-content-strategy-agent .cvz-pf-urlrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}',
+    '#cvz-content-strategy-agent .cvz-pf-urlrow input{flex:1 1 260px;min-width:0;}',
+    '#cvz-content-strategy-agent .cvz-pf-urlerror{color:var(--cvz-amber);}',
     '#cvz-content-strategy-agent .cvz-tp-demand{border:1px solid var(--cvz-border);background:var(--cvz-surface);margin:14px 0;}',
     '#cvz-content-strategy-agent .cvz-tp-demand>summary{padding:10px 14px;cursor:pointer;font-weight:600;color:var(--cvz-heading);}',
     '#cvz-content-strategy-agent .cvz-tp-demand .cvz-cs-table-wrap{padding:0 14px 12px;}',
