@@ -1120,8 +1120,8 @@
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Thema / Ziel-Keyword', topicInput]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Eigene Domain', domainInput]));
 
-    // NEU (siehe Chat-Verlauf, Positionierung): Angebotstyp und Endziel. Ohne diese Angaben hat die Strategie bei einem
-    // SaaS-Tool Agentur-Texte empfohlen ("Erstgespräch vereinbaren"). Das Endziel wird passend zum Angebotstyp vorbelegt.
+    // NEU (siehe Chat-Verlauf, Positionierung): Angebotstyp und Zielaktion. Ohne diese Angaben hat die Strategie bei einem
+    // SaaS-Tool Agentur-Texte empfohlen ("Erstgespräch vereinbaren"). Die Zielaktion wird passend zum Angebotstyp vorbelegt.
     var goalPrefill = prefill.strategyGoal || state.strategyGoal || {};
     var offerSelect = el('select', { name: 'offer_type', required: 'required' }, [el('option', { value: '' }, ['Bitte wählen'])]
       .concat(OFFER_TYPE_OPTIONS.map(function (o) { return el('option', { value: o.value }, [o.label]); })));
@@ -1134,18 +1134,18 @@
     var goalTouched = !!goalPrefill.end_goal;
     goalSelect.addEventListener('change', function () { goalTouched = true; });
     offerSelect.addEventListener('change', function () {
-      // Vorbelegung nur, solange der Kunde das Endziel nicht selbst gewählt hat.
+      // Vorbelegung nur, solange der Kunde die Zielaktion nicht selbst gewählt hat.
       if (!goalTouched && DEFAULT_END_GOAL[offerSelect.value]) goalSelect.value = DEFAULT_END_GOAL[offerSelect.value];
     });
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Was bietest du zu diesem Thema an?', offerSelect]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, [
-      'Worauf soll die Strategie einzahlen?',
-      tip('Das Endziel. Die Strategie zeigt den Weg dorthin, mit Zwischenschritten je Phase der Customer Journey.'),
+      'Welche Handlung soll ein Interessent am Ende ausführen?',
+      tip('Das ist die Zielaktion, auf die die ganze Strategie einzahlt. Sie zeigt den Weg dorthin, mit Zwischenschritten je Phase der Customer Journey. Der Weg richtet sich nach der Zielaktion: Eine Demo braucht anderes Vertrauen als ein Pilot oder eine Partnerschaft.'),
       goalSelect,
     ]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, [
       'Text deines Haupt-Buttons (optional)',
-      tip('Leer lassen, dann schlägt die Strategie einen Text passend zum Endziel vor.'),
+      tip('Leer lassen, dann schlägt die Strategie einen Text passend zur Zielaktion vor.'),
       ctaInput,
     ]));
     // NEU (Lead-Magneten): Was es schon gibt, wird nicht noch einmal vorgeschlagen, sondern sinnvoll ergänzt.
@@ -1217,11 +1217,11 @@
     return form;
   }
 
-  // NEU: Angebotstyp und Endziel (gleiche Werte wie StrategyGoalSchema im Backend).
+  // NEU: Angebotstyp und Zielaktion (gleiche Werte wie StrategyGoalSchema im Backend).
   var OFFER_TYPE_OPTIONS = [
     { value: 'dienstleistung', label: 'Dienstleistung (z.B. Agentur, Beratung)' },
     { value: 'saas', label: 'Software as a Service (SaaS)' },
-    { value: 'produkt', label: 'Produkt (Shop)' },
+    { value: 'produkt', label: 'Produkt (Shop oder B2B-Produkt)' },
   ];
   var END_GOAL_OPTIONS = [
     { value: 'registrierung', label: 'Registrierung oder Testzugang' },
@@ -1229,6 +1229,9 @@
     { value: 'anfrage', label: 'Anfrage oder Angebot' },
     { value: 'kauf', label: 'Kauf' },
     { value: 'lead', label: 'Lead über Download oder Newsletter' },
+    { value: 'pilot', label: 'Pilot oder Proof of Concept' },
+    { value: 'partner', label: 'Partner werden' },
+    { value: 'event', label: 'Event oder Training buchen' },
   ];
   var DEFAULT_END_GOAL = { saas: 'registrierung', dienstleistung: 'demo', produkt: 'kauf' };
   function optionLabel(list, value) {
@@ -1240,7 +1243,7 @@
     gegen_email: 'Gegen E-Mail',
     produkt_erleben: 'Produkt erleben',
     beleg: 'Beleg',
-    endziel: 'Endziel',
+    endziel: 'Zielaktion',
   };
   // ==== FUNNEL-KONSTANTEN-ANFANG ====
   // NEU (Funnel und Lead-Magneten): Bezeichnungen der Werte aus result.funnel_check und result.lead_magnets.
@@ -1250,7 +1253,7 @@
     weiterfuehren: 'Weiterführen (noch kein Verkaufsschritt)',
     ergebnis_nutzen: 'Ergebnis als Anlass für den Endschritt',
     nachfassen: 'Per E-Mail nachfassen',
-    direkt: 'Direkt zum Endziel',
+    direkt: 'Direkt zur Zielaktion',
   };
   var MAGNET_HURDLE_LABELS = { ohne_anmeldung: 'Ohne Anmeldung', email: 'Gegen E-Mail', registrierung: 'Mit Registrierung' };
   // ==== FUNNEL-KONSTANTEN-ENDE ====
@@ -1941,7 +1944,7 @@
         run_prompt_test: true,
         validation_id: validationId,
         tracker_topic_id: trackerTopicId || undefined,
-        // NEU: Angebotstyp, Endziel und Button-Text aus dem Startformular.
+        // NEU: Angebotstyp, Zielaktion und Button-Text aus dem Startformular.
         strategy_goal: state.strategyGoal || undefined,
         // NEU (Lead-Magneten): was es schon gibt, damit es nicht noch einmal vorgeschlagen wird.
         existing_magnets: state.existingMagnets || undefined,
@@ -3743,7 +3746,7 @@
     if (!goal) return null;
     var lines = [
       el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Angebot: ']), optionLabel(OFFER_TYPE_OPTIONS, goal.offer_type)]),
-      el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Endziel: ']), optionLabel(END_GOAL_OPTIONS, goal.end_goal)]),
+      el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Zielaktion: ']), optionLabel(END_GOAL_OPTIONS, goal.end_goal)]),
     ];
     if (goal.cta_label) lines.push(el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Haupt-Button: ']), '„' + goal.cta_label + '“']));
     return el('div', { class: 'cvz-cs-goal-box' }, [el('p', { class: 'cvz-cs-brief-label' }, ['Ziel der Strategie']), el('div', {}, lines)]);
@@ -3842,7 +3845,7 @@
     if (m.conversion_target && m.conversion_target.page_topic) {
       var t = m.conversion_target;
       body.appendChild(magnetLine('Führt zur Conversion-Seite:',
-        t.page_topic + (t.cta_label ? ' mit dem Button „' + t.cta_label + '“' : '') + (t.end_goal_label ? ' (Endziel: ' + t.end_goal_label + ')' : '')));
+        t.page_topic + (t.cta_label ? ' mit dem Button „' + t.cta_label + '“' : '') + (t.end_goal_label ? ' (Zielaktion: ' + t.end_goal_label + ')' : '')));
     }
     if (m.captures && m.captures.length > 0) {
       var cl = el('ul', { class: 'cvz-cs-brief-list' });
@@ -3867,7 +3870,7 @@
     var box = el('div', { class: 'cvz-cs-funnel' });
     box.appendChild(el('p', { class: 'cvz-cs-hint' }, [
       'Je Phase ein Zwischenschritt mit echtem Nutzen.',
-      tip('pcvz-cs-hintBesucher kommen mit unterschiedlicher Kaufbereitschaft auf die Seiten der Strategie. Wer noch orientiert oder bewertet, ist selten bereit für das Endziel. Ein Zwischenschritt mit echtem Nutzen, etwa ein Check, ein Rechner oder eine ehrliche Vorlage, hält Interessenten im Funnel und hebt den Anbieter von Wettbewerbern ab. Er muss so nützlich sein, dass ihn jemand ohne Absender weiterleiten würde, sonst wird er nicht genutzt. Der Funnel-Befund ist aus den Seiten dieser Strategie berechnet. Eigene Seiten, die du im Content-Flow einer Phase zuordnest, zählen als Zwischenschritt, wenn sie vom Typ Rechner/Tool, Vorlage/Download, Vergleichsseite oder Test/Review sind (Vergleich und Review erst ab der Bewertungsphase). Die Lead-Magneten sind Vorschläge der KI, ihre Wirkung ist nicht prognostiziert.', 'Warum Zwischenschritte, und wie wird der Befund berechnet?'),
+      tip('Besucher kommen mit unterschiedlicher Kaufbereitschaft auf die Seiten der Strategie. Wer noch orientiert oder bewertet, ist selten bereit für die Zielaktion. Ein Zwischenschritt mit echtem Nutzen, etwa ein Check, ein Rechner oder eine ehrliche Vorlage, hält Interessenten im Funnel und hebt den Anbieter von Wettbewerbern ab. Er muss so nützlich sein, dass ihn jemand ohne Absender weiterleiten würde, sonst wird er nicht genutzt. Der Funnel-Befund ist aus den Seiten dieser Strategie berechnet. Eigene Seiten, die du im Content-Flow einer Phase zuordnest, zählen als Zwischenschritt, wenn sie vom Typ Rechner/Tool, Vorlage/Download, Vergleichsseite oder Test/Review sind (Vergleich und Review erst ab der Bewertungsphase). Die Lead-Magneten sind Vorschläge der KI, ihre Wirkung ist nicht prognostiziert.', 'Warum Zwischenschritte, und wie wird der Befund berechnet?'),
     ]));
     var checkHolder = el('div', { class: 'cvz-cs-funnel-holder' });
     function fillCheck(funnel) {
@@ -3889,7 +3892,7 @@
     var magnets = result.lead_magnets || [];
     if (magnets.length > 0) {
       box.appendChild(el('h5', {}, ['Vorgeschlagene Lead-Magneten und kostenlose Tools']));
-      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Vorschläge, die eine Lücke schließen, stehen zuerst.', tip('Tippe auf einen Vorschlag für Inhalte, Abgrenzung, den Übergang zum Endziel und den Aufwand.')]));
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Vorschläge, die eine Lücke schließen, stehen zuerst.', tip('Tippe auf einen Vorschlag für Inhalte, Abgrenzung, den Übergang zur Zielaktion und den Aufwand.')]));
       if (result.lead_magnets_substance_note) box.appendChild(el('p', { class: 'cvz-cs-callout' }, [result.lead_magnets_substance_note]));
       magnets.forEach(function (m) { box.appendChild(renderLeadMagnetCard(m)); });
       if (result.lead_magnets_tracking_note) {
@@ -3906,7 +3909,7 @@
   // ==== FUNNEL-ENDE ====
 
   // NEU: Conversion-Pfad. Wird aus den Zwischenzielen der Seiten berechnet (nicht separat von Claude geliefert), damit
-  // Übersicht und Seiten nie auseinanderlaufen. Je Phase: was der Besucher tut und wohin es führt, am Ende das Endziel.
+  // Übersicht und Seiten nie auseinanderlaufen. Je Phase: was der Besucher tut und wohin es führt, am Ende die Zielaktion.
   function renderConversionPath(result) {
     var pages = result.supporting_pages || [];
     var phases = MESSY_MIDDLE_PHASES.filter(function (p) { return p.value !== 'legacy'; });
@@ -3927,15 +3930,15 @@
     if (rows.length === 0) return null; // ältere Berichte ohne Zwischenziele
     var goal = result.strategy_goal;
     rows.push(el('div', { class: 'cvz-cs-path-step cvz-cs-path-end' }, [
-      el('p', { class: 'cvz-cs-path-phase' }, ['Endziel']),
+      el('p', { class: 'cvz-cs-path-phase' }, ['Zielaktion']),
       el('p', { class: 'cvz-cs-path-endtext' }, [
         goal ? optionLabel(END_GOAL_OPTIONS, goal.end_goal) + (goal.cta_label ? ' („' + goal.cta_label + '“)' : '') : 'Conversion-Seite',
         ' auf „' + result.conversion_page.topic + '“',
       ]),
     ]));
     return el('div', { class: 'cvz-cs-path' }, [
-      el('h5', {}, ['Conversion-Pfad: der Weg zum Endziel']),
-      el('p', { class: 'cvz-cs-hint' }, ['Kaum jemand erreicht das Endziel beim ersten Besuch. Je Phase zeigt die Übersicht den nächsten sinnvollen Schritt.']),
+      el('h5', {}, ['Conversion-Pfad: der Weg zur Zielaktion']),
+      el('p', { class: 'cvz-cs-hint' }, ['Kaum jemand erreicht die Zielaktion beim ersten Besuch. Je Phase zeigt die Übersicht den nächsten sinnvollen Schritt.']),
     ].concat(rows));
   }
 
@@ -5972,9 +5975,9 @@
     { key: 'konkurrenten', label: 'Direkte Wettbewerber (optional)', hint: 'Namen oder Domains. Sie bekommen nie eine Off-Site-Maßnahme.', max: 8, placeholder: 'z. B. unbounce.com' },
   ];
 
-  // NEU (Wirtschaftlichkeit): grobe Klasse für den Wert eines Kunden. Leer = aus Angebotstyp und Endziel ableiten.
+  // NEU (Wirtschaftlichkeit): grobe Klasse für den Wert eines Kunden. Leer = aus Angebotstyp und Zielaktion ableiten.
   var PROFILE_VALUE_OPTIONS = [
-    { value: '', label: 'Aus Angebotstyp und Endziel ableiten' },
+    { value: '', label: 'Aus Angebotstyp und Zielaktion ableiten' },
     { value: 'klein', label: 'Klein: bis ca. 2.000 € pro Kunde und Jahr (meist Selbstbedienung)' },
     { value: 'mittel', label: 'Mittel: ca. 2.000 bis 20.000 € pro Kunde und Jahr' },
     { value: 'gross', label: 'Groß: über ca. 20.000 € pro Kunde und Jahr (Vertrieb mit persönlichem Kontakt)' },
