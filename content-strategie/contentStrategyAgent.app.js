@@ -822,6 +822,7 @@
     state.existingMagnets = d.existingMagnets || null;
     state.productProfile = d.productProfile || null; // NEU (Produktprofil)
     if (draft.step === 'validation') {
+      state.productUrl = d.productUrl || '';
       state.wizardSteps = wizardStepsFor(d.trackerTopicId, d.domain);
       renderTopicValidationResult(d.result, d.domain, d.originalTopic, d.trackerTopicId);
     } else if (draft.step === 'profile') {
@@ -1113,7 +1114,7 @@
     var form = el('form', { class: 'cvz-cs-form' });
     var topicInput = el('input', { type: 'text', name: 'topic', placeholder: 'z.B. "Landingpage Software für B2B"', required: 'required' });
     if (prefill.topic) topicInput.value = prefill.topic;
-    var domainInput = el('input', { type: 'text', name: 'domain', placeholder: 'z.B. convertlyze.com (ohne Tracker-Daten nötig für die Sichtbarkeits-Messung)' });
+    var domainInput = el('input', { type: 'text', name: 'domain', placeholder: 'z.B. https://convertlyze.com/produkte/dein-angebot' });
     if (prefill.domain) {
       domainInput.value = prefill.domain;
     } else if (state.gscStatus && state.gscStatus.connected && state.gscStatus.sites.length === 1) {
@@ -1121,7 +1122,7 @@
       domainInput.value = suggested;
     }
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Thema / Ziel-Keyword', topicInput]));
-    form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Eigene Domain', domainInput]));
+    form.appendChild(el('label', { class: 'cvz-cs-label' }, [el('span', { class: 'cvz-cs-label-text' }, ['Website oder Produktseite deines Angebots', tip('Trage am besten die Seite deines Angebots ein. Daraus wird die Domain für die Sichtbarkeits-Messung abgeleitet, und das Produktprofil entsteht aus dieser Seite statt aus der Startseite. Eine Domain genügt, wenn dein Angebot keine eigene Seite hat. Ohne Tracker-Daten brauchen wir die Domain, um deine Sichtbarkeit zu messen.')]), domainInput]));
 
     // NEU (siehe Chat-Verlauf, Positionierung): Angebotstyp und Zielaktion. Ohne diese Angaben hat die Strategie bei einem
     // SaaS-Tool Agentur-Texte empfohlen ("Erstgespräch vereinbaren"). Die Zielaktion wird passend zum Angebotstyp vorbelegt.
@@ -1197,11 +1198,13 @@
     form.addEventListener('submit', function (event) {
       event.preventDefault();
       var topic = topicInput.value.trim();
-      var domain = domainInput.value.trim();
+      var site = splitSiteInput(domainInput.value);
+      var domain = site.domain;
       if (!topic) return;
+      if (site.error) { formError.textContent = site.error; return; }
       var trackerTopicId = trackerSelect && trackerSelect.value ? trackerSelect.value : null;
       if (!trackerTopicId && !domain) {
-        formError.textContent = 'Bitte deine Domain angeben: Ohne Tracker-Daten brauchen wir sie, um deine Sichtbarkeit zu messen.';
+        formError.textContent = 'Bitte die Website oder Produktseite deines Angebots angeben: Ohne Tracker-Daten brauchen wir die Domain, um deine Sichtbarkeit zu messen.';
         return;
       }
       if (!offerSelect.value || !goalSelect.value) {
@@ -1212,6 +1215,7 @@
       state.strategyGoal = { offer_type: offerSelect.value, end_goal: goalSelect.value };
       if (cta.length >= 2) state.strategyGoal.cta_label = cta.slice(0, 80);
       state.existingMagnets = magnetsInput.value.trim().slice(0, 600) || null;
+      state.productUrl = site.productUrl || ''; // NEU: Produktseite aus dem Feld, für den Profil-Schritt
       formError.textContent = '';
       startTopicValidation(topic, domain || undefined, trackerTopicId);
     });
@@ -1433,7 +1437,7 @@
   function renderTopicValidationResult(result, domain, originalTopic, trackerTopicId) {
     state.wizardActive = true;
     clear(state.root);
-    saveDraft('validation', { result: result, domain: domain, originalTopic: originalTopic, trackerTopicId: trackerTopicId || null });
+    saveDraft('validation', { result: result, domain: domain, originalTopic: originalTopic, trackerTopicId: trackerTopicId || null, productUrl: state.productUrl || '' });
     var hasProfileStep = !!profileDomain(domain, trackerTopicId); // NEU (Produktprofil)
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
     wrap.appendChild(renderStepper(state.wizardSteps || STEPS_FULL, 0, true));
@@ -1514,9 +1518,9 @@
         var trackerParsed = parseCustomerQuestions(trackerQuestions ? trackerQuestions.value : '');
         if (trackerParsed.error) { trackerErrorLine.textContent = trackerParsed.error; return; }
         trackerErrorLine.textContent = '';
-        startProfileStep({ topic: finalTopic, domain: domain, validationId: result.validation_id, originalTopic: originalTopic, trackerTopicId: trackerTopicId, customerQuestions: trackerParsed.list, validationResult: result });
+        startProfileStep({ topic: finalTopic, domain: domain, validationId: result.validation_id, originalTopic: originalTopic, trackerTopicId: trackerTopicId, customerQuestions: trackerParsed.list, validationResult: result, productUrl: state.productUrl || '' });
       } else {
-        startProfileStep({ topic: finalTopic, domain: domain, validationId: result.validation_id, originalTopic: originalTopic, trackerTopicId: null, customerQuestions: [], validationResult: result });
+        startProfileStep({ topic: finalTopic, domain: domain, validationId: result.validation_id, originalTopic: originalTopic, trackerTopicId: null, customerQuestions: [], validationResult: result, productUrl: state.productUrl || '' });
       }
     });
     var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Zurück, Thema/Domain ändern']);
@@ -5982,13 +5986,81 @@
   // ab (POST /suggest-profile), der Kunde prüft und bestätigt ihn. Bestätigt wird pro Domain gespeichert, beim nächsten Mal ist der Schritt
   // vorbelegt. Ohne Domain oder bei einem Fehler lässt sich der Schritt überspringen, die Strategie läuft dann wie bisher ohne Profil.
   var PROFILE_LIMITS = { items: 6, competitors: 8, item: 140, desc: 500, category: 100 };
-  var PROFILE_FIELD_DEFS = [
-    { key: 'kann', label: 'Was kann dein Angebot?', hint: 'Eine Fähigkeit pro Zeile.', max: 6, placeholder: 'z. B. Landingpage aus einem Briefing erzeugen' },
-    { key: 'kann_nicht', label: 'Was kann es NICHT?', hint: 'Besonders wichtig. Die Strategie empfiehlt nichts, was hier steht. Zum Beispiel "veröffentlicht keine Seiten" oder "kein Hosting".', max: 6, placeholder: 'z. B. veröffentlicht keine Seiten', flag: true },
-    { key: 'ergaenzt', label: 'Womit arbeitet es zusammen? (kein Wettbewerb)', hint: 'Dinge, mit denen dein Angebot zusammenspielt oder zu denen es führt, zum Beispiel ein CMS. Dagegen wird nie verglichen.', max: 6, placeholder: 'z. B. CMS (WordPress, Webflow)', flag: true },
-    { key: 'ersetzt', label: 'Gegen wen tritt es an?', hint: 'Alternativen, die deine Kunden stattdessen wählen würden. Nur dagegen wird verglichen.', max: 6, placeholder: 'z. B. Agentur' },
-    { key: 'konkurrenten', label: 'Direkte Wettbewerber (optional)', hint: 'Namen oder Domains. Sie bekommen nie eine Off-Site-Maßnahme.', max: 8, placeholder: 'z. B. unbounce.com' },
-  ];
+  // GEÄNDERT (Beratung, Systemhaus, Managed Service): Fragen und Beispiele waren für ein Software-Werkzeug geschrieben ("veröffentlicht keine Seiten",
+  // "CMS"). Jetzt passen Beschriftung, Hinweis und Beispiel zum Angebotstyp aus dem Startformular (gleiche Gruppen wie im Backend, profileKindOf).
+  // "Womit arbeitet es zusammen?" nimmt ausdrücklich nur Dritte auf. Eigene Leistungen gehören zu "Was kann dein Angebot?".
+  function profileKindOf(offerType) {
+    if (offerType === 'saas' || offerType === 'software_vertrieb') return 'software';
+    if (offerType === 'produkt' || offerType === 'b2b_produkt') return 'produkt';
+    if (offerType === 'beratung' || offerType === 'projekt' || offerType === 'managed_service' || offerType === 'dienstleistung') return 'dienstleistung';
+    return 'offen';
+  }
+  var PROFILE_FIELD_TEXTS = {
+    software: {
+      kategorie: 'z. B. Landingpage-Generator',
+      kann: ['Was kann dein Angebot?', 'Eine Fähigkeit pro Zeile.', 'z. B. Landingpage aus einem Briefing erzeugen'],
+      kann_nicht: ['Was kann es NICHT?', 'Besonders wichtig. Die Strategie empfiehlt nichts, was hier steht. Zum Beispiel "veröffentlicht keine Seiten" oder "keine On-Premise-Installation".', 'z. B. veröffentlicht keine Seiten'],
+      ergaenzt: ['Mit welchen fremden Produkten arbeitet es zusammen? (kein Wettbewerb)', 'Nur Produkte anderer Anbieter, mit denen dein Angebot zusammenspielt, zum Beispiel ein CMS oder CRM. Dagegen wird nie verglichen. Eigene Funktionen gehören nicht hierher, sondern zu den Fähigkeiten deines Angebots.', 'z. B. CMS (WordPress, Webflow)'],
+      ersetzt: ['Gegen wen tritt es an?', 'Was deine Kunden stattdessen wählen würden. Nur dagegen wird verglichen.', 'z. B. Agentur'],
+      konkurrenten: 'z. B. unbounce.com',
+    },
+    produkt: {
+      kategorie: 'z. B. Industrie-Messtechnik',
+      kann: ['Was kann dein Angebot?', 'Eine Eigenschaft oder Leistung pro Zeile.', 'z. B. misst Temperatur bis 1.200 °C'],
+      kann_nicht: ['Was kann es NICHT?', 'Besonders wichtig. Die Strategie empfiehlt nichts, was hier steht. Zum Beispiel "keine Montage vor Ort" oder "keine Sonderanfertigung".', 'z. B. keine Montage vor Ort'],
+      ergaenzt: ['Mit welchen fremden Produkten wird es eingesetzt? (kein Wettbewerb)', 'Nur Produkte oder Systeme anderer Hersteller, mit denen dein Produkt zusammen genutzt wird. Dagegen wird nie verglichen. Eigenes Zubehör und eigener Service gehören nicht hierher, sondern zu den Fähigkeiten deines Angebots.', 'z. B. Steuerungen von Siemens'],
+      ersetzt: ['Gegen wen tritt es an?', 'Was deine Kunden stattdessen wählen würden. Nur dagegen wird verglichen.', 'z. B. Gebrauchtgerät'],
+      konkurrenten: 'z. B. wettbewerber.de',
+    },
+    dienstleistung: {
+      kategorie: 'z. B. SAP-Beratung oder Managed Hosting',
+      kann: ['Was leistest du?', 'Eine Leistung pro Zeile, auch eigene Ressourcen wie Rechenzentren, Team oder Zertifizierungen und die Systeme, die du einführst oder betreibst.', 'z. B. Betrieb von SAP-Systemen in eigenen Rechenzentren'],
+      kann_nicht: ['Was bietest du NICHT an?', 'Besonders wichtig. Die Strategie empfiehlt nichts, was hier steht. Zum Beispiel "keine Rechtsberatung", "kein Betrieb außerhalb der EU" oder "keine Projekte unter 20 Personentagen".', 'z. B. keine reine Lizenz ohne Projekt'],
+      ergaenzt: ['Mit welchen Herstellern und Plattformen arbeitest du? (kein Wettbewerb)', 'Nur Dritte: Software, Clouds oder Hersteller, die du einführst, betreibst oder mit denen du als Partner arbeitest. Dagegen wird nie verglichen. Eigene Leistungen wie eigene Rechenzentren gehören nicht hierher, sondern zu deinen Leistungen.', 'z. B. SAP S/4HANA, Microsoft Azure, STACKIT'],
+      ersetzt: ['Gegen wen trittst du an?', 'Was deine Kunden stattdessen wählen würden, zum Beispiel die eigene IT oder ein anderes Systemhaus. Nur dagegen wird verglichen.', 'z. B. interne IT-Abteilung'],
+      konkurrenten: 'z. B. wettbewerber.de',
+    },
+    offen: {
+      kategorie: 'z. B. Projektmanagement-Software oder SAP-Beratung',
+      kann: ['Was kann dein Angebot?', 'Eine Fähigkeit oder Leistung pro Zeile.', 'z. B. Betrieb von SAP-Systemen'],
+      kann_nicht: ['Was kann es NICHT?', 'Besonders wichtig. Die Strategie empfiehlt nichts, was hier steht. Zum Beispiel "kein Betrieb, nur Beratung" oder "veröffentlicht keine Seiten".', 'z. B. kein Betrieb, nur Beratung'],
+      ergaenzt: ['Mit welchen fremden Produkten oder Partnern arbeitet es zusammen? (kein Wettbewerb)', 'Nur Dritte: Produkte, Plattformen oder Hersteller anderer Unternehmen. Dagegen wird nie verglichen. Eigene Leistungen gehören nicht hierher, sondern zu den Fähigkeiten deines Angebots.', 'z. B. SAP S/4HANA'],
+      ersetzt: ['Gegen wen tritt es an?', 'Was deine Kunden stattdessen wählen würden. Nur dagegen wird verglichen.', 'z. B. interne Umsetzung'],
+      konkurrenten: 'z. B. wettbewerber.de',
+    },
+  };
+  function profileFieldDefs(offerType) {
+    var t = PROFILE_FIELD_TEXTS[profileKindOf(offerType)];
+    var f = function (key, max, flag) { return { key: key, label: t[key][0], hint: t[key][1], placeholder: t[key][2], max: max, flag: !!flag }; };
+    return [
+      f('kann', 6),
+      f('kann_nicht', 6, true),
+      f('ergaenzt', 6, true),
+      f('ersetzt', 6),
+      { key: 'konkurrenten', label: 'Direkte Wettbewerber (optional)', hint: 'Namen oder Domains. Sie bekommen nie eine Off-Site-Maßnahme.', max: 8, placeholder: t.konkurrenten },
+    ];
+  }
+  // Ohne Angebotstyp (zum Beispiel beim Start aus dem Tracker) gelten neutrale Texte.
+  var PROFILE_FIELD_DEFS = profileFieldDefs(null);
+
+  // Erkennt Zeilen unter "arbeitet zusammen", die nach eigener Leistung klingen ("eigene", "unser", "wir" oder der eigene Name aus der Domain).
+  // Gleiche Regel wie im Backend (splitOwnComplements). Nur ein Hinweis, der Kunde entscheidet.
+  function foldText(t) { return String(t || '').toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss'); }
+  function ownBrandStem(host) {
+    var parts = String(host || '').toLowerCase().split('.');
+    var label = parts.length >= 2 ? parts[parts.length - 2] : (parts[0] || '');
+    var stem = foldText(label).replace(/[^a-z0-9]/g, '');
+    return stem.length >= 4 ? stem : '';
+  }
+  var OWN_MARKER_RE = /(^|[^a-z0-9])(eigene[nmrs]?|unser(e[nmrs]?)?|wir|uns|hauseigene[nmrs]?|inhouse|in-house)(?![a-z0-9])/;
+  function ownComplementLines(text, host) {
+    var brand = ownBrandStem(host);
+    return String(text || '').split(/\r?\n/).map(function (l) { return l.trim(); }).filter(function (l) {
+      if (l.length < 2) return false;
+      var f = foldText(l);
+      return OWN_MARKER_RE.test(f) || (!!brand && f.replace(/[^a-z0-9]/g, '').indexOf(brand) >= 0);
+    });
+  }
 
   // NEU (Wirtschaftlichkeit): grobe Klasse für den Wert eines Kunden. Leer = aus Angebotstyp und Zielaktion ableiten.
   var PROFILE_VALUE_OPTIONS = [
@@ -6012,7 +6084,23 @@
     if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(h)) return { url: '', error: 'Das ist keine gültige Adresse.' };
     if (d && h !== d && h.slice(-(d.length + 1)) !== '.' + d) return { url: '', error: 'Die Seite muss zu ' + d + ' gehören (oder zu einer Subdomain davon).' };
     u.hash = '';
+    Array.from(u.searchParams.keys()).filter(function (k) { return /^(utm_|fbclid|gclid|mc_|_hs)/i.test(k); }).forEach(function (k) { u.searchParams.delete(k); });
     return { url: u.protocol + '//' + u.host + u.pathname.replace(/\/+$/, '') + u.search, error: '' };
+  }
+  // NEU: Das Feld nimmt eine Domain ODER die Adresse der Produktseite. Daraus werden zwei Dinge: die Domain (für Sichtbarkeits-Messung, Rankings und
+  // Off-Site, wie bisher) und, wenn ein Pfad dabei ist, die Produktseite für das Produktprofil. Das Backend bekommt weiter nur die Domain.
+  var SITE_FIELD_ERROR = 'Bitte eine gültige Adresse angeben, zum Beispiel convertlyze.com oder https://convertlyze.com/produkte/dein-angebot.';
+  function splitSiteInput(raw) {
+    var v = String(raw || '').trim();
+    if (!v) return { domain: '', productUrl: '', error: '' };
+    var u;
+    try { u = new URL(/^https?:\/\//i.test(v) ? v : 'https://' + v); } catch (e) { return { domain: '', productUrl: '', error: SITE_FIELD_ERROR }; }
+    if (!/^https?:$/.test(u.protocol)) return { domain: '', productUrl: '', error: SITE_FIELD_ERROR };
+    var host = u.hostname.toLowerCase().replace(/^www\./, '');
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(host)) return { domain: '', productUrl: '', error: SITE_FIELD_ERROR };
+    var hasPath = u.pathname.replace(/\/+$/, '') !== '';
+    var chk = hasPath ? checkProductUrl(v, host) : { url: '', error: '' };
+    return { domain: host, productUrl: chk.url, error: chk.error };
   }
   function shortUrl(u) { return String(u || '').replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '').slice(0, 70); }
 
@@ -6111,7 +6199,7 @@
     var growAreas = [];
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
     wrap.appendChild(renderStepper(state.wizardSteps || STEPS_FULL, stepNo('Produkt bestätigen'), true));
-    wrap.appendChild(el('h3', {}, ['Stimmt dieses Produktprofil?', tip('Mit diesem Profil vergleicht und empfiehlt die Strategie nur, was zu deinem Angebot passt. Es genügt, zu bestätigen. Prüfe vor allem, was dein Angebot NICHT kann und womit es zusammenarbeitet, denn das steht selten auf einer Produktseite.', 'Wozu dient das Produktprofil?')]));
+    wrap.appendChild(el('h3', {}, ['Stimmt dieses Produktprofil?', tip('Mit diesem Profil vergleicht und empfiehlt die Strategie nur, was zu deinem Angebot passt. Es genügt, zu bestätigen. Prüfe vor allem, was dein Angebot NICHT kann oder leistet und mit welchen fremden Produkten oder Partnern es zusammenarbeitet, denn das steht selten auf einer Produktseite.', 'Wozu dient das Produktprofil?')]));
 
     var host = profileDomain(ctx.domain, ctx.trackerTopicId);
     var sourceText;
@@ -6155,7 +6243,7 @@
     var preview = el('p', { class: 'cvz-pf-quote' }, [base.beschreibung || '']);
     descInput.addEventListener('input', function () { preview.textContent = descInput.value; });
     wrap.appendChild(preview);
-    var catInput = el('input', { type: 'text', maxlength: String(PROFILE_LIMITS.category), placeholder: 'z. B. Landingpage-Generator' });
+    var catInput = el('input', { type: 'text', maxlength: String(PROFILE_LIMITS.category), placeholder: PROFILE_FIELD_TEXTS[profileKindOf(state.strategyGoal && state.strategyGoal.offer_type)].kategorie });
     catInput.value = base.kategorie || '';
 
     var annahmen = (res.profile && res.profile.annahmen) || [];
@@ -6167,7 +6255,8 @@
 
     var inputs = {};
     var fieldNodes = {};
-    PROFILE_FIELD_DEFS.forEach(function (def) {
+    var FIELD_DEFS = profileFieldDefs(state.strategyGoal && state.strategyGoal.offer_type);
+    FIELD_DEFS.forEach(function (def) {
       var area = makeGrowArea((base[def.key] || []).join('\n'), def.placeholder, growAreas);
       inputs[def.key] = area;
       var empty = (base[def.key] || []).length === 0;
@@ -6178,6 +6267,18 @@
       }
       fieldNodes[def.key] = f;
     });
+    // NEU: Hinweis, wenn unter "arbeitet zusammen" eine eigene Leistung steht. Sonst gilt sie als "kein Wettbewerb" und fehlt in jedem Vergleich.
+    var ownHint = el('span', { class: 'cvz-cs-hint cvz-pf-ownhint' }); // nur eingehängt, wenn es etwas zu melden gibt
+    var ergaenztEmpty = (base.ergaenzt || []).length === 0;
+    function checkOwnComplements() {
+      var own = ownComplementLines(inputs.ergaenzt.value, host);
+      ownHint.textContent = own.length === 0 ? '' : 'Klingt nach eigener Leistung: "' + own[0].slice(0, 60) + (own[0].length > 60 ? '…' : '') + '"' + (own.length > 1 ? ' und ' + (own.length - 1) + ' weitere' : '') + '. Eigenes gehört zu "' + FIELD_DEFS[0].label + '", hier stehen nur Dritte.';
+      if (own.length > 0 && !ownHint.parentNode) fieldNodes.ergaenzt.appendChild(ownHint);
+      if (own.length === 0 && ownHint.parentNode) ownHint.parentNode.removeChild(ownHint);
+      fieldNodes.ergaenzt.classList.toggle('cvz-pf-check', own.length > 0 || ergaenztEmpty);
+    }
+    inputs.ergaenzt.addEventListener('input', checkOwnComplements);
+    checkOwnComplements();
     wrap.appendChild(fieldNodes.kann_nicht);
     wrap.appendChild(fieldNodes.ergaenzt);
 
@@ -6198,7 +6299,7 @@
 
     function collect() {
       var out = { beschreibung: descInput.value, kategorie: catInput.value, kundenwert: valueSel.value || null, produktseite: base.produktseite || null, annahmen: annahmen };
-      PROFILE_FIELD_DEFS.forEach(function (def) { out[def.key] = String(inputs[def.key].value || '').split(/\r?\n/); });
+      FIELD_DEFS.forEach(function (def) { out[def.key] = String(inputs[def.key].value || '').split(/\r?\n/); });
       return out;
     }
     var draftTimer = null;
@@ -6215,8 +6316,8 @@
       var desc = descInput.value.replace(/\s+/g, ' ').trim();
       if (desc.length < 10) return { error: 'Bitte beschreibe dein Angebot in ein bis zwei Sätzen.' };
       var profile = { beschreibung: desc.slice(0, PROFILE_LIMITS.desc), kategorie: catInput.value.trim().slice(0, PROFILE_LIMITS.category), kundenwert: valueSel.value || null, produktseite: base.produktseite || null, annahmen: annahmen };
-      for (var i = 0; i < PROFILE_FIELD_DEFS.length; i++) {
-        var def = PROFILE_FIELD_DEFS[i];
+      for (var i = 0; i < FIELD_DEFS.length; i++) {
+        var def = FIELD_DEFS[i];
         var parsed = parseProfileLines(inputs[def.key].value, def.max);
         if (parsed.error) return { error: def.label + ': ' + parsed.error };
         profile[def.key] = parsed.list;
