@@ -459,6 +459,24 @@
       '.cvz-cs-funnel-steps{font-size:13px;color:var(--cvz-muted);margin:2px 0;overflow-wrap:anywhere;}',
       '.cvz-cs-funnel-finding{font-size:14px;color:var(--cvz-text);margin:6px 0 0;overflow-wrap:anywhere;}',
       '.cvz-cs-magnet-gap{color:var(--cvz-amber);font-weight:600;}',
+      /* NEU (Abschnitt 5 verständlich): Aufgaben und Seiten je Phase */
+      '.cvz-tp-kit{margin:14px 0;}',
+      '.cvz-tp-kit-item{padding:10px 14px;border:1px solid var(--cvz-border);border-left:3px solid #4fd1c5;background:var(--cvz-surface);margin:0 0 8px;}',
+      '.cvz-tp-kit-item .cvz-cs-magnet-line{margin:6px 0;}',
+      '.cvz-cs-funnel-todos{margin:12px 0;padding:12px 14px;border:1px solid var(--cvz-border);border-left:3px solid var(--cvz-teal);background:var(--cvz-surface);}',
+      '.cvz-cs-funnel-todos.has-gap{border-left-color:var(--cvz-amber);}',
+      '.cvz-cs-funnel-todos ol{margin:6px 0 0;padding-left:20px;}',
+      '.cvz-cs-funnel-todos li{margin:0 0 10px;font-size:14px;color:var(--cvz-text);overflow-wrap:anywhere;}',
+      '.cvz-cs-funnel-todos li strong{color:var(--cvz-heading);}',
+      '.cvz-cs-funnel-todo-meta{display:block;font-size:13px;color:var(--cvz-muted);margin:2px 0;}',
+      '.cvz-cs-funnel-todo-task{display:block;margin:2px 0;}',
+      '.cvz-cs-funnel-pages{margin:8px 0;}',
+      '.cvz-cs-funnel-pages>details{border:1px solid var(--cvz-border);background:var(--cvz-surface);margin:0 0 6px;}',
+      '.cvz-cs-funnel-pages summary{cursor:pointer;padding:8px 12px;font-size:14px;color:var(--cvz-heading);}',
+      '.cvz-cs-funnel-pages ul{list-style:none;margin:0;padding:0 12px 10px;}',
+      '.cvz-cs-funnel-pages li{margin:0 0 8px;font-size:14px;color:var(--cvz-text);overflow-wrap:anywhere;}',
+      '.cvz-cs-funnel-nocount{display:block;font-size:12px;color:var(--cvz-muted);}',
+      '.cvz-cs-funnel-pages .cvz-cs-funnel-finding{padding:0 12px 10px;margin:0;}',
       '.cvz-cs-magnet-line{font-size:14px;color:var(--cvz-text);margin:8px 0;overflow-wrap:anywhere;}',
       '.cvz-cs-magnet-line strong{color:var(--cvz-heading);}',
       '.cvz-cs-zwischenziel{margin:0 0 10px;}',
@@ -3783,28 +3801,102 @@
     return parts.length > 0 ? parts.join(' · ') : 'keine Zwischenschritte';
   }
 
-  // GEÄNDERT (Übersicht): Vier Phasen als eine kompakte Leiste statt vier großer Karten. Befunde mit Handlungsbedarf (Lücke, schwach, durch eigene
-  // Seite gedeckt) stehen darunter sichtbar, weil sie etwas zu tun bedeuten.
+  // GEÄNDERT (Abschnitt 5 verständlich): Früher nur Zählwerte je Phase ("Ohne Hürde: 1 · Gegen E-Mail: 1"). Der Leser wusste nicht, um welche
+  // Seiten es geht und was zu tun ist. Jetzt: 1. Zu tun (was zusätzlich zu den Seiten gebaut werden muss, vom Server berechnet),
+  // 2. kompakte Leiste der Phasen, 3. je Phase die Seiten mit ihrem Zwischenschritt. Ältere Befunde ohne Seitenliste zeigen die Zählwerte.
+  var FUNNEL_TODO_LABELS = { luecke: 'Lücke schließen', inhalt: 'Inhalt erstellen', erlebnis: 'Bereitstellen', beleg: 'Beleg beschaffen' };
+
+  function renderFunnelTodos(funnel) {
+    var todos = funnel.todos || [];
+    var hasGap = todos.some(function (t) { return t.kind === 'luecke'; });
+    var box = el('div', { class: 'cvz-cs-funnel-todos' + (hasGap ? ' has-gap' : '') });
+    box.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Zu tun zusätzlich zu den Seiten', tip('Die Seiten der Strategie versprechen Zwischenschritte, etwa eine Checkliste gegen E-Mail oder eine Fallstudie. Diese Inhalte entstehen nicht mit dem Text der Seite, sie müssen eigens gebaut werden. Ohne sie hat die Seite keinen Zwischenschritt, auch wenn der Befund "Ok" zeigt.', 'Warum diese Aufgaben?')]));
+    if (todos.length === 0) {
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Nichts. Die Zwischenschritte sind die Seiten selbst (zum Beispiel Vergleichsseiten).']));
+      return box;
+    }
+    var ol = el('ol');
+    todos.forEach(function (t) {
+      // Überschrift ist die Aufgabe, nicht die Handlung des Besuchers. Die Handlung steht darunter als Bezug.
+      var title = t.kind === 'luecke' ? t.what : (FUNNEL_TODO_LABELS[t.kind] || t.kind) + ' für „' + t.what + '“';
+      var meta = (t.phase_label || optionLabel(MESSY_MIDDLE_PHASES, t.phase)) + (t.page_topic ? ' · auf der Seite „' + t.page_topic + '“' : '');
+      var li = el('li', {}, [
+        el('strong', {}, [title]),
+        el('span', { class: 'cvz-cs-funnel-todo-meta' }, [meta]),
+        el('span', { class: 'cvz-cs-funnel-todo-task' }, [t.task]),
+      ]);
+      if (t.next) li.appendChild(el('span', { class: 'cvz-cs-funnel-todo-meta' }, ['Danach: ' + t.next]));
+      ol.appendChild(li);
+    });
+    box.appendChild(ol);
+    return box;
+  }
+
+  function renderFunnelPages(funnel) {
+    var phases = (funnel.phases || []).filter(function (r) { return r.items && (r.items.length > 0 || r.status === 'keine_seiten'); });
+    if (phases.length === 0) return null;
+    var wrap = el('div', { class: 'cvz-cs-funnel-pages' });
+    wrap.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Seiten je Phase und ihr Zwischenschritt']));
+    phases.forEach(function (r) {
+      var warn = r.status === 'luecke' || r.status === 'schwach';
+      var counted = r.items.filter(function (i) { return i.counts; }).length;
+      var head = optionLabel(MESSY_MIDDLE_PHASES, r.phase) + ': ' + (r.items.length === 0 ? (r.via_conversion ? 'über die Conversion-Seite' : 'keine Seite') : (r.items.length + (r.items.length === 1 ? ' Seite' : ' Seiten') + ', ' + counted + ' mit Zwischenschritt'));
+      var d = el('details', warn ? { open: 'open' } : {}, [el('summary', {}, [head])]);
+      var ul = el('ul');
+      r.items.forEach(function (i) {
+        var li = el('li', {}, [
+          el('span', { class: 'cvz-cs-badge cvz-cs-badge-path-' + i.art }, [i.art === 'fehlt' ? 'Ohne Zwischenziel' : (ZWISCHENZIEL_ART_LABELS[i.art] || i.art_label || i.art)]),
+          ' ', el('strong', {}, [i.aktion || 'Keine Aktion angegeben']),
+          el('span', { class: 'cvz-cs-path-page' }, [' auf „' + i.topic + '“']),
+        ]);
+        if (!i.counts) li.appendChild(el('span', { class: 'cvz-cs-funnel-nocount' }, [i.art === 'ohne_huerde' ? 'Zählt nicht als Zwischenschritt: führt nur weiter, ohne Anlass zum Kontakt.' : 'Zählt in dieser Phase nicht als Zwischenschritt.']));
+        ul.appendChild(li);
+      });
+      if (r.items.length > 0) d.appendChild(ul);
+      if (r.finding && (warn || r.status === 'keine_seiten' || r.covered_by_own)) d.appendChild(el('p', { class: 'cvz-cs-funnel-finding' }, [r.finding]));
+      wrap.appendChild(d);
+    });
+    return wrap;
+  }
+
   function renderFunnelCheck(funnel) {
     var box = el('div', { class: 'cvz-cs-funnel-check' });
     box.appendChild(el('h5', {}, ['Funnel-Befund: wo fehlt ein Zwischenschritt?']));
     if (funnel.summary) box.appendChild(el('p', { class: 'cvz-cs-hint' }, [funnel.summary]));
+    var detailed = (funnel.phases || []).some(function (r) { return Array.isArray(r.items); });
+    if (detailed) box.appendChild(renderFunnelTodos(funnel));
     var grid = el('div', { class: 'cvz-cs-funnel-grid' });
     var findings = [];
     (funnel.phases || []).forEach(function (r) {
-      var status = (FUNNEL_STATUS_LABELS[r.status] || r.status) + (r.covered_by_own ? ', durch eigene Seite' : '');
+      var statusKey = r.via_conversion ? 'ok' : r.status;
+      var status = r.via_conversion ? 'Über Conversion-Seite' : (FUNNEL_STATUS_LABELS[r.status] || r.status) + (r.covered_by_own ? ', durch eigene Seite' : '');
       var warn = r.status === 'luecke' || r.status === 'schwach' || r.covered_by_own === true;
-      grid.appendChild(el('div', { class: 'cvz-cs-funnel-tile cvz-cs-funnel-row--' + r.status }, [
+      var stepsText = Array.isArray(r.items)
+        ? (r.items.length === 0 ? (r.via_conversion ? 'Zielaktion auf der Conversion-Seite' : 'keine Seite') : r.items.filter(function (i) { return i.counts; }).length + ' von ' + r.items.length + ' mit Zwischenschritt')
+        : funnelStepsText(r.steps);
+      grid.appendChild(el('div', { class: 'cvz-cs-funnel-tile cvz-cs-funnel-row--' + statusKey }, [
         el('span', { class: 'cvz-cs-funnel-phase' }, [optionLabel(MESSY_MIDDLE_PHASES, r.phase)]),
-        el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--' + r.status }, [status]),
+        el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--' + statusKey }, [status]),
         el('span', { class: 'cvz-cs-hint' }, [r.pages + (r.pages === 1 ? ' Seite' : ' Seiten')]),
-        el('span', { class: 'cvz-cs-funnel-steps' }, [funnelStepsText(r.steps)]),
+        el('span', { class: 'cvz-cs-funnel-steps' }, [stepsText]),
       ]));
-      if (warn && r.finding) findings.push(el('p', { class: 'cvz-cs-funnel-finding' }, [el('strong', {}, [optionLabel(MESSY_MIDDLE_PHASES, r.phase) + ': ']), r.finding]));
+      if (!detailed && warn && r.finding) findings.push(el('p', { class: 'cvz-cs-funnel-finding' }, [el('strong', {}, [optionLabel(MESSY_MIDDLE_PHASES, r.phase) + ': ']), r.finding]));
     });
     box.appendChild(grid);
     findings.forEach(function (f) { box.appendChild(f); });
+    if (detailed) { var pagesBox = renderFunnelPages(funnel); if (pagesBox) box.appendChild(pagesBox); }
     return box;
+  }
+
+  // NEU: Warum es keine Lead-Magnet-Vorschläge gibt. Früher stand immer derselbe Satz, egal ob ein Fehler vorlag oder keine nötig waren.
+  function leadMagnetsEmptyText(result) {
+    var gaps = (result.funnel_check && result.funnel_check.gap_phases) || [];
+    var st = result.lead_magnets_status;
+    if (st === 'fehler') return 'Die Vorschläge konnten in diesem Lauf nicht erzeugt werden (Zeitüberschreitung oder technischer Fehler). Befund und Aufgaben oben gelten trotzdem.';
+    if (st === 'verworfen') return 'Die KI hat Vorschläge gemacht, aber keiner hat die Prüfung bestanden, zum Beispiel weil er keine echte Kundenfrage beantwortete oder etwas voraussetzte, das dein Angebot nicht kann. Lieber kein Vorschlag als ein erfundener.' + (gaps.length > 0 ? ' Für die Lücken helfen die Aufgaben unter „Zu tun“.' : '');
+    if (gaps.length === 0) return 'Keine zusätzlichen Vorschläge nötig: Jede Phase bis zum Vergleich hat schon einen Zwischenschritt. Arbeite die Aufgaben unter „Zu tun“ ab.';
+    if (st === 'keine') return 'Für die Lücken hat die KI keinen passenden Vorschlag gefunden. Die Aufgaben unter „Zu tun“ zeigen, welche Seiten du aufwerten kannst.';
+    return 'Für diesen Lauf liegen keine Vorschläge vor. Die Aufgaben unter „Zu tun“ zeigen, welche Seiten du aufwerten kannst.';
   }
 
   function magnetLine(label, text) {
@@ -3897,6 +3989,8 @@
       if (!funnel || !funnel.phases) return;
       result.funnel_check = funnel;
       fillCheck(funnel);
+      var en = box.querySelector('.cvz-cs-magnet-empty');
+      if (en) en.textContent = leadMagnetsEmptyText(result);
       var gaps = funnel.gap_phases || [];
       Array.prototype.forEach.call(box.querySelectorAll('.cvz-cs-magnet-gapbadge'), function (b) {
         b.style.display = gaps.indexOf(b.getAttribute('data-phase')) !== -1 && b.getAttribute('data-counts') !== '0' ? '' : 'none';
@@ -3915,7 +4009,9 @@
         ]));
       }
     } else {
-      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für diesen Lauf liegen keine Lead-Magnet-Vorschläge vor.']));
+      box.appendChild(el('h5', {}, ['Lead-Magneten und kostenlose Tools']));
+      var emptyNote = el('p', { class: 'cvz-cs-hint cvz-cs-magnet-empty' }, [leadMagnetsEmptyText(result)]);
+      box.appendChild(emptyNote);
     }
     return box;
   }
@@ -5100,16 +5196,33 @@
         v.note ? tip((v.label || '') + '. ' + v.note, 'Wie wird die Wirtschaftlichkeit bewertet?') : null,
       ]);
     }
+    // NEU: Unterlagen für Mitentscheider nach einer Terminanfrage. Statt einer Mail-Strecke: je Rolle eine Unterlage, die der Vertrieb weitergibt.
+    function renderBuyingCenter(kit) {
+      var box = el('div', { class: 'cvz-tp-kit' });
+      box.appendChild(el('h5', {}, ['Unterlagen für Mitentscheider nach: ' + (kit.entry_label || 'Zielaktion'), tip(kit.usage || '', 'Warum keine E-Mail-Strecke?')]));
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Kein Versand nach Zeitplan. Der Vertrieb gibt die passende Unterlage weiter, oder dein Ansprechpartner leitet sie intern weiter.']));
+      (kit.items || []).forEach(function (it) {
+        var card = el('div', { class: 'cvz-tp-kit-item' }, [
+          el('div', { class: 'cvz-cs-page-card-badges' }, [el('span', { class: 'cvz-cs-badge' }, [it.role]), it.role_is_champion ? el('span', { class: 'cvz-cs-badge' }, ['Champion']) : null, el('span', { class: 'cvz-cs-badge' }, [it.format])]),
+          el('p', { class: 'cvz-cs-magnet-line' }, [el('strong', {}, ['Danach weiß die Person: ']), it.learning_goal]),
+          el('p', { class: 'cvz-cs-magnet-line' }, [el('strong', {}, ['Kernaussage: ']), it.message]),
+        ]);
+        if (it.objection) card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Beantwortet den Einwand: ' + it.objection]));
+        box.appendChild(card);
+      });
+      return box;
+    }
     function renderResult() {
       var gated = result.gated_content;
       var plan = result.touchpoint_plan;
       if (plan) {
         if (plan.value_class && plan.value_class.value) root.appendChild(renderValueLine(plan.value_class));
-        var head = el('h5', {}, ['Touchpoints und E-Mails nach dem Lead']);
+        var head = el('h5', {}, ['Touchpoints und E-Mails']);
         if (plan.plan_note) head.appendChild(tip(plan.plan_note, 'Was zeigt der Plan?'));
         root.appendChild(head);
         root.appendChild(renderTouchpointEditor(sessionId, result, session));
         if (plan.consent_note) root.appendChild(el('p', { class: 'cvz-cs-callout' }, [plan.consent_note]));
+        if (result.nurture_plan && result.nurture_plan.buying_center) root.appendChild(renderBuyingCenter(result.nurture_plan.buying_center));
         if (result.nurture_plan && result.nurture_plan.note) root.appendChild(el('p', { class: 'cvz-cs-hint' }, [result.nurture_plan.note]));
         if (gated) root.appendChild(renderGatedBlock(gated));
         root.appendChild(renderDemandBlock(plan.search_demand || []));
@@ -5206,6 +5319,46 @@
       (seq.mails || []).forEach(function (m, mi) { map[m.id] = { mail: m, seq: seq, si: si, mi: mi }; });
     });
     return map;
+  }
+
+  // NEU (Strecken nach der Zielaktion): Zeitpunkt und Beschriftung je Art der Strecke. Gleiche Regeln wie im Backend (mailTimingText).
+  // day bedeutet: nach_lead, onboarding = Tage nach dem Start, vor_termin = Tage VOR dem Termin (leer = sofort nach der Anfrage),
+  // reaktivierung = Tage nach dem Auslöser. Ältere Pläne haben keinen mode und gelten als nach_lead.
+  var TP_TERMIN_GOALS = { demo: true, anfrage: true, pilot: true, partner: true, event: true };
+  function tpMailTiming(mode, kind, day) {
+    var m = mode || 'nach_lead';
+    if (m === 'vor_termin') {
+      if (kind === 'bestaetigung' || day == null) return 'Sofort nach der Anfrage';
+      return day === 1 ? '1 Tag vor dem Termin' : day + ' Tage vor dem Termin';
+    }
+    if (day == null) return 'Zeitpunkt offen';
+    if (m === 'reaktivierung') return 'Tag ' + day + ' nach dem Auslöser';
+    if (m === 'onboarding') return 'Tag ' + day + ' nach dem Start';
+    return 'Tag ' + day;
+  }
+  // Kurzform für die Kästchen im Editor (höchstens 32 Zeichen samt "E-Mail · ").
+  function tpMailTimingShort(mode, kind, day) {
+    var t = tpMailTiming(mode, kind, day);
+    return t.replace(' nach dem Auslöser', ' nach Auslöser').replace(' vor dem Termin', ' vor Termin').replace(' nach dem Start', ' nach Start').replace('Sofort nach der Anfrage', 'sofort nach Anfrage');
+  }
+  function tpDayFieldLabel(mode) {
+    if (mode === 'vor_termin') return 'Tage vor dem Termin (Vorschlag)';
+    if (mode === 'reaktivierung') return 'Tage nach dem Auslöser (Vorschlag)';
+    if (mode === 'onboarding') return 'Tage nach dem Start (Vorschlag)';
+    return 'Tage nach dem Lead (Vorschlag)';
+  }
+  // Ältere Pläne: eine Zeitstrecke nach einer Terminanfrage. Sie bleibt sichtbar, ist aber als "nicht automatisch versenden" markiert.
+  function tpIsLegacyMeetingDrip(seq, endGoal) {
+    return !!seq && !seq.mode && seq.entry && seq.entry.kind === 'endziel' && !!TP_TERMIN_GOALS[endGoal];
+  }
+  function tpSeqZoneLabel(seq, endGoal) {
+    if (!seq) return 'Eigene E-Mails';
+    var label = seq.entry && seq.entry.label ? seq.entry.label : '';
+    if (seq.mode === 'vor_termin') return 'Bis zum Termin (' + label + '), danach übernimmt der Vertrieb';
+    if (seq.mode === 'reaktivierung') return 'Nur von Hand auslösen: wenn es nach dem Termin stockt';
+    if (seq.mode === 'onboarding') return 'Onboarding nach: ' + label;
+    if (tpIsLegacyMeetingDrip(seq, endGoal)) return 'Nach dem Lead: ' + label + ' (älterer Plan, nicht automatisch versenden)';
+    return 'Nach dem Lead: ' + label;
   }
 
   function tpBuildDiagram(plan, nurture) {
@@ -5319,7 +5472,7 @@
   }
 
   // ==================== EXPORT ====================
-  function tpExportRows(diagram, plan, nurture) {
+  function tpExportRows(diagram, plan, nurture, endGoal) {
     var byId = {};
     diagram.nodes.forEach(function (n) { byId[n.id] = n; });
     var phaseIdx = function (n) { for (var i = 0; i < TP_PHASES.length; i++) if (TP_PHASES[i].value === n.phase) return i; return 9; };
@@ -5337,7 +5490,7 @@
       used[c.toLowerCase()] = true;
       titleOf[n.id] = c;
     });
-    return ordered.map(function (n, i) {
+    var rows = ordered.map(function (n, i) {
       var d = tpDataFor(n, plan, nurture) || {};
       var isMail = n.kind === 'mail';
       var isAsset = n.kind === 'asset';
@@ -5348,7 +5501,11 @@
       var seqLabel = '';
       if (isMail && n.mail_ref) { var hit = tpMailIndex(nurture)[n.mail_ref]; if (hit) seqLabel = hit.seq.entry && hit.seq.entry.label ? hit.seq.entry.label : ''; }
       var desc = [];
-      if (isMail) desc.push('E-Mail nach dem Lead' + (n.day != null ? ', Tag ' + n.day : '') + (seqLabel ? ' (Einstieg: ' + seqLabel + ')' : ''));
+      var mailHit = isMail && n.mail_ref ? tpMailIndex(nurture)[n.mail_ref] : null;
+      if (isMail) {
+        desc.push((mailHit ? tpSeqZoneLabel(mailHit.seq, endGoal) : 'Eigene E-Mail') + ', ' + (mailHit ? tpMailTiming(mailHit.seq.mode, mailHit.mail.kind, n.day) : (n.day != null ? 'Tag ' + n.day : 'Zeitpunkt offen')));
+        if (mailHit && mailHit.seq.trigger) desc.push(mailHit.seq.trigger);
+      }
       if (isAsset) {
         desc.push((d.origin === 'frei' ? 'Lead-Magnet, frei zugänglich' : 'Gated Content, hinter E-Mail') + (d.effort ? ', Aufwand ' + d.effort : ''));
         if (d.promise) desc.push('Versprechen: ' + d.promise);
@@ -5366,7 +5523,7 @@
       if (n.note) desc.push('Notiz: ' + n.note);
       return {
         taskId: 'TP' + (i + 1), title: titleOf[n.id], art: isMail ? 'E-Mail' : (isAsset ? (d.origin === 'frei' ? 'Lead-Magnet' : 'Gated Content') : 'Touchpoint'),
-        phase: isMail ? '' : tpPhaseLabel(n.phase), day: isMail && n.day != null ? n.day : '',
+        phase: isMail ? '' : tpPhaseLabel(n.phase), day: isMail ? (mailHit ? tpMailTiming(mailHit.seq.mode, mailHit.mail.kind, n.day) : (n.day != null ? n.day : '')) : '',
         role: n.role || '', format: isMail ? (d.kind_label || '') : (d.format_label || tpFormatLabel(n.format)),
         channel: n.channel || '', goal: d.learning_goal || d.promise || '', message: d.message || '', objection: d.objection || '',
         asset: asset, micro: d.micro_conversion || '', req: req,
@@ -5375,10 +5532,22 @@
         tags: [isMail ? 'E-Mail' : tpPhaseLabel(n.phase), isMail ? '' : (d.format_label || tpFormatLabel(n.format)), n.role || ''].filter(Boolean).map(function (t) { return String(t).replace(/[|,]/g, ' '); }).join('|'),
       };
     });
+    // NEU: Unterlagen für Mitentscheider als Aufgaben (erstellen, dann im Gespräch weitergeben). Kein Versandtag.
+    var kit = nurture && nurture.buying_center;
+    ((kit && kit.items) || []).forEach(function (it) {
+      var title = 'Unterlage für ' + it.role + ': ' + it.format;
+      rows.push({
+        taskId: 'TP' + (rows.length + 1), title: title, art: 'Unterlage', phase: '', day: 'kein Versandtag', role: it.role, format: it.format, channel: '',
+        goal: it.learning_goal, message: it.message, objection: it.objection || '', asset: '', micro: '', req: '', basis: 'Aus deinen Angaben', note: '',
+        description: ['Unterlage für Mitentscheider nach: ' + (kit.entry_label || 'Zielaktion'), kit.usage, 'Lernziel: ' + it.learning_goal, 'Botschaft: ' + it.message].concat(it.objection ? ['Einwand: ' + it.objection] : []).join('\n'),
+        tags: ['Unterlage', it.role].map(function (t) { return String(t).replace(/[|,]/g, ' '); }).join('|'),
+      });
+    });
+    return rows;
   }
 
-  function tpBuildExport(kind, diagram, plan, nurture, seedTopic) {
-    var rows = tpExportRows(diagram, plan, nurture);
+  function tpBuildExport(kind, diagram, plan, nurture, seedTopic, endGoal) {
+    var rows = tpExportRows(diagram, plan, nurture, endGoal);
     var base = 'touchpoint-plan-' + flowSlug(seedTopic);
     if (kind === 'clickup') {
       return { filename: base + '-clickup.csv', rows: rows.length, text: flowToCsv(['Task ID', 'Task Name', 'Description', 'Tags', 'Subtask IDs'], rows.map(function (r) { return [r.taskId, r.title, r.description, r.tags, '']; }), ',', false) };
@@ -5397,7 +5566,9 @@
   function renderTouchpointEditor(sessionId, result, session) {
     var plan = result.touchpoint_plan;
     var nurture = result.nurture_plan || null;
+    var endGoal = result.strategy_goal && result.strategy_goal.end_goal;
     var diagram = tpSanitizeStored(session && session.touchpoint_diagram, plan, nurture) || tpBuildDiagram(plan, nurture);
+    function mailModeOf(n) { var h = n && n.mail_ref ? tpMailIndex(nurture)[n.mail_ref] : null; return h ? h.seq.mode : undefined; }
     var ui = { selected: null, mode: null, roleFilter: '', view: { x: 40, y: 40, k: 1 }, undo: [], drag: null, saveState: sessionId ? 'idle' : 'unsaved', saveTimer: null, saveError: '', fullscreen: false, exportOpen: false, lastUndoKey: null };
     var roles = (plan.role_coverage || []).map(function (r) { return r.role; });
 
@@ -5507,7 +5678,7 @@
       Object.keys(groups).forEach(function (k) {
         var g = groups[k];
         var hit = g.ref ? idx[g.ref] : null;
-        var label = 'Nach dem Lead' + (hit && hit.seq.entry && hit.seq.entry.label ? ': ' + hit.seq.entry.label : ': eigene E-Mails');
+        var label = tpSeqZoneLabel(hit ? hit.seq : null, endGoal);
         zoneLayer.appendChild(svgEl('rect', { class: 'cvz-tp-zone', x: g.minX - 14, y: g.minY - 34, width: g.maxX - g.minX + 28, height: g.maxY - g.minY + 48 }));
         zoneLayer.appendChild(svgEl('text', { class: 'cvz-tp-zone-label', x: g.minX - 6, y: g.minY - 18 }, [label.slice(0, 90)]));
       });
@@ -5538,7 +5709,7 @@
         });
         g.appendChild(svgEl('rect', { class: 'cvz-flow-node-box', width: TP_NODE_W, height: TP_NODE_H, style: 'stroke:' + (isSel ? '#f0f4f8' : 'rgba(255,255,255,.18)') }));
         g.appendChild(svgEl('rect', { width: 5, height: TP_NODE_H, fill: color }));
-        var tag = isAsset ? (d && d.origin === 'frei' ? 'Lead-Magnet · frei' : 'Gated Content · hinter E-Mail') : isMail ? 'E-Mail' + (n.day != null ? ' · Tag ' + n.day : '') : ((d && d.format_label) || tpFormatLabel(n.format) || (n.kind === 'custom' ? 'Eigener Touchpoint' : 'Touchpoint'));
+        var tag = isAsset ? (d && d.origin === 'frei' ? 'Lead-Magnet · frei' : 'Gated Content · hinter E-Mail') : isMail ? 'E-Mail · ' + (n.mail_ref ? tpMailTimingShort(mailModeOf(n), d && d.kind, n.day) : (n.day != null ? 'Tag ' + n.day : 'eigene')) : ((d && d.format_label) || tpFormatLabel(n.format) || (n.kind === 'custom' ? 'Eigener Touchpoint' : 'Touchpoint'));
         g.appendChild(svgEl('text', { class: 'cvz-flow-node-tag', x: 16, y: 17 }, [String(tag).slice(0, 32)]));
         flowWrapText(n.label, 30, 3).forEach(function (line, i) { g.appendChild(svgEl('text', { class: 'cvz-flow-node-label', x: 16, y: 38 + i * 16 }, [line])); });
         var foot = isMail ? (n.role || '') : isAsset ? (tpPhaseLabel(n.phase) + (d && d.effort ? ' · Aufwand ' + d.effort : '')) : (tpPhaseLabel(n.phase) + (n.role ? ' · ' + n.role : ''));
@@ -5595,7 +5766,7 @@
           var entry = el('button', { type: 'button', class: 'cvz-flow-menu-item', role: 'menuitem' }, [el('span', {}, [item.label]), el('small', {}, [item.hint])]);
           entry.addEventListener('click', function (evt) {
             evt.stopPropagation();
-            var out = tpBuildExport(item.kind, diagram, plan, nurture, result.seed_topic);
+            var out = tpBuildExport(item.kind, diagram, plan, nurture, result.seed_topic, endGoal);
             flowDownload(out.filename, out.text);
             ui.exportOpen = false; renderToolbar();
             notice(out.rows + ' Einträge exportiert: ' + out.filename);
@@ -5619,7 +5790,7 @@
         var legend = el('div', { class: 'cvz-flow-legend' });
         TP_PHASES.forEach(function (ph) { legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [el('i', { style: 'background:' + TP_PHASE_COLORS[ph.value] }), ph.label])); });
         legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [el('i', { style: 'background:' + TP_ASSET_COLOR }), 'Lead-Magnet oder Gated Content']));
-        legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [el('i', { style: 'background:' + TP_MAIL_COLOR }), 'E-Mail nach dem Lead']));
+        legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [el('i', { style: 'background:' + TP_MAIL_COLOR }), 'E-Mail']));
         panel.appendChild(legend);
         return;
       }
@@ -5639,7 +5810,7 @@
       var d = tpDataFor(node, plan, nurture);
       var isMail = node.kind === 'mail';
       var isAsset = node.kind === 'asset';
-      panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [isAsset ? (d && d.origin === 'frei' ? 'Lead-Magnet' : 'Gated Content') : isMail ? 'E-Mail nach dem Lead' : (node.kind === 'custom' ? 'Eigener Touchpoint' : 'Touchpoint')]));
+      panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, [isAsset ? (d && d.origin === 'frei' ? 'Lead-Magnet' : 'Gated Content') : isMail ? ({ vor_termin: 'E-Mail bis zum Termin', reaktivierung: 'E-Mail zur Reaktivierung (von Hand)', onboarding: 'E-Mail im Onboarding' }[mailModeOf(node)] || 'E-Mail nach dem Lead') : (node.kind === 'custom' ? 'Eigener Touchpoint' : 'Touchpoint')]));
       if (d && isAsset) {
         panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [[d.phase_label, d.format_label, d.effort ? 'Aufwand ' + d.effort : '', d.origin === 'frei' ? 'frei zugänglich' : 'hinter E-Mail, mit deiner Substanz'].filter(Boolean).join(' · ')]));
         if (d.promise) panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, ['Versprechen: ' + d.promise]));
@@ -5649,7 +5820,10 @@
       }
       if (d && !isAsset) {
         if (isMail) {
-          panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [(d.kind_label || '') + ' · Tag ' + d.day + ' (Vorschlag)']));
+          var hitSeq = tpMailIndex(nurture)[node.mail_ref];
+          panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [(d.kind_label || '') + ' · ' + tpMailTiming(mailModeOf(node), d.kind, node.day) + ' (Vorschlag)']));
+          if (hitSeq && hitSeq.seq.trigger) panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, [hitSeq.seq.trigger]));
+          if (hitSeq && tpIsLegacyMeetingDrip(hitSeq.seq, endGoal)) panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Älterer Plan: Nach einer Terminanfrage übernimmt der Vertrieb. Diese Mail nicht automatisch versenden.']));
         } else {
           panel.appendChild(el('p', { class: 'cvz-cs-hint' }, [tpPhaseLabel(d.phase) + ' · ' + d.format_label + ' · ' + (TP_BASIS_LABELS[d.basis] || d.basis)]));
         }
@@ -5676,7 +5850,7 @@
         fmtSel.addEventListener('change', function () { pushUndo(); node.format = fmtSel.value || undefined; changed(); });
         panel.appendChild(field('Format', fmtSel));
       }
-      if (isMail) {
+      if (isMail && !(d && d.kind === 'bestaetigung')) { // Die Bestätigung geht sofort raus, ohne Tag
         var dayInput = el('input', { type: 'number', class: 'cvz-flow-input', min: '0', max: '365', step: '1' });
         dayInput.value = node.day != null ? String(node.day) : '';
         dayInput.addEventListener('focus', pushUndoOnce(node.id + ':day'));
@@ -5685,7 +5859,7 @@
           node.day = isFinite(v) ? Math.max(0, Math.min(365, v)) : null;
           renderCanvas(); scheduleSave();
         });
-        panel.appendChild(field('Tage nach dem Lead (Vorschlag)', dayInput));
+        panel.appendChild(field(tpDayFieldLabel(mailModeOf(node)), dayInput));
       }
       var roleControl;
       if (roles.length > 0) {
