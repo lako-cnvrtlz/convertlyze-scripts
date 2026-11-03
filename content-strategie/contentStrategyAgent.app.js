@@ -461,6 +461,36 @@
       '.cvz-cs-magnet-gap{color:var(--cvz-amber);font-weight:600;}',
       /* NEU (Abschnitt 5 verständlich): Aufgaben und Seiten je Phase */
       '.cvz-tp-kit{margin:14px 0;}',
+      '.cvz-cs-path-fold>summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--cvz-heading);margin:0 0 8px;}',
+      '.cvz-cs-plan-tabs{display:flex;gap:0;margin:0 0 14px;border-bottom:1px solid var(--cvz-border);}',
+      '.cvz-cs-plan-tab{background:transparent;border:0;border-bottom:2px solid transparent;color:var(--cvz-muted);padding:8px 14px;font:600 14px "Geist",sans-serif;cursor:pointer;}',
+      '.cvz-cs-plan-tab.is-active{color:var(--cvz-heading);border-bottom-color:var(--cvz-teal);}',
+      '.cvz-cs-phase-status{margin-left:8px;text-transform:none;letter-spacing:0;font-weight:600;}',
+      '.cvz-cs-build{margin-top:22px;padding-top:16px;border-top:1px solid var(--cvz-border);}',
+      '.cvz-cs-build-title{margin:0 0 6px;}',
+      '.cvz-cs-build-block{margin:10px 0;}',
+      '.cvz-cs-build-gap{padding:10px 14px;border:1px solid var(--cvz-border);border-left:3px solid var(--cvz-amber);background:var(--cvz-surface);margin:0 0 10px;}',
+      '.cvz-cs-build-gap-title{margin:0 0 4px;font-weight:700;color:var(--cvz-heading);font-size:14px;}',
+      '.cvz-cs-build-group-title{margin:14px 0 4px;font-weight:700;color:var(--cvz-heading);font-size:14px;}',
+      '.cvz-cs-build-list{margin:0;padding-left:18px;}',
+      '.cvz-cs-build-list li{margin:0 0 8px;font-size:14px;color:var(--cvz-text);overflow-wrap:anywhere;}',
+      '.cvz-cs-build-more{margin:12px 0;}',
+      '.cvz-cs-build-more summary{cursor:pointer;font-size:14px;color:var(--cvz-text);}',
+      '.cvz-cs-traffic{margin:16px 0;padding:14px 16px;border:1px solid var(--cvz-border);background:var(--cvz-surface);}',
+      '.cvz-cs-traffic-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}',
+      '.cvz-cs-traffic-head h5{margin:0;}',
+      '.cvz-cs-traffic-range{font-size:1.15rem;font-weight:700;color:var(--cvz-heading);margin:10px 0;}',
+      '.cvz-cs-traffic-sub{display:block;font-size:13px;font-weight:400;color:var(--cvz-muted);margin-top:2px;}',
+      '.cvz-cs-traffic-level--sehr_gering,.cvz-cs-traffic-level--gering{background:rgba(245,158,11,.12);color:var(--cvz-amber);border-color:rgba(245,158,11,.3);}',
+      '.cvz-cs-traffic-level--mittel,.cvz-cs-traffic-level--hoch{background:rgba(79,209,197,.12);color:var(--cvz-teal);border-color:rgba(79,209,197,.25);}',
+      '.cvz-cs-traffic-how{margin-top:10px;}',
+      '.cvz-cs-traffic-how summary{cursor:pointer;font-size:14px;color:var(--cvz-text);}',
+      '.cvz-cs-also{margin:-4px 0 14px;}',
+      '.cvz-cs-also summary{cursor:pointer;font-size:14px;color:var(--cvz-text);}',
+      '.cvz-cs-also-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:4px 14px;margin:6px 0 0;}',
+      '.cvz-cs-also-item{font-size:14px;color:var(--cvz-text);display:flex;gap:6px;align-items:flex-start;cursor:pointer;}',
+      '.cvz-cs-also-item input{margin-top:3px;}',
+      '.cvz-cs-also-item.is-off{opacity:.45;cursor:default;}',
       '.cvz-tp-kit-item{padding:10px 14px;border:1px solid var(--cvz-border);border-left:3px solid #4fd1c5;background:var(--cvz-surface);margin:0 0 8px;}',
       '.cvz-tp-kit-item .cvz-cs-magnet-line{margin:6px 0;}',
       '.cvz-cs-funnel-todos{margin:12px 0;padding:12px 14px;border:1px solid var(--cvz-border);border-left:3px solid var(--cvz-teal);background:var(--cvz-surface);}',
@@ -1161,7 +1191,42 @@
       // Vorbelegung nur, solange der Kunde die Zielaktion nicht selbst gewählt hat.
       if (!goalTouched && DEFAULT_END_GOAL[offerSelect.value]) goalSelect.value = DEFAULT_END_GOAL[offerSelect.value];
     });
-    form.appendChild(el('label', { class: 'cvz-cs-label' }, [el('span', { class: 'cvz-cs-label-text' }, ['Was bietest du zu diesem Thema an?', tip('Wähle, was am besten passt. Der Angebotstyp bestimmt Ton und Wortwahl der Strategie, die vorgeschlagene Zielaktion und die Einschätzung, was ein Kunde wert ist. Wettbewerb und Kategorie ergänzt das Produktprofil im nächsten Schritt.')]), offerSelect]));
+    form.appendChild(el('label', { class: 'cvz-cs-label' }, [el('span', { class: 'cvz-cs-label-text' }, ['Was kauft dein Kunde bei diesem Thema?', tip('Wähle das Hauptangebot, also das, was der Kunde bei diesem Thema kauft. Es bestimmt Ton und Wortwahl der Strategie, die vorgeschlagene Zielaktion und die Einschätzung, was ein Kunde wert ist. Was zusätzlich dazugehört, kannst du darunter angeben. Wettbewerb und Kategorie ergänzt das Produktprofil im nächsten Schritt.')]), offerSelect]));
+    // NEU (Pakete): Was zusätzlich dazugehört, höchstens zwei. Ändert keine Regel, sondern fließt als Zusatz in die Inhalte ein (Backend: alsoOffersLine).
+    // Eingeklappt, damit nicht aus Gewohnheit alles angehakt wird. Das Hauptangebot steht nicht zur Wahl.
+    var ALSO_MAX = 2;
+    var alsoChecks = [];
+    var alsoInfo = el('p', { class: 'cvz-cs-hint' });
+    var alsoList = el('div', { class: 'cvz-cs-also-list' });
+    OFFER_TYPE_OPTIONS.forEach(function (o) {
+      var box = el('input', { type: 'checkbox', value: o.value });
+      box.checked = (goalPrefill.also_offers || []).indexOf(o.value) !== -1;
+      var row = el('label', { class: 'cvz-cs-also-item' }, [box, ' ' + o.label]);
+      alsoChecks.push({ box: box, row: row, value: o.value });
+      alsoList.appendChild(row);
+    });
+    function refreshAlso() {
+      var main = offerSelect.value;
+      var picked = 0;
+      alsoChecks.forEach(function (c) {
+        var isMain = c.value === main;
+        if (isMain) c.box.checked = false;
+        c.row.style.display = isMain ? 'none' : '';
+        if (c.box.checked) picked++;
+      });
+      alsoChecks.forEach(function (c) { c.box.disabled = !c.box.checked && picked >= ALSO_MAX; c.row.classList.toggle('is-off', c.box.disabled); });
+      alsoInfo.textContent = picked >= ALSO_MAX ? 'Höchstens zwei. Für getrennte Angebote erstelle besser je Angebot eine eigene Strategie.' : 'Höchstens zwei, zum Beispiel ein Projekt mit anschließendem Betrieb.';
+    }
+    alsoChecks.forEach(function (c) { c.box.addEventListener('change', refreshAlso); });
+    offerSelect.addEventListener('change', refreshAlso);
+    refreshAlso();
+    var alsoBox = el('details', { class: 'cvz-cs-also' }, [
+      el('summary', {}, ['Gehört zu diesem Angebot noch etwas dazu? (optional)', tip('Zum Beispiel ein IT-Projekt, nach dem ihr den Betrieb übernehmt, oder eine Software, zu der ihr Einführung und Schulung anbietet. Das ändert keine Regel der Strategie: Ton, Weg zur Zielaktion und Kundenwert folgen dem Hauptangebot. Die Strategie greift die Zusatzangebote dort auf, wo Käufer danach fragen.', 'Wozu dient das?')]),
+      alsoInfo,
+      alsoList,
+    ]);
+    if ((goalPrefill.also_offers || []).length > 0) alsoBox.setAttribute('open', 'open');
+    form.appendChild(alsoBox);
     form.appendChild(el('label', { class: 'cvz-cs-label' }, [
       el('span', { class: 'cvz-cs-label-text' }, ['Welche Handlung soll ein Interessent am Ende ausführen?', tip('Das ist die Zielaktion, auf die die ganze Strategie einzahlt. Sie zeigt den Weg dorthin, mit Zwischenschritten je Phase der Customer Journey. Der Weg richtet sich nach der Zielaktion: Eine Demo braucht anderes Vertrauen als ein Pilot oder eine Partnerschaft.')]),
       goalSelect,
@@ -1232,6 +1297,8 @@
       var cta = ctaInput.value.trim();
       state.strategyGoal = { offer_type: offerSelect.value, end_goal: goalSelect.value };
       if (cta.length >= 2) state.strategyGoal.cta_label = cta.slice(0, 80);
+      var also = alsoChecks.filter(function (c) { return c.box.checked && c.value !== offerSelect.value; }).map(function (c) { return c.value; }).slice(0, ALSO_MAX);
+      if (also.length > 0) state.strategyGoal.also_offers = also;
       state.existingMagnets = magnetsInput.value.trim().slice(0, 600) || null;
       state.productUrl = site.productUrl || ''; // NEU: Produktseite aus dem Feld, für den Profil-Schritt
       formError.textContent = '';
@@ -1252,6 +1319,7 @@
     { value: 'beratung', label: 'Beratung (Expertise, Audit, Workshop)', group: 'Dienstleistungen' },
     { value: 'projekt', label: 'IT-Projekt und Systemhaus (Implementierung, Integration)', group: 'Dienstleistungen' },
     { value: 'managed_service', label: 'Managed Service und Outsourcing (laufender Betrieb)', group: 'Dienstleistungen' },
+    { value: 'schulung', label: 'Schulung und Weiterbildung (Seminar, Zertifizierung, E-Learning, Inhouse)', group: 'Dienstleistungen' }, // NEU
     { value: 'dienstleistung', label: 'Agentur oder andere Dienstleistung', group: 'Dienstleistungen' },
   ];
   var END_GOAL_OPTIONS = [
@@ -1264,7 +1332,7 @@
     { value: 'partner', label: 'Partner werden' },
     { value: 'event', label: 'Event oder Training buchen' },
   ];
-  var DEFAULT_END_GOAL = { saas: 'registrierung', software_vertrieb: 'demo', b2b_produkt: 'anfrage', produkt: 'kauf', beratung: 'demo', projekt: 'anfrage', managed_service: 'anfrage', dienstleistung: 'demo' };
+  var DEFAULT_END_GOAL = { saas: 'registrierung', software_vertrieb: 'demo', b2b_produkt: 'anfrage', produkt: 'kauf', beratung: 'demo', projekt: 'anfrage', managed_service: 'anfrage', dienstleistung: 'demo', schulung: 'event' };
   function optionLabel(list, value) {
     var o = list.filter(function (x) { return x.value === value; })[0];
     return o ? o.label : value;
@@ -3518,12 +3586,10 @@
     wrap.appendChild(anchorNav.nav);
     wrap.appendChild(anchorNav.spacer);
     // GEÄNDERT (Übersicht): Reihenfolge Überblick, Plan, Grundlagen. Die Grundlagen sind eingeklappt, die Sprungleiste öffnet sie bei Bedarf.
-    var sec_summary = renderReportSection(secNo.summary, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)]), renderProfileWarnings(result)]);
+    var sec_summary = renderReportSection(secNo.summary, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)]), renderTrafficBlock(result), renderProfileWarnings(result)]);
     var sec_roadmap = renderReportSection(secNo.roadmap, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]);
-    var sec_cluster = renderReportSection(secNo.cluster, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result));
-    var sec_flow = renderReportSection(secNo.flow, 'Content-Flow: Themen-Baum bearbeiten', [renderFlowSection(sessionId, result, session)]);
-    var sec_funnel = secNo.funnel ? renderReportSection(secNo.funnel, 'Funnel und Lead-Magneten', [renderFunnelSection(result)]) : null;
-    var sec_touchpoints = secNo.touchpoints ? renderReportSection(secNo.touchpoints, 'Touchpoint-Plan', [renderTouchpointSection(sessionId, result, session)]) : null;
+    var sec_cluster = renderReportSection(secNo.cluster, 'Content-Plan: Seiten, Weg zur Zielaktion und was ihr bauen müsst', buildContentPlanChildren(sessionId, result, session));
+    var sec_touchpoints = secNo.touchpoints ? renderReportSection(secNo.touchpoints, 'Touchpoint-Plan: wie Interessenten zu den Zwischenschritten kommen', [renderTouchpointSection(sessionId, result, session)]) : null;
     var sec_geo = renderReportSection(secNo.geo, 'GEO-Strategie', [renderVisibilitySection(session), renderOffsiteSection(result.offsite_measures, result.offsite_sources), renderGeoSection(result.geo_strategy)]);
     var sec_validation = renderReportSection(secNo.validation, 'Themen-Check', [renderTopicValidationSection(result.topic_validation, result.seed_topic)]);
     var sec_ausgangslage = renderReportSection(secNo.ausgangslage, 'Ausgangslage', [renderTrackerSourceNote(session), renderProse(result.ausgangslage), renderProfileBox(result)]);
@@ -3533,8 +3599,6 @@
     wrap.appendChild(sec_roadmap);
     wrap.appendChild(el('p', { class: 'cvz-cs-group-label' }, ['Plan']));
     wrap.appendChild(sec_cluster);
-    wrap.appendChild(sec_flow);
-    if (sec_funnel) wrap.appendChild(sec_funnel);
     if (sec_touchpoints) wrap.appendChild(sec_touchpoints);
     wrap.appendChild(sec_geo);
     var foundations = el('details', { class: 'cvz-cs-group-fold' }, [el('summary', {}, ['Grundlagen: Themen-Check, Ausgangslage, Ist-Zustand', tip('Hier steht, worauf die Strategie aufbaut: das geprüfte Thema, die Ausgangslage mit deinem Produktprofil und wer heute schon für das Thema rankt. Zum Arbeiten brauchst du es selten, zum Nachvollziehen schon.', 'Was steht in den Grundlagen?')])]);
@@ -3575,9 +3639,7 @@
   var REPORT_NAV_BASE = [
     { key: 'summary', label: 'Zusammenfassung' },
     { key: 'roadmap', label: 'Roadmap' },
-    { key: 'cluster', label: 'Cluster' },
-    { key: 'flow', label: 'Content-Flow' },
-    { key: 'funnel', label: 'Funnel', optional: true },
+    { key: 'cluster', label: 'Content-Plan' }, // GEÄNDERT: Cluster, Content-Flow und Funnel sind ein Abschnitt
     { key: 'touchpoints', label: 'Touchpoints', optional: true },
     { key: 'geo', label: 'GEO' },
     { key: 'validation', label: 'Themen-Check' },
@@ -3589,7 +3651,7 @@
     var n = 0;
     var out = [];
     REPORT_NAV_BASE.forEach(function (item) {
-      if (item.optional && !(item.key === 'touchpoints' ? hasTouchpointSection(result, session) : hasFunnelSection(result))) return;
+      if (item.optional && item.key === 'touchpoints' && !hasTouchpointSection(result, session)) return;
       n++;
       out.push({ key: item.key, n: n, label: item.label });
     });
@@ -3777,6 +3839,7 @@
     if (!goal) return null;
     var lines = [
       el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Angebot: ']), optionLabel(OFFER_TYPE_OPTIONS, goal.offer_type)]),
+      (goal.also_offers || []).length > 0 ? el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Gehört auch dazu: ']), goal.also_offers.filter(function (o) { return o !== goal.offer_type; }).map(function (o) { return optionLabel(OFFER_TYPE_OPTIONS, o); }).join('; ')]) : null,
       el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Zielaktion: ']), optionLabel(END_GOAL_OPTIONS, goal.end_goal)]),
     ];
     if (goal.cta_label) lines.push(el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Haupt-Button: ']), '„' + goal.cta_label + '“']));
@@ -3801,91 +3864,73 @@
     return parts.length > 0 ? parts.join(' · ') : 'keine Zwischenschritte';
   }
 
-  // GEÄNDERT (Abschnitt 5 verständlich): Früher nur Zählwerte je Phase ("Ohne Hürde: 1 · Gegen E-Mail: 1"). Der Leser wusste nicht, um welche
-  // Seiten es geht und was zu tun ist. Jetzt: 1. Zu tun (was zusätzlich zu den Seiten gebaut werden muss, vom Server berechnet),
-  // 2. kompakte Leiste der Phasen, 3. je Phase die Seiten mit ihrem Zwischenschritt. Ältere Befunde ohne Seitenliste zeigen die Zählwerte.
+  // GEÄNDERT (Content-Plan): Der frühere Abschnitt "Funnel und Lead-Magneten" doppelte sich mit dem Cluster (Seiten je Phase, Conversion-Pfad),
+  // dem Content-Flow und dem Touchpoint-Plan. Jetzt: Der Status je Phase steht in den Phasen-Überschriften der Seitenliste (paintPhaseStatus),
+  // und am Ende des Content-Plans steht nur noch die Bauliste: Lücken mit den passenden Lead-Magnet-Ideen, dann die Inhalte, die Seiten versprechen.
   var FUNNEL_TODO_LABELS = { luecke: 'Lücke schließen', inhalt: 'Inhalt erstellen', erlebnis: 'Bereitstellen', beleg: 'Beleg beschaffen' };
+  var BUILD_GROUPS = [
+    { kind: 'inhalt', title: 'Versprochene Inhalte erstellen', intro: 'Diese Seiten bieten etwas gegen E-Mail an. Den Inhalt fertigstellen und hinter ein kurzes Formular legen. Ohne ihn hat die Seite keinen Zwischenschritt.' },
+    { kind: 'erlebnis', title: 'Zum Ausprobieren bereitstellen', intro: 'Diese Seiten führen zu etwas, das der Besucher selbst ausprobiert oder ansieht (Rechner, Beispiel-Ergebnis, Testzugang). Fertigstellen und auf der Seite gut sichtbar verlinken.' },
+    { kind: 'beleg', title: 'Belege beschaffen', intro: 'Fallstudien oder Referenzen mit Freigabe des Kunden, Zahlen nur mit Quelle. Ohne echten Beleg die Seite nicht damit bewerben.' },
+  ];
+  var PHASE_STATUS_TEXT = { luecke: 'kein Zwischenschritt', schwach: 'nur Weiterlesen, kein Zwischenschritt', ok: 'Zwischenschritt vorhanden' };
 
-  function renderFunnelTodos(funnel) {
-    var todos = funnel.todos || [];
-    var hasGap = todos.some(function (t) { return t.kind === 'luecke'; });
-    var box = el('div', { class: 'cvz-cs-funnel-todos' + (hasGap ? ' has-gap' : '') });
-    box.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Zu tun zusätzlich zu den Seiten', tip('Die Seiten der Strategie versprechen Zwischenschritte, etwa eine Checkliste gegen E-Mail oder eine Fallstudie. Diese Inhalte entstehen nicht mit dem Text der Seite, sie müssen eigens gebaut werden. Ohne sie hat die Seite keinen Zwischenschritt, auch wenn der Befund "Ok" zeigt.', 'Warum diese Aufgaben?')]));
-    if (todos.length === 0) {
-      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Nichts. Die Zwischenschritte sind die Seiten selbst (zum Beispiel Vergleichsseiten).']));
-      return box;
-    }
-    var ol = el('ol');
-    todos.forEach(function (t) {
-      // Überschrift ist die Aufgabe, nicht die Handlung des Besuchers. Die Handlung steht darunter als Bezug.
-      var title = t.kind === 'luecke' ? t.what : (FUNNEL_TODO_LABELS[t.kind] || t.kind) + ' für „' + t.what + '“';
-      var meta = (t.phase_label || optionLabel(MESSY_MIDDLE_PHASES, t.phase)) + (t.page_topic ? ' · auf der Seite „' + t.page_topic + '“' : '');
-      var li = el('li', {}, [
-        el('strong', {}, [title]),
-        el('span', { class: 'cvz-cs-funnel-todo-meta' }, [meta]),
-        el('span', { class: 'cvz-cs-funnel-todo-task' }, [t.task]),
-      ]);
-      if (t.next) li.appendChild(el('span', { class: 'cvz-cs-funnel-todo-meta' }, ['Danach: ' + t.next]));
-      ol.appendChild(li);
+  // Status je Phase in den Überschriften der Seitenliste. Wird nach dem Speichern des Content-Flows neu gemalt.
+  function paintPhaseStatus(funnel, scope) {
+    var rootEl = scope || state.root;
+    if (!rootEl || !funnel || !funnel.phases) return;
+    var byPhase = {};
+    funnel.phases.forEach(function (r) { byPhase[r.phase] = r; });
+    Array.prototype.forEach.call(rootEl.querySelectorAll('.cvz-cs-phase-status[data-phase]'), function (badge) {
+      var r = byPhase[badge.getAttribute('data-phase')];
+      if (!r || r.status === 'keine_seiten') { badge.style.display = 'none'; return; }
+      badge.style.display = '';
+      badge.className = 'cvz-cs-badge cvz-cs-phase-status cvz-cs-funnel-status--' + r.status;
+      badge.textContent = r.covered_by_own ? 'Zwischenschritt über eigene Seite' : (PHASE_STATUS_TEXT[r.status] || r.status);
+      badge.setAttribute('title', r.finding || '');
     });
-    box.appendChild(ol);
-    return box;
   }
 
-  function renderFunnelPages(funnel) {
-    var phases = (funnel.phases || []).filter(function (r) { return r.items && (r.items.length > 0 || r.status === 'keine_seiten'); });
-    if (phases.length === 0) return null;
-    var wrap = el('div', { class: 'cvz-cs-funnel-pages' });
-    wrap.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Seiten je Phase und ihr Zwischenschritt']));
-    phases.forEach(function (r) {
-      var warn = r.status === 'luecke' || r.status === 'schwach';
-      var counted = r.items.filter(function (i) { return i.counts; }).length;
-      var head = optionLabel(MESSY_MIDDLE_PHASES, r.phase) + ': ' + (r.items.length === 0 ? (r.via_conversion ? 'über die Conversion-Seite' : 'keine Seite') : (r.items.length + (r.items.length === 1 ? ' Seite' : ' Seiten') + ', ' + counted + ' mit Zwischenschritt'));
-      var d = el('details', warn ? { open: 'open' } : {}, [el('summary', {}, [head])]);
-      var ul = el('ul');
-      r.items.forEach(function (i) {
-        var li = el('li', {}, [
-          el('span', { class: 'cvz-cs-badge cvz-cs-badge-path-' + i.art }, [i.art === 'fehlt' ? 'Ohne Zwischenziel' : (ZWISCHENZIEL_ART_LABELS[i.art] || i.art_label || i.art)]),
-          ' ', el('strong', {}, [i.aktion || 'Keine Aktion angegeben']),
-          el('span', { class: 'cvz-cs-path-page' }, [' auf „' + i.topic + '“']),
-        ]);
-        if (!i.counts) li.appendChild(el('span', { class: 'cvz-cs-funnel-nocount' }, [i.art === 'ohne_huerde' ? 'Zählt nicht als Zwischenschritt: führt nur weiter, ohne Anlass zum Kontakt.' : 'Zählt in dieser Phase nicht als Zwischenschritt.']));
-        ul.appendChild(li);
-      });
-      if (r.items.length > 0) d.appendChild(ul);
-      if (r.finding && (warn || r.status === 'keine_seiten' || r.covered_by_own)) d.appendChild(el('p', { class: 'cvz-cs-funnel-finding' }, [r.finding]));
-      wrap.appendChild(d);
+  function renderBuildGaps(funnel, magnets) {
+    var gaps = (funnel.phases || []).filter(function (r) { return r.needs_magnet; });
+    if (gaps.length === 0) return null;
+    var wrap = el('div', { class: 'cvz-cs-build-block' });
+    gaps.forEach(function (r) {
+      var gap = el('div', { class: 'cvz-cs-build-gap' }, [
+        el('p', { class: 'cvz-cs-build-gap-title' }, ['Lücke in der Phase ' + r.label + ': ' + (r.status === 'schwach' ? 'die Seiten führen nur weiter' : 'kein Zwischenschritt')]),
+        el('p', { class: 'cvz-cs-hint' }, ['Wer hier ankommt, geht ohne Spur wieder. Werte eine dieser Seiten mit einem Angebot auf, das dem Besucher etwas für seine Lage gibt: ' + (r.items || []).map(function (i) { return '„' + i.topic + '“'; }).join(', ') + '.']),
+      ]);
+      var fitting = magnets.filter(function (m) { return m.phase === r.phase && m.counts_as_step !== false; });
+      if (fitting.length > 0) {
+        gap.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Passende Ideen (Vorschläge der KI)']));
+        fitting.forEach(function (m) { gap.appendChild(renderLeadMagnetCard(m)); });
+      } else {
+        gap.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für diese Phase gibt es keine passende Idee aus der KI. Üblich sind ein Check oder Rechner für die eigene Lage, eine Vorlage gegen E-Mail oder eine Fallstudie.']));
+      }
+      wrap.appendChild(gap);
     });
     return wrap;
   }
 
-  function renderFunnelCheck(funnel) {
-    var box = el('div', { class: 'cvz-cs-funnel-check' });
-    box.appendChild(el('h5', {}, ['Funnel-Befund: wo fehlt ein Zwischenschritt?']));
-    if (funnel.summary) box.appendChild(el('p', { class: 'cvz-cs-hint' }, [funnel.summary]));
-    var detailed = (funnel.phases || []).some(function (r) { return Array.isArray(r.items); });
-    if (detailed) box.appendChild(renderFunnelTodos(funnel));
-    var grid = el('div', { class: 'cvz-cs-funnel-grid' });
-    var findings = [];
-    (funnel.phases || []).forEach(function (r) {
-      var statusKey = r.via_conversion ? 'ok' : r.status;
-      var status = r.via_conversion ? 'Über Conversion-Seite' : (FUNNEL_STATUS_LABELS[r.status] || r.status) + (r.covered_by_own ? ', durch eigene Seite' : '');
-      var warn = r.status === 'luecke' || r.status === 'schwach' || r.covered_by_own === true;
-      var stepsText = Array.isArray(r.items)
-        ? (r.items.length === 0 ? (r.via_conversion ? 'Zielaktion auf der Conversion-Seite' : 'keine Seite') : r.items.filter(function (i) { return i.counts; }).length + ' von ' + r.items.length + ' mit Zwischenschritt')
-        : funnelStepsText(r.steps);
-      grid.appendChild(el('div', { class: 'cvz-cs-funnel-tile cvz-cs-funnel-row--' + statusKey }, [
-        el('span', { class: 'cvz-cs-funnel-phase' }, [optionLabel(MESSY_MIDDLE_PHASES, r.phase)]),
-        el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--' + statusKey }, [status]),
-        el('span', { class: 'cvz-cs-hint' }, [r.pages + (r.pages === 1 ? ' Seite' : ' Seiten')]),
-        el('span', { class: 'cvz-cs-funnel-steps' }, [stepsText]),
-      ]));
-      if (!detailed && warn && r.finding) findings.push(el('p', { class: 'cvz-cs-funnel-finding' }, [el('strong', {}, [optionLabel(MESSY_MIDDLE_PHASES, r.phase) + ': ']), r.finding]));
+  function renderBuildTasks(funnel) {
+    var todos = (funnel.todos || []).filter(function (t) { return t.kind !== 'luecke'; });
+    var wrap = el('div', { class: 'cvz-cs-build-block' });
+    BUILD_GROUPS.forEach(function (g) {
+      var list = todos.filter(function (t) { return t.kind === g.kind; });
+      if (list.length === 0) return;
+      wrap.appendChild(el('p', { class: 'cvz-cs-build-group-title' }, [g.title + ' (' + list.length + ')', tip(g.intro, 'Was ist zu tun?')]));
+      var ul = el('ul', { class: 'cvz-cs-build-list' });
+      list.forEach(function (t) {
+        var li = el('li', {}, [
+          el('strong', {}, [t.what]),
+          el('span', { class: 'cvz-cs-funnel-todo-meta' }, [(t.phase_label || '') + (t.page_topic ? ' · auf „' + t.page_topic + '“' : '')]),
+        ]);
+        if (t.next) li.appendChild(el('span', { class: 'cvz-cs-funnel-todo-meta' }, ['Danach: ' + t.next]));
+        ul.appendChild(li);
+      });
+      wrap.appendChild(ul);
     });
-    box.appendChild(grid);
-    findings.forEach(function (f) { box.appendChild(f); });
-    if (detailed) { var pagesBox = renderFunnelPages(funnel); if (pagesBox) box.appendChild(pagesBox); }
-    return box;
+    return wrap.childNodes.length > 0 ? wrap : null;
   }
 
   // NEU: Warum es keine Lead-Magnet-Vorschläge gibt. Früher stand immer derselbe Satz, egal ob ein Fehler vorlag oder keine nötig waren.
@@ -3916,7 +3961,7 @@
     if (m.hurdle && m.hurdle !== 'ohne_anmeldung') badges.splice(2, 0, el('span', { class: 'cvz-cs-badge' }, [hurdleText]));
     // Immer angelegt und nur ein- oder ausgeblendet: Ändert sich der Befund (eigene Seite im Flow), zieht die Karte mit.
     var gapBadge = el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--schwach cvz-cs-magnet-gapbadge', 'data-phase': m.phase, 'data-counts': m.counts_as_step === false ? '0' : '1' }, ['Schließt Lücke']);
-    if (!m.closes_gap) gapBadge.style.display = 'none';
+    gapBadge.style.display = 'none'; // GEÄNDERT: Die Karte steht jetzt direkt unter ihrer Lücke, das Badge wäre doppelt
     badges.push(gapBadge);
     card.appendChild(el('summary', {}, [el('div', { class: 'cvz-cs-page-acc-head' }, [
       el('div', { class: 'cvz-cs-page-card-badges' }, badges),
@@ -3971,48 +4016,48 @@
     return card;
   }
 
+  // Bauliste am Ende des Content-Plans. Alles darin hängt am Funnel-Befund des Servers und wird nach dem Speichern des Content-Flows neu gezeichnet.
   function renderFunnelSection(result) {
-    var box = el('div', { class: 'cvz-cs-funnel' });
-    box.appendChild(el('p', { class: 'cvz-cs-hint' }, [
-      'Je Phase ein Zwischenschritt mit echtem Nutzen.',
-      tip('Besucher kommen mit unterschiedlicher Kaufbereitschaft auf die Seiten der Strategie. Wer noch orientiert oder bewertet, ist selten bereit für die Zielaktion. Ein Zwischenschritt mit echtem Nutzen, etwa ein Check, ein Rechner oder eine ehrliche Vorlage, hält Interessenten im Funnel und hebt den Anbieter von Wettbewerbern ab. Er muss so nützlich sein, dass ihn jemand ohne Absender weiterleiten würde, sonst wird er nicht genutzt. Der Funnel-Befund ist aus den Seiten dieser Strategie berechnet. Eigene Seiten, die du im Content-Flow einer Phase zuordnest, zählen als Zwischenschritt, wenn sie vom Typ Rechner/Tool, Vorlage/Download, Vergleichsseite oder Test/Review sind (Vergleich und Review erst ab der Bewertungsphase). Die Lead-Magneten sind Vorschläge der KI, ihre Wirkung ist nicht prognostiziert.', 'Warum Zwischenschritte, und wie wird der Befund berechnet?'),
+    var box = el('div', { class: 'cvz-cs-funnel cvz-cs-build' });
+    box.appendChild(el('h4', { class: 'cvz-cs-build-title' }, [
+      'Was ihr zusätzlich zu den Seiten bauen müsst',
+      tip('Besucher kommen mit unterschiedlicher Kaufbereitschaft. Wer sich noch orientiert, ist selten bereit für die Zielaktion. Deshalb braucht jede Phase einen Zwischenschritt mit echtem Nutzen, etwa einen Check, einen Rechner, eine Vorlage gegen E-Mail oder eine Fallstudie. Er muss so nützlich sein, dass ihn jemand ohne Absender weiterleiten würde. Die Liste rechnet der Server aus den Seiten des Plans. Eigene Seiten im Diagramm vom Typ Rechner/Tool, Vorlage/Download, Vergleichsseite oder Test/Review zählen mit. Die Lead-Magneten sind Vorschläge der KI, ihre Wirkung ist nicht prognostiziert.', 'Warum Zwischenschritte, und woher kommt die Liste?'),
     ]));
-    var checkHolder = el('div', { class: 'cvz-cs-funnel-holder' });
-    function fillCheck(funnel) {
-      clear(checkHolder);
-      if (funnel && funnel.phases && funnel.phases.length > 0) checkHolder.appendChild(renderFunnelCheck(funnel));
+    var holder = el('div', {});
+    box.appendChild(holder);
+    var magnets = result.lead_magnets || [];
+    function fill(funnel) {
+      clear(holder);
+      if (!funnel || !funnel.phases) { holder.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für diesen Bericht liegt kein Befund vor.'])); return; }
+      if (funnel.summary) holder.appendChild(el('p', { class: 'cvz-cs-hint' }, [funnel.summary]));
+      var gaps = renderBuildGaps(funnel, magnets);
+      var tasks = renderBuildTasks(funnel);
+      if (gaps) holder.appendChild(gaps);
+      if (tasks) holder.appendChild(tasks);
+      if (!gaps && !tasks) holder.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Nichts zusätzlich zu bauen. Die Zwischenschritte sind die Seiten selbst, zum Beispiel Vergleichsseiten.']));
+      // Ideen, die keine offene Lücke betreffen, eingeklappt darunter
+      var gapPhases = (funnel.phases || []).filter(function (r) { return r.needs_magnet; }).map(function (r) { return r.phase; });
+      var rest = magnets.filter(function (m) { return gapPhases.indexOf(m.phase) === -1 || m.counts_as_step === false; });
+      if (rest.length > 0) {
+        var more = el('details', { class: 'cvz-cs-build-more' }, [el('summary', {}, ['Weitere Ideen für Lead-Magneten (' + rest.length + ')'])]);
+        rest.forEach(function (m) { more.appendChild(renderLeadMagnetCard(m)); });
+        holder.appendChild(more);
+      }
+      if (magnets.length > 0) {
+        if (result.lead_magnets_substance_note) holder.appendChild(el('p', { class: 'cvz-cs-hint' }, [result.lead_magnets_substance_note]));
+        if (result.lead_magnets_tracking_note) holder.appendChild(el('p', { class: 'cvz-cs-hint' }, [el('strong', {}, ['So misst du, welcher Magnet wirkt: ']), result.lead_magnets_tracking_note]));
+      } else {
+        holder.appendChild(el('p', { class: 'cvz-cs-hint cvz-cs-magnet-empty' }, [leadMagnetsEmptyText(result)]));
+      }
     }
-    fillCheck(result.funnel_check);
-    box.appendChild(checkHolder);
-    // NEU: Der Befund wird neu gezeichnet, sobald der Flow gespeichert ist (eigene Seiten ergänzt, geändert oder gelöscht).
+    fill(result.funnel_check);
+    // Nach dem Speichern des Content-Flows (eigene Seiten ergänzt, geändert oder gelöscht): Bauliste und Phasen-Status neu.
     state.funnelRefresh = function (funnel) {
       if (!funnel || !funnel.phases) return;
       result.funnel_check = funnel;
-      fillCheck(funnel);
-      var en = box.querySelector('.cvz-cs-magnet-empty');
-      if (en) en.textContent = leadMagnetsEmptyText(result);
-      var gaps = funnel.gap_phases || [];
-      Array.prototype.forEach.call(box.querySelectorAll('.cvz-cs-magnet-gapbadge'), function (b) {
-        b.style.display = gaps.indexOf(b.getAttribute('data-phase')) !== -1 && b.getAttribute('data-counts') !== '0' ? '' : 'none';
-      });
+      fill(funnel);
+      paintPhaseStatus(funnel);
     };
-    var magnets = result.lead_magnets || [];
-    if (magnets.length > 0) {
-      box.appendChild(el('h5', {}, ['Vorgeschlagene Lead-Magneten und kostenlose Tools']));
-      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Vorschläge, die eine Lücke schließen, stehen zuerst.', tip('Tippe auf einen Vorschlag für Inhalte, Abgrenzung, den Übergang zur Zielaktion und den Aufwand.')]));
-      if (result.lead_magnets_substance_note) box.appendChild(el('p', { class: 'cvz-cs-callout' }, [result.lead_magnets_substance_note]));
-      magnets.forEach(function (m) { box.appendChild(renderLeadMagnetCard(m)); });
-      if (result.lead_magnets_tracking_note) {
-        box.appendChild(el('div', { class: 'cvz-cs-goal-box' }, [
-          el('p', { class: 'cvz-cs-brief-label' }, ['So misst du, welcher Magnet wirkt']),
-          el('p', { class: 'cvz-cs-goal-line' }, [result.lead_magnets_tracking_note]),
-        ]));
-      }
-    } else {
-      box.appendChild(el('h5', {}, ['Lead-Magneten und kostenlose Tools']));
-      var emptyNote = el('p', { class: 'cvz-cs-hint cvz-cs-magnet-empty' }, [leadMagnetsEmptyText(result)]);
-      box.appendChild(emptyNote);
-    }
     return box;
   }
   // ==== FUNNEL-ENDE ====
@@ -4045,10 +4090,96 @@
         ' auf „' + result.conversion_page.topic + '“',
       ]),
     ]));
-    return el('div', { class: 'cvz-cs-path' }, [
-      el('h5', {}, ['Conversion-Pfad: der Weg zur Zielaktion']),
+    // GEÄNDERT (Content-Plan): eingeklappt. Dieselben Aktionen stehen in den Seitenkarten darunter, der Pfad ist die Kurzfassung auf einen Blick.
+    return el('details', { class: 'cvz-cs-path cvz-cs-path-fold' }, [
+      el('summary', {}, ['Conversion-Pfad auf einen Blick: der Weg zur Zielaktion']),
       el('p', { class: 'cvz-cs-hint' }, ['Kaum jemand erreicht die Zielaktion beim ersten Besuch. Je Phase zeigt die Übersicht den nächsten sinnvollen Schritt.']),
     ].concat(rows));
+  }
+
+  // NEU (Content-Plan): früher drei Abschnitte (Cluster, Content-Flow, Funnel). Jetzt einer: oben der Umschalter zwischen Liste und Diagramm,
+  // darunter die Bauliste. Das Diagramm entsteht erst beim ersten Öffnen, weil es zum Einpassen eine sichtbare Fläche braucht.
+  function buildContentPlanChildren(sessionId, result, session) {
+    var listView = el('div', { class: 'cvz-cs-plan-view' }, buildClusterSectionChildren(sessionId, result));
+    var diagramView = el('div', { class: 'cvz-cs-plan-view', style: 'display:none' });
+    var diagramBuilt = false;
+    var btnList = el('button', { type: 'button', class: 'cvz-cs-plan-tab is-active' }, ['Liste der Seiten']);
+    var btnDiagram = el('button', { type: 'button', class: 'cvz-cs-plan-tab' }, ['Diagramm bearbeiten']);
+    function show(which) {
+      var diag = which === 'diagram';
+      if (diag && !diagramBuilt) {
+        diagramBuilt = true;
+        diagramView.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Dieselben Seiten als Baum. Hier ergänzt, verschiebst und verknüpfst du Seiten. Eigene Seiten zählen in der Bauliste unten mit.']));
+        diagramView.appendChild(renderFlowSection(sessionId, result, session));
+      }
+      listView.style.display = diag ? 'none' : '';
+      diagramView.style.display = diag ? '' : 'none';
+      btnList.classList.toggle('is-active', !diag);
+      btnDiagram.classList.toggle('is-active', diag);
+    }
+    btnList.addEventListener('click', function () { show('list'); });
+    btnDiagram.addEventListener('click', function () { show('diagram'); });
+    var children = [el('div', { class: 'cvz-cs-plan-tabs', role: 'group', 'aria-label': 'Ansicht des Content-Plans' }, [btnList, btnDiagram]), listView, diagramView];
+    children.push(renderFunnelSection(result));
+    paintPhaseStatus(result.funnel_check, listView); // direkt in der Liste, sie hängt noch nicht im Dokument
+    return children;
+  }
+
+  // NEU (Erwartung an organischen Traffic): Einordnung von Claude (traffic_outlook, ohne Zahlen) und die vom Server gerechnete Spanne
+  // (traffic_range) mit offener Rechnung. Die Stufe kommt aus traffic_outlook, damit es nur eine Einordnung gibt.
+  var TRAFFIC_LEVEL_TEXT = { sehr_gering: 'Sehr geringe Reichweite', gering: 'Geringe Reichweite', mittel: 'Mittlere Reichweite', hoch: 'Hohe Reichweite', nicht_beurteilbar: 'Nicht beurteilbar (Daten fehlen)' };
+  function renderTrafficBlock(result) {
+    var o = result.traffic_outlook;
+    var r = result.traffic_range;
+    if (!o && !r) return null;
+    var box = el('div', { class: 'cvz-cs-traffic' });
+    var head = el('div', { class: 'cvz-cs-traffic-head' }, [el('h5', {}, ['Was organisch realistisch ist'])]);
+    if (o && o.level) head.appendChild(el('span', { class: 'cvz-cs-badge cvz-cs-traffic-level cvz-cs-traffic-level--' + o.level }, [TRAFFIC_LEVEL_TEXT[o.level] || o.level]));
+    box.appendChild(head);
+    if (r && r.volume_total > 0) {
+      box.appendChild(el('p', { class: 'cvz-cs-traffic-range' }, [
+        'ca. ' + r.visits_low.toLocaleString('de-DE') + ' bis ' + r.visits_high.toLocaleString('de-DE') + ' Besuche pro Monat aus der Google-Suche',
+        el('span', { class: 'cvz-cs-traffic-sub' }, [r.horizon + ', wenn die Seiten auf die erste Ergebnisseite kommen. Eine Spanne, keine Prognose.']),
+      ]));
+    } else if (r) {
+      box.appendChild(el('p', { class: 'cvz-cs-traffic-range' }, ['Keine Zahl möglich', el('span', { class: 'cvz-cs-traffic-sub' }, ['Für keine geplante Seite ist ein Suchvolumen messbar. Bei B2B-Themen heißt das oft nur "unter der Messgrenze".'])]));
+    }
+    if (o && o.expectation) box.appendChild(el('p', {}, [o.expectation]));
+    if (o && o.distribution_note) {
+      box.appendChild(el('div', { class: 'cvz-cs-callout' }, [el('strong', {}, ['Wofür die Seiten trotzdem gebraucht werden: ']), o.distribution_note]));
+    }
+    if (r) {
+      var how = el('details', { class: 'cvz-cs-traffic-how' }, [el('summary', {}, ['So kommt die Zahl zustande'])]);
+      var ol = el('ol', { class: 'cvz-cs-brief-list' });
+      (r.steps || []).forEach(function (t) { ol.appendChild(el('li', {}, [t])); });
+      how.appendChild(ol);
+      if (r.caveats && r.caveats.length) {
+        how.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Was die Zahl nicht enthält']));
+        var ul = el('ul', { class: 'cvz-cs-brief-list' });
+        r.caveats.forEach(function (t) { ul.appendChild(el('li', {}, [t])); });
+        how.appendChild(ul);
+      }
+      if (o && o.limiting_factors) how.appendChild(el('p', {}, [el('strong', {}, ['Was hier zusätzlich drückt: ']), o.limiting_factors]));
+      if (o && o.traffic_drivers && o.traffic_drivers.length) how.appendChild(el('p', {}, [el('strong', {}, ['Tragen den Großteil des Volumens: ']), o.traffic_drivers.join(', ')]));
+      var phases = (r.phases || []).filter(function (ph) { return ph.pages > 0; });
+      if (phases.length > 0) {
+        how.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Suchen Interessenten in dieser Phase selbst?']));
+        var t = el('table', { class: 'cvz-cs-table cvz-cs-table-cards' });
+        t.appendChild(el('thead', {}, [el('tr', {}, [el('th', {}, ['Phase']), el('th', {}, ['Suchvolumen']), el('th', {}, ['Was das heißt'])])]));
+        var tb = el('tbody');
+        phases.forEach(function (ph) {
+          tb.appendChild(el('tr', {}, [
+            el('td', { 'data-label': 'Phase' }, [ph.label + ' (' + ph.pages + (ph.pages === 1 ? ' Seite)' : ' Seiten)')]),
+            el('td', { 'data-label': 'Suchvolumen' }, [ph.volume > 0 ? 'ca. ' + ph.volume.toLocaleString('de-DE') + ' pro Monat' : 'nicht messbar']),
+            el('td', { 'data-label': 'Was das heißt' }, [ph.volume >= 100 ? 'Interessenten suchen selbst. Die Seiten können sie über Google erreichen.' : ph.volume > 0 ? 'Wenig eigene Suche. Google allein trägt hier nicht, nimm Anzeigen, LinkedIn oder den Vertrieb dazu.' : 'Kaum messbare Suche. Erreiche Interessenten über Anzeigen, LinkedIn, Newsletter oder den Vertrieb, die Seiten sind dann das Ziel.']),
+          ]));
+        });
+        t.appendChild(tb);
+        how.appendChild(el('div', { class: 'cvz-cs-table-wrap' }, [t]));
+      }
+      box.appendChild(how);
+    }
+    return box;
   }
 
   function buildClusterSectionChildren(sessionId, result) {
@@ -4100,6 +4231,7 @@
       group.appendChild(el('h6', { class: 'cvz-cs-phase-title' }, [
         phase.label,
         el('span', { class: 'cvz-cs-phase-count' }, ['(' + pagesInPhase.length + (pagesInPhase.length === 1 ? ' Seite)' : ' Seiten)')]),
+        el('span', { class: 'cvz-cs-badge cvz-cs-phase-status', 'data-phase': phase.value, style: 'display:none' }), // NEU: Status aus dem Funnel-Befund
       ]));
       group.appendChild(el('p', { class: 'cvz-cs-phase-desc' }, [phase.description]));
       pagesInPhase.forEach(function (entry) {
@@ -5225,7 +5357,7 @@
         if (result.nurture_plan && result.nurture_plan.buying_center) root.appendChild(renderBuyingCenter(result.nurture_plan.buying_center));
         if (result.nurture_plan && result.nurture_plan.note) root.appendChild(el('p', { class: 'cvz-cs-hint' }, [result.nurture_plan.note]));
         if (gated) root.appendChild(renderGatedBlock(gated));
-        root.appendChild(renderDemandBlock(plan.search_demand || []));
+        // GEÄNDERT: "Suchen Interessenten selbst?" steht jetzt im Traffic-Block der Zusammenfassung (gleiche Frage, einmal).
       } else {
         if (gated) root.appendChild(renderGatedBlock(gated));
         root.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für diesen Lauf liegt kein Touchpoint-Plan vor, die Auswertung ergab keine belastbaren Touchpoints.']));
@@ -6167,6 +6299,7 @@
     if (offerType === 'saas' || offerType === 'software_vertrieb') return 'software';
     if (offerType === 'produkt' || offerType === 'b2b_produkt') return 'produkt';
     if (offerType === 'beratung' || offerType === 'projekt' || offerType === 'managed_service' || offerType === 'dienstleistung') return 'dienstleistung';
+    if (offerType === 'schulung') return 'schulung'; // NEU
     return 'offen';
   }
   var PROFILE_FIELD_TEXTS = {
@@ -6192,6 +6325,14 @@
       kann_nicht: ['Was bietest du NICHT an?', 'Besonders wichtig. Die Strategie empfiehlt nichts, was hier steht. Zum Beispiel "keine Rechtsberatung", "kein Betrieb außerhalb der EU" oder "keine Projekte unter 20 Personentagen".', 'z. B. keine reine Lizenz ohne Projekt'],
       ergaenzt: ['Mit welchen Herstellern und Plattformen arbeitest du? (kein Wettbewerb)', 'Nur Dritte: Software, Clouds oder Hersteller, die du einführst, betreibst oder mit denen du als Partner arbeitest. Dagegen wird nie verglichen. Eigene Leistungen wie eigene Rechenzentren gehören nicht hierher, sondern zu deinen Leistungen.', 'z. B. SAP S/4HANA, Microsoft Azure, STACKIT'],
       ersetzt: ['Gegen wen trittst du an?', 'Was deine Kunden stattdessen wählen würden, zum Beispiel die eigene IT oder ein anderes Systemhaus. Nur dagegen wird verglichen.', 'z. B. interne IT-Abteilung'],
+      konkurrenten: 'z. B. wettbewerber.de',
+    },
+    schulung: {
+      kategorie: 'z. B. Seminar für Projektleiter oder Zertifizierungskurs',
+      kann: ['Was bietest du an?', 'Eine Leistung pro Zeile: Formate (Präsenz, online, inhouse), Abschlüsse, Trainer, Orte und Termine.', 'z. B. Präsenz in Hamburg und online, mit Zertifikat'],
+      kann_nicht: ['Was bietest du NICHT an?', 'Besonders wichtig. Die Strategie empfiehlt nichts, was hier steht. Zum Beispiel "keine Inhouse-Termine unter 6 Teilnehmenden" oder "keine staatlich anerkannte Prüfung".', 'z. B. kein E-Learning zum Selbstlernen'],
+      ergaenzt: ['Mit welchen Prüfstellen, Herstellern oder Plattformen arbeitest du? (kein Wettbewerb)', 'Nur Dritte: Zertifizierer, Hersteller der geschulten Software oder Lernplattformen anderer Anbieter. Dagegen wird nie verglichen. Eigene Kurse und Trainer gehören nicht hierher, sondern zu deinen Leistungen.', 'z. B. PMI, TÜV, SAP'],
+      ersetzt: ['Gegen wen trittst du an?', 'Was deine Kunden stattdessen wählen würden, zum Beispiel andere Seminaranbieter oder Selbstlernen. Nur dagegen wird verglichen.', 'z. B. Selbstlernen mit Online-Kursen'],
       konkurrenten: 'z. B. wettbewerber.de',
     },
     offen: {
