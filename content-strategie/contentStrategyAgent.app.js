@@ -106,6 +106,9 @@
       '#cvz-content-strategy-agent select:focus,',
       '#cvz-content-strategy-agent textarea:focus{border-color:var(--cvz-teal);}',
       '#cvz-content-strategy-agent select option{background:#1a2233;color:var(--cvz-text);}',
+      // NEU: Gruppen-Überschriften im Dropdown (Angebotstyp). Ohne Regel zeichnet der Browser sie weiß auf hellem Grund, kaum lesbar.
+      // Dunkler als die Einträge, damit sie als Überschrift erkennbar sind, mit ausreichendem Kontrast.
+      '#cvz-content-strategy-agent select optgroup{background:#0f1521;color:#9aa7b8;font-style:normal;font-weight:700;}',
 
       /* ---- Buttons ---- */
       '#cvz-content-strategy-agent button.cvz-cs-submit-btn,',
