@@ -1124,7 +1124,9 @@
     // SaaS-Tool Agentur-Texte empfohlen ("Erstgespräch vereinbaren"). Die Zielaktion wird passend zum Angebotstyp vorbelegt.
     var goalPrefill = prefill.strategyGoal || state.strategyGoal || {};
     var offerSelect = el('select', { name: 'offer_type', required: 'required' }, [el('option', { value: '' }, ['Bitte wählen'])]
-      .concat(OFFER_TYPE_OPTIONS.map(function (o) { return el('option', { value: o.value }, [o.label]); })));
+      .concat(OFFER_TYPE_GROUPS.map(function (g) {
+        return el('optgroup', { label: g }, OFFER_TYPE_OPTIONS.filter(function (o) { return o.group === g; }).map(function (o) { return el('option', { value: o.value }, [o.label]); }));
+      })));
     var goalSelect = el('select', { name: 'end_goal', required: 'required' }, [el('option', { value: '' }, ['Bitte wählen'])]
       .concat(END_GOAL_OPTIONS.map(function (o) { return el('option', { value: o.value }, [o.label]); })));
     var ctaInput = el('input', { type: 'text', name: 'cta_label', maxlength: '80', placeholder: 'z.B. "Eigene Content-Strategie starten"' });
@@ -1137,23 +1139,20 @@
       // Vorbelegung nur, solange der Kunde die Zielaktion nicht selbst gewählt hat.
       if (!goalTouched && DEFAULT_END_GOAL[offerSelect.value]) goalSelect.value = DEFAULT_END_GOAL[offerSelect.value];
     });
-    form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Was bietest du zu diesem Thema an?', offerSelect]));
+    form.appendChild(el('label', { class: 'cvz-cs-label' }, [el('span', { class: 'cvz-cs-label-text' }, ['Was bietest du zu diesem Thema an?', tip('Wähle, was am besten passt. Der Angebotstyp bestimmt Ton und Wortwahl der Strategie, die vorgeschlagene Zielaktion und die Einschätzung, was ein Kunde wert ist. Wettbewerb und Kategorie ergänzt das Produktprofil im nächsten Schritt.')]), offerSelect]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, [
-      'Welche Handlung soll ein Interessent am Ende ausführen?',
-      tip('Das ist die Zielaktion, auf die die ganze Strategie einzahlt. Sie zeigt den Weg dorthin, mit Zwischenschritten je Phase der Customer Journey. Der Weg richtet sich nach der Zielaktion: Eine Demo braucht anderes Vertrauen als ein Pilot oder eine Partnerschaft.'),
+      el('span', { class: 'cvz-cs-label-text' }, ['Welche Handlung soll ein Interessent am Ende ausführen?', tip('Das ist die Zielaktion, auf die die ganze Strategie einzahlt. Sie zeigt den Weg dorthin, mit Zwischenschritten je Phase der Customer Journey. Der Weg richtet sich nach der Zielaktion: Eine Demo braucht anderes Vertrauen als ein Pilot oder eine Partnerschaft.')]),
       goalSelect,
     ]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, [
-      'Text deines Haupt-Buttons (optional)',
-      tip('Leer lassen, dann schlägt die Strategie einen Text passend zur Zielaktion vor.'),
+      el('span', { class: 'cvz-cs-label-text' }, ['Text deines Haupt-Buttons (optional)', tip('Leer lassen, dann schlägt die Strategie einen Text passend zur Zielaktion vor.')]),
       ctaInput,
     ]));
     // NEU (Lead-Magneten): Was es schon gibt, wird nicht noch einmal vorgeschlagen, sondern sinnvoll ergänzt.
     var magnetsInput = el('textarea', { name: 'existing_magnets', rows: '2', maxlength: '600', placeholder: 'z.B. 7 Tage Testversion, Checkliste zum Thema, kostenloser Rechner' });
     magnetsInput.value = prefill.existingMagnets || state.existingMagnets || '';
     form.appendChild(el('label', { class: 'cvz-cs-label' }, [
-      'Welche Lead-Magneten oder kostenlosen Tools gibt es schon? (optional)',
-      tip('Die Strategie schlägt Zwischenschritte für den Funnel vor, zum Beispiel Checks, Rechner oder Vorlagen. Was du schon hast, wird nicht doppelt vorgeschlagen.'),
+      el('span', { class: 'cvz-cs-label-text' }, ['Welche Lead-Magneten oder kostenlosen Tools gibt es schon? (optional)', tip('Die Strategie schlägt Zwischenschritte für den Funnel vor, zum Beispiel Checks, Rechner oder Vorlagen. Was du schon hast, wird nicht doppelt vorgeschlagen.')]),
       magnetsInput,
     ]));
     // NEU (Tracker-Verbindung): nur sichtbar, wenn der User Tracker-Themen hat.
@@ -1167,8 +1166,7 @@
       if (prefill.trackerTopicId) trackerSelect.value = prefill.trackerTopicId;
       form.appendChild(
         el('label', { class: 'cvz-cs-label' }, [
-          'Daten aus dem Customer Journey Tracker einbeziehen?',
-          tip('Die Strategie berücksichtigt dann deine gemessene KI-Sichtbarkeit je Journey-Phase, zitierte Quellen und die Wirkung bereits umgesetzter Maßnahmen. Wähle ein Tracker-Thema, das zum Strategie-Thema passt.'),
+          el('span', { class: 'cvz-cs-label-text' }, ['Daten aus dem Customer Journey Tracker einbeziehen?', tip('Die Strategie berücksichtigt dann deine gemessene KI-Sichtbarkeit je Journey-Phase, zitierte Quellen und die Wirkung bereits umgesetzter Maßnahmen. Wähle ein Tracker-Thema, das zum Strategie-Thema passt.')]),
           trackerSelect,
         ])
       );
@@ -1218,10 +1216,18 @@
   }
 
   // NEU: Angebotstyp und Zielaktion (gleiche Werte wie StrategyGoalSchema im Backend).
+  // GEÄNDERT (B2B): acht Angebotstypen in drei Gruppen. Der Weg zur Zielaktion hängt von der Zielaktion ab, der Angebotstyp bestimmt Ton,
+  // Wortwahl, die vorgeschlagene Zielaktion und die Ableitung des Kundenwerts.
+  var OFFER_TYPE_GROUPS = ['Software', 'Produkte', 'Dienstleistungen'];
   var OFFER_TYPE_OPTIONS = [
-    { value: 'dienstleistung', label: 'Dienstleistung (z.B. Agentur, Beratung)' },
-    { value: 'saas', label: 'Software as a Service (SaaS)' },
-    { value: 'produkt', label: 'Produkt (Shop oder B2B-Produkt)' },
+    { value: 'saas', label: 'Software as a Service (SaaS)', group: 'Software' },
+    { value: 'software_vertrieb', label: 'Software mit Vertrieb (Lizenz, Enterprise, On-Premise)', group: 'Software' },
+    { value: 'b2b_produkt', label: 'Technisches B2B-Produkt (ohne Shop)', group: 'Produkte' },
+    { value: 'produkt', label: 'Produkt (Online-Shop)', group: 'Produkte' },
+    { value: 'beratung', label: 'Beratung (Expertise, Audit, Workshop)', group: 'Dienstleistungen' },
+    { value: 'projekt', label: 'IT-Projekt und Systemhaus (Implementierung, Integration)', group: 'Dienstleistungen' },
+    { value: 'managed_service', label: 'Managed Service und Outsourcing (laufender Betrieb)', group: 'Dienstleistungen' },
+    { value: 'dienstleistung', label: 'Agentur oder andere Dienstleistung', group: 'Dienstleistungen' },
   ];
   var END_GOAL_OPTIONS = [
     { value: 'registrierung', label: 'Registrierung oder Testzugang' },
@@ -1233,7 +1239,7 @@
     { value: 'partner', label: 'Partner werden' },
     { value: 'event', label: 'Event oder Training buchen' },
   ];
-  var DEFAULT_END_GOAL = { saas: 'registrierung', dienstleistung: 'demo', produkt: 'kauf' };
+  var DEFAULT_END_GOAL = { saas: 'registrierung', software_vertrieb: 'demo', b2b_produkt: 'anfrage', produkt: 'kauf', beratung: 'demo', projekt: 'anfrage', managed_service: 'anfrage', dienstleistung: 'demo' };
   function optionLabel(list, value) {
     var o = list.filter(function (x) { return x.value === value; })[0];
     return o ? o.label : value;
