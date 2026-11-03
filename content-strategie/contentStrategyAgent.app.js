@@ -309,6 +309,12 @@
       '.cvz-cs-anchor-nav a+a::before{content:"";position:absolute;left:0;top:25%;height:50%;width:1px;background:rgba(255,255,255,.06);}',
       '.cvz-cs-anchor-nav a:focus-visible{outline:2px solid #4fd1c5;outline-offset:-2px;}',
       '@media(max-width:600px){.cvz-cs-anchor-nav a{font-size:12px;padding:12px 14px;}}',
+      '.cvz-cs-anchor-select{display:none;}',
+      '@media(max-width:600px){.cvz-cs-anchor-inner{display:none !important;}.cvz-cs-anchor-select{display:block;box-sizing:border-box;width:100% !important;max-width:100%;margin:8px 0;padding:10px 12px;background:#161b22;color:#e6edf3;border:1px solid rgba(255,255,255,.18);font-size:14px;}}',
+      '.cvz-cs-group-label{margin:28px 0 -8px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8b949e;font-weight:600;}',
+      '.cvz-cs-group-fold{margin:24px 0 0;border:1px solid var(--cvz-border);background:var(--cvz-surface);}',
+      '.cvz-cs-group-fold>summary{cursor:pointer;padding:12px 16px;font-weight:600;color:var(--cvz-heading);}',
+      '.cvz-cs-group-fold>.cvz-cs-report-section{padding:0 16px 8px;}',
       '@media print{.cvz-cs-anchor-nav{display:none !important;}}',
       /* ---- Content-Flow-Diagramm ---- */
       '#cvz-content-strategy-agent .cvz-flow{border:1px solid var(--cvz-border);background:rgba(255,255,255,.02);}',
@@ -437,6 +443,11 @@
       '.cvz-cs-funnel-row--luecke{border-left-color:var(--cvz-red);}',
       '.cvz-cs-funnel-row--schwach{border-left-color:var(--cvz-amber);}',
       '.cvz-cs-funnel-row--ok{border-left-color:var(--cvz-teal);}',
+      '.cvz-cs-funnel-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin:8px 0;}',
+      '.cvz-cs-funnel-tile{display:flex;flex-direction:column;align-items:flex-start;gap:5px;padding:10px 12px;border:1px solid var(--cvz-border);border-top:3px solid var(--cvz-border);background:var(--cvz-surface);}',
+      '.cvz-cs-funnel-tile.cvz-cs-funnel-row--luecke{border-top-color:var(--cvz-red);}',
+      '.cvz-cs-funnel-tile.cvz-cs-funnel-row--schwach{border-top-color:var(--cvz-amber);}',
+      '.cvz-cs-funnel-tile.cvz-cs-funnel-row--ok{border-top-color:var(--cvz-teal);}',
       '.cvz-cs-funnel-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 4px;}',
       '.cvz-cs-funnel-phase{font-family:"Syne",sans-serif;font-size:.95rem;font-weight:700;color:var(--cvz-heading);}',
       '.cvz-cs-funnel-status--luecke{background:rgba(239,68,68,.12);color:#fca5a5;border-color:rgba(239,68,68,.3);}',
@@ -614,7 +625,7 @@
       /* ---- KI-Disclaimer ---- */
       '.cvz-cs-ki-disclaimer{margin-top:28px;padding-top:16px;border-top:1px solid var(--cvz-border);',
         'color:var(--cvz-muted);font-size:12px;line-height:1.6;text-align:center;}',
-    ].concat(TOUCHPOINT_STYLES, PROFILE_STYLES).join('');
+    ].concat(TOUCHPOINT_STYLES, PROFILE_STYLES, TIP_STYLES).join('');
 
     var style = document.createElement('style');
     style.id = 'cvz-cs-styles';
@@ -1041,7 +1052,8 @@
   var STEPS_TRACKER = ['Thema prüfen und bestätigen', 'Produkt bestätigen', 'Strategie wird erstellt'];
   var STEPS_TRACKER_SHORT = ['Thema prüfen und bestätigen', 'Strategie wird erstellt'];
   var STEP_LAST_HINT = 'ab hier läuft alles im Hintergrund';
-  var STEP_LEAVE_WARNING = 'Bitte schließe diese Seite erst, wenn "Strategie wird erstellt" läuft. Bis dahin gehen deine Eingaben verloren.';
+  // GEÄNDERT: Der alte Text ("Bis dahin gehen deine Eingaben verloren") stimmte nicht mehr: Der Stand wird ab der Themen-Bestätigung 24 Stunden im Browser gespeichert.
+  var STEP_LEAVE_WARNING = 'Dein Stand wird ab der Themen-Bestätigung 24 Stunden in diesem Browser gespeichert. Du kannst die Seite also schließen und später weitermachen. Erst ab „Strategie wird erstellt“ läuft alles im Hintergrund.';
 
   // current: Index des aktuellen Schritts (0-basiert), -1 = noch nichts begonnen (Vorschau im Formular)
   function renderStepper(steps, current, withWarning) {
@@ -1055,10 +1067,9 @@
       ]));
     });
     var box = el('div', { class: 'cvz-cs-stepbox' }, [
-      el('p', { class: 'cvz-cs-stepbox-title' }, [current < 0 ? 'So läuft es ab' : 'Schritt ' + (current + 1) + ' von ' + steps.length]),
+      el('p', { class: 'cvz-cs-stepbox-title' }, [current < 0 ? 'So läuft es ab' : 'Schritt ' + (current + 1) + ' von ' + steps.length, withWarning ? tip(STEP_LEAVE_WARNING, 'Wann kann ich die Seite schließen?') : null]),
       list,
     ]);
-    if (withWarning) box.appendChild(el('p', { class: 'cvz-cs-stepnote' }, [STEP_LEAVE_WARNING]));
     return box;
   }
 
@@ -1129,21 +1140,21 @@
     form.appendChild(el('label', { class: 'cvz-cs-label' }, ['Was bietest du zu diesem Thema an?', offerSelect]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, [
       'Worauf soll die Strategie einzahlen?',
+      tip('Das Endziel. Die Strategie zeigt den Weg dorthin, mit Zwischenschritten je Phase der Customer Journey.'),
       goalSelect,
-      el('span', { class: 'cvz-cs-hint' }, ['Das Endziel. Die Strategie zeigt den Weg dorthin, mit Zwischenschritten je Phase der Customer Journey.']),
     ]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, [
       'Text deines Haupt-Buttons (optional)',
+      tip('Leer lassen, dann schlägt die Strategie einen Text passend zum Endziel vor.'),
       ctaInput,
-      el('span', { class: 'cvz-cs-hint' }, ['Leer lassen, dann schlägt die Strategie einen Text passend zum Endziel vor.']),
     ]));
     // NEU (Lead-Magneten): Was es schon gibt, wird nicht noch einmal vorgeschlagen, sondern sinnvoll ergänzt.
     var magnetsInput = el('textarea', { name: 'existing_magnets', rows: '2', maxlength: '600', placeholder: 'z.B. 7 Tage Testversion, Checkliste zum Thema, kostenloser Rechner' });
     magnetsInput.value = prefill.existingMagnets || state.existingMagnets || '';
     form.appendChild(el('label', { class: 'cvz-cs-label' }, [
       'Welche Lead-Magneten oder kostenlosen Tools gibt es schon? (optional)',
+      tip('Die Strategie schlägt Zwischenschritte für den Funnel vor, zum Beispiel Checks, Rechner oder Vorlagen. Was du schon hast, wird nicht doppelt vorgeschlagen.'),
       magnetsInput,
-      el('span', { class: 'cvz-cs-hint' }, ['Die Strategie schlägt Zwischenschritte für den Funnel vor, zum Beispiel Checks, Rechner oder Vorlagen. Was du schon hast, wird nicht doppelt vorgeschlagen.']),
     ]));
     // NEU (Tracker-Verbindung): nur sichtbar, wenn der User Tracker-Themen hat.
     var trackerSelect = null;
@@ -1157,10 +1168,8 @@
       form.appendChild(
         el('label', { class: 'cvz-cs-label' }, [
           'Daten aus dem Customer Journey Tracker einbeziehen?',
+          tip('Die Strategie berücksichtigt dann deine gemessene KI-Sichtbarkeit je Journey-Phase, zitierte Quellen und die Wirkung bereits umgesetzter Maßnahmen. Wähle ein Tracker-Thema, das zum Strategie-Thema passt.'),
           trackerSelect,
-          el('span', { class: 'cvz-cs-hint' }, [
-            'Die Strategie berücksichtigt dann deine gemessene KI-Sichtbarkeit je Journey-Phase, zitierte Quellen und die Wirkung bereits umgesetzter Maßnahmen. Wähle ein Tracker-Thema, das zum Strategie-Thema passt.',
-          ]),
         ])
       );
     }
@@ -1270,6 +1279,57 @@
     var n = Number(v);
     if (!isFinite(n) || n <= 0) return 'unter der Messgrenze';
     return 'ca. ' + n.toLocaleString('de-DE') + ' Suchanfragen/Monat';
+  }
+
+  // NEU (Suchvolumen-Grund): Ein Volumen-Satz für Seiten. Fehlt die Zahl, steht der Grund da, den der Server je Seite festgehalten hat
+  // (unter der Messgrenze, Messung fehlgeschlagen, nicht gemessen). Ältere Berichte haben keinen Grund und bleiben bei "unbekannt".
+  var PAGE_VOLUME_STATUS_TEXT = {
+    unter_messgrenze: 'Suchvolumen unter der Messgrenze (Google Ads weist keinen Wert aus)',
+    messung_fehlgeschlagen: 'Suchvolumen: Messung fehlgeschlagen',
+    nicht_gemessen: 'Suchvolumen nicht gemessen',
+  };
+  function pageVolumeText(page) {
+    if (!page) return 'Suchvolumen unbekannt';
+    if (page.estimated_volume != null) {
+      return volumeRangeText(page.estimated_volume) + (page.volume_status === 'nicht_nachgemessen' ? ' (nicht nachgemessen, die Messung ist ausgefallen)' : '');
+    }
+    var base = PAGE_VOLUME_STATUS_TEXT[page.volume_status] || 'Suchvolumen unbekannt';
+    // NEU (Anhaltspunkt): nächstkürzere Form des Keywords mit Messwert, in der Zeile kurz, die Erklärung steht aufgeklappt (renderVolumeProxyNote).
+    if (page.volume_proxy && page.volume_proxy.keyword && page.volume_proxy.volume > 0) {
+      return base + ' · Anhaltspunkt „' + page.volume_proxy.keyword + '“: ' + volumeRangeText(page.volume_proxy.volume);
+    }
+    return base;
+  }
+
+  // NEU (Übersicht): Kurzform für die zugeklappte Karte. Die ausführliche Erklärung (welche Variante gemessen wurde und warum) steht im Tooltip
+  // neben der Zeile und aufgeklappt in der Karte.
+  function pageVolumeShort(page) {
+    if (!page) return 'Suchvolumen unbekannt';
+    if (page.estimated_volume != null) return volumeRangeText(page.estimated_volume) + (page.volume_status === 'nicht_nachgemessen' ? ' (nicht nachgemessen)' : '');
+    var short = { unter_messgrenze: 'Volumen unter der Messgrenze', messung_fehlgeschlagen: 'Volumen: Messung fehlgeschlagen', nicht_gemessen: 'Volumen nicht gemessen' }[page.volume_status];
+    if (!short) return 'Suchvolumen unbekannt';
+    if (page.volume_proxy && page.volume_proxy.volume > 0) short += ', Anhaltspunkt ' + volumeRangeText(page.volume_proxy.volume);
+    return short;
+  }
+  function pageVolumeTip(page) {
+    if (!page) return null;
+    if (page.estimated_volume != null && page.volume_status !== 'nicht_nachgemessen') return null;
+    if (page.volume_proxy && page.volume_proxy.reason) return tip(page.volume_proxy.reason, 'Warum dieser Anhaltspunkt?');
+    if (page.volume_variants_note) return tip(page.volume_variants_note, 'Welche Varianten wurden geprüft?');
+    if (page.volume_status === 'nicht_nachgemessen') return tip('Die Zahl stammt aus der Planung und konnte nicht nachgemessen werden, weil die Messung bei Google Ads ausgefallen ist.', 'Warum nicht nachgemessen?');
+    var long = { unter_messgrenze: 'Google Ads weist für dieses Keyword keinen Wert aus. Das heißt nicht, dass niemand danach sucht, meist ist das Volumen sehr klein.', messung_fehlgeschlagen: 'Die Messung bei Google Ads ist in diesem Lauf ausgefallen. Über die Nachfrage lässt sich deshalb nichts sagen.', nicht_gemessen: 'Für dieses Keyword wurde kein Suchvolumen abgefragt.' }[page.volume_status];
+    return long ? tip(long, 'Warum fehlt das Suchvolumen?') : null;
+  }
+
+  // Welche Variante gemessen wurde und warum, oder dass auch die gekürzten Formen keinen Wert haben. Der Server liefert den fertigen Text.
+  function renderVolumeProxyNote(page) {
+    if (!page) return null;
+    var text = page.volume_proxy && page.volume_proxy.reason ? page.volume_proxy.reason : page.volume_variants_note;
+    if (!text) return null;
+    return el('div', { class: 'cvz-cs-volproxy' }, [
+      el('p', { class: 'cvz-cs-brief-label' }, [page.volume_proxy ? 'Anhaltspunkt aus einem verwandten Begriff' : 'Gekürzte Varianten geprüft']),
+      el('p', { class: 'cvz-cs-hint' }, [text]),
+    ]);
   }
 
   function topicVolumeText(volume, status) {
@@ -1520,6 +1580,11 @@
   // Ein beschriftetes Feld: Beschriftung links über dem Feld, nie zentriert.
   function field(labelText, control) {
     return el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, [labelText]), control]);
+  }
+
+  // NEU (Übersicht): Feld mit "i" neben der Beschriftung. Gleiche Klassen wie field(), nur die Erklärung steht im Tooltip statt als Dauertext darunter.
+  function fieldTip(labelText, control, tipText) {
+    return el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, [labelText, tipText ? tip(tipText) : null]), control]);
   }
 
   function sectionTitle(number, text) {
@@ -2505,7 +2570,7 @@
       var volume = page && page.estimated_volume != null ? page.estimated_volume : '';
       var source = n.kind === 'custom' ? 'Nur im Diagramm' : 'Bericht';
       var description = [];
-      if (page && page.keyword) description.push('Keyword: ' + page.keyword + (volume !== '' ? ' (' + volumeRangeText(volume) + ')' : ''));
+      if (page && page.keyword) description.push('Keyword: ' + page.keyword + (volume !== '' ? ' (' + volumeRangeText(volume) + ')' : (page.volume_status && PAGE_VOLUME_STATUS_TEXT[page.volume_status] ? ' (' + PAGE_VOLUME_STATUS_TEXT[page.volume_status] + (page.volume_proxy ? '; Anhaltspunkt „' + page.volume_proxy.keyword + '“: ' + volumeRangeText(page.volume_proxy.volume) + ', nicht die Zahl dieser Seite' : '') + ')' : '')));
       if (typeText) description.push('Seitentyp: ' + typeText);
       if (phaseText) description.push('Phase: ' + phaseText);
       if (page && page.primary_audience) description.push('Zielgruppe: ' + page.primary_audience);
@@ -2967,14 +3032,8 @@
       clear(panel);
       var sel = ui.selected;
       if (!sel) {
-        panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, ['Content-Flow']));
-        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Klicke eine Seite oder Verbindung an, um sie zu bearbeiten. Ziehe Seiten mit der Maus, um sie zu verschieben; ziehe den Hintergrund, um den Ausschnitt zu bewegen. Strg/Cmd + Mausrad zoomt.']));
-        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Ganz oben steht das Cluster-Thema. Es ist keine eigene Seite, sondern fasst den Cluster zusammen. Darunter stehen nebeneinander die Conversion-Seite (verkauft) und Pillar Pages (bündeln Teilthemen).']));
-        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Durchgezogene Pfeile zeigen den Themen-Baum (Oberseite → Unterseite), gestrichelte sind interne Links, also der Weg zur Conversion-Seite. Die Farbe zeigt die Phase, der Punkt oben rechts den Status aus dem Bericht. Der Baum beschreibt Themen und Verlinkung, nicht die URL-Struktur.']));
-        if (hasOffsite()) {
-          panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Rechts in der rosa Zone stehen die Off-Site-Maßnahmen: Inhalte und Einträge außerhalb deiner Website, zum Beispiel ein Video oder ein Profil auf einem Bewertungsportal. Die gepunktete Linie zeigt, auf welche eigene Seite die Maßnahme verweisen soll.']));
-        }
-        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Änderungen am Diagramm werden gespeichert, verändern aber den Bericht nicht.']));
+        panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, ['Content-Flow', tip('Klicke eine Seite oder Verbindung an, um sie zu bearbeiten. Ziehe Seiten mit der Maus, um sie zu verschieben; ziehe den Hintergrund, um den Ausschnitt zu bewegen. Strg/Cmd + Mausrad zoomt. Ganz oben steht das Cluster-Thema. Es ist keine eigene Seite, sondern fasst den Cluster zusammen. Darunter stehen nebeneinander die Conversion-Seite (verkauft) und Pillar Pages (bündeln Teilthemen). Durchgezogene Pfeile zeigen den Themen-Baum (Oberseite → Unterseite), gestrichelte sind interne Links, also der Weg zur Conversion-Seite. Die Farbe zeigt die Phase, der Punkt oben rechts den Status aus dem Bericht. Der Baum beschreibt Themen und Verlinkung, nicht die URL-Struktur. Änderungen am Diagramm werden gespeichert, verändern aber den Bericht nicht.' + (hasOffsite() ? ' ' + 'Rechts in der rosa Zone stehen die Off-Site-Maßnahmen: Inhalte und Einträge außerhalb deiner Website, zum Beispiel ein Video oder ein Profil auf einem Bewertungsportal. Die gepunktete Linie zeigt, auf welche eigene Seite die Maßnahme verweisen soll.' : ''), 'Hilfe zum Content-Flow')]));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Klicke eine Seite oder Verbindung an, um sie zu bearbeiten.']));
         var legend = el('div', { class: 'cvz-flow-legend' });
         MESSY_MIDDLE_PHASES.forEach(function (ph) {
           if (ph.value === 'legacy') return;
@@ -3087,11 +3146,15 @@
         panel.appendChild(field('Phase', phaseSelect));
       } else if (node.kind === 'page' && node.page_ref != null && pages[node.page_ref]) {
         var page = pages[node.page_ref];
-        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + page.keyword + ' · ' + (page.estimated_volume != null ? volumeRangeText(page.estimated_volume) : 'Suchvolumen unbekannt')]));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + page.keyword + ' · ' + pageVolumeText(page)]));
+        var panelVolNote = renderVolumeProxyNote(page);
+        if (panelVolNote) panel.appendChild(panelVolNote);
         if (page.reasoning) panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, [String(page.reasoning).slice(0, 260) + (String(page.reasoning).length > 260 ? '…' : '')]));
       } else if (node.kind === 'conversion') {
         var cp = result.conversion_page;
-        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + cp.keyword + ' · ' + (cp.estimated_volume != null ? volumeRangeText(cp.estimated_volume) : 'Suchvolumen unbekannt')]));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + cp.keyword + ' · ' + pageVolumeText(cp)]));
+        var panelVolNoteCp = renderVolumeProxyNote(cp);
+        if (panelVolNoteCp) panel.appendChild(panelVolNoteCp);
       }
 
       if (node.kind !== 'conversion' && node.kind !== 'topic') {
@@ -3420,16 +3483,31 @@
     wrap.appendChild(anchorNav.sentinel);
     wrap.appendChild(anchorNav.nav);
     wrap.appendChild(anchorNav.spacer);
-    wrap.appendChild(renderReportSection(secNo.validation, 'Themen-Check', [renderTopicValidationSection(result.topic_validation, result.seed_topic)]));
-    wrap.appendChild(renderReportSection(secNo.ausgangslage, 'Ausgangslage', [renderTrackerSourceNote(session), renderProse(result.ausgangslage), renderProfileBox(result)]));
-    wrap.appendChild(renderReportSection(secNo.summary, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)])]));
-    wrap.appendChild(renderReportSection(secNo.state, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]));
-    wrap.appendChild(renderReportSection(secNo.cluster, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result)));
-    wrap.appendChild(renderReportSection(secNo.flow, 'Content-Flow: Themen-Baum bearbeiten', [renderFlowSection(sessionId, result, session)]));
-    if (secNo.funnel) wrap.appendChild(renderReportSection(secNo.funnel, 'Funnel und Lead-Magneten', [renderFunnelSection(result)]));
-    if (secNo.touchpoints) wrap.appendChild(renderReportSection(secNo.touchpoints, 'Touchpoint-Plan', [renderTouchpointSection(sessionId, result, session)]));
-    wrap.appendChild(renderReportSection(secNo.geo, 'GEO-Strategie', [renderVisibilitySection(session), renderOffsiteSection(result.offsite_measures, result.offsite_sources), renderGeoSection(result.geo_strategy)]));
-    wrap.appendChild(renderReportSection(secNo.roadmap, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]));
+    // GEÄNDERT (Übersicht): Reihenfolge Überblick, Plan, Grundlagen. Die Grundlagen sind eingeklappt, die Sprungleiste öffnet sie bei Bedarf.
+    var sec_summary = renderReportSection(secNo.summary, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)]), renderProfileWarnings(result)]);
+    var sec_roadmap = renderReportSection(secNo.roadmap, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]);
+    var sec_cluster = renderReportSection(secNo.cluster, 'Content-Cluster-Strategie (Soll-Zustand)', buildClusterSectionChildren(sessionId, result));
+    var sec_flow = renderReportSection(secNo.flow, 'Content-Flow: Themen-Baum bearbeiten', [renderFlowSection(sessionId, result, session)]);
+    var sec_funnel = secNo.funnel ? renderReportSection(secNo.funnel, 'Funnel und Lead-Magneten', [renderFunnelSection(result)]) : null;
+    var sec_touchpoints = secNo.touchpoints ? renderReportSection(secNo.touchpoints, 'Touchpoint-Plan', [renderTouchpointSection(sessionId, result, session)]) : null;
+    var sec_geo = renderReportSection(secNo.geo, 'GEO-Strategie', [renderVisibilitySection(session), renderOffsiteSection(result.offsite_measures, result.offsite_sources), renderGeoSection(result.geo_strategy)]);
+    var sec_validation = renderReportSection(secNo.validation, 'Themen-Check', [renderTopicValidationSection(result.topic_validation, result.seed_topic)]);
+    var sec_ausgangslage = renderReportSection(secNo.ausgangslage, 'Ausgangslage', [renderTrackerSourceNote(session), renderProse(result.ausgangslage), renderProfileBox(result)]);
+    var sec_state = renderReportSection(secNo.state, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]);
+    wrap.appendChild(el('p', { class: 'cvz-cs-group-label' }, ['Überblick']));
+    wrap.appendChild(sec_summary);
+    wrap.appendChild(sec_roadmap);
+    wrap.appendChild(el('p', { class: 'cvz-cs-group-label' }, ['Plan']));
+    wrap.appendChild(sec_cluster);
+    wrap.appendChild(sec_flow);
+    if (sec_funnel) wrap.appendChild(sec_funnel);
+    if (sec_touchpoints) wrap.appendChild(sec_touchpoints);
+    wrap.appendChild(sec_geo);
+    var foundations = el('details', { class: 'cvz-cs-group-fold' }, [el('summary', {}, ['Grundlagen: Themen-Check, Ausgangslage, Ist-Zustand', tip('Hier steht, worauf die Strategie aufbaut: das geprüfte Thema, die Ausgangslage mit deinem Produktprofil und wer heute schon für das Thema rankt. Zum Arbeiten brauchst du es selten, zum Nachvollziehen schon.', 'Was steht in den Grundlagen?')])]);
+    foundations.appendChild(sec_validation);
+    foundations.appendChild(sec_ausgangslage);
+    foundations.appendChild(sec_state);
+    wrap.appendChild(foundations);
     var fundingText = fundedBy
       ? 'Finanziert aus: ' + (fundedBy === 'ppu_strategy' ? 'Pay-per-Use-Credit' : 'Plan-Kontingent')
       : 'Gespeicherte Strategie';
@@ -3458,17 +3536,19 @@
   // - activate() gibt eine Aufräum-Funktion zurück. clear() ruft sie auf, wenn der Bericht verlassen wird.
   // GEÄNDERT: Die Nummern ergeben sich aus dem, was der Bericht enthält. Der Abschnitt "Funnel" fehlt bei älteren Berichten,
   // dann rücken GEO und Roadmap auf und die Sprungleiste zeigt keinen toten Link.
+  // GEÄNDERT (Übersicht): Der Bericht folgt jetzt der Arbeit statt der Entstehung. Überblick (Zusammenfassung, Roadmap), Plan (Cluster, Flow,
+  // Funnel, Touchpoints, GEO), Grundlagen (Themen-Check, Ausgangslage, Ist-Zustand, eingeklappt). GEO liegt im Plan, weil dort Maßnahmen stehen.
   var REPORT_NAV_BASE = [
-    { key: 'validation', label: 'Themen-Check' },
-    { key: 'ausgangslage', label: 'Ausgangslage' },
     { key: 'summary', label: 'Zusammenfassung' },
-    { key: 'state', label: 'Ist-Zustand' },
+    { key: 'roadmap', label: 'Roadmap' },
     { key: 'cluster', label: 'Cluster' },
     { key: 'flow', label: 'Content-Flow' },
     { key: 'funnel', label: 'Funnel', optional: true },
     { key: 'touchpoints', label: 'Touchpoints', optional: true },
     { key: 'geo', label: 'GEO' },
-    { key: 'roadmap', label: 'Roadmap' },
+    { key: 'validation', label: 'Themen-Check' },
+    { key: 'ausgangslage', label: 'Ausgangslage' },
+    { key: 'state', label: 'Ist-Zustand' },
   ];
 
   function buildReportNavItems(result, session) {
@@ -3500,12 +3580,23 @@
     spacer.style.display = 'none';
     var links = {};
 
+    // NEU (Übersicht): Am Handy sind von zehn Einträgen nur drei sichtbar. Dort ersetzt eine Auswahl die Leiste (siehe CSS), sie springt wie ein Link.
+    var jumpSelect = el('select', { class: 'cvz-cs-anchor-select', 'aria-label': 'Zu Abschnitt springen' }, items.map(function (item) { return el('option', { value: String(item.n) }, [item.n + '. ' + item.label]); }));
+    nav.appendChild(jumpSelect);
+    jumpSelect.addEventListener('change', function () {
+      var a = links[jumpSelect.value];
+      // Klick-Ereignis statt a.click(): löst denselben Sprung aus, ohne dass der Browser zusätzlich zum Anker navigiert.
+      if (a) a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
     items.forEach(function (item) {
       var a = el('a', { href: '#' + reportSectionId(item.n) }, [item.label]);
       a.addEventListener('click', function (e) {
         var target = document.getElementById(reportSectionId(item.n));
         if (!target) return;
         e.preventDefault();
+        // NEU (Übersicht): Liegt der Abschnitt in den eingeklappten Grundlagen, zuerst aufklappen, dann messen.
+        var fold = target.closest ? target.closest('details.cvz-cs-group-fold') : null;
+        if (fold && !fold.open) fold.open = true;
         // Wie im LP-Report: erst aufklappen, dann messen. Im Abschnitt Roadmap öffnet das die erste Gruppe,
         // falls jemand alles zugeklappt hat. Seiten-Karten bleiben, wie sie sind.
         var firstFold = target.querySelector('details.cvz-cs-roadmap-fold');
@@ -3523,6 +3614,7 @@
       Object.keys(links).forEach(function (k) { links[k].classList.remove('cvz-cs-nav-active'); });
       var a = links[n];
       if (!a) return;
+      jumpSelect.value = String(n);
       a.classList.add('cvz-cs-nav-active');
       // Nur die Leiste horizontal verschieben, nie die Seite.
       var left = a.offsetLeft - (inner.clientWidth - a.offsetWidth) / 2;
@@ -3675,23 +3767,27 @@
     return parts.length > 0 ? parts.join(' · ') : 'keine Zwischenschritte';
   }
 
+  // GEÄNDERT (Übersicht): Vier Phasen als eine kompakte Leiste statt vier großer Karten. Befunde mit Handlungsbedarf (Lücke, schwach, durch eigene
+  // Seite gedeckt) stehen darunter sichtbar, weil sie etwas zu tun bedeuten.
   function renderFunnelCheck(funnel) {
     var box = el('div', { class: 'cvz-cs-funnel-check' });
     box.appendChild(el('h5', {}, ['Funnel-Befund: wo fehlt ein Zwischenschritt?']));
     if (funnel.summary) box.appendChild(el('p', { class: 'cvz-cs-hint' }, [funnel.summary]));
+    var grid = el('div', { class: 'cvz-cs-funnel-grid' });
+    var findings = [];
     (funnel.phases || []).forEach(function (r) {
       var status = (FUNNEL_STATUS_LABELS[r.status] || r.status) + (r.covered_by_own ? ', durch eigene Seite' : '');
       var warn = r.status === 'luecke' || r.status === 'schwach' || r.covered_by_own === true;
-      var row = el('div', { class: 'cvz-cs-funnel-row cvz-cs-funnel-row--' + r.status });
-      row.appendChild(el('div', { class: 'cvz-cs-funnel-head' }, [
+      grid.appendChild(el('div', { class: 'cvz-cs-funnel-tile cvz-cs-funnel-row--' + r.status }, [
         el('span', { class: 'cvz-cs-funnel-phase' }, [optionLabel(MESSY_MIDDLE_PHASES, r.phase)]),
         el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--' + r.status }, [status]),
         el('span', { class: 'cvz-cs-hint' }, [r.pages + (r.pages === 1 ? ' Seite' : ' Seiten')]),
+        el('span', { class: 'cvz-cs-funnel-steps' }, [funnelStepsText(r.steps)]),
       ]));
-      row.appendChild(el('p', { class: 'cvz-cs-funnel-steps' }, [funnelStepsText(r.steps)]));
-      if (warn && r.finding) row.appendChild(el('p', { class: 'cvz-cs-funnel-finding' }, [r.finding]));
-      box.appendChild(row);
+      if (warn && r.finding) findings.push(el('p', { class: 'cvz-cs-funnel-finding' }, [el('strong', {}, [optionLabel(MESSY_MIDDLE_PHASES, r.phase) + ': ']), r.finding]));
     });
+    box.appendChild(grid);
+    findings.forEach(function (f) { box.appendChild(f); });
     return box;
   }
 
@@ -3704,9 +3800,12 @@
     var badges = [
       el('span', { class: 'cvz-cs-badge' }, [optionLabel(MESSY_MIDDLE_PHASES, m.phase)]),
       el('span', { class: 'cvz-cs-badge' }, [m.format_label || m.format]),
-      el('span', { class: 'cvz-cs-badge' }, [m.hurdle_label || MAGNET_HURDLE_LABELS[m.hurdle] || m.hurdle]),
       el('span', { class: 'cvz-cs-badge' }, ['Aufwand ' + m.effort]),
     ];
+    // GEÄNDERT (Übersicht): "Ohne Anmeldung" gilt für fast jeden Magneten und war nur Rauschen im Kopf. Es steht aufgeklappt unter "Zugang".
+    // Abweichende Hürden (zum Beispiel Registrierung) bleiben als Badge sichtbar.
+    var hurdleText = m.hurdle_label || MAGNET_HURDLE_LABELS[m.hurdle] || m.hurdle;
+    if (m.hurdle && m.hurdle !== 'ohne_anmeldung') badges.splice(2, 0, el('span', { class: 'cvz-cs-badge' }, [hurdleText]));
     // Immer angelegt und nur ein- oder ausgeblendet: Ändert sich der Befund (eigene Seite im Flow), zieht die Karte mit.
     var gapBadge = el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--schwach cvz-cs-magnet-gapbadge', 'data-phase': m.phase, 'data-counts': m.counts_as_step === false ? '0' : '1' }, ['Schließt Lücke']);
     if (!m.closes_gap) gapBadge.style.display = 'none';
@@ -3719,6 +3818,7 @@
     var body = el('div', { class: 'cvz-cs-page-acc-body' });
     card.appendChild(body);
     body.appendChild(magnetLine('Ergebnis für den Nutzer:', m.promise));
+    if (hurdleText) body.appendChild(magnetLine('Zugang:', hurdleText));
     if (m.grounding && m.grounding.source_text) body.appendChild(magnetLine('Beantwortet (' + m.grounding.kind_label + '):', m.grounding.source_text));
     if (m.gate_requirement && m.gate_requirement.need) body.appendChild(magnetLine('Als Gated Content erst, wenn ihr habt (' + m.gate_requirement.kind_label + '):', m.gate_requirement.need));
     if (m.counts_as_step === false) body.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Zählt im Funnel-Befund nicht als Zwischenschritt: Es gibt kein persönliches Ergebnis und kein Produkt-Erlebnis, nur Inhalt. Eine Lücke schließt das allein nicht.']));
@@ -3766,11 +3866,9 @@
   function renderFunnelSection(result) {
     var box = el('div', { class: 'cvz-cs-funnel' });
     box.appendChild(el('p', { class: 'cvz-cs-hint' }, [
-      'Besucher kommen mit unterschiedlicher Kaufbereitschaft auf die Seiten der Strategie. Wer noch orientiert oder bewertet, ist selten bereit für das Endziel. ' +
-      'Ein Zwischenschritt mit echtem Nutzen, etwa ein Check, ein Rechner oder eine ehrliche Vorlage, hält Interessenten im Funnel und hebt den Anbieter von Wettbewerbern ab. ' +
-      'Er muss so nützlich sein, dass ihn jemand ohne Absender weiterleiten würde, sonst wird er nicht genutzt.',
+      'Je Phase ein Zwischenschritt mit echtem Nutzen.',
+      tip('pcvz-cs-hintBesucher kommen mit unterschiedlicher Kaufbereitschaft auf die Seiten der Strategie. Wer noch orientiert oder bewertet, ist selten bereit für das Endziel. Ein Zwischenschritt mit echtem Nutzen, etwa ein Check, ein Rechner oder eine ehrliche Vorlage, hält Interessenten im Funnel und hebt den Anbieter von Wettbewerbern ab. Er muss so nützlich sein, dass ihn jemand ohne Absender weiterleiten würde, sonst wird er nicht genutzt. Der Funnel-Befund ist aus den Seiten dieser Strategie berechnet. Eigene Seiten, die du im Content-Flow einer Phase zuordnest, zählen als Zwischenschritt, wenn sie vom Typ Rechner/Tool, Vorlage/Download, Vergleichsseite oder Test/Review sind (Vergleich und Review erst ab der Bewertungsphase). Die Lead-Magneten sind Vorschläge der KI, ihre Wirkung ist nicht prognostiziert.', 'Warum Zwischenschritte, und wie wird der Befund berechnet?'),
     ]));
-    box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Der Funnel-Befund ist aus den Seiten dieser Strategie berechnet. Eigene Seiten, die du im Content-Flow einer Phase zuordnest, zählen als Zwischenschritt, wenn sie vom Typ Rechner/Tool, Vorlage/Download, Vergleichsseite oder Test/Review sind (Vergleich und Review erst ab der Bewertungsphase). Die Lead-Magneten sind Vorschläge der KI, ihre Wirkung ist nicht prognostiziert.']));
     var checkHolder = el('div', { class: 'cvz-cs-funnel-holder' });
     function fillCheck(funnel) {
       clear(checkHolder);
@@ -3791,7 +3889,7 @@
     var magnets = result.lead_magnets || [];
     if (magnets.length > 0) {
       box.appendChild(el('h5', {}, ['Vorgeschlagene Lead-Magneten und kostenlose Tools']));
-      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Tippe auf einen Vorschlag für Inhalte, Abgrenzung, den Übergang zum Endziel und den Aufwand. Vorschläge, die eine Lücke schließen, stehen zuerst.']));
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Vorschläge, die eine Lücke schließen, stehen zuerst.', tip('Tippe auf einen Vorschlag für Inhalte, Abgrenzung, den Übergang zum Endziel und den Aufwand.')]));
       if (result.lead_magnets_substance_note) box.appendChild(el('p', { class: 'cvz-cs-callout' }, [result.lead_magnets_substance_note]));
       magnets.forEach(function (m) { box.appendChild(renderLeadMagnetCard(m)); });
       if (result.lead_magnets_tracking_note) {
@@ -3845,12 +3943,13 @@
     var children = [];
     var goalBox = renderStrategyGoalBox(result.strategy_goal);
     if (goalBox) children.push(goalBox);
-    var volumeText = result.conversion_page.estimated_volume != null ? volumeRangeText(result.conversion_page.estimated_volume) : 'Suchvolumen unbekannt';
+    var volumeText = pageVolumeText(result.conversion_page);
     var conversionBadges = [el('span', { class: 'cvz-cs-badge cvz-cs-badge-conversion' }, ['Conversion-Seite'])];
     var conversionCardChildren = [
       el('div', { class: 'cvz-cs-page-card-badges' }, conversionBadges),
       el('h4', {}, [result.conversion_page.topic]),
       el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + result.conversion_page.keyword + ' · ' + volumeText]),
+      renderVolumeProxyNote(result.conversion_page),
     ];
     // NEU: Conversion-Seite ist eine bestehende Seite, die umgebaut wird (Backend-Feld existing_url).
     if (result.conversion_page.existing_url) {
@@ -3874,8 +3973,8 @@
     var toggleAllBtn = el('button', { type: 'button', class: 'cvz-cs-expand-btn' }, ['Alle aufklappen']);
     var toolbar = el('div', { class: 'cvz-cs-cluster-toolbar' }, [
       el('p', { class: 'cvz-cs-hint' }, [
-        'Tippe auf eine Seite für Begründung, Content-Brief und Status. Den Bearbeitungsstatus setzt du selbst: Er dient deiner Übersicht, wird gespeichert und steht im Export.',
-        el('br'), VOLUME_NOTE,
+        'Tippe auf eine Seite für Begründung, Content-Brief und Status.',
+        tip('Den Bearbeitungsstatus setzt du selbst: Er dient deiner Übersicht, wird gespeichert und steht im Export. ' + VOLUME_NOTE, 'Hinweise zu Status und Suchvolumen'),
       ]),
       toggleAllBtn,
     ]);
@@ -3961,18 +4060,17 @@
   // Die Zielgruppe ist kein Badge mehr, weil sie oft ein ganzer Satz ist und mobil aus der Karte lief.
   function renderPageCard(sessionId, page, index) {
     var card = el('details', { class: 'cvz-cs-page-card cvz-cs-fold cvz-cs-page-acc' });
-    var badges = [
-      el('span', { class: 'cvz-cs-badge' }, [pageTypeLabel(page.page_type)]),
-      el('span', { class: 'cvz-cs-badge cvz-cs-badge-role-' + page.role }, [roleLabel(page.role)]),
-    ];
+    // GEÄNDERT (Übersicht): Das Standard-Badge "Trust/Themenabdeckung" (role coverage) stand fast überall neben "Themenabdeckung" und sagte
+    // dasselbe. Es entfällt. Besondere Rollen (Rank- & Zitier-Ziel, bereits vorhanden) bleiben.
+    var badges = [el('span', { class: 'cvz-cs-badge' }, [pageTypeLabel(page.page_type)])];
+    if (page.role !== 'coverage') badges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-role-' + page.role }, [roleLabel(page.role)]));
     if (page.commodity_risk) badges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-commodity', title: page.commodity_reasoning || '' }, ['Austauschbar']));
-    var volumeText = page.estimated_volume != null ? volumeRangeText(page.estimated_volume) : 'Suchvolumen unbekannt';
     var statusMeta = el('strong', {}, [statusLabel(page.status)]);
     // Wie im LP-Report: ein Teaser (erster Satz der Begründung), damit die zugeklappte Zeile eine Aussage hat.
     var headChildren = [
       el('div', { class: 'cvz-cs-page-card-badges' }, badges),
       el('h4', { class: 'cvz-cs-page-card-topic' }, [page.topic]),
-      el('p', { class: 'cvz-cs-page-acc-meta' }, [page.keyword + ' · ' + volumeText + ' · Status: ', statusMeta]),
+      el('p', { class: 'cvz-cs-page-acc-meta' }, [page.keyword + ' · ' + pageVolumeShort(page), pageVolumeTip(page), ' · Status: ', statusMeta]),
     ];
     // NEU: Zwischenziel schon in der zugeklappten Zeile, weil es die Frage "wozu ist diese Seite da?" am schnellsten beantwortet.
     if (page.zwischenziel) {
@@ -3990,6 +4088,8 @@
     if (page.primary_audience) {
       card.appendChild(el('p', { class: 'cvz-cs-page-acc-audience' }, [el('strong', {}, ['Zielgruppe: ']), page.primary_audience]));
     }
+    var volNote = renderVolumeProxyNote(page);
+    if (volNote) card.appendChild(volNote);
     if (page.zwischenziel) {
       card.appendChild(el('div', { class: 'cvz-cs-zwischenziel' }, [
         el('p', { class: 'cvz-cs-brief-label' }, ['Zwischenziel']),
@@ -4617,7 +4717,7 @@
   function renderChatSection(sessionId) {
     var section = el('div', { class: 'cvz-cs-chat' });
     section.appendChild(el('h4', { class: 'cvz-cs-chat-title' }, ['Fragen zum Report']));
-    section.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Der Agent kennt diesen Report und kann bei Bedarf auch neue Daten live nachschlagen (kein erneuter GEO-Prompt-Test).']));
+    section.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Frag zum Beispiel, warum eine Seite empfohlen wurde.', tip('Der Agent kennt diesen Report und kann bei Bedarf auch neue Daten live nachschlagen (kein erneuter GEO-Prompt-Test).', 'Was kann der Agent?')]));
     section.appendChild(el('div', { class: 'cvz-cs-chat-messages' }, []));
     var inputEl = el('textarea', {
       class: 'cvz-cs-chat-input',
@@ -4970,22 +5070,35 @@
     }
 
     // ---------- Ergebnis ----------
+    // GEÄNDERT (Übersicht): Das Diagramm kommt zuerst, davor nur eine Zeile zur Wirtschaftlichkeit. Gated-Content-Ideen und die Such-Tabelle folgen
+    // darunter (die Tabelle eingeklappt). Pflichthinweise (Einwilligung, Konzept statt Text) bleiben sichtbar.
+    var VALUE_SHORT = {
+      klein: 'Kundenwert klein: keine Webinare, Workshops oder persönlichen Gespräche.',
+      mittel: 'Kundenwert mittel: Webinare möglich, Gespräche nur in der Entscheidung, keine Workshops.',
+      gross: 'Kundenwert groß: persönliche Formate möglich.',
+    };
+    function renderValueLine(v) {
+      return el('p', { class: 'cvz-cs-hint cvz-tp-value' }, [
+        el('strong', {}, ['Wirtschaftlichkeit: ']),
+        VALUE_SHORT[v.value] || v.label || '',
+        v.note ? tip((v.label || '') + '. ' + v.note, 'Wie wird die Wirtschaftlichkeit bewertet?') : null,
+      ]);
+    }
     function renderResult() {
       var gated = result.gated_content;
-      if (gated) root.appendChild(renderGatedBlock(gated));
-      if (result.touchpoint_plan) {
-        // NEU (Wirtschaftlichkeit): Der Plan richtet sich nach dem Wert eines Kunden. Der Hinweis sagt, welche Klasse gilt, woher sie stammt und was sie ausschließt.
-        var vcls = result.touchpoint_plan.value_class;
-        if (vcls && vcls.note) {
-          root.appendChild(el('div', { class: 'cvz-cs-callout cvz-tp-value' }, [el('strong', {}, ['Wirtschaftlichkeit: ']), (vcls.label || '') + '. ' + vcls.note]));
-        }
-        root.appendChild(renderDemandBlock(result.touchpoint_plan.search_demand || []));
-        root.appendChild(el('h5', {}, ['Touchpoints und E-Mails nach dem Lead']));
-        root.appendChild(el('p', { class: 'cvz-cs-hint' }, [result.touchpoint_plan.plan_note || '']));
+      var plan = result.touchpoint_plan;
+      if (plan) {
+        if (plan.value_class && plan.value_class.value) root.appendChild(renderValueLine(plan.value_class));
+        var head = el('h5', {}, ['Touchpoints und E-Mails nach dem Lead']);
+        if (plan.plan_note) head.appendChild(tip(plan.plan_note, 'Was zeigt der Plan?'));
+        root.appendChild(head);
         root.appendChild(renderTouchpointEditor(sessionId, result, session));
-        if (result.touchpoint_plan.consent_note) root.appendChild(el('p', { class: 'cvz-cs-callout' }, [result.touchpoint_plan.consent_note]));
+        if (plan.consent_note) root.appendChild(el('p', { class: 'cvz-cs-callout' }, [plan.consent_note]));
         if (result.nurture_plan && result.nurture_plan.note) root.appendChild(el('p', { class: 'cvz-cs-hint' }, [result.nurture_plan.note]));
+        if (gated) root.appendChild(renderGatedBlock(gated));
+        root.appendChild(renderDemandBlock(plan.search_demand || []));
       } else {
+        if (gated) root.appendChild(renderGatedBlock(gated));
         root.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für diesen Lauf liegt kein Touchpoint-Plan vor, die Auswertung ergab keine belastbaren Touchpoints.']));
       }
       if (result.inventory && result.inventory.entries && result.inventory.entries.length > 0) root.appendChild(renderInventorySummary(result.inventory));
@@ -5036,22 +5149,22 @@
   }
 
   // Je Phase: Suchen Interessenten dort selbst? Der Server prüft, ob zum Haupt-Keyword der geplanten Seiten ein Suchvolumen gemessen wurde.
-  // Die Spalte "Was das heißt" sagt es in einem Satz (ältere Pläne ohne meaning bekommen den Satz hier ergänzt).
+  // GEÄNDERT (Übersicht): eingeklappt, kompakt in drei Spalten. Was eine Zeile heißt, steht als Tooltip am Status (ältere Pläne ohne meaning
+  // bekommen den Satz hier ergänzt), die Erklärung der Tabelle am Titel.
   function renderDemandBlock(demand) {
-    var box = el('div', { class: 'cvz-tp-demand' });
-    box.appendChild(el('h5', {}, ['Suchen Interessenten in dieser Phase selbst?']));
-    box.appendChild(el('p', { class: 'cvz-cs-hint' }, [
-      'Für jede Phase prüft der Server, ob zum Haupt-Keyword der geplanten Seiten Google-Suchanfragen gemessen wurden. Das zeigt, wo Interessenten dich selbst finden und wo du sie aktiv erreichen musst. ' +
-      'Die Zahl in der Spalte "Beleg" ist das monatliche Suchvolumen dieses einen Keywords (gerundeter Google-Ads-Wert), nicht die Größe der Phase. Keine Kanalempfehlung.',
+    var box = el('details', { class: 'cvz-tp-demand' });
+    box.appendChild(el('summary', {}, [
+      'Suchen Interessenten in dieser Phase selbst?',
+      tip('Für jede Phase prüft der Server, ob zum Haupt-Keyword der geplanten Seiten Google-Suchanfragen gemessen wurden. Das zeigt, wo Interessenten dich selbst finden und wo du sie aktiv erreichen musst. ' +
+        'Die Zahl in der Spalte "Beleg" ist das monatliche Suchvolumen dieses einen Keywords (gerundeter Google-Ads-Wert), nicht die Größe der Phase. Keine Kanalempfehlung.', 'Wie ist die Tabelle gemeint?'),
     ]));
     var table = el('table', { class: 'cvz-cs-table cvz-cs-table-cards' });
-    table.appendChild(el('thead', {}, [el('tr', {}, [el('th', {}, ['Phase']), el('th', {}, ['Suchen sie selbst?']), el('th', {}, ['Was das heißt']), el('th', {}, ['Beleg'])])]));
+    table.appendChild(el('thead', {}, [el('tr', {}, [el('th', {}, ['Phase']), el('th', {}, ['Suchen sie selbst?']), el('th', {}, ['Beleg'])])]));
     var tbody = el('tbody');
     demand.forEach(function (d) {
       tbody.appendChild(el('tr', {}, [
         el('td', { 'data-label': 'Phase' }, [d.phase_label]),
-        el('td', { 'data-label': 'Suchen sie selbst?' }, [TP_DEMAND_LABELS[d.measurable] || d.measurable]),
-        el('td', { 'data-label': 'Was das heißt' }, [d.meaning || TP_DEMAND_MEANING[d.measurable] || '']),
+        el('td', { 'data-label': 'Suchen sie selbst?' }, [TP_DEMAND_LABELS[d.measurable] || d.measurable, tip(d.meaning || TP_DEMAND_MEANING[d.measurable] || '', 'Was heißt das?')]),
         el('td', { 'data-label': 'Beleg' }, [d.basis]),
       ]));
     });
@@ -5485,10 +5598,8 @@
       clear(panel);
       var sel = ui.selected;
       if (!sel) {
-        panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, ['Touchpoint-Plan']));
-        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Klicke einen Schritt oder eine Verbindung an, um sie zu bearbeiten. Ziehe Schritte mit der Maus, ziehe den Hintergrund, um den Ausschnitt zu bewegen. Strg/Cmd + Mausrad zoomt.']));
-        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Oben stehen die Touchpoints je Phase, darunter die Lead-Magneten und Gated-Content-Ideen, ganz unten die E-Mails nach dem Lead. Die Pfeile zeigen, was zu was führt. Der Weg im B2B ist eine Schleife, keine feste Reihenfolge. Gestrichelt: "Retargeting, wenn gesehen", das setzt Tracking und Einwilligung voraus. Den Kanal trägst du pro Schritt selbst ein.']));
-        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Änderungen werden gespeichert und verändern den Bericht nicht.']));
+        panel.appendChild(el('p', { class: 'cvz-flow-panel-title' }, ['Touchpoint-Plan', tip('Klicke einen Schritt oder eine Verbindung an, um sie zu bearbeiten. Ziehe Schritte mit der Maus, ziehe den Hintergrund, um den Ausschnitt zu bewegen. Strg/Cmd + Mausrad zoomt. Oben stehen die Touchpoints je Phase, darunter die Lead-Magneten und Gated-Content-Ideen, ganz unten die E-Mails nach dem Lead. Die Pfeile zeigen, was zu was führt. Der Weg im B2B ist eine Schleife, keine feste Reihenfolge. Gestrichelt: "Retargeting, wenn gesehen", das setzt Tracking und Einwilligung voraus. Den Kanal trägst du pro Schritt selbst ein. Änderungen werden gespeichert und verändern den Bericht nicht.', 'Hilfe zum Touchpoint-Plan')]));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Klicke einen Schritt an, um ihn zu bearbeiten.']));
         var legend = el('div', { class: 'cvz-flow-legend' });
         TP_PHASES.forEach(function (ph) { legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [el('i', { style: 'background:' + TP_PHASE_COLORS[ph.value] }), ph.label])); });
         legend.appendChild(el('span', { class: 'cvz-flow-legend-item' }, [el('i', { style: 'background:' + TP_ASSET_COLOR }), 'Lead-Magnet oder Gated Content']));
@@ -5767,6 +5878,87 @@
   ];
   // ==== TOUCHPOINT-ENDE ====
 
+  // ==== TOOLTIP-ANFANG ====
+  // NEU (Übersicht): Erklärungen stehen nicht mehr als Dauertext im Bericht, sondern hinter einem kleinen "i". Die Blase öffnet bei Hover und
+  // Tastaturfokus sowie per Tipp (Handy, dort gibt es kein Hover). Ein Tipp hält sie offen, ein Tipp daneben oder Esc schließt sie. Beim
+  // Scrollen folgt sie dem Symbol. Der Text bleibt im DOM (Bildschirmleser). Wichtige Hinweise (Einwilligung, Warnungen, Hypothesen, Grenzen
+  // der Daten) bleiben sichtbar und gehören NICHT in einen Tooltip.
+  var tipSeq = 0;
+  var tipOpen = null;
+  var tipWired = false;
+
+  function tipPlace(wrap) {
+    var btn = wrap.firstChild;
+    var bubble = wrap.lastChild;
+    var r = btn.getBoundingClientRect();
+    var vw = window.innerWidth || document.documentElement.clientWidth || 360;
+    var vh = window.innerHeight || document.documentElement.clientHeight || 700;
+    bubble.style.maxWidth = Math.max(160, Math.min(340, vw - 24)) + 'px';
+    var w = bubble.offsetWidth || 0;
+    var h = bubble.offsetHeight || 0;
+    var left = Math.max(12, Math.min(r.left - 10, vw - w - 12));
+    var top = r.bottom + 8;
+    if (h && top + h > vh - 8 && r.top - 8 - h > 8) top = r.top - 8 - h; // unten kein Platz: über dem Symbol
+    bubble.style.left = left + 'px';
+    bubble.style.top = top + 'px';
+  }
+
+  function tipHide(wrap) {
+    if (!wrap) return;
+    wrap.classList.remove('is-open');
+    wrap._pinned = false;
+    wrap.firstChild.setAttribute('aria-expanded', 'false');
+    if (tipOpen === wrap) tipOpen = null;
+  }
+
+  function tipShow(wrap) {
+    if (tipOpen && tipOpen !== wrap) tipHide(tipOpen);
+    wrap.classList.add('is-open');
+    wrap.firstChild.setAttribute('aria-expanded', 'true');
+    tipOpen = wrap;
+    tipPlace(wrap);
+  }
+
+  function tipWire() {
+    if (tipWired) return;
+    tipWired = true;
+    document.addEventListener('click', function (e) { if (tipOpen && !tipOpen.contains(e.target)) tipHide(tipOpen); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && tipOpen) tipHide(tipOpen); });
+    window.addEventListener('scroll', function () { if (tipOpen) tipPlace(tipOpen); }, true);
+    window.addEventListener('resize', function () { if (tipOpen) tipPlace(tipOpen); });
+  }
+
+  // Kleines "i" mit Erklärung. text: der Erklärtext. label: Beschriftung für Bildschirmleser.
+  function tip(text, label) {
+    tipWire();
+    var id = 'cvz-tip-' + (++tipSeq);
+    var btn = el('button', { type: 'button', class: 'cvz-tip-btn', 'aria-label': label || 'Erklärung anzeigen', 'aria-expanded': 'false', 'aria-describedby': id }, ['i']);
+    var bubble = el('span', { class: 'cvz-tip-bubble', role: 'tooltip', id: id }, [text]);
+    var wrap = el('span', { class: 'cvz-tip' }, [btn, bubble]);
+    wrap._pinned = false;
+    wrap.addEventListener('mouseenter', function () { tipShow(wrap); });
+    wrap.addEventListener('mouseleave', function () { if (!wrap._pinned) tipHide(wrap); });
+    btn.addEventListener('focus', function () { tipShow(wrap); });
+    btn.addEventListener('blur', function () { if (!wrap._pinned) tipHide(wrap); });
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (wrap._pinned) { tipHide(wrap); return; }
+      tipShow(wrap);
+      wrap._pinned = true;
+    });
+    return wrap;
+  }
+
+  var TIP_STYLES = [
+    '#cvz-content-strategy-agent .cvz-tip{display:inline-block;position:relative;margin-left:6px;vertical-align:middle;line-height:1;text-transform:none;letter-spacing:normal;font-weight:400;}',
+    '#cvz-content-strategy-agent .cvz-tip-btn{width:17px;height:17px;padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.32);background:transparent;color:#8b949e;font:italic 700 11px/15px Georgia,serif;cursor:help;display:inline-flex;align-items:center;justify-content:center;}',
+    '#cvz-content-strategy-agent .cvz-tip-btn:hover,#cvz-content-strategy-agent .cvz-tip-btn:focus-visible,#cvz-content-strategy-agent .cvz-tip.is-open .cvz-tip-btn{color:#4fd1c5;border-color:#4fd1c5;outline:none;}',
+    '#cvz-content-strategy-agent .cvz-tip-bubble{display:none;position:fixed;z-index:10000;width:max-content;max-width:340px;padding:10px 12px;background:#1c2128;border:1px solid rgba(255,255,255,.16);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.45);color:#e6edf3;font-size:13px;line-height:1.5;font-style:normal;font-weight:400;text-transform:none;letter-spacing:normal;white-space:normal;text-align:left;}',
+    '#cvz-content-strategy-agent .cvz-tip.is-open .cvz-tip-bubble{display:block;}',
+  ];
+  // ==== TOOLTIP-ENDE ====
+
   // ==== PROFIL-ANFANG ====
   // NEU (Produktprofil): Schritt "Produkt bestätigen" nach der Themen-Prüfung. Der Server liest die eigene Domain und leitet einen Entwurf
   // ab (POST /suggest-profile), der Kunde prüft und bestätigt ihn. Bestätigt wird pro Domain gespeichert, beim nächsten Mal ist der Schritt
@@ -5881,47 +6073,30 @@
     var growAreas = [];
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
     wrap.appendChild(renderStepper(state.wizardSteps || STEPS_FULL, stepNo('Produkt bestätigen'), true));
-    wrap.appendChild(el('h3', {}, ['Stimmt dieses Produktprofil?']));
+    wrap.appendChild(el('h3', {}, ['Stimmt dieses Produktprofil?', tip('Mit diesem Profil vergleicht und empfiehlt die Strategie nur, was zu deinem Angebot passt. Es genügt, zu bestätigen. Prüfe vor allem, was dein Angebot NICHT kann und womit es zusammenarbeitet, denn das steht selten auf einer Produktseite.', 'Wozu dient das Produktprofil?')]));
 
     var host = profileDomain(ctx.domain, ctx.trackerTopicId);
     var sourceText;
     if (res.source === 'gespeichert') {
       var when = profileDateText(res.confirmed_at);
-      sourceText = 'Das ist die Fassung, die du für ' + host + (when ? ' am ' + when : '') + ' bestätigt hast. Prüfe nur, ob sie noch stimmt.';
+      sourceText = 'Von dir für ' + host + (when ? ' am ' + when : '') + ' bestätigt. Prüfe nur, ob es noch stimmt.';
     } else if (res.source === 'ohne_seite') {
-      sourceText = 'Deine Website war nicht abrufbar. Ich konnte nur aus Thema und Angebotstyp ableiten. Bitte ergänze, was dein Angebot kann und was nicht.';
+      sourceText = 'Deine Website war nicht abrufbar. Bitte ergänze, was dein Angebot kann und was nicht.';
     } else {
       var n = (res.pages || []).length;
-      sourceText = 'Das habe ich aus ' + (n === 1 ? 'einer Seite' : n + ' Seiten') + ' von ' + host + ' abgeleitet. Prüfe es und ändere, was nicht stimmt.';
+      sourceText = 'Aus ' + (n === 1 ? 'einer Seite' : n + ' Seiten') + ' von ' + host + ' abgeleitet.';
     }
-    wrap.appendChild(el('div', { class: 'cvz-cs-callout' }, [
-      el('strong', {}, ['Das ist jetzt zu tun: ']),
-      sourceText + ' Mit diesem Profil vergleicht und empfiehlt die Strategie nur, was zu deinem Angebot passt. Es genügt, zu bestätigen.',
-    ]));
+    wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [sourceText]));
 
+    // GEÄNDERT (Übersicht): Zuerst das, was zu prüfen ist (Prüffragen und die zwei Felder, zu denen die Seite meist schweigt). Alles andere liegt
+    // zugeklappt darunter. So genügt in der Regel ein Blick und ein Klick auf "bestätigen".
     var descInput = makeGrowArea(base.beschreibung || '', 'Was ist dein Angebot, und für wen? Ein bis zwei Sätze.', growAreas);
     descInput.setAttribute('maxlength', String(PROFILE_LIMITS.desc));
-    wrap.appendChild(field('Dein Angebot in ein bis zwei Sätzen', descInput));
+    var preview = el('p', { class: 'cvz-pf-quote' }, [base.beschreibung || '']);
+    descInput.addEventListener('input', function () { preview.textContent = descInput.value; });
+    wrap.appendChild(preview);
     var catInput = el('input', { type: 'text', maxlength: String(PROFILE_LIMITS.category), placeholder: 'z. B. Landingpage-Generator' });
     catInput.value = base.kategorie || '';
-    wrap.appendChild(field('Kategorie', catInput));
-
-    var inputs = {};
-    PROFILE_FIELD_DEFS.forEach(function (def) {
-      var area = makeGrowArea((base[def.key] || []).join('\n'), def.placeholder, growAreas);
-      inputs[def.key] = area;
-      var empty = (base[def.key] || []).length === 0;
-      var f = field(def.label, area);
-      if (def.flag && empty) f.classList.add('cvz-pf-check');
-      f.appendChild(el('span', { class: 'cvz-cs-hint' }, [def.hint + (def.flag && empty ? ' Dazu stand auf der Seite nichts. Bitte prüfen.' : '')]));
-      wrap.appendChild(f);
-    });
-
-    var valueSel = el('select', { name: 'kundenwert' }, PROFILE_VALUE_OPTIONS.map(function (o) { return el('option', { value: o.value }, [o.label]); }));
-    valueSel.value = base.kundenwert || '';
-    var valueField = field('Was ist ein Kunde pro Jahr ungefähr wert?', valueSel);
-    valueField.appendChild(el('span', { class: 'cvz-cs-hint' }, ['Bestimmt, welche Formate sich lohnen. Bei kleinem Kundenwert schlägt die Strategie keine Webinare, Workshops oder persönlichen Gespräche vor, weil sie sich nicht rechnen. Eine grobe Einordnung, keine Prognose.']));
-    wrap.appendChild(valueField);
 
     var annahmen = (res.profile && res.profile.annahmen) || [];
     if (annahmen.length > 0) {
@@ -5929,6 +6104,34 @@
       annahmen.forEach(function (a) { ul.appendChild(el('li', {}, [a])); });
       wrap.appendChild(el('div', { class: 'cvz-cs-callout cvz-pf-assumptions' }, [el('strong', {}, ['Bitte besonders prüfen: ']), 'Das stand nicht klar auf deiner Seite.', ul]));
     }
+
+    var inputs = {};
+    var fieldNodes = {};
+    PROFILE_FIELD_DEFS.forEach(function (def) {
+      var area = makeGrowArea((base[def.key] || []).join('\n'), def.placeholder, growAreas);
+      inputs[def.key] = area;
+      var empty = (base[def.key] || []).length === 0;
+      var f = fieldTip(def.label, area, def.hint);
+      if (def.flag && empty) {
+        f.classList.add('cvz-pf-check');
+        f.appendChild(el('span', { class: 'cvz-cs-hint' }, ['Auf der Seite nichts gefunden. Bitte prüfen.']));
+      }
+      fieldNodes[def.key] = f;
+    });
+    wrap.appendChild(fieldNodes.kann_nicht);
+    wrap.appendChild(fieldNodes.ergaenzt);
+
+    var valueSel = el('select', { name: 'kundenwert' }, PROFILE_VALUE_OPTIONS.map(function (o) { return el('option', { value: o.value }, [o.label]); }));
+    valueSel.value = base.kundenwert || '';
+    var more = el('details', { class: 'cvz-pf-more' }, [el('summary', {}, ['Weitere Angaben ansehen und ändern'])]);
+    more.appendChild(fieldTip('Dein Angebot in ein bis zwei Sätzen', descInput));
+    more.appendChild(fieldTip('Kategorie', catInput));
+    more.appendChild(fieldNodes.kann);
+    more.appendChild(fieldNodes.ersetzt);
+    more.appendChild(fieldNodes.konkurrenten);
+    more.appendChild(fieldTip('Was ist ein Kunde pro Jahr ungefähr wert?', valueSel, 'Bestimmt, welche Formate sich lohnen. Bei kleinem Kundenwert schlägt die Strategie keine Webinare, Workshops oder persönlichen Gespräche vor, weil sie sich nicht rechnen. Eine grobe Einordnung, keine Prognose.'));
+    more.addEventListener('toggle', function () { growAllLater(growAreas); }); // Höhe der Felder erst berechnen, wenn sie sichtbar sind
+    wrap.appendChild(more);
 
     var errorLine = el('p', { class: 'cvz-cs-quota-empty' });
     wrap.appendChild(errorLine);
@@ -5985,42 +6188,50 @@
     saveProfileDraft();
   }
 
-  // Bericht: das berücksichtigte Profil (aufklappbar) und Widersprüche, die nach den Korrekturen blieben.
+  // Bericht: das berücksichtigte Profil (aufklappbar, in den Grundlagen). Widersprüche, die nach den Korrekturen blieben, stehen getrennt und
+  // SICHTBAR im Überblick (renderProfileWarnings), weil sie etwas zu prüfen bedeuten und die Grundlagen eingeklappt sind.
   function renderProfileBox(result) {
     var p = result && result.product_profile;
-    var warns = (result && result.profile_warnings) || [];
-    if (!p && warns.length === 0) return null;
+    if (!p) return null;
     var box = el('div', { class: 'cvz-pf-box' });
-    if (p) {
-      var body = el('div', { class: 'cvz-pf-body' });
-      body.appendChild(el('p', {}, [p.beschreibung]));
-      var valueRow = p.kundenwert ? [['Wert eines Kunden', [PROFILE_VALUE_LABELS[p.kundenwert] || p.kundenwert]]] : [];
-      valueRow.concat([['Kann', p.kann], ['Kann nicht', p.kann_nicht], ['Ergänzt, kein Wettbewerb', p.ergaenzt], ['Wettbewerb (Ersetzt)', p.ersetzt], ['Direkte Wettbewerber', p.konkurrenten]]).forEach(function (row) {
-        if (row[1] && row[1].length > 0) body.appendChild(el('p', {}, [el('strong', {}, [row[0] + ': ']), row[1].join('; ')]));
-      });
-      box.appendChild(el('details', { class: 'cvz-cs-expand' }, [
-        el('summary', {}, ['Aufklappen: Produktprofil, nach dem diese Strategie arbeitet']),
-        body,
-        el('p', { class: 'cvz-cs-hint' }, ['Du hast es vor dem Start bestätigt. Vergleiche, Zwischenziele und Off-Site-Maßnahmen richten sich danach.']),
-      ]));
-    }
-    if (warns.length > 0) {
-      var ul = el('ul', { class: 'cvz-cs-brief-list' });
-      warns.slice(0, 6).forEach(function (w) { ul.appendChild(el('li', {}, [w])); });
-      box.appendChild(el('div', { class: 'cvz-cs-gsc-hint cvz-pf-warn' }, [
-        el('strong', {}, ['Bitte prüfen: ']),
-        'Diese Stellen widersprechen deinem Produktprofil. Die Strategie hat sie trotz Korrektur nicht ganz bereinigt.',
-        ul,
-      ]));
-    }
+    var body = el('div', { class: 'cvz-pf-body' });
+    body.appendChild(el('p', {}, [p.beschreibung]));
+    var valueRow = p.kundenwert ? [['Wert eines Kunden', [PROFILE_VALUE_LABELS[p.kundenwert] || p.kundenwert]]] : [];
+    valueRow.concat([['Kann', p.kann], ['Kann nicht', p.kann_nicht], ['Ergänzt, kein Wettbewerb', p.ergaenzt], ['Wettbewerb (Ersetzt)', p.ersetzt], ['Direkte Wettbewerber', p.konkurrenten]]).forEach(function (row) {
+      if (row[1] && row[1].length > 0) body.appendChild(el('p', {}, [el('strong', {}, [row[0] + ': ']), row[1].join('; ')]));
+    });
+    box.appendChild(el('details', { class: 'cvz-cs-expand' }, [
+      el('summary', {}, ['Aufklappen: Produktprofil, nach dem diese Strategie arbeitet', tip('Du hast es vor dem Start bestätigt. Vergleiche, Zwischenziele und Off-Site-Maßnahmen richten sich danach.', 'Wozu dient das Produktprofil?')]),
+      body,
+    ]));
     return box;
+  }
+
+  function renderProfileWarnings(result) {
+    var warns = (result && result.profile_warnings) || [];
+    if (warns.length === 0) return null;
+    var ul = el('ul', { class: 'cvz-cs-brief-list' });
+    warns.slice(0, 6).forEach(function (w) { ul.appendChild(el('li', {}, [w])); });
+    return el('div', { class: 'cvz-cs-gsc-hint cvz-pf-warn' }, [
+      el('strong', {}, ['Bitte prüfen: ']),
+      'Diese Stellen widersprechen deinem Produktprofil. Die Strategie hat sie trotz Korrektur nicht ganz bereinigt.',
+      ul,
+    ]);
   }
 
   var PROFILE_STYLES = [
     '#cvz-content-strategy-agent .cvz-pf-check .cvz-cs-field-label{color:var(--cvz-amber);}',
     '#cvz-content-strategy-agent .cvz-pf-check textarea{border-color:rgba(245,158,11,.6);}',
     '#cvz-content-strategy-agent .cvz-pf-assumptions ul{margin:6px 0 0;}',
+    '#cvz-content-strategy-agent .cvz-cs-volproxy{border-left:2px solid rgba(255,255,255,.2);padding:2px 0 2px 12px;margin:8px 0;}',
     '#cvz-content-strategy-agent .cvz-pf-box{margin:14px 0 0;}',
+    '#cvz-content-strategy-agent .cvz-tp-demand{border:1px solid var(--cvz-border);background:var(--cvz-surface);margin:14px 0;}',
+    '#cvz-content-strategy-agent .cvz-tp-demand>summary{padding:10px 14px;cursor:pointer;font-weight:600;color:var(--cvz-heading);}',
+    '#cvz-content-strategy-agent .cvz-tp-demand .cvz-cs-table-wrap{padding:0 14px 12px;}',
+    '#cvz-content-strategy-agent .cvz-pf-more{margin:14px 0;border:1px solid var(--cvz-border);background:var(--cvz-surface);}',
+    '#cvz-content-strategy-agent .cvz-pf-more>summary{padding:10px 14px;cursor:pointer;font-weight:600;color:var(--cvz-heading);}',
+    '#cvz-content-strategy-agent .cvz-pf-more>.cvz-cs-field{padding:0 14px;}',
+    '#cvz-content-strategy-agent .cvz-pf-quote{margin:4px 0 12px;padding:8px 12px;border-left:3px solid var(--cvz-teal);color:var(--cvz-text);font-size:14px;}',
     '#cvz-content-strategy-agent .cvz-pf-body p{margin:0 0 6px;font-size:14px;}',
     '#cvz-content-strategy-agent .cvz-pf-warn{padding:12px 16px;margin-top:10px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.06);}',
   ];
