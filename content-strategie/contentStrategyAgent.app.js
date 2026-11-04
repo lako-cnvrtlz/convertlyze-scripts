@@ -5453,28 +5453,28 @@
     }
     return aioBox;
   }
-  // GEÄNDERT: Google-eigene Einträge (google.com, google.de, keine Unterdomains wie cloud.google.com) ausblenden, auch in älteren Berichten,
-  // und den Seitentitel zeigen, damit erkennbar ist, welche Seite rankt.
-  function geoIsGoogleSelf(r) {
-    var host = String(r.domain || '').toLowerCase();
-    try { if (r.url) host = new URL(r.url).hostname.toLowerCase(); } catch (e) { /* Domain verwenden */ }
-    return /^(www\.)?google\.[a-z]{2,3}(\.[a-z]{2})?$/.test(host);
+  // GEÄNDERT: DataForSEO liefert bei manchen Treffern eine Google-Weiterleitung (google.com/goto?url=...) statt der Zieladresse. Das sind echte
+  // Wettbewerber, der Link führt beim Klick auf die richtige Seite. Neue Berichte haben die erkannte Domain (Server: resolveSerpTarget), ältere
+  // zeigen "Domain nicht erkannt" statt "google.com". Der Seitentitel steht immer dabei.
+  function geoIsGoogleRedirect(r) {
+    try { var u = new URL(r.url); return /^(www\.)?google\.[a-z]{2,3}(\.[a-z]{2})?$/i.test(u.hostname) && /^\/(goto|url)\b/.test(u.pathname); } catch (e) { return false; }
   }
+  function geoSerpDomain(r) { return geoIsGoogleRedirect(r) && /google\./i.test(r.domain || '') ? 'Domain nicht erkannt' : r.domain; }
   function geoSerpBlock(geo) {
     if (!geo || !geo.top_serp_results || geo.top_serp_results.length === 0) return null;
-    var shown = geo.top_serp_results.filter(function (r) { return !geoIsGoogleSelf(r); });
-    var hidden = (geo.top_serp_results.length - shown.length) + (geo.serp_google_hidden || 0);
     var serpList = el('ol', { class: 'cvz-cs-serp-list' });
-    shown.forEach(function (r) {
+    var unknown = 0;
+    geo.top_serp_results.forEach(function (r) {
+      var dom = geoSerpDomain(r);
+      if (dom === 'Domain nicht erkannt') unknown++;
       serpList.appendChild(el('li', {}, [
         el('span', { class: 'cvz-cs-serp-pos' }, ['Platz ' + r.position]),
-        ' ', el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain]),
+        ' ', el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [dom]),
         r.title ? el('span', { class: 'cvz-cs-funnel-todo-meta' }, [r.title]) : null,
       ]));
     });
     var box = el('div', {}, [el('h5', {}, ['Top-Ergebnisse bei Google (organisch)']), serpList]);
-    if (hidden > 0) box.appendChild(el('p', { class: 'cvz-cs-hint' }, [hidden + (hidden === 1 ? ' Google-eigener Eintrag' : ' Google-eigene Einträge') + ' (z. B. Verweise auf die Google-Suche) ausgeblendet, das sind keine Wettbewerber. Die Platzzahlen bleiben die von Google.']));
-    if (shown.length === 0) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine Treffer außer Google-eigenen Einträgen.']));
+    if (unknown > 0) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Bei ' + unknown + (unknown === 1 ? ' Treffer' : ' Treffern') + ' liefert Google nur eine Weiterleitung, die Domain ist deshalb nicht erkennbar. Der Titel zeigt, um welche Seite es geht, der Link führt zur Seite.']));
     return box;
   }
   function geoCompetitorBlock(geo) {
