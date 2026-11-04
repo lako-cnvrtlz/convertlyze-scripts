@@ -210,8 +210,8 @@
       '.cvz-cs-rollout-note p{margin:0 0 6px;}',
       '.cvz-cs-rollout-filter{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}',
       '.cvz-cs-notplanned{margin:14px 0 6px;}',
-      '.cvz-cs-vis-query{margin:4px 0 10px;padding:8px 10px;background:rgba(96,165,250,.08);border-left:3px solid #60a5fa;font-size:14px;color:var(--cvz-heading);}',
-      '.cvz-cs-vis-query-label{font-weight:700;}',
+      '.cvz-cs-vis-query{margin:4px 0 10px;font-size:13px;color:var(--cvz-muted);}',
+      '.cvz-cs-serp-table td:first-child{white-space:nowrap;width:1%;}',
       '.cvz-cs-serp-list{margin:4px 0;padding-left:0;list-style:none;}',
       '.cvz-cs-serp-list li{margin:0 0 6px;overflow-wrap:anywhere;}',
       '.cvz-cs-serp-pos{display:inline-block;min-width:58px;font-size:13px;color:var(--cvz-muted);}',
@@ -5422,29 +5422,32 @@
     var topic = result && (result.seed_topic || (result.topic_validation && result.topic_validation.seed_topic));
     return topic ? { text: topic, exact: false, date: null } : null;
   }
+  // GEÄNDERT: Das Keyword steht jetzt in den Überschriften (Block, AI Overview, Top-Ergebnisse). Diese Zeile sagt nur noch, woher die Daten stammen.
+  function geoQuoted(q) { return q ? '„' + q.text + '“' : ''; }
   function geoQueryLine(geo, result) {
     var q = geoSerpQuery(geo, result);
     if (!q) return null;
     var when = q.date ? ', abgerufen am ' + new Date(q.date).toLocaleDateString('de-DE') : '';
     return el('p', { class: 'cvz-cs-vis-query' }, [
-      el('span', { class: 'cvz-cs-vis-query-label' }, ['Suchanfrage bei Google:']),
-      ' „' + q.text + '“',
-      el('span', { class: 'cvz-cs-hint' }, [q.exact ? ' (Deutschland' + when + ')' : ' (das Kernthema; ältere Berichte haben die genaue Suchanfrage nicht gespeichert)']),
-      tip('Die Ergebnisse darunter stammen aus genau einer Google-Suche nach diesem Begriff: das AI Overview oben auf der Ergebnisseite und die organischen Treffer darunter. Für andere Formulierungen kann Google andere Seiten zeigen.', 'Woher stammen die Ergebnisse?'),
+      q.exact
+        ? 'Eine Google-Suche nach ' + geoQuoted(q) + ' in Deutschland' + when + '. Alles in diesem Block stammt aus dieser einen Suche.'
+        : 'Ältere Berichte haben die genaue Suchanfrage nicht gespeichert. Laut Vorgabe ist es das Kernthema ' + geoQuoted(q) + '.',
+      tip('Für andere Formulierungen kann Google andere Seiten zeigen. Die Spalte „Titel der Seite“ zeigt den Titel des Treffers, nicht das Keyword.', 'Woher stammen die Ergebnisse?'),
     ]);
   }
-  function geoAioBlock(geo) {
+  function geoAioBlock(geo, q) {
     var aio = geo && geo.ai_overview;
     if (!aio) return null;
     var aioBox = el('div', { class: 'cvz-cs-aio' });
+    var aioTitle = 'AI Overview' + (q ? ' zu ' + geoQuoted(q) : '');
     if (!aio.present) {
-      aioBox.appendChild(el('h5', {}, ['Google AI Overview']));
+      aioBox.appendChild(el('h5', {}, [aioTitle]));
       aioBox.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Kein AI Overview für dieses Thema vorhanden.']));
     } else if (!aio.references || aio.references.length === 0) {
-      aioBox.appendChild(el('h5', {}, ['Google AI Overview']));
+      aioBox.appendChild(el('h5', {}, [aioTitle]));
       aioBox.appendChild(el('p', { class: 'cvz-cs-gsc-hint' }, ['AI Overview vorhanden, aber ohne zitierte Quellen-Links - Hinweis auf Commodity-Charakter dieses Themas.']));
     } else {
-      aioBox.appendChild(el('h5', {}, ['Google AI Overview: diese Quellen werden zitiert' + (aio.own_domain_cited ? ' (eure Domain ist dabei)' : ' (eure Domain fehlt noch)')]));
+      aioBox.appendChild(el('h5', {}, [aioTitle + ': diese Quellen werden zitiert' + (aio.own_domain_cited ? ' (eure Domain ist dabei)' : ' (eure Domain fehlt noch)')]));
       var aioList = el('ul', {});
       aio.references.forEach(function (r) {
         aioList.appendChild(el('li', {}, [el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain]), r.title ? ' – "' + r.title + '"' : '']));
@@ -5460,20 +5463,24 @@
     try { var u = new URL(r.url); return /^(www\.)?google\.[a-z]{2,3}(\.[a-z]{2})?$/i.test(u.hostname) && /^\/(goto|url)\b/.test(u.pathname); } catch (e) { return false; }
   }
   function geoSerpDomain(r) { return geoIsGoogleRedirect(r) && /google\./i.test(r.domain || '') ? 'Domain nicht erkannt' : r.domain; }
-  function geoSerpBlock(geo) {
+  // GEÄNDERT: Tabelle mit Spaltenköpfen, damit klar ist, dass der graue Text der Seitentitel ist und nicht das Keyword.
+  function geoSerpBlock(geo, q) {
     if (!geo || !geo.top_serp_results || geo.top_serp_results.length === 0) return null;
-    var serpList = el('ol', { class: 'cvz-cs-serp-list' });
+    var table = el('table', { class: 'cvz-cs-table cvz-cs-table-cards cvz-cs-serp-table' });
+    table.appendChild(el('thead', {}, [el('tr', {}, [el('th', {}, ['Platz']), el('th', {}, ['Website']), el('th', {}, ['Titel der Seite'])])]));
+    var tbody = el('tbody');
     var unknown = 0;
     geo.top_serp_results.forEach(function (r) {
       var dom = geoSerpDomain(r);
       if (dom === 'Domain nicht erkannt') unknown++;
-      serpList.appendChild(el('li', {}, [
-        el('span', { class: 'cvz-cs-serp-pos' }, ['Platz ' + r.position]),
-        ' ', el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [dom]),
-        r.title ? el('span', { class: 'cvz-cs-funnel-todo-meta' }, [r.title]) : null,
+      tbody.appendChild(el('tr', {}, [
+        el('td', { 'data-label': 'Platz' }, [String(r.position)]),
+        el('td', { 'data-label': 'Website' }, [el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [dom])]),
+        el('td', { 'data-label': 'Titel der Seite' }, [r.title || '']),
       ]));
     });
-    var box = el('div', {}, [el('h5', {}, ['Top-Ergebnisse bei Google (organisch)']), serpList]);
+    table.appendChild(tbody);
+    var box = el('div', {}, [el('h5', {}, ['Top-Ergebnisse bei Google' + (q ? ' für ' + geoQuoted(q) : '') + ' (organisch)']), el('div', { class: 'cvz-cs-table-wrap' }, [table])]);
     if (unknown > 0) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Bei ' + unknown + (unknown === 1 ? ' Treffer' : ' Treffern') + ' liefert Google nur eine Weiterleitung, die Domain ist deshalb nicht erkennbar. Der Titel zeigt, um welche Seite es geht, der Link führt zur Seite.']));
     return box;
   }
@@ -5539,8 +5546,9 @@
       visBlock('ki', 'Wirst du in KI-Antworten genannt?', [renderVisibilitySection(session)]),
     ]));
     out.push(el('h4', { class: 'cvz-cs-vis-q' }, ['2. Wer wird stattdessen gezeigt?']));
-    out.push(visBlock('google', 'Suchergebnisse und AI Overview', [geoQueryLine(geo, result), geoAioBlock(geo), geoSerpBlock(geo), geoCompetitorBlock(geo)]));
-    out.push(visBlock('ki', 'Quellen, die KI-Assistenten zitieren', [geoPortalsBlock(geo, result), geoPromptTestsBlock(geo)]));
+    var q2 = geoSerpQuery(geo, result); // NEU: Keyword in den Überschriften statt versteckt in einer Zeile
+    out.push(visBlock('google', q2 ? 'Google-Suche nach ' + geoQuoted(q2) : 'Suchergebnisse und AI Overview', [geoQueryLine(geo, result), geoAioBlock(geo, q2), geoSerpBlock(geo, q2), geoCompetitorBlock(geo)]));
+    out.push(visBlock('ki', q2 ? 'Googles KI-Antworten rund um ' + geoQuoted(q2) + ' und eure Testfragen' : 'Quellen, die KI-Assistenten zitieren', [geoPortalsBlock(geo, result), geoPromptTestsBlock(geo)]));
     out.push(el('h4', { class: 'cvz-cs-vis-q' }, ['3. Was ihr tut']));
     out.push(visBlock('beides', 'Auf euren Seiten: Formate mit Chancen, zitiert zu werden', [
       geo && geo.citation_strategy_note ? renderProse(geo.citation_strategy_note, 'cvz-cs-citation-note') : null,
