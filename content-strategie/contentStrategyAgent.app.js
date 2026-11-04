@@ -212,6 +212,7 @@
       '.cvz-cs-notplanned{margin:14px 0 6px;}',
       '.cvz-cs-vis-query{margin:4px 0 10px;font-size:13px;color:var(--cvz-muted);}',
       '.cvz-cs-serp-table td:first-child{white-space:nowrap;width:1%;}',
+      '.cvz-cs-portal-general td{color:var(--cvz-muted);}',
       '.cvz-cs-serp-list{margin:4px 0;padding-left:0;list-style:none;}',
       '.cvz-cs-serp-list li{margin:0 0 6px;overflow-wrap:anywhere;}',
       '.cvz-cs-serp-pos{display:inline-block;min-width:58px;font-size:13px;color:var(--cvz-muted);}',
@@ -5492,23 +5493,52 @@
     });
     return el('div', {}, [el('h5', {}, ['Was Wettbewerber-Seiten konkret enthalten']), compList]);
   }
+  // GEÄNDERT: Grundlage nennen (wie viele KI-Antworten auf Fragen mit dem Begriff), Spalten verständlich benennen, allgemeine Plattformen
+  // kennzeichnen. Ältere Berichte haben keine Grundlage: Ihre Liste zählt alle Antworten, in denen die Wörter irgendwo vorkommen.
+  var GEO_GENERAL_PLATFORMS = ['youtube.com', 'wikipedia.org', 'linkedin.com', 'facebook.com', 'instagram.com', 'reddit.com', 'x.com', 'twitter.com', 'tiktok.com', 'pinterest.com', 'quora.com', 'amazon.de', 'amazon.com', 'apps.apple.com', 'play.google.com'];
+  function geoIsGeneralPlatform(p) {
+    if (p.general_platform) return true;
+    var d = String(p.domain || '').toLowerCase().replace(/^www\./, '');
+    return GEO_GENERAL_PLATFORMS.some(function (x) { return d === x || d.slice(-x.length - 1) === '.' + x; });
+  }
   function geoPortalsBlock(geo, result) {
     if (!geo) return null;
     var q = geoSerpQuery(geo, result);
-    var box = el('div', {}, [el('h5', {}, ['Welche Domains Googles KI-Antworten am häufigsten nennen' + (geo.own_domain_already_cited ? ' (eure Domain ist dabei)' : '')])]);
-    // NEU: Worauf sich die Zählung bezieht. Das sind keine Antworten auf eure Testfragen, sondern ausgewertete KI-Antworten von Google zum Thema.
-    box.appendChild(el('p', { class: 'cvz-cs-hint' }, [
-      'Gezählt wird, wie oft eine Domain in Googles KI-Antworten (AI Overviews) zu Suchanfragen ' + (q ? 'rund um „' + q.text + '“' : 'zum Thema') + ' genannt wird. Grundlage ist eine laufende Auswertung des Datenanbieters, nicht eure eigenen Testfragen. Die stehen weiter unten.',
-    ]));
+    var basis = geo.portals_basis || null;
+    var box = el('div', {}, [el('h5', {}, ['Welche Domains Googles KI-Antworten als Quelle nennen' + (geo.own_domain_already_cited ? ' (eure Domain ist dabei)' : '')])]);
+    if (basis) {
+      box.appendChild(el('p', { class: 'cvz-cs-vis-query' }, [
+        'Grundlage: ' + basis.answers.toLocaleString('de-DE') + ' KI-Antworten von Google (AI Overviews, Deutschland), bei denen ' + (q ? geoQuoted(q) : 'der Begriff') + ' in der Frage des Nutzers steht' +
+          (basis.ai_search_volume ? ', zusammen ca. ' + basis.ai_search_volume.toLocaleString('de-DE') + ' Suchanfragen pro Monat' : '') + '.' +
+          (basis.answers > 0 && basis.answers < 20 ? ' Kleine Stichprobe, vorsichtig lesen.' : ''),
+        tip('Der Datenanbieter wertet laufend Googles KI-Antworten aus. Gezählt wird, in wie vielen dieser Antworten eine Domain als Quelle verlinkt ist. Das sind nicht eure eigenen Testfragen, die stehen weiter unten.', 'Wie entstehen die Zahlen?'),
+      ]));
+    } else if (geo.top_portals && geo.top_portals.length > 0) {
+      box.appendChild(el('p', { class: 'cvz-cs-gsc-hint' }, ['Älterer Bericht: Diese Liste zählt alle KI-Antworten, in denen die Wörter irgendwo vorkommen, auch zu fremden Themen (zum Beispiel Aktien). Deshalb stehen dort oft Finanzportale und allgemeine Plattformen. Für die Strategie nur eingeschränkt aussagekräftig. Ein neuer Lauf zählt nur Antworten auf passende Fragen.']));
+    }
     if (geo.top_portals && geo.top_portals.length > 0) {
-      var list = el('ul', {});
+      var table = el('table', { class: 'cvz-cs-table cvz-cs-table-cards cvz-cs-portal-table' });
+      table.appendChild(el('thead', {}, [el('tr', {}, [el('th', {}, ['Domain']), el('th', {}, [basis ? 'Als Quelle zitiert' : 'Erwähnungen']), el('th', {}, ['Suchanfragen hinter diesen Antworten']), el('th', {}, ['Einordnung'])])]));
+      var tbody = el('tbody');
       geo.top_portals.forEach(function (p) {
-        var volumeText = typeof p.ai_search_volume === 'number' ? ', AI-Search-Volumen ca. ' + p.ai_search_volume : '';
-        list.appendChild(el('li', {}, [p.domain + (p.mention_count ? ' (' + p.mention_count + 'x' + volumeText + ')' : volumeText) + (p.note ? ' - ' + p.note : '')]));
+        var general = geoIsGeneralPlatform(p);
+        var kind = [];
+        if (general) kind.push(el('span', { class: 'cvz-cs-badge' }, ['Allgemeine Plattform']));
+        if (p.note) kind.push((kind.length ? ' ' : '') + p.note);
+        tbody.appendChild(el('tr', { class: general ? 'cvz-cs-portal-general' : '' }, [
+          el('td', { 'data-label': 'Domain' }, [p.domain]),
+          el('td', { 'data-label': basis ? 'Als Quelle zitiert' : 'Erwähnungen' }, [basis ? 'in ' + p.mention_count + ' von ' + basis.answers + ' Antworten' : String(p.mention_count) + '×']),
+          el('td', { 'data-label': 'Suchanfragen hinter diesen Antworten' }, [typeof p.ai_search_volume === 'number' ? 'ca. ' + p.ai_search_volume.toLocaleString('de-DE') + ' pro Monat' : 'nicht ermittelt']),
+          el('td', { 'data-label': 'Einordnung' }, kind.length ? kind : ['']),
+        ]));
       });
-      box.appendChild(list);
+      table.appendChild(tbody);
+      box.appendChild(el('div', { class: 'cvz-cs-table-wrap' }, [table]));
+      if (geo.top_portals.some(geoIsGeneralPlatform)) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Allgemeine Plattformen wie YouTube oder Wikipedia werden zu fast jedem Thema zitiert. Sie sind keine Themen-Wettbewerber, zeigen aber, welches Format gefragt ist (zum Beispiel Video).']));
     } else {
-      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine zitierten Portale gefunden oder Daten nicht verfügbar.']));
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, [basis && basis.answers === 0
+        ? 'Keine KI-Antworten von Google gefunden, bei denen ' + (q ? geoQuoted(q) : 'der Begriff') + ' in der Frage steht. Das Thema ist für diese Auswertung zu klein oder zu neu. Daraus folgt nichts über eure Chancen.'
+        : 'Keine zitierten Domains gefunden oder Daten nicht verfügbar.']));
     }
     return box;
   }
