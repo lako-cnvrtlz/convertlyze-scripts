@@ -6,6 +6,9 @@
     containerId: 'cvz-content-strategy-agent',
     settingsUrl: '/member/einstellungen#integrationen',
     landingpageAssistantUrl: '/member/landingpage-assistant',
+    // NEU: Aufbau-Tool für Pillar Pages. Standard ist derselbe Assistent mit page_type=pillar (die API kennt den Seitentyp "pillar").
+    // Liegt das Pillar-Tool unter einer eigenen Adresse, hier per window.CVZ_CONTENT_STRATEGY_CONFIG überschreiben.
+    pillarAssistantUrl: '/member/landingpage-assistant',
     pollIntervalMs: 3000,
     pollTimeoutMs: 42 * 60 * 1000, // muss über BACKGROUND_TURN_TIMEOUT_MS (40 Min) im Backend liegen
     chatPollIntervalMs: 1500,
@@ -207,6 +210,19 @@
       '.cvz-cs-rollout-note p{margin:0 0 6px;}',
       '.cvz-cs-rollout-filter{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}',
       '.cvz-cs-notplanned{margin:14px 0 6px;}',
+      '.cvz-tp-recheck{margin:14px 0;}',
+      '.cvz-tp-reqs{margin:10px 0 14px;padding:10px 12px;background:rgba(79,209,197,.06);border-left:3px solid var(--cvz-teal);}',
+      '.cvz-tp-req{margin:8px 0 0;padding-top:8px;border-top:1px solid rgba(148,163,184,.2);}',
+      '.cvz-tp-req p{margin:0 0 4px;}',
+      '.cvz-tp-guide{margin:2px 0 6px;font-size:13px;color:var(--cvz-muted);}',
+      '.cvz-tp-guide ul{margin:2px 0 4px;padding-left:18px;}',
+      '.cvz-tp-guide li{margin:0 0 2px;}',
+      '.cvz-tp-soft{margin:2px 0;font-size:13px;color:#fbbf24;}',
+      '.cvz-tp-need{margin:8px 0;padding:8px 10px;border:1px solid rgba(148,163,184,.25);}',
+      '.cvz-tp-need p{margin:4px 0 0;}',
+      '.cvz-tp-need-fehlt{background:rgba(239,68,68,.1);color:#fca5a5;border-color:rgba(239,68,68,.2);}',
+      '.cvz-tp-need-unklar{background:rgba(245,158,11,.12);color:#fcd34d;border-color:rgba(245,158,11,.25);}',
+      '.cvz-tp-need-vorhanden{background:rgba(34,197,94,.12);color:#86efac;border-color:rgba(34,197,94,.25);}',
       '.cvz-cs-prompt-line{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}',
       '.cvz-cs-prompt-line label{flex:1;min-width:0;overflow-wrap:anywhere;}',
       '.cvz-cs-prompt-link{background:none;border:0;padding:0;font:inherit;font-size:13px;color:var(--cvz-teal);cursor:pointer;text-decoration:underline;white-space:nowrap;}',
@@ -5102,6 +5118,7 @@
     ]);
     var footer = el('div', { class: 'cvz-cs-page-card-footer' }, [statusRow]);
     if (page.page_type === 'conversion_landingpage') footer.appendChild(buildLandingpageButton(page.topic));
+    if (page.page_type === 'pillar_page') footer.appendChild(buildPillarButton(page)); // NEU
     card.appendChild(footer);
     return outer;
   }
@@ -5162,6 +5179,12 @@
       box.appendChild(renderCurrentStateTable(generalRows, isEstimate));
     }
     return box;
+  }
+
+  // NEU: Button zum Pillar-Aufbau, wie "Jetzt mit dem Landingpage-Tool bauen" bei der Conversion-Seite
+  function buildPillarButton(page) {
+    var href = CONFIG.pillarAssistantUrl + '?new=1&page_type=pillar&topic=' + encodeURIComponent(page.topic || '') + (page.keyword ? '&keyword=' + encodeURIComponent(page.keyword) : '');
+    return el('a', { class: 'cvz-cs-build-btn', href: href }, ['Jetzt mit dem Pillar-Page-Tool bauen']);
   }
 
   function buildLandingpageButton(topic) {
@@ -5779,6 +5802,23 @@
     { value: 'methode', label: 'Methode oder Erfahrungswerte', hint: 'z. B. Bewertungsraster mit 12 Kriterien, nach dem wir intern arbeiten' },
     { value: 'werkzeug', label: 'Vorhandenes Werkzeug', hint: 'z. B. Skript, das Berechtigungen in 12 Punkten prüft' },
   ];
+  // NEU: Was eine Angabe je Art braucht, damit daraus Gated Content werden kann. Steht unter dem Beschreibungsfeld und wechselt mit der Art.
+  var TP_INV_GUIDE = {
+    daten: ['Was wurde ausgewertet oder gemessen (z. B. Laufzeit, Kosten, Fehlerquote)', 'Wie viel: Anzahl Projekte, Kunden oder Datensätze', 'Zeitraum (z. B. 2019 bis 2025)', 'Herkunft (z. B. eigene Projektdatenbank, Ticketsystem, Umfrage unter 80 Kunden)'],
+    fall: ['Wer: Branche und Größe des Kunden (Name nur, wenn freigegeben)', 'Ausgangslage: welches Problem', 'Was ihr getan habt, in einem Satz', 'Ergebnis in Zahlen und in welcher Zeit (z. B. Kosten minus 30 Prozent in 9 Monaten)'],
+    methode: ['Was die Methode entscheidet oder bewertet', 'Aufbau: Anzahl Kriterien oder Schritte', 'Wie oft schon angewendet (z. B. in 40 Projekten)', 'Was ein Kunde danach weiß, das er vorher nicht wusste'],
+    werkzeug: ['Was es tut: welche Eingaben, welches Ergebnis', 'Zustand: fertig, intern im Einsatz oder nur Entwurf', 'Ob Kunden es selbst nutzen dürfen oder ihr es für sie ausführt'],
+  };
+  // Weiche Hinweise (blockieren nicht): machen eine Angabe stärker, sind aber keine Pflicht für den Server.
+  function tpSoftHints(e) {
+    var d = String(e.detail || '');
+    var out = [];
+    var hasPeriod = /(19|20)\d\d|\b\d+\s*(jahr|jahre|jahren|monat|monate|monaten|wochen|quartal)/i.test(d);
+    if ((e.kind === 'daten' || e.kind === 'fall') && d.trim().length >= TP_DETAIL_MIN && !hasPeriod) out.push('Noch stärker mit einem Zeitraum (z. B. 2019 bis 2025 oder „in 9 Monaten“).');
+    if (e.kind === 'fall' && d.trim().length >= TP_DETAIL_MIN && !/\d/.test(d)) out.push('Ein Ergebnis in Zahlen macht den Fall erst zum Beleg (z. B. „Kosten minus 30 Prozent“).');
+    if (e.kind === 'methode' && d.trim().length >= TP_DETAIL_MIN && !/\d/.test(d)) out.push('Nenne den Umfang, z. B. Anzahl Kriterien oder wie oft ihr die Methode angewendet habt.');
+    return out;
+  }
   var TP_RELEASES = [
     { value: 'frei', label: 'Darf genannt werden' },
     { value: 'anonymisiert', label: 'Nur anonymisiert' },
@@ -5920,27 +5960,56 @@
         return;
       }
       if (startError) root.appendChild(el('div', { class: 'cvz-cs-error' }, [el('p', {}, [startError])]));
-      var needs = tpGateNeeds(result);
-      if (needs.length > 0) {
-        root.appendChild(el('div', { class: 'cvz-cs-callout cvz-tp-needs' }, [
-          el('strong', {}, ['Aus dem Bericht: ']),
-          'Bei den Lead-Magneten im Abschnitt Funnel steht, welche Substanz sie als Gated Content tragen würde. Trage unten ein, was davon ihr wirklich habt:',
-          tpList(needs),
-        ]));
-      }
+      // GEÄNDERT: Die Liste "Aus dem Bericht" steht jetzt im Formular, mit Knopf zum Vorbereiten eines Eintrags (siehe renderInventoryForm).
       root.appendChild(renderInventoryForm());
     }
 
-    function renderInventoryForm() {
+    // GEÄNDERT: recheck = true für "Angaben ergänzen und Gated Content neu prüfen" nach dem Plan. Gleiches Formular, vorbelegt mit dem
+    // bisherigen Inventar, eigener Entwurf, anderer Endpunkt (POST /:id/gated-content).
+    function renderInventoryForm(recheck) {
       var wrap = el('div', { class: 'cvz-tp-form' });
-      var draft = tpLoadDraft(sessionId);
-      var entries = draft && draft.entries.length ? draft.entries.slice(0, TP_LIMITS.entries) : [];
-      var restrictions = draft && draft.restrictions ? draft.restrictions : '';
-      wrap.appendChild(el('h4', { class: 'cvz-cs-section-title' }, ['Was habt ihr, das andere nicht haben?']));
-      wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [
-        'Eigene Daten, Kundenfälle, Methoden oder Werkzeuge, die sich als Gegenwert für eine E-Mail-Adresse eignen. Je konkreter, desto besser: Umfang, Zeitraum, Herkunft. ' +
-        'Hast du nichts davon, lass die Liste leer. Dann entsteht der Plan ohne Gated Content.',
+      var draftId = recheck ? sessionId + '-recheck' : sessionId;
+      var draft = tpLoadDraft(draftId);
+      var prevInv = recheck && result.inventory ? result.inventory : null;
+      var entries = draft && draft.entries.length ? draft.entries.slice(0, TP_LIMITS.entries)
+        : prevInv ? (prevInv.entries || []).map(function (e) { return { kind: e.kind, title: e.title, detail: e.detail, release: e.release }; }).slice(0, TP_LIMITS.entries) : [];
+      var restrictions = draft && draft.restrictions ? draft.restrictions : (prevInv && prevInv.restrictions) || '';
+      if (!recheck) wrap.appendChild(el('h4', { class: 'cvz-cs-section-title' }, ['Was habt ihr, das andere nicht haben?']));
+      wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [recheck
+        ? 'Ergänze oder präzisiere eure Angaben so, wie oben unter „Das müsstet ihr liefern“ beschrieben. Geprüft wird nur der Gated-Content-Teil, Touchpoints und E-Mails bleiben, wie sie sind.'
+        : 'Eigene Daten, Kundenfälle, Methoden oder Werkzeuge, die sich als Gegenwert für eine E-Mail-Adresse eignen. Je konkreter, desto besser: Umfang, Zeitraum, Herkunft. ' +
+          'Hast du nichts davon, lass die Liste leer. Dann entsteht der Plan ohne Gated Content.',
       ]));
+      // NEU: Was die Ideen aus dem Funnel-Abschnitt bräuchten, damit sie hinter einer E-Mail-Adresse gerechtfertigt wären
+      var reqs = [];
+      var reqSeen = {};
+      (result.lead_magnets || []).forEach(function (m) {
+        var gr = m && m.gate_requirement;
+        if (!gr || !gr.need || reqSeen[gr.kind + '|' + gr.need]) return;
+        reqSeen[gr.kind + '|' + gr.need] = true;
+        reqs.push({ title: m.title, phase: tpPhaseLabel(m.phase), kind: gr.kind, kind_label: gr.kind_label, need: gr.need });
+      });
+      if (reqs.length > 0) {
+        var reqBox = el('div', { class: 'cvz-tp-reqs cvz-tp-needs' }, [
+          el('p', { class: 'cvz-cs-brief-label' }, ['Was eure Strategie dafür bräuchte']),
+          el('p', { class: 'cvz-cs-hint' }, ['Für diese Ideen aus dem Funnel-Abschnitt wäre klar, welche Substanz sie tragen würde. Habt ihr etwas davon, bereite den Eintrag mit einem Klick vor und ergänze die Details.']),
+        ]);
+        reqs.slice(0, 5).forEach(function (q) {
+          var prep = el('button', { type: 'button', class: 'cvz-cs-notplanned-btn' }, ['+ Als Eintrag vorbereiten']);
+          prep.addEventListener('click', function () {
+            addRow({ kind: q.kind, title: 'Grundlage für: ' + q.title, detail: '', release: 'anonymisiert', placeholder: q.need });
+            refresh(); persist();
+            var last = rows[rows.length - 1];
+            if (last) { try { last.detail.focus(); } catch (e) { /* ohne Fokus weiter */ } }
+          });
+          reqBox.appendChild(el('div', { class: 'cvz-tp-req' }, [
+            el('p', {}, [el('strong', {}, [q.title]), q.phase ? el('span', { class: 'cvz-cs-funnel-todo-meta' }, [q.phase + ' · ' + q.kind_label]) : null]),
+            el('p', { class: 'cvz-cs-hint' }, ['Gebraucht wird: ' + q.need]),
+            prep,
+          ]));
+        });
+        wrap.appendChild(reqBox);
+      }
       var list = el('div', {});
       var summary = el('p', { class: 'cvz-cs-hint cvz-tp-summary' });
       var warn = el('div', {});
@@ -5948,7 +6017,7 @@
       var rows = [];
 
       function persist() {
-        tpSaveDraft(sessionId, { entries: collect(), restrictions: restrictionsInput.value });
+        tpSaveDraft(draftId, { entries: collect(), restrictions: restrictionsInput.value });
       }
       function collect() {
         return rows.map(function (r) { return { kind: r.kind.value, title: r.title.value, detail: r.detail.value, release: r.release.value }; });
@@ -5961,6 +6030,12 @@
           if (c.state === 'ok') usable++;
           rows[i].status.textContent = c.text;
           rows[i].status.className = 'cvz-tp-status cvz-tp-status-' + c.state;
+          // NEU: Ausfüllhilfe je Art und weiche Hinweise
+          clear(rows[i].guide);
+          var g = TP_INV_GUIDE[e.kind] || [];
+          rows[i].guide.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Damit daraus eine Empfehlung wird, beschreibe:']));
+          rows[i].guide.appendChild(el('ul', {}, g.map(function (x) { return el('li', {}, [x]); })));
+          tpSoftHints(e).forEach(function (h) { rows[i].guide.appendChild(el('p', { class: 'cvz-tp-soft' }, [h])); });
           rows[i].num.textContent = 'Eintrag ' + (i + 1);
         });
         addBtn.style.display = rows.length >= TP_LIMITS.entries ? 'none' : '';
@@ -5978,12 +6053,13 @@
         kind.value = e.kind;
         var title = el('input', { type: 'text', maxlength: String(TP_LIMITS.title), placeholder: 'Kurzer Titel, z. B. Projektdaten 2019 bis 2025' });
         title.value = e.title || '';
-        var detail = el('textarea', { class: 'cvz-cs-autogrow', rows: '2', maxlength: String(TP_LIMITS.detail), placeholder: TP_INV_KINDS[0].hint });
+        var detail = el('textarea', { class: 'cvz-cs-autogrow', rows: '2', maxlength: String(TP_LIMITS.detail), placeholder: e.placeholder || (TP_INV_KINDS.filter(function (k) { return k.value === e.kind; })[0] || TP_INV_KINDS[0]).hint });
         detail.value = e.detail || '';
         var release = el('select', {}, TP_RELEASES.map(function (r) { return el('option', { value: r.value }, [r.label]); }));
         release.value = e.release || 'anonymisiert';
         var num = el('span', { class: 'cvz-tp-entry-num' });
         var status = el('p', { class: 'cvz-tp-status' });
+        var guide = el('div', { class: 'cvz-tp-guide' }); // NEU
         var remove = el('button', { type: 'button', class: 'cvz-cs-link-btn' }, ['Entfernen']);
         var card = el('div', { class: 'cvz-tp-entry' }, [
           el('div', { class: 'cvz-cs-role-head' }, [num, remove]),
@@ -5993,9 +6069,10 @@
           ]),
           el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, ['Titel']), title]),
           el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, ['Was genau? Umfang, Zeitraum, Herkunft']), detail]),
+          guide,
           status,
         ]);
-        var row = { card: card, kind: kind, title: title, detail: detail, release: release, num: num, status: status };
+        var row = { card: card, kind: kind, title: title, detail: detail, release: release, num: num, status: status, guide: guide };
         kind.addEventListener('change', function () {
           for (var i = 0; i < TP_INV_KINDS.length; i++) if (TP_INV_KINDS[i].value === kind.value) detail.setAttribute('placeholder', TP_INV_KINDS[i].hint);
           refresh(); persist();
@@ -6024,8 +6101,10 @@
       wrap.appendChild(el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, ['Was darf nie nach draußen? (optional)']), restrictionsInput]));
       wrap.appendChild(warn);
       wrap.appendChild(formError);
-      wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Der Plan wird einmal erstellt. Prüfe deine Angaben vor dem Start. Das dauert etwa zwei Minuten, du kannst die Seite währenddessen offen lassen.']));
-      var startBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Touchpoint-Plan erstellen']);
+      wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [recheck
+        ? 'Die Prüfung dauert etwa eine Minute. Ergibt sie keine neuen Ideen, bleiben vorhandene Ideen erhalten.'
+        : 'Der Plan wird einmal erstellt. Prüfe deine Angaben vor dem Start. Das dauert etwa zwei Minuten, du kannst die Seite währenddessen offen lassen.']));
+      var startBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, [recheck ? 'Gated Content neu prüfen' : 'Touchpoint-Plan erstellen']);
       startBtn.addEventListener('click', function () {
         var data = collect();
         var filled = data.filter(function (e) { return String(e.title).trim().length >= 2; });
@@ -6036,6 +6115,7 @@
         var payload = { entries: filled.map(function (e) { return { kind: e.kind, title: String(e.title).trim().slice(0, TP_LIMITS.title), detail: String(e.detail).trim().slice(0, TP_LIMITS.detail), release: e.release }; }) };
         var r = restrictionsInput.value.trim();
         if (r) payload.restrictions = r.slice(0, TP_LIMITS.restrictions);
+        if (recheck) { runRecheck(payload, startBtn, formError); return; }
         apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId) + '/touchpoint-plan', { method: 'POST', body: JSON.stringify({ inventory: payload }) })
           .then(function () {
             startError = '';
@@ -6059,6 +6139,53 @@
       refresh();
       setTimeout(function () { rows.forEach(function (r) { r.detail.style.height = 'auto'; r.detail.style.height = Math.max(r.detail.scrollHeight + 2, 54) + 'px'; }); }, 50);
       return wrap;
+    }
+
+    // NEU: Neuprüfung des Gated-Content-Teils. Danach den Stand frisch laden (auch das Touchpoint-Diagramm, damit Änderungen darin nicht
+    // durch einen älteren Stand im Speicher überzeichnet werden) und neu zeichnen.
+    var recheckNotice = '';
+    function runRecheck(payload, btn, errorEl) {
+      btn.setAttribute('disabled', 'disabled');
+      btn.textContent = 'Wird geprüft …';
+      errorEl.textContent = '';
+      apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId) + '/gated-content', { method: 'POST', body: JSON.stringify({ inventory: payload }) })
+        .then(function (resp) {
+          recheckNotice = resp && resp.kept_previous ? 'Neu geprüft: keine weiteren Ideen, die bisherigen bleiben.' : 'Neu geprüft mit euren ergänzten Angaben.';
+          return apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId));
+        })
+        .then(function (fresh) {
+          if (fresh && fresh.result) {
+            ['inventory', 'gated_content', 'gated_rechecks'].forEach(function (k) { if (fresh.result[k] !== undefined) result[k] = fresh.result[k]; });
+            session.touchpoint_diagram = fresh.touchpoint_diagram || session.touchpoint_diagram || null;
+          }
+          tpClearDraft(sessionId + '-recheck');
+          paint();
+        })
+        .catch(function (err) {
+          btn.removeAttribute('disabled');
+          btn.textContent = 'Gated Content neu prüfen';
+          var code = err && err.body && err.body.code;
+          errorEl.textContent = code === 'zeitlimit' ? 'Die Prüfung hat zu lange gedauert. Das liegt nicht an deinen Angaben, bitte versuche es in ein paar Minuten erneut. Deine Angaben sind gespeichert.'
+            : err && err.network ? 'Die Verbindung wurde unterbrochen. Bitte versuche es in ein paar Sekunden erneut. Deine Angaben sind gespeichert.'
+              : (err && err.message ? err.message : 'Neuprüfung fehlgeschlagen.');
+        });
+    }
+    function renderRecheckPanel() {
+      if (!isCreator || !result.gated_content) return null;
+      var rc = result.gated_rechecks || {};
+      var used = typeof rc.count === 'number' ? rc.count : 0;
+      var max = 3;
+      var noIdeas = result.gated_content.verdict !== 'ideen' || !(result.gated_content.ideas || []).length;
+      var box = el('details', { class: 'cvz-cs-expand cvz-tp-recheck' });
+      if (noIdeas && used < max && result.gated_content.fit && result.gated_content.fit.level === 'passend') box.open = true;
+      box.appendChild(el('summary', {}, [noIdeas ? 'Angaben ergänzen und Gated Content neu prüfen' : 'Weitere Substanz ergänzen und neu prüfen']));
+      if (used >= max) {
+        box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Gated Content wurde für diese Strategie schon ' + max + ' Mal neu geprüft. Für weitere Prüfungen starte eine neue Strategie.']));
+        return box;
+      }
+      box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Noch ' + (max - used) + ' von ' + max + ' Neuprüfungen für diese Strategie.' + (rc.last_at ? ' Zuletzt geprüft am ' + new Date(rc.last_at).toLocaleDateString('de-DE') + '.' : '')]));
+      box.appendChild(renderInventoryForm(true));
+      return box;
     }
 
     function renderRunning() {
@@ -6112,10 +6239,16 @@
         if (plan.consent_note) root.appendChild(el('p', { class: 'cvz-cs-callout' }, [plan.consent_note]));
         if (result.nurture_plan && result.nurture_plan.buying_center) root.appendChild(renderBuyingCenter(result.nurture_plan.buying_center));
         if (result.nurture_plan && result.nurture_plan.note) root.appendChild(el('p', { class: 'cvz-cs-hint' }, [result.nurture_plan.note]));
+        if (recheckNotice) root.appendChild(el('p', { class: 'cvz-cs-callout' }, [recheckNotice]));
         if (gated) root.appendChild(renderGatedBlock(gated));
+        var rcPanel = renderRecheckPanel(); // NEU: Angaben ergänzen und neu prüfen
+        if (rcPanel) root.appendChild(rcPanel);
         // GEÄNDERT: "Suchen Interessenten selbst?" steht jetzt im Traffic-Block der Zusammenfassung (gleiche Frage, einmal).
       } else {
+        if (recheckNotice) root.appendChild(el('p', { class: 'cvz-cs-callout' }, [recheckNotice]));
         if (gated) root.appendChild(renderGatedBlock(gated));
+        var rcPanel2 = renderRecheckPanel();
+        if (rcPanel2) root.appendChild(rcPanel2);
         root.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für diesen Lauf liegt kein Touchpoint-Plan vor, die Auswertung ergab keine belastbaren Touchpoints.']));
       }
       if (result.inventory && result.inventory.entries && result.inventory.entries.length > 0) root.appendChild(renderInventorySummary(result.inventory));
@@ -6125,10 +6258,46 @@
     return root;
   }
 
+  // NEU: Einordnung, wenn kein Gated Content entsteht (Server: contentStrategyGatedFit.ts). Sagt, ob das Thema taugt und was fehlt.
+  var GATED_NEED_STATUS = { fehlt: 'Fehlt', unklar: 'Angegeben, reicht noch nicht', vorhanden: 'Vorhanden' };
+  function renderGatedFit(fit) {
+    var box = el('div', { class: 'cvz-tp-verdict-none cvz-tp-fit cvz-tp-fit-' + fit.level }, [
+      el('p', { class: 'cvz-cs-brief-label' }, ['Ergebnis']),
+      el('p', { class: 'cvz-tp-verdict-title' }, [fit.headline]),
+    ]);
+    (fit.reasons || []).forEach(function (r) { box.appendChild(el('p', {}, [r])); });
+    if ((fit.needs || []).length > 0) {
+      box.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Das müsstet ihr liefern']));
+      fit.needs.forEach(function (n) {
+        var kids = [
+          el('div', { class: 'cvz-cs-page-card-badges' }, [
+            el('span', { class: 'cvz-cs-badge cvz-tp-need-' + n.status }, [GATED_NEED_STATUS[n.status] || n.status]),
+            el('span', { class: 'cvz-cs-badge' }, [n.kind_label]),
+            n.phase_label ? el('span', { class: 'cvz-cs-badge' }, [n.phase_label]) : null,
+          ]),
+          el('p', {}, [el('strong', {}, ['Für die Idee „' + n.idea_title + '“: ']), n.need]),
+        ];
+        if (n.entry_problem) kids.push(el('p', { class: 'cvz-cs-hint' }, ['Euer Eintrag „' + n.entry_title + '“: ' + n.entry_problem + '.']));
+        box.appendChild(el('div', { class: 'cvz-tp-need' }, kids));
+      });
+    }
+    if ((fit.entry_fixes || []).length > 0) {
+      box.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Eure Einträge, die noch nicht reichen']));
+      box.appendChild(el('ul', {}, fit.entry_fixes.map(function (f) { return el('li', {}, [el('strong', {}, [f.title]), ' (' + f.kind_label + '): ' + f.fix]); })));
+    }
+    box.appendChild(el('p', {}, [el('strong', {}, ['Nächster Schritt: ']), fit.next_step]));
+    return box;
+  }
+
   function renderGatedBlock(gated) {
     var box = el('div', { class: 'cvz-tp-gated' });
     box.appendChild(el('h5', {}, ['Gated Content auf Basis eurer Substanz']));
     if (gated.note) box.appendChild(el('p', { class: 'cvz-cs-hint' }, [gated.note]));
+    if (gated.recheck_note) box.appendChild(el('p', { class: 'cvz-cs-callout' }, [gated.recheck_note]));
+    if ((gated.verdict !== 'ideen' || !gated.ideas || gated.ideas.length === 0) && gated.fit) {
+      box.appendChild(renderGatedFit(gated.fit));
+      return box;
+    }
     if (gated.verdict !== 'ideen' || !gated.ideas || gated.ideas.length === 0) {
       box.appendChild(el('div', { class: 'cvz-tp-verdict-none' }, [
         el('p', { class: 'cvz-cs-brief-label' }, ['Ergebnis']),
