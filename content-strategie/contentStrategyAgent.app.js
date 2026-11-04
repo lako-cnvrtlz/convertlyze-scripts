@@ -1081,10 +1081,12 @@
     return apiFetch('/api/content-strategy/tracker-topics')
       .then(function (data) {
         state.trackerTopics = (data && data.topics) || [];
+        state.trackerTopicsError = null;
         return state.trackerTopics;
       })
       .catch(function (err) {
         console.warn('Tracker-Themen konnten nicht geladen werden:', err.message);
+        state.trackerTopicsError = err && err.message ? err.message : 'unbekannter Fehler'; // NEU: im Formular sichtbar statt still ausgeblendet
         state.trackerTopics = [];
         return state.trackerTopics;
       });
@@ -1289,7 +1291,7 @@
     alsoChecks.forEach(function (c) { c.box.addEventListener('change', refreshAlso); });
     offerSelect.addEventListener('change', refreshAlso);
     refreshAlso();
-    var alsoBox = el('details', { class: 'cvz-cs-also' }, [
+    var alsoBox = el('details', { class: 'cvz-cs-also cvz-cs-expand' }, [ // GEÄNDERT: als Aufklapp-Knopf erkennbar
       el('summary', {}, ['Gehört zu diesem Angebot noch etwas dazu? (optional)', tip('Zum Beispiel ein IT-Projekt, nach dem ihr den Betrieb übernehmt, oder eine Software, zu der ihr Einführung und Schulung anbietet. Das ändert keine Regel der Strategie: Ton, Weg zur Zielaktion und Kundenwert folgen dem Hauptangebot. Die Strategie greift die Zusatzangebote dort auf, wo Käufer danach fragen.', 'Wozu dient das?')]),
       alsoInfo,
       alsoList,
@@ -1311,8 +1313,17 @@
       el('span', { class: 'cvz-cs-label-text' }, ['Welche Lead-Magneten oder kostenlosen Tools gibt es schon? (optional)', tip('Die Strategie schlägt Zwischenschritte für den Funnel vor, zum Beispiel Checks, Rechner oder Vorlagen. Was du schon hast, wird nicht doppelt vorgeschlagen.')]),
       magnetsInput,
     ]));
-    // NEU (Tracker-Verbindung): nur sichtbar, wenn der User Tracker-Themen hat.
+    // NEU (Tracker-Verbindung). GEÄNDERT: Das Feld ist immer da. Früher verschwand es still, wenn keine Tracker-Themen kamen (keine angelegt
+    // oder Abruf fehlgeschlagen). Dann sah es aus, als gäbe es die Verbindung nicht mehr.
     var trackerSelect = null;
+    if (state.trackerTopics.length === 0) {
+      form.appendChild(el('div', { class: 'cvz-cs-label' }, [
+        el('span', { class: 'cvz-cs-label-text' }, ['Daten aus dem Customer Journey Tracker einbeziehen?', tip('Die Strategie berücksichtigt dann deine gemessene KI-Sichtbarkeit je Journey-Phase, zitierte Quellen und die Wirkung bereits umgesetzter Maßnahmen.')]),
+        el('p', { class: 'cvz-cs-hint cvz-cs-tracker-empty' }, [state.trackerTopicsError
+          ? 'Deine Tracker-Themen konnten gerade nicht geladen werden (' + state.trackerTopicsError + '). Lade die Seite neu, um sie auszuwählen. Ohne Auswahl läuft die Strategie mit einer frischen Messung.'
+          : 'Für dein Konto gibt es noch kein Thema im Customer Journey Tracker. Legst du dort ein passendes Thema an, kannst du es hier auswählen, und seine Messdaten fließen in die Strategie ein.']),
+      ]));
+    }
     if (state.trackerTopics.length > 0) {
       trackerSelect = el('select', { name: 'tracker_topic_id' }, [el('option', { value: '' }, ['Keine Tracker-Daten einbeziehen'])]);
       state.trackerTopics.forEach(function (t) {
