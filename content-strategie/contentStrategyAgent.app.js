@@ -201,6 +201,30 @@
       '.cvz-cs-badge-audience{background:rgba(79,209,197,.12);color:var(--cvz-teal);border-color:rgba(79,209,197,.25);}',
       '.cvz-cs-badge-recommended{background:rgba(245,158,11,.12);color:#fcd34d;border-color:rgba(245,158,11,.25);}',
       '.cvz-cs-badge-commodity{background:rgba(239,68,68,.1);color:#fca5a5;border-color:rgba(239,68,68,.2);}',
+      '.cvz-cs-badge-rollout-zuerst{background:rgba(34,197,94,.12);color:#86efac;border-color:rgba(34,197,94,.25);}',
+      '.cvz-cs-badge-rollout-spaeter{background:rgba(148,163,184,.12);color:#cbd5e1;border-color:rgba(148,163,184,.25);}',
+      '.cvz-cs-rollout-note{margin:10px 0 12px;padding:10px 12px;border:1px solid var(--cvz-border, rgba(148,163,184,.25));border-radius:10px;}',
+      '.cvz-cs-rollout-note p{margin:0 0 6px;}',
+      '.cvz-cs-rollout-filter{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}',
+      '.cvz-cs-notplanned{margin:14px 0 6px;}',
+      '.cvz-cs-notplanned-act{display:block;margin:2px 0 0;}',
+      '.cvz-cs-notplanned-btn{font:inherit;font-size:13px;padding:3px 10px;border-radius:8px;border:1px solid rgba(148,163,184,.35);background:transparent;color:var(--cvz-heading);cursor:pointer;}',
+      '.cvz-cs-notplanned-btn:hover{border-color:#60a5fa;}',
+      '.cvz-cs-notplanned-done{font-size:13px;color:#86efac;}',
+      '.cvz-cs-own{margin:6px 0 0;}',
+      '.cvz-cs-own-card{margin:8px 0;padding:10px 12px;border:1px dashed rgba(148,163,184,.35);border-radius:10px;}',
+      '.cvz-cs-own-title{margin:4px 0 2px;font-weight:700;color:var(--cvz-heading);overflow-wrap:anywhere;}',
+      '.cvz-cs-own-note{margin:4px 0;font-size:14px;color:var(--cvz-text);white-space:pre-line;overflow-wrap:anywhere;}',
+      '.cvz-cs-own-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}',
+      '.cvz-cs-own-error{margin:6px 0;font-size:13px;color:#fca5a5;}',
+      '.cvz-cs-flow-note p{white-space:pre-line;}',
+      '.cvz-cs-notplanned > summary{cursor:pointer;font-weight:700;color:var(--cvz-heading);}',
+      '.cvz-cs-notplanned-group{margin:10px 0 0;}',
+      '.cvz-cs-notplanned-group ul{margin:4px 0 0;padding-left:18px;}',
+      '.cvz-cs-notplanned-group li{margin:0 0 4px;font-size:14px;color:var(--cvz-text);overflow-wrap:anywhere;}',
+      '.cvz-cs-cannibal{margin:0 0 12px;padding:10px 12px;border:1px solid rgba(245,158,11,.3);border-radius:10px;}',
+      '.cvz-cs-cannibal-q{margin:0 0 4px;font-weight:700;color:var(--cvz-heading);overflow-wrap:anywhere;}',
+      '.cvz-cs-cannibal-row{margin:6px 0 0;font-size:14px;color:var(--cvz-text);overflow-wrap:anywhere;}',
       /* ---- Mehrzeilige Felder, die mit dem Text wachsen ---- */
       '#cvz-content-strategy-agent textarea.cvz-cs-autogrow{display:block;width:100%;box-sizing:border-box;min-height:42px;resize:vertical;overflow:hidden;line-height:1.45;font-family:inherit;font-size:14px;}',
       '.cvz-cs-topic-option .cvz-cs-label,.cvz-cs-topic-check .cvz-cs-label{text-align:left;align-items:stretch;}',
@@ -462,9 +486,13 @@
       /* NEU (Abschnitt 5 verständlich): Aufgaben und Seiten je Phase */
       '.cvz-tp-kit{margin:14px 0;}',
       '.cvz-cs-path-fold>summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--cvz-heading);margin:0 0 8px;}',
-      '.cvz-cs-plan-tabs{display:flex;gap:0;margin:0 0 14px;border-bottom:1px solid var(--cvz-border);}',
-      '.cvz-cs-plan-tab{background:transparent;border:0;border-bottom:2px solid transparent;color:var(--cvz-muted);padding:8px 14px;font:600 14px "Geist",sans-serif;cursor:pointer;}',
-      '.cvz-cs-plan-tab.is-active{color:var(--cvz-heading);border-bottom-color:var(--cvz-teal);}',
+      '.cvz-cs-plan-switch{margin:0 0 16px;}',
+      '.cvz-cs-plan-switch .cvz-cs-hint{margin:6px 0 0;}',
+      '.cvz-cs-plan-tabs{display:flex;flex-wrap:wrap;gap:0;}',
+      '.cvz-cs-plan-tab{background:var(--cvz-surface);border:1px solid var(--cvz-border);color:var(--cvz-text);padding:10px 16px;font:600 14px "Geist",sans-serif;cursor:pointer;}',
+      '.cvz-cs-plan-tab+.cvz-cs-plan-tab{border-left:0;}',
+      '.cvz-cs-plan-tab:hover{color:var(--cvz-heading);}',
+      '.cvz-cs-plan-tab.is-active{background:rgba(79,209,197,.12);color:var(--cvz-teal);border-color:rgba(79,209,197,.5);}',
       '.cvz-cs-phase-status{margin-left:8px;text-transform:none;letter-spacing:0;font-weight:600;}',
       '.cvz-cs-build{margin-top:22px;padding-top:16px;border-top:1px solid var(--cvz-border);}',
       '.cvz-cs-build-title{margin:0 0 6px;}',
@@ -604,6 +632,36 @@
 
       /* ---- Internal Links ---- */
       '.cvz-cs-link-list{padding-left:18px;font-size:14px;}',
+      '.cvz-cs-vis-q{margin:22px 0 10px;}',
+      '.cvz-cs-vis-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;}',
+      '.cvz-cs-vis-block{padding:12px 14px;border:1px solid var(--cvz-border);background:var(--cvz-surface);margin:0 0 12px;min-width:0;}',
+      '.cvz-cs-vis-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 8px;color:var(--cvz-heading);font-size:14px;}',
+      '.cvz-cs-vis-google .cvz-cs-vis-src{background:rgba(59,130,246,.12);color:#93c5fd;border-color:rgba(59,130,246,.25);}',
+      '.cvz-cs-vis-ki .cvz-cs-vis-src{background:rgba(167,139,250,.12);color:#c4b5fd;border-color:rgba(167,139,250,.3);}',
+      '.cvz-cs-vis-beides .cvz-cs-vis-src{background:rgba(79,209,197,.12);color:var(--cvz-teal);border-color:rgba(79,209,197,.25);}',
+      '.cvz-cs-vis-block .cvz-cs-geo{margin:0;padding:0;border:0;background:transparent;}',
+      '.cvz-cs-cmp{margin:12px 0;padding:10px 12px;border:1px solid var(--cvz-border);border-left:3px solid #a78bfa;background:rgba(255,255,255,.02);}',
+      '.cvz-cs-cmp.is-compact{padding:8px 10px;margin:8px 0;}',
+      '.cvz-cs-cmp-list{margin:0 0 6px;padding-left:18px;}',
+      '.cvz-cs-cmp-list li{margin:0 0 6px;font-size:14px;color:var(--cvz-text);overflow-wrap:anywhere;}',
+      '.cvz-cs-cmp-intent{font-size:14px;margin:6px 0;color:var(--cvz-text);}',
+      '.cvz-cs-cmp-intent--passt_nicht strong,.cvz-cs-cmp-intent--teilweise strong{color:var(--cvz-amber);}',
+      '.cvz-cs-cmp-intent--passt strong{color:var(--cvz-teal);}',
+      '.cvz-cs-page-links{margin:12px 0;padding:10px 12px;border:1px solid var(--cvz-border);background:rgba(255,255,255,.02);}',
+      '.cvz-cs-page-links-sub{font-size:13px;color:var(--cvz-muted);margin:6px 0 4px;}',
+      '.cvz-cs-page-links-warn{font-size:13px;color:var(--cvz-amber);margin:6px 0 0;}',
+      '.cvz-flow-links{margin:10px 0;}',
+      '.cvz-flow-panel-sub{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--cvz-muted);margin:0 0 4px;}',
+      '.cvz-cs-link-card{padding:10px 14px;border:1px solid var(--cvz-border);border-left:3px solid var(--cvz-border);background:var(--cvz-surface);margin:0 0 8px;}',
+      '.cvz-cs-link-card.is-existing{border-left-color:var(--cvz-teal);}',
+      '.cvz-cs-link-src{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:14px;color:var(--cvz-heading);}',
+      '.cvz-cs-link-url{font-size:12px;color:var(--cvz-muted);overflow-wrap:anywhere;}',
+      '.cvz-cs-link-targets{list-style:none;margin:8px 0 0;padding:0;}',
+      '.cvz-cs-link-targets li{display:flex;gap:8px;margin:0 0 8px;font-size:14px;color:var(--cvz-text);overflow-wrap:anywhere;}',
+      '.cvz-cs-link-arrow{color:var(--cvz-teal);flex-shrink:0;}',
+      '.cvz-cs-link-meta{display:block;font-size:13px;color:var(--cvz-muted);margin-top:2px;}',
+      '.cvz-cs-link-existing{background:rgba(79,209,197,.12);color:var(--cvz-teal);border-color:rgba(79,209,197,.25);}',
+      '.cvz-cs-link-new{background:rgba(255,255,255,.06);color:var(--cvz-text);}',
       '.cvz-cs-link-list li{margin-bottom:5px;color:var(--cvz-text);}',
 
       /* ---- Prose (Markdown) ---- */
@@ -2753,8 +2811,83 @@
     return { filename: base + '-tabelle.csv', text: flowToCsv(headers, uni, ';', true), rows: rows.length };
   }
 
+  // ==== NEU: Gemeinsamer Diagramm-Stand für Liste und Content-Flow ====
+  function flowStoreCreate(sessionId, result, session) {
+    return { sessionId: sessionId, result: result, diagram: flowSanitizeStored(session && session.flow_diagram, result) || flowBuildFromResult(result), api: null, listeners: [], error: null, saveTimer: null };
+  }
+  function flowStoreNotify(store) {
+    store.listeners.forEach(function (fn) { try { fn(); } catch (e) { /* eine Ansicht darf die anderen nicht blockieren */ } });
+  }
+  // Nach einer Änderung aus der Liste: Ist das Diagramm schon aufgebaut, zeichnet und speichert es selbst. Sonst speichert die Liste.
+  function flowStoreCommit(store) {
+    if (store.api) { store.api.externalChanged(); return; }
+    store.error = null;
+    flowStoreNotify(store);
+    if (!store.sessionId) return;
+    clearTimeout(store.saveTimer);
+    store.saveTimer = setTimeout(function () {
+      var d = store.diagram;
+      apiFetch('/api/content-strategy/' + store.sessionId + '/flow', { method: 'PUT', body: JSON.stringify({ version: FLOW_VERSION, offsite_seeded: d.offsite_seeded === true ? true : undefined, nodes: d.nodes, edges: d.edges }) })
+        .then(function (data) { if (data && data.funnel_check && typeof state.funnelRefresh === 'function') state.funnelRefresh(data.funnel_check); })
+        .catch(function (err) { store.error = 'Speichern fehlgeschlagen: ' + (err && err.message ? err.message : 'unbekannter Fehler'); flowStoreNotify(store); });
+    }, 300);
+  }
+  function flowOwnPages(store) {
+    return store ? store.diagram.nodes.filter(function (n) { return n.kind === 'custom'; }) : [];
+  }
+  function flowNodeOfRef(store, ref) {
+    if (!store) return null;
+    return store.diagram.nodes.filter(function (n) { return ref === -1 ? n.kind === 'conversion' : (n.kind === 'page' && n.page_ref === ref); })[0] || null;
+  }
+  function flowNormLabel(t) { return String(t || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+  function flowHasOwnPage(store, label) {
+    return flowOwnPages(store).some(function (n) { return flowNormLabel(n.label) === flowNormLabel(label); });
+  }
+  // Eigene Seite aus der Liste anlegen. Sie kommt in eine Reihe unter alle Seiten aus dem Bericht. Rückgabe: Fehlertext oder null.
+  function flowAddOwnPage(store, label, note) {
+    var d = store.diagram;
+    if (d.nodes.length >= FLOW_LIMITS.nodes) return 'Maximal ' + FLOW_LIMITS.nodes + ' Seiten im Content-Flow.';
+    if (flowHasOwnPage(store, label)) return null;
+    var taken = {};
+    d.nodes.forEach(function (n) { taken[n.id] = true; });
+    d.edges.forEach(function (e) { taken[e.id] = true; });
+    var base = d.nodes.filter(function (n) { return n.kind !== 'custom' && n.kind !== 'offsite'; });
+    var baseY = Math.max.apply(null, base.map(function (n) { return n.y; }).concat([0])) + FLOW_NODE_H + FLOW_GAP_Y;
+    var minX = Math.min.apply(null, base.map(function (n) { return n.x; }).concat([0]));
+    var inRow = d.nodes.filter(function (n) { return n.kind === 'custom' && n.y >= baseY; }).length;
+    var node = { id: flowNewId('n', taken), kind: 'custom', label: String(label).slice(0, FLOW_LIMITS.label), x: flowClamp(minX + inRow * (FLOW_NODE_W + FLOW_GAP_X)), y: flowClamp(baseY) };
+    if (note) node.note = String(note).slice(0, FLOW_LIMITS.note);
+    d.nodes.push(node);
+    flowStoreCommit(store);
+    return null;
+  }
+  function flowRemoveOwnPage(store, id) {
+    var d = store.diagram;
+    d.nodes = d.nodes.filter(function (n) { return n.id !== id; });
+    d.edges = d.edges.filter(function (e) { return e.from !== id && e.to !== id; });
+    flowStoreCommit(store);
+  }
+  function flowNoteHas(store, ref, term) {
+    var n = flowNodeOfRef(store, ref);
+    return !!(n && n.note && n.note.toLowerCase().indexOf('„' + String(term).toLowerCase() + '“') !== -1);
+  }
+  // Notiz an eine Seite aus dem Bericht anhängen (der Content-Brief des Berichts bleibt unverändert). Rückgabe: Fehlertext oder null.
+  function flowAppendNote(store, ref, line) {
+    var n = flowNodeOfRef(store, ref);
+    if (!n) return 'Die Seite steht nicht mehr im Content-Flow. Baue ihn dort aus dem Bericht neu auf oder ergänze die Notiz von Hand.';
+    var next = n.note ? n.note + '\n' + line : line;
+    if (next.length > FLOW_LIMITS.note) return 'Die Notiz dieser Seite ist voll (' + FLOW_LIMITS.note + ' Zeichen). Kürze sie im Content-Flow.';
+    n.note = next;
+    flowStoreCommit(store);
+    return null;
+  }
+  // ==== NEU-ENDE ====
+
   function renderFlowSection(sessionId, result, session) {
-    var diagram = flowSanitizeStored(session && session.flow_diagram, result) || flowBuildFromResult(result);
+    // GEÄNDERT (eigene Seiten in der Liste): Liste und Diagramm teilen sich einen Diagramm-Stand (state.flowStore), damit Seiten, die in der
+    // Liste übernommen werden, sofort im Diagramm stehen und umgekehrt.
+    var store = state.flowStore && state.flowStore.result === result ? state.flowStore : null;
+    var diagram = store ? store.diagram : (flowSanitizeStored(session && session.flow_diagram, result) || flowBuildFromResult(result));
     var ui = {
       selected: null,          // { type: 'node' | 'edge', id }
       mode: null,              // null | 'connect-hierarchy' | 'connect-link'
@@ -2769,6 +2902,35 @@
       hasFitted: false,
     };
     var pages = result.supporting_pages || [];
+    // NEU: Bestehende Seite (eigene URL) und Ankertexte aus dem Plan, für Knoten und Seitenpanel.
+    function flowIsExisting(n) {
+      if (n.kind === 'conversion') return !!result.conversion_page.existing_url;
+      if (n.kind === 'page' && n.page_ref != null && pages[n.page_ref]) return pages[n.page_ref].role === 'existing' && !!(pages[n.page_ref].existing_coverage && pages[n.page_ref].existing_coverage.url);
+      return false;
+    }
+    function flowRefOf(id) { return id === 'conv' ? -1 : (/^p\d+$/.test(id) ? Number(id.slice(1)) : null); }
+    function flowAnchorOf(fromId, toId) {
+      var f = flowRefOf(fromId), t = flowRefOf(toId);
+      if (f === null || t === null) return '';
+      var hit = (result.internal_links || []).filter(function (l) { return l.from_index === f && l.to_index === t; })[0];
+      return hit && hit.anchor_text_idea ? hit.anchor_text_idea : '';
+    }
+    function renderNodeLinks(node) {
+      var byId = {};
+      diagram.nodes.forEach(function (x) { byId[x.id] = x; });
+      var out = diagram.edges.filter(function (e) { return e.type === 'link' && e.from === node.id && byId[e.to]; });
+      var inc = diagram.edges.filter(function (e) { return e.type === 'link' && e.to === node.id && byId[e.from]; });
+      var box = el('div', { class: 'cvz-flow-links' }, [el('p', { class: 'cvz-flow-panel-sub' }, ['Interne Links' + (flowIsExisting(node) ? ' (bestehende Seite, geht sofort)' : '')])]);
+      if (out.length === 0 && inc.length === 0) { box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine. Lege einen mit „Interner Link …“ an.'])); return box; }
+      var ul = el('ul', { class: 'cvz-cs-link-targets' });
+      out.forEach(function (e) {
+        var t = byId[e.to], anchor = flowAnchorOf(e.from, e.to);
+        ul.appendChild(el('li', {}, [el('span', { class: 'cvz-cs-link-arrow' }, ['→']), el('span', {}, [t.label + (flowIsExisting(t) ? ' (bestehend)' : ''), anchor ? el('span', { class: 'cvz-cs-link-meta' }, ['Ankertext: „' + anchor + '“']) : null])]));
+      });
+      if (out.length) box.appendChild(ul);
+      if (inc.length) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Verlinkt von: ' + inc.map(function (e) { return byId[e.from].label; }).join(', ')]));
+      return box;
+    }
 
     var root = el('div', { class: 'cvz-flow' });
     var toolbar = el('div', { class: 'cvz-flow-toolbar' });
@@ -2881,6 +3043,7 @@
 
     // ---------- Speichern ----------
     function scheduleSave() {
+      if (store) flowStoreNotify(store); // NEU: Liste (eigene Seiten, Notizen) aktualisieren
       if (!sessionId) { ui.saveState = 'unsaved'; renderToolbar(); return; }
       ui.saveState = 'dirty';
       renderToolbar();
@@ -2918,6 +3081,8 @@
       renderPanel();
       scheduleSave();
     }
+    // NEU: Änderungen aus der Liste (Seite übernommen, Notiz ergänzt, eigene Seite entfernt) zeichnen und speichern
+    if (store) store.api = { externalChanged: function () { if (ui.selected && ui.selected.type === 'node' && !nodeById(ui.selected.id)) ui.selected = null; renderCanvas(); renderPanel(); scheduleSave(); } };
 
     // ---------- Zeichnen ----------
     function applyView() {
@@ -2990,6 +3155,7 @@
         g.appendChild(svgEl('rect', { class: 'cvz-flow-node-box', width: FLOW_NODE_W, height: FLOW_NODE_H, style: 'stroke:' + (isSel ? '#f0f4f8' : 'rgba(255,255,255,.18)') }));
         g.appendChild(svgEl('rect', { width: 5, height: FLOW_NODE_H, fill: color }));
         var typeText = n.kind === 'topic' ? 'Cluster-Thema' : (n.kind === 'conversion' ? 'Conversion-Seite' : (n.page_type ? pageTypeLabel(n.page_type) : 'Seite'));
+        if (flowIsExisting(n)) typeText += ' · bestehend'; // NEU: bestehende Seite
         g.appendChild(svgEl('text', { class: 'cvz-flow-node-tag', x: 16, y: 17 }, [typeText]));
         var lines = flowWrapText(n.label, 28, 2);
         lines.forEach(function (line, i) {
@@ -3063,6 +3229,7 @@
         if (!window.confirm('Alle Änderungen am Diagramm verwerfen und neu aus dem Bericht aufbauen?')) return;
         pushUndo();
         diagram = flowBuildFromResult(result);
+        if (store) store.diagram = diagram;
         ui.selected = null;
         changed();
         fitView();
@@ -3248,7 +3415,7 @@
         panel.appendChild(field('Phase', phaseSelect));
       } else if (node.kind === 'page' && node.page_ref != null && pages[node.page_ref]) {
         var page = pages[node.page_ref];
-        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + page.keyword + ' · ' + pageVolumeText(page)]));
+        panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keyword: ' + page.keyword + ' · ' + pageVolumeText(page) + (page.search_intent ? ' · Suchintention: ' + (SEARCH_INTENT_TEXT[page.search_intent] || page.search_intent).replace(/ \(.*\)$/, '') : '')]));
         var panelVolNote = renderVolumeProxyNote(page);
         if (panelVolNote) panel.appendChild(panelVolNote);
         if (page.reasoning) panel.appendChild(el('p', { class: 'cvz-flow-reasoning' }, [String(page.reasoning).slice(0, 260) + (String(page.reasoning).length > 260 ? '…' : '')]));
@@ -3258,6 +3425,21 @@
         var panelVolNoteCp = renderVolumeProxyNote(cp);
         if (panelVolNoteCp) panel.appendChild(panelVolNoteCp);
       }
+      // NEU: bei bestehenden Seiten Hebel, Verbesserungen und Vergleich auch hier, damit im Flow alles beisammen ist
+      if (flowIsExisting(node)) {
+        var refN = node.kind === 'conversion' ? -1 : node.page_ref;
+        var pg = refN === -1 ? result.conversion_page : pages[refN];
+        if (pg && pg.existing_lever) panel.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Hebel: ' + pg.existing_lever.label]));
+        var cmpN = renderPageComparison(comparisonOf(refN), true);
+        if (cmpN) panel.appendChild(cmpN);
+        if (pg && pg.content_brief && pg.content_brief.length) {
+          panel.appendChild(el('p', { class: 'cvz-flow-panel-sub' }, ['Was an dieser Seite verbessert wird']));
+          var bl = el('ul', { class: 'cvz-cs-cmp-list' });
+          pg.content_brief.slice(0, 5).forEach(function (b) { bl.appendChild(el('li', {}, [b])); });
+          panel.appendChild(bl);
+        }
+      }
+      if (node.kind === 'page' || node.kind === 'conversion' || node.kind === 'custom') panel.appendChild(renderNodeLinks(node)); // NEU: Links dieser Seite
 
       if (node.kind !== 'conversion' && node.kind !== 'topic') {
         var parentSelect = el('select', { class: 'cvz-flow-input' });
@@ -3588,12 +3770,11 @@
     // GEÄNDERT (Übersicht): Reihenfolge Überblick, Plan, Grundlagen. Die Grundlagen sind eingeklappt, die Sprungleiste öffnet sie bei Bedarf.
     var sec_summary = renderReportSection(secNo.summary, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)]), renderTrafficBlock(result), renderProfileWarnings(result)]);
     var sec_roadmap = renderReportSection(secNo.roadmap, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap)]);
-    var sec_cluster = renderReportSection(secNo.cluster, 'Content-Plan: Seiten, Weg zur Zielaktion und was ihr bauen müsst', buildContentPlanChildren(sessionId, result, session));
+    var sec_cluster = renderReportSection(secNo.cluster, 'Content-Plan: Seiten, Content-Flow und was ihr bauen müsst', buildContentPlanChildren(sessionId, result, session));
     var sec_touchpoints = secNo.touchpoints ? renderReportSection(secNo.touchpoints, 'Touchpoint-Plan: wie Interessenten zu den Zwischenschritten kommen', [renderTouchpointSection(sessionId, result, session)]) : null;
-    var sec_geo = renderReportSection(secNo.geo, 'GEO-Strategie', [renderVisibilitySection(session), renderOffsiteSection(result.offsite_measures, result.offsite_sources), renderGeoSection(result.geo_strategy)]);
+    var sec_geo = renderReportSection(secNo.geo, 'Sichtbarkeit: Google und KI-Antworten', renderVisibilityOverview(result, session)); // GEÄNDERT: SEO und GEO zusammen, Ist-Zustand integriert
     var sec_validation = renderReportSection(secNo.validation, 'Themen-Check', [renderTopicValidationSection(result.topic_validation, result.seed_topic)]);
     var sec_ausgangslage = renderReportSection(secNo.ausgangslage, 'Ausgangslage', [renderTrackerSourceNote(session), renderProse(result.ausgangslage), renderProfileBox(result)]);
-    var sec_state = renderReportSection(secNo.state, 'Ist-Zustand: wer rankt heute schon wofür?', [renderCurrentStateSection(result.current_state)]);
     wrap.appendChild(el('p', { class: 'cvz-cs-group-label' }, ['Überblick']));
     wrap.appendChild(sec_summary);
     wrap.appendChild(sec_roadmap);
@@ -3601,10 +3782,9 @@
     wrap.appendChild(sec_cluster);
     if (sec_touchpoints) wrap.appendChild(sec_touchpoints);
     wrap.appendChild(sec_geo);
-    var foundations = el('details', { class: 'cvz-cs-group-fold' }, [el('summary', {}, ['Grundlagen: Themen-Check, Ausgangslage, Ist-Zustand', tip('Hier steht, worauf die Strategie aufbaut: das geprüfte Thema, die Ausgangslage mit deinem Produktprofil und wer heute schon für das Thema rankt. Zum Arbeiten brauchst du es selten, zum Nachvollziehen schon.', 'Was steht in den Grundlagen?')])]);
+    var foundations = el('details', { class: 'cvz-cs-group-fold' }, [el('summary', {}, ['Grundlagen: Themen-Check und Ausgangslage', tip('Hier steht, worauf die Strategie aufbaut: das geprüfte Thema und die Ausgangslage mit deinem Produktprofil. Wer heute schon für das Thema rankt, steht jetzt im Abschnitt Sichtbarkeit. Zum Arbeiten brauchst du die Grundlagen selten, zum Nachvollziehen schon.', 'Was steht in den Grundlagen?')])]);
     foundations.appendChild(sec_validation);
     foundations.appendChild(sec_ausgangslage);
-    foundations.appendChild(sec_state);
     wrap.appendChild(foundations);
     var fundingText = fundedBy
       ? 'Finanziert aus: ' + (fundedBy === 'ppu_strategy' ? 'Pay-per-Use-Credit' : 'Plan-Kontingent')
@@ -3639,12 +3819,11 @@
   var REPORT_NAV_BASE = [
     { key: 'summary', label: 'Zusammenfassung' },
     { key: 'roadmap', label: 'Roadmap' },
-    { key: 'cluster', label: 'Content-Plan' }, // GEÄNDERT: Cluster, Content-Flow und Funnel sind ein Abschnitt
+    { key: 'cluster', label: 'Content-Plan & Flow' }, // GEÄNDERT: Cluster, Content-Flow und Funnel sind ein Abschnitt
     { key: 'touchpoints', label: 'Touchpoints', optional: true },
-    { key: 'geo', label: 'GEO' },
+    { key: 'geo', label: 'Sichtbarkeit' }, // GEÄNDERT: Google und KI-Antworten zusammen
     { key: 'validation', label: 'Themen-Check' },
     { key: 'ausgangslage', label: 'Ausgangslage' },
-    { key: 'state', label: 'Ist-Zustand' },
   ];
 
   function buildReportNavItems(result, session) {
@@ -3912,6 +4091,176 @@
     return wrap;
   }
 
+  // NEU (Kannibalisierung): mehrere eigene Seiten für dieselbe Suchanfrage, aus der Search Console (Server: contentStrategyCannibalization.ts)
+  var CANNIBAL_ACTION_TEXT = { hauptseite: 'Bleibt Hauptseite', zusammenlegen: 'Zusammenlegen (301)', abgrenzen: 'Bleibt, abgrenzen', ausbauen: 'Wird zur Hauptseite ausgebaut' };
+  function renderCannibalization(c) {
+    if (!c || !c.items || c.items.length === 0) return null;
+    var wrap = el('div', { class: 'cvz-cs-build-block' });
+    wrap.appendChild(el('p', { class: 'cvz-cs-build-group-title' }, [
+      'Seiten zusammenlegen oder abgrenzen (' + c.items.length + ')',
+      tip('Für diese Suchanfragen erscheinen mehrere eigene Seiten in Google. Sie teilen sich die Signale, Google wechselt zwischen ihnen, und keine kommt richtig nach vorn. Erledige das vor neuen Seiten: Es kostet wenig und stärkt die Seite, die bleibt. ' + (c.note || ''), 'Was ist Kannibalisierung?'),
+    ]));
+    c.items.forEach(function (it) {
+      var keeper = it.keeper && it.keeper.kind === 'neu' ? 'neue Seite „' + it.keeper.topic + '“' : shortUrl(it.keeper && it.keeper.url);
+      var box = el('div', { class: 'cvz-cs-cannibal' }, [
+        el('p', { class: 'cvz-cs-cannibal-q' }, ['„' + it.queries.join('“, „') + '“']),
+        el('p', { class: 'cvz-cs-hint' }, [it.pages.length + ' eigene Seiten, zusammen ' + it.impressions + ' Impressionen. Hauptseite: ' + keeper + '. ' + (it.keeper_reason || '')]),
+      ]);
+      it.pages.forEach(function (p) {
+        box.appendChild(el('div', { class: 'cvz-cs-cannibal-row' }, [
+          el('span', { class: 'cvz-cs-badge' + (p.action === 'zusammenlegen' ? ' cvz-cs-badge-commodity' : (p.action === 'hauptseite' || p.action === 'ausbauen' ? ' cvz-cs-badge-rollout-zuerst' : '')) }, [CANNIBAL_ACTION_TEXT[p.action] || p.action]),
+          ' ', el('strong', {}, [shortUrl(p.url)]),
+          el('span', { class: 'cvz-cs-funnel-todo-meta' }, [p.impressions + ' Impressionen, ' + p.clicks + ' Klicks' + (p.position ? ', Ø Position ' + String(p.position).replace('.', ',') : '')]),
+          el('span', { class: 'cvz-cs-funnel-todo-meta' }, [p.task]),
+        ]));
+      });
+      wrap.appendChild(box);
+    });
+    return wrap;
+  }
+  function cannibalNoteFor(c, ref) {
+    if (!c || !c.items) return null;
+    for (var i = 0; i < c.items.length; i++) {
+      var it = c.items[i];
+      if (it.keeper && it.keeper.kind === 'neu' && it.keeper.ref === ref) return 'Löst eine Kannibalisierung bei „' + it.queries[0] + '“ auf' + (it.keeper.base_url ? ': baut sie auf ' + shortUrl(it.keeper.base_url) + ' auf, statt eine weitere Seite daneben zu stellen.' : '.') + ' Details in der Bauliste unten.';
+      for (var j = 0; j < it.pages.length; j++) {
+        if (it.pages[j].ref === ref) return 'Teilt sich die Suchanfrage „' + it.queries[0] + '“ mit anderen eigenen Seiten: ' + (CANNIBAL_ACTION_TEXT[it.pages[j].action] || '') + '. Details in der Bauliste unten.';
+      }
+    }
+    return null;
+  }
+  // NEU (eigene Seiten in der Liste): Seiten aus dem Content-Flow, die nicht aus dem Bericht kommen. Immer "Später", ohne Brief.
+  function renderOwnPages(box, store) {
+    clear(box);
+    var own = flowOwnPages(store);
+    if (store.error) box.appendChild(el('p', { class: 'cvz-cs-own-error' }, [store.error]));
+    if (own.length === 0) return;
+    box.appendChild(el('h6', { class: 'cvz-cs-phase-title' }, [
+      'Von dir ergänzt',
+      el('span', { class: 'cvz-cs-phase-count' }, ['(' + own.length + (own.length === 1 ? ' Seite)' : ' Seiten)')]),
+      tip('Diese Seiten stehen im Content-Flow, aber nicht in der Empfehlung. Sie haben keinen Content-Brief, keinen Seitenvergleich und keine geplanten Links. Deshalb laufen sie unter „Später“. Wer für ein solches Thema einen vollständigen Brief will, startet dafür eine eigene Strategie.', 'Warum ohne Brief?'),
+    ]));
+    box.appendChild(el('p', { class: 'cvz-cs-phase-desc' }, ['Nicht Teil der Empfehlung. Seitentyp, Phase und Links legst du im Content-Flow fest.']));
+    own.forEach(function (n) {
+      var meta = [n.page_type ? pageTypeLabel(n.page_type) : 'Seitentyp offen'];
+      var ph = MESSY_MIDDLE_PHASES.filter(function (p) { return p.value === n.phase; })[0];
+      meta.push(ph ? ph.label : 'Phase offen');
+      var editBtn = el('button', { type: 'button', class: 'cvz-cs-expand-btn' }, ['Im Content-Flow bearbeiten']);
+      editBtn.addEventListener('click', function () { if (typeof state.showPlanView === 'function') state.showPlanView('diagram'); });
+      var delBtn = el('button', { type: 'button', class: 'cvz-cs-expand-btn' }, ['Entfernen']);
+      delBtn.addEventListener('click', function () { flowRemoveOwnPage(store, n.id); });
+      var kids = [
+        el('div', { class: 'cvz-cs-page-card-badges' }, [el('span', { class: 'cvz-cs-badge cvz-cs-badge-rollout-spaeter' }, ['Später']), el('span', { class: 'cvz-cs-badge' }, ['Eigene Seite'])]),
+        el('p', { class: 'cvz-cs-own-title' }, [n.label]),
+        el('p', { class: 'cvz-cs-hint' }, [meta.join(' · ')]),
+      ];
+      if (n.note) kids.push(el('p', { class: 'cvz-cs-own-note' }, [n.note]));
+      kids.push(el('div', { class: 'cvz-cs-own-actions' }, [editBtn, delBtn]));
+      box.appendChild(el('div', { class: 'cvz-cs-own-card' }, kids));
+    });
+  }
+  // NEU: Notizen aus dem Content-Flow in den Karten der Seiten aus dem Bericht ("Zur Seite notieren" und Notizen aus dem Diagramm)
+  function paintFlowNotes(scopeNodes, store) {
+    scopeNodes.forEach(function (root) {
+      if (!root || !root.querySelectorAll) return;
+      Array.prototype.forEach.call(root.querySelectorAll('.cvz-cs-flow-note[data-ref]'), function (box) {
+        var n = flowNodeOfRef(store, Number(box.getAttribute('data-ref')));
+        clear(box);
+        if (!n || !n.note) { box.style.display = 'none'; return; }
+        box.style.display = '';
+        box.appendChild(el('p', { class: 'cvz-cs-page-acc-audience' }, [el('strong', {}, ['Deine Notiz (Content-Flow): ']), n.note]));
+      });
+    });
+  }
+
+  // NEU (Bewusst nicht im Plan): gefundene Suchbegriffe ohne eigene Seite, nach Grund (Server: contentStrategyNotPlanned.ts)
+  function renderNotPlanned(np, store) {
+    if (!np || !np.groups || np.groups.length === 0) return null;
+    var box = el('details', { class: 'cvz-cs-notplanned cvz-cs-fold' }, [
+      el('summary', {}, ['Bewusst nicht im Plan (' + np.pool_size + ' Suchbegriffe)']),
+      el('p', { class: 'cvz-cs-hint' }, ['Zum Thema wurden weitere Suchbegriffe gefunden. Sie bekommen keine eigene Seite, hier steht warum. ', tip(np.note || '', 'Woher kommt die Liste?')]),
+    ]);
+    var inner = el('div', {});
+    var msg = el('p', { class: 'cvz-cs-own-error', style: 'display:none' });
+    box.appendChild(msg);
+    box.appendChild(inner);
+    function fail(text) { msg.textContent = text || ''; msg.style.display = text ? '' : 'none'; }
+    // NEU: Übernehmen direkt aus der Liste. Neue Seite nur, wo eine eigene Seite sinnvoll sein kann; sonst als Notiz zur passenden Seite.
+    function actionFor(g, it) {
+      if (!store) return null;
+      var volText = it.volume ? it.volume.toLocaleString('de-DE') + ' Suchen pro Monat' : 'ohne messbares Suchvolumen';
+      if (g.reason === 'nachfrage_ohne_seite' || g.reason === 'ohne_nachfrage') {
+        if (flowHasOwnPage(store, it.term)) return el('span', { class: 'cvz-cs-notplanned-done' }, ['✓ Als eigene Seite übernommen']);
+        var b = el('button', { type: 'button', class: 'cvz-cs-notplanned-btn' }, ['Als Seite übernehmen']);
+        b.addEventListener('click', function () { fail(flowAddOwnPage(store, it.term, 'Aus „Bewusst nicht im Plan“, ' + volText + '. Nicht Teil der Empfehlung.')); });
+        return b;
+      }
+      if ((g.reason === 'mit_abgedeckt' || g.reason === 'als_abschnitt') && it.page_ref != null) {
+        if (flowNoteHas(store, it.page_ref, it.term)) return el('span', { class: 'cvz-cs-notplanned-done' }, ['✓ Bei der Seite notiert']);
+        var nb = el('button', { type: 'button', class: 'cvz-cs-notplanned-btn' }, ['Zur Seite notieren']);
+        nb.addEventListener('click', function () {
+          var line = g.reason === 'als_abschnitt' ? 'Abschnitt oder FAQ: „' + it.term + '“' : 'Begriff aufgreifen: „' + it.term + '“ (' + volText + ')';
+          fail(flowAppendNote(store, it.page_ref, line));
+        });
+        return nb;
+      }
+      return null;
+    }
+    function paint() {
+      clear(inner);
+      np.groups.forEach(function (g) {
+        var grp = el('div', { class: 'cvz-cs-notplanned-group' }, [
+          el('p', { class: 'cvz-cs-build-group-title' }, [g.label + ' (' + g.total + ')', tip(g.intro, 'Was heißt das?')]),
+        ]);
+        var ul = el('ul', {});
+        g.items.forEach(function (it) {
+          var meta = (it.volume ? it.volume.toLocaleString('de-DE') + '/Monat' : 'ohne Messwert') + (it.page_topic ? ' · → ' + it.page_topic : '');
+          var li = el('li', {}, [el('strong', {}, [it.term]), el('span', { class: 'cvz-cs-funnel-todo-meta' }, [meta])]);
+          var act = actionFor(g, it);
+          if (act) li.appendChild(el('span', { class: 'cvz-cs-notplanned-act' }, [act]));
+          ul.appendChild(li);
+        });
+        grp.appendChild(ul);
+        if (g.total > g.items.length) grp.appendChild(el('p', { class: 'cvz-cs-hint' }, ['… und ' + (g.total - g.items.length) + ' weitere']));
+        inner.appendChild(grp);
+      });
+    }
+    paint();
+    if (store) store.listeners.push(paint);
+    return box;
+  }
+  // NEU (Reihenfolge Zuerst / Später): nur bei geringer Reichweite (Server: contentStrategyRollout.ts)
+  function rolloutOf(result, ref) {
+    var ro = result && result.rollout;
+    if (!ro || !ro.pages) return null;
+    for (var i = 0; i < ro.pages.length; i++) if (ro.pages[i].ref === ref) return ro.pages[i];
+    return null;
+  }
+  function renderRolloutNote(result, getCards) {
+    var ro = result.rollout;
+    if (!ro || !ro.pages) return null;
+    var btns = [['alle', 'Alle Seiten'], ['zuerst', 'Nur Zuerst (' + ro.counts.zuerst + ')'], ['spaeter', 'Nur Später (' + ro.counts.spaeter + ')']].map(function (b) {
+      var btn = el('button', { type: 'button', class: 'cvz-cs-plan-tab' + (b[0] === 'alle' ? ' is-active' : ''), 'data-filter': b[0] }, [b[1]]);
+      btn.addEventListener('click', function () {
+        btns.forEach(function (x) { x.classList.toggle('is-active', x === btn); });
+        getCards().forEach(function (card) {
+          var st = card.getAttribute('data-rollout');
+          card.style.display = b[0] === 'alle' || st === b[0] ? '' : 'none';
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('#cvz-content-strategy-agent .cvz-cs-phase-group'), function (g) {
+          var any = Array.prototype.some.call(g.querySelectorAll('.cvz-cs-page-acc'), function (c) { return c.style.display !== 'none'; });
+          g.style.display = any ? '' : 'none';
+        });
+      });
+      return btn;
+    });
+    return el('div', { class: 'cvz-cs-rollout-note' }, [
+      el('p', {}, [el('strong', {}, ['Reihenfolge: ' + ro.counts.zuerst + ' Seiten zuerst, ' + ro.counts.spaeter + ' später']), tip(ro.trigger, 'Wann starten die Seiten unter „Später“?')]),
+      el('p', { class: 'cvz-cs-hint' }, [ro.summary]),
+      el('div', { class: 'cvz-cs-rollout-filter', role: 'group', 'aria-label': 'Seiten filtern' }, btns),
+    ]);
+  }
+
   function renderBuildTasks(funnel) {
     var todos = (funnel.todos || []).filter(function (t) { return t.kind !== 'luecke'; });
     var wrap = el('div', { class: 'cvz-cs-build-block' });
@@ -4030,11 +4379,22 @@
       clear(holder);
       if (!funnel || !funnel.phases) { holder.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für diesen Bericht liegt kein Befund vor.'])); return; }
       if (funnel.summary) holder.appendChild(el('p', { class: 'cvz-cs-hint' }, [funnel.summary]));
+      var cannibal = renderCannibalization(result.cannibalization); // NEU: zuerst aufräumen, dann bauen
+      if (cannibal) holder.appendChild(cannibal);
       var gaps = renderBuildGaps(funnel, magnets);
       var tasks = renderBuildTasks(funnel);
       if (gaps) holder.appendChild(gaps);
       if (tasks) holder.appendChild(tasks);
       if (!gaps && !tasks) holder.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Nichts zusätzlich zu bauen. Die Zwischenschritte sind die Seiten selbst, zum Beispiel Vergleichsseiten.']));
+      // NEU: Seiten, auf die im Plan kein Link zeigt (aus dem Verlinkungsplan). Eine Aufgabe, deshalb hier.
+      var lp = state.linkPlan || linkPlanOf(result);
+      if (lp && (lp.orphans || []).length > 0) {
+        var sup = result.supporting_pages || [];
+        holder.appendChild(el('p', { class: 'cvz-cs-build-group-title' }, ['Seiten ohne eingehenden Link (' + lp.orphans.length + ')', tip('Kein Link aus dem Plan zeigt auf diese Seiten. Ohne Link aus einer passenden Seite finden Besucher und Google sie nur über Navigation oder Sitemap. Am einfachsten ergänzt du Links im Content-Flow. Unterseiten einer Pillar Page gelten als verlinkt.', 'Warum ist das eine Aufgabe?')]));
+        var ol = el('ul', { class: 'cvz-cs-build-list' });
+        lp.orphans.forEach(function (i) { ol.appendChild(el('li', {}, [el('strong', {}, [(sup[i] && sup[i].topic) || ('Seite ' + (i + 1))])])); });
+        holder.appendChild(ol);
+      }
       // Ideen, die keine offene Lücke betreffen, eingeklappt darunter
       var gapPhases = (funnel.phases || []).filter(function (r) { return r.needs_magnet; }).map(function (r) { return r.phase; });
       var rest = magnets.filter(function (m) { return gapPhases.indexOf(m.phase) === -1 || m.counts_as_step === false; });
@@ -4100,11 +4460,13 @@
   // NEU (Content-Plan): früher drei Abschnitte (Cluster, Content-Flow, Funnel). Jetzt einer: oben der Umschalter zwischen Liste und Diagramm,
   // darunter die Bauliste. Das Diagramm entsteht erst beim ersten Öffnen, weil es zum Einpassen eine sichtbare Fläche braucht.
   function buildContentPlanChildren(sessionId, result, session) {
+    state.flowStore = flowStoreCreate(sessionId, result, session); // NEU: ein Diagramm-Stand für Liste und Content-Flow
     var listView = el('div', { class: 'cvz-cs-plan-view' }, buildClusterSectionChildren(sessionId, result));
     var diagramView = el('div', { class: 'cvz-cs-plan-view', style: 'display:none' });
     var diagramBuilt = false;
-    var btnList = el('button', { type: 'button', class: 'cvz-cs-plan-tab is-active' }, ['Liste der Seiten']);
-    var btnDiagram = el('button', { type: 'button', class: 'cvz-cs-plan-tab' }, ['Diagramm bearbeiten']);
+    // GEÄNDERT: Der Content-Flow heißt wieder so und ist als gleichwertige Ansicht erkennbar (ein grauer Textreiter wurde übersehen).
+    var btnList = el('button', { type: 'button', class: 'cvz-cs-plan-tab is-active' }, ['Seitenliste']);
+    var btnDiagram = el('button', { type: 'button', class: 'cvz-cs-plan-tab' }, ['Content-Flow (Diagramm bearbeiten)']);
     function show(which) {
       var diag = which === 'diagram';
       if (diag && !diagramBuilt) {
@@ -4117,9 +4479,16 @@
       btnList.classList.toggle('is-active', !diag);
       btnDiagram.classList.toggle('is-active', diag);
     }
+    state.showPlanView = show; // NEU: "Im Content-Flow bearbeiten" aus der Liste
     btnList.addEventListener('click', function () { show('list'); });
     btnDiagram.addEventListener('click', function () { show('diagram'); });
-    var children = [el('div', { class: 'cvz-cs-plan-tabs', role: 'group', 'aria-label': 'Ansicht des Content-Plans' }, [btnList, btnDiagram]), listView, diagramView];
+    var children = [
+      el('div', { class: 'cvz-cs-plan-switch' }, [
+        el('div', { class: 'cvz-cs-plan-tabs', role: 'group', 'aria-label': 'Ansicht des Content-Plans' }, [btnList, btnDiagram]),
+        el('p', { class: 'cvz-cs-hint' }, ['Zwei Ansichten derselben Seiten: als Liste mit Content-Briefs oder als Content-Flow, in dem du Seiten ergänzt, verschiebst und verknüpfst.']),
+      ]),
+      listView, diagramView,
+    ];
     children.push(renderFunnelSection(result));
     paintPhaseStatus(result.funnel_check, listView); // direkt in der Liste, sie hängt noch nicht im Dokument
     return children;
@@ -4182,7 +4551,132 @@
     return box;
   }
 
+  // NEU (Verlinkung in den Seiten): Verlinkungsplan vom Server (result.link_plan). Fehlt er (ältere Antwort), wird er hier aus internal_links
+  // gebildet, nach denselben Regeln wie im Backend (contentStrategyLinkPlan.ts). Die Links stehen danach in der Karte jeder Seite und im
+  // Seitenpanel des Content-Flows, eine eigene Linkliste gibt es nicht mehr (sie doppelte sich mit dem Content-Flow).
+  function linkPlanOf(result) {
+    if (result.link_plan && result.link_plan.pages) return result.link_plan;
+    var sup = result.supporting_pages || [];
+    var cp = result.conversion_page || {};
+    var pages = [{ ref: -1, topic: cp.topic || 'Conversion-Seite', existing: !!cp.existing_url, url: cp.existing_url || null, is_conversion: true }];
+    sup.forEach(function (p, i) {
+      var url = p && p.role === 'existing' && p.existing_coverage && p.existing_coverage.url ? p.existing_coverage.url : null;
+      pages.push({ ref: i, topic: (p && p.topic) || ('Seite ' + (i + 1)), existing: !!url, url: url, is_conversion: false });
+    });
+    var known = {}; pages.forEach(function (p) { known[p.ref] = p; });
+    var bySrc = {}, incoming = {}, total = 0;
+    (result.internal_links || []).forEach(function (l) {
+      var f = Number(l.from_index), t = Number(l.to_index);
+      if (f === t || !known[f] || !known[t]) return;
+      var list = bySrc[f] = bySrc[f] || [];
+      if (list.some(function (x) { return x.target === t; })) return;
+      list.push({ target: t, anchor: l.anchor_text_idea || '', reason: l.reason || '' });
+      incoming[t] = (incoming[t] || 0) + 1; total++;
+    });
+    var sources = Object.keys(bySrc).map(Number).sort(function (x, y) { return x - y; }).map(function (k) { return { source: k, links: bySrc[k] }; });
+    var underPillar = function (i) { var par = Number(sup[i] && sup[i].parent_index); return isFinite(par) && par >= 0 && sup[par] && sup[par].page_type === 'pillar_page'; };
+    return {
+      total: total, pages: pages, incoming: incoming,
+      existing_sources: sources.filter(function (x) { return known[x.source].existing; }),
+      new_sources: sources.filter(function (x) { return !known[x.source].existing; }),
+      orphans: sup.map(function (_, i) { return i; }).filter(function (i) { return !incoming[i] && !underPillar(i); }).slice(0, 8),
+    };
+  }
+
+  // Interne Links einer Seite: welche Links hier eingebaut werden, und woher Links kommen.
+  function renderPageLinks(ref) {
+    var plan = state.linkPlan;
+    if (!plan) return null;
+    var byRef = {};
+    plan.pages.forEach(function (p) { byRef[p.ref] = p; });
+    var me = byRef[ref];
+    if (!me) return null;
+    var all = (plan.existing_sources || []).concat(plan.new_sources || []);
+    var out = (all.filter(function (x) { return x.source === ref; })[0] || {}).links || [];
+    var from = all.filter(function (x) { return x.links.some(function (l) { return l.target === ref; }); }).map(function (x) { return byRef[x.source]; });
+    var label = function (p) { return (p.is_conversion ? 'Conversion-Seite: ' : '') + p.topic + (p.existing ? ' (bestehend)' : ''); };
+    var box = el('div', { class: 'cvz-cs-page-links' }, [el('p', { class: 'cvz-cs-brief-label' }, ['Interne Links'])]);
+    if (out.length > 0) {
+      box.appendChild(el('p', { class: 'cvz-cs-page-links-sub' }, [me.existing ? 'Auf dieser Seite ergänzen (geht sofort):' : 'Beim Schreiben einbauen:']));
+      var ul = el('ul', { class: 'cvz-cs-link-targets' });
+      out.forEach(function (l) {
+        var t = byRef[l.target] || { topic: '?' };
+        ul.appendChild(el('li', {}, [
+          el('span', { class: 'cvz-cs-link-arrow' }, ['→']),
+          el('span', {}, [
+            el('strong', {}, [label(t)]),
+            l.anchor ? el('span', { class: 'cvz-cs-link-meta' }, ['Ankertext: „' + l.anchor + '“' + (me.existing && !t.existing ? ' · einbauen, sobald die Seite online ist' : '')]) : null,
+            l.reason ? el('span', { class: 'cvz-cs-link-meta' }, ['Warum: ' + l.reason]) : null,
+          ]),
+        ]));
+      });
+      box.appendChild(ul);
+    }
+    if (from.length > 0) {
+      box.appendChild(el('p', { class: 'cvz-cs-page-links-sub' }, ['Wird verlinkt von: ' + from.map(label).join(', ')]));
+    } else if (ref >= 0 && (plan.orphans || []).indexOf(ref) !== -1) {
+      box.appendChild(el('p', { class: 'cvz-cs-page-links-warn' }, ['Noch kein Link aus dem Plan zeigt auf diese Seite. Ergänze einen im Content-Flow, sonst finden Besucher und Google sie nur über Navigation oder Sitemap.']));
+    }
+    return box.childNodes.length > 1 ? box : null;
+  }
+
+  // NEU (inhaltlicher Vergleich bestehender Seiten): result.page_comparisons vom Server. compact = Seitenpanel im Content-Flow.
+  var INTENT_TEXT = { passt: 'Trifft die Suchintention', teilweise: 'Trifft die Suchintention nur teilweise', passt_nicht: 'Trifft die Suchintention nicht' };
+  // NEU (Suchintention): Bezeichnungen wie im Backend (INTENT_LABELS in contentStrategyPageCompare.ts)
+  var SEARCH_INTENT_TEXT = { informational: 'informativ (will etwas verstehen)', commercial: 'kommerziell (vergleicht Anbieter und Lösungen)', transactional: 'transaktional (will kaufen, buchen, anfragen)', navigational: 'navigational (sucht eine bestimmte Marke oder Seite)', mixed: 'gemischt' };
+  function searchIntentLine(intent, extra) {
+    if (!intent) return null;
+    return el('p', { class: 'cvz-cs-page-acc-audience' }, [el('strong', {}, ['Suchintention: ']), (SEARCH_INTENT_TEXT[intent] || intent) + (extra || '')]);
+  }
+  function comparisonOf(ref) { return (state.pageComparisons || {})[ref] || null; }
+  function renderPageComparison(cmp, compact) {
+    if (!cmp) return null;
+    var box = el('div', { class: 'cvz-cs-cmp' + (compact ? ' is-compact' : '') });
+    box.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Vergleich mit den Top-Seiten zu „' + cmp.keyword + '“', tip('Der Server hat bei Google nach dem Suchbegriff dieser Seite gesucht, die ersten drei Seiten anderer Anbieter und eure Seite abgerufen und inhaltlich vergleichen lassen. Jeder Befund ist mit einem wörtlichen Zitat belegt, das der Server im abgerufenen Text geprüft hat. Befunde ohne Beleg fallen weg. Verglichen wird, was die Seiten inhaltlich bieten: Länge und Anzahl der Überschriften sind kein Ranking-Kriterium und werden nicht bewertet.', 'Wie entsteht der Vergleich?')]));
+    if (cmp.status !== 'ok') { box.appendChild(el('p', { class: 'cvz-cs-hint' }, [cmp.note || 'Kein Vergleich möglich.'])); return box; }
+    var compName = function (i) { var c = cmp.competitors[i - 1]; return c ? 'Platz ' + c.position + ', ' + c.domain : 'Top-Seite ' + i; };
+    if (cmp.search_intent) {
+      var si = cmp.search_intent;
+      box.appendChild(el('p', { class: 'cvz-cs-cmp-intent' }, [el('strong', {}, ['Suchintention laut Google-Daten: ']), (SEARCH_INTENT_TEXT[si.label] || si.label) + (si.probability != null ? ', ' + Math.round(si.probability * 100) + ' %' : '') + (si.secondary && si.secondary.length ? '; daneben ' + si.secondary.map(function (x) { return (SEARCH_INTENT_TEXT[x.label] || x.label).replace(/ \(.*\)$/, ''); }).join(', ') : '')]));
+    }
+    if (cmp.intent) box.appendChild(el('p', { class: 'cvz-cs-cmp-intent cvz-cs-cmp-intent--' + cmp.intent.verdict }, [el('strong', {}, [INTENT_TEXT[cmp.intent.verdict] + ': ']), cmp.intent.explanation]));
+    function findingList(title, list, max) {
+      if (!list || list.length === 0) return;
+      box.appendChild(el('p', { class: 'cvz-cs-page-links-sub' }, [title]));
+      var ul = el('ul', { class: 'cvz-cs-cmp-list' });
+      list.slice(0, max || list.length).forEach(function (f) {
+        ul.appendChild(el('li', {}, [
+          el('strong', {}, [f.topic]), ': ' + f.detail,
+          compact ? null : el('span', { class: 'cvz-cs-link-meta' }, [compName(f.competitor) + ': „' + f.evidence + '“']),
+        ]));
+      });
+      box.appendChild(ul);
+    }
+    findingList('Behandeln die Top-Seiten, eure Seite nicht:', cmp.gaps, compact ? 3 : 0);
+    findingList('Behandelt eure Seite oberflächlicher:', cmp.depth, compact ? 2 : 0);
+    if (!compact && cmp.strengths && cmp.strengths.length) {
+      box.appendChild(el('p', { class: 'cvz-cs-page-links-sub' }, ['Was eure Seite besser macht:']));
+      var su = el('ul', { class: 'cvz-cs-cmp-list' });
+      cmp.strengths.forEach(function (x) { su.appendChild(el('li', {}, [x.point, el('span', { class: 'cvz-cs-link-meta' }, ['Eure Seite: „' + x.evidence + '“'])])); });
+      box.appendChild(su);
+    }
+    if (cmp.actions && cmp.actions.length) {
+      box.appendChild(el('p', { class: 'cvz-cs-page-links-sub' }, ['Daraus folgt:']));
+      var ol = el('ol', { class: 'cvz-cs-cmp-list' });
+      cmp.actions.forEach(function (a) { ol.appendChild(el('li', {}, [a])); });
+      box.appendChild(ol);
+    }
+    if (!cmp.gaps.length && !cmp.depth.length && !cmp.actions.length) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine belegten inhaltlichen Lücken gefunden. Eure Seite deckt ab, was die Top-Seiten behandeln.']));
+    // GEÄNDERT: keine Tabelle mit Wörtern und Überschriften mehr. Länge ist kein Ranking-Kriterium und verleitete zu falschen Schlüssen.
+    if (!compact) box.appendChild(el('p', { class: 'cvz-cs-hint' }, [cmp.note]));
+    return box;
+  }
+
   function buildClusterSectionChildren(sessionId, result) {
+    state.linkPlan = linkPlanOf(result);
+    state.planResult = result; // NEU: Reihenfolge und Kannibalisierung in den Seitenkarten
+    state.pageComparisons = {};
+    (result.page_comparisons || []).forEach(function (c) { state.pageComparisons[c.ref] = c; });
     var children = [];
     var goalBox = renderStrategyGoalBox(result.strategy_goal);
     if (goalBox) children.push(goalBox);
@@ -4202,9 +4696,16 @@
     if (result.conversion_page.primary_audience) {
       conversionCardChildren.push(el('p', { class: 'cvz-cs-page-acc-audience' }, [el('strong', {}, ['Zielgruppe: ']), result.conversion_page.primary_audience]));
     }
+    conversionCardChildren.push(el('div', { class: 'cvz-cs-flow-note', 'data-ref': '-1', style: 'display:none' })); // NEU: Notiz aus dem Content-Flow
+    var convCannibal = cannibalNoteFor(result.cannibalization, -1); // NEU: Kannibalisierung
+    if (convCannibal) conversionCardChildren.push(el('p', { class: 'cvz-cs-page-acc-audience' }, [el('strong', {}, ['Kannibalisierung: ']), convCannibal]));
+    var convCmp = renderPageComparison(comparisonOf(-1), false); // NEU: Vergleich der umgebauten Conversion-Seite
+    if (convCmp) conversionCardChildren.push(convCmp);
     if (result.conversion_page.content_brief && result.conversion_page.content_brief.length > 0) {
-      conversionCardChildren.push(renderContentBrief(result.conversion_page.content_brief));
+      conversionCardChildren.push(renderContentBrief(result.conversion_page.content_brief, result.conversion_page.existing_url ? 'Was an dieser Seite umgebaut wird:' : null));
     }
+    var convLinks = renderPageLinks(-1); // NEU: Links der Conversion-Seite
+    if (convLinks) conversionCardChildren.push(convLinks);
     conversionCardChildren.push(buildLandingpageButton(result.conversion_page.topic));
     children.push(el('div', { class: 'cvz-cs-conversion-card' }, conversionCardChildren));
     var path = renderConversionPath(result);
@@ -4223,6 +4724,8 @@
     ]);
     children.push(toolbar);
     var refreshToggle = wireExpandToggle(toggleAllBtn, function () { return accCards; });
+    var roNote = renderRolloutNote(result, function () { return accCards; }); // NEU: Reihenfolge Zuerst / Später
+    if (roNote) children.push(roNote);
     var pagesByPhase = groupPagesByPhase(result.supporting_pages || []);
     MESSY_MIDDLE_PHASES.forEach(function (phase) {
       var pagesInPhase = pagesByPhase[phase.value];
@@ -4242,11 +4745,15 @@
       });
       children.push(group);
     });
-    if (result.internal_links && result.internal_links.length > 0) {
-      children.push(el('h5', {}, ['Interne Verlinkung']));
-      var linkList = el('ul', { class: 'cvz-cs-link-list' });
-      result.internal_links.forEach(function (link) { linkList.appendChild(el('li', {}, [describeLink(link, result)])); });
-      children.push(linkList);
+    var ownBox = el('div', { class: 'cvz-cs-own' }); // NEU: eigene Seiten aus dem Content-Flow, auch in der Liste
+    children.push(ownBox);
+    var notPlanned = renderNotPlanned(result.not_planned, state.flowStore); // NEU: Bewusst nicht im Plan, unter den Seiten
+    if (notPlanned) children.push(notPlanned);
+    if (state.flowStore) {
+      var store = state.flowStore;
+      var paintOwn = function () { renderOwnPages(ownBox, store); paintFlowNotes(children, store); };
+      store.listeners.push(paintOwn);
+      paintOwn();
     }
     return children;
   }
@@ -4307,6 +4814,11 @@
     // GEÄNDERT (Übersicht): Das Standard-Badge "Trust/Themenabdeckung" (role coverage) stand fast überall neben "Themenabdeckung" und sagte
     // dasselbe. Es entfällt. Besondere Rollen (Rank- & Zitier-Ziel, bereits vorhanden) bleiben.
     var badges = [el('span', { class: 'cvz-cs-badge' }, [pageTypeLabel(page.page_type)])];
+    var ro = rolloutOf(state.planResult, index); // NEU: Reihenfolge
+    if (ro) {
+      badges.unshift(el('span', { class: 'cvz-cs-badge cvz-cs-badge-rollout-' + ro.step, title: ro.why }, [ro.step === 'zuerst' ? 'Zuerst' : 'Später']));
+      card.setAttribute('data-rollout', ro.step);
+    }
     if (page.role !== 'coverage') badges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-role-' + page.role }, [roleLabel(page.role)]));
     if (page.commodity_risk) badges.push(el('span', { class: 'cvz-cs-badge cvz-cs-badge-commodity', title: page.commodity_reasoning || '' }, ['Austauschbar']));
     var statusMeta = el('strong', {}, [statusLabel(page.status)]);
@@ -4329,9 +4841,20 @@
     card.appendChild(body);
     var outer = card;
     card = body;
+    // NEU: Bestehende Seite mit Adresse und Position (stand bisher nur als Badge da)
+    if (page.role === 'existing' && page.existing_coverage && page.existing_coverage.url) {
+      card.appendChild(el('p', { class: 'cvz-cs-page-acc-audience' }, [el('strong', {}, ['Bestehende Seite: ']), shortUrl(page.existing_coverage.url) + (page.existing_coverage.position ? ' (heute Position ' + page.existing_coverage.position + ')' : '')]));
+      if (page.existing_lever) card.appendChild(el('p', { class: 'cvz-cs-page-acc-audience' }, [el('strong', {}, ['Hebel: ']), page.existing_lever.label])); // NEU
+    }
     if (page.primary_audience) {
       card.appendChild(el('p', { class: 'cvz-cs-page-acc-audience' }, [el('strong', {}, ['Zielgruppe: ']), page.primary_audience]));
     }
+    if (ro) card.appendChild(el('p', { class: 'cvz-cs-page-acc-audience' }, [el('strong', {}, [(ro.step === 'zuerst' ? 'Zuerst' : 'Später') + ': ']), ro.why]));
+    card.appendChild(el('div', { class: 'cvz-cs-flow-note', 'data-ref': String(index), style: 'display:none' })); // NEU: Notiz aus dem Content-Flow
+    var cnNote = cannibalNoteFor(state.planResult && state.planResult.cannibalization, index); // NEU: Kannibalisierung
+    if (cnNote) card.appendChild(el('p', { class: 'cvz-cs-page-acc-audience' }, [el('strong', {}, ['Kannibalisierung: ']), cnNote]));
+    var siLine = searchIntentLine(page.search_intent); // NEU: Suchintention des Haupt-Keywords (stand bisher nur in den Daten)
+    if (siLine) card.appendChild(siLine);
     var volNote = renderVolumeProxyNote(page);
     if (volNote) card.appendChild(volNote);
     if (page.zwischenziel) {
@@ -4380,7 +4903,12 @@
         ]));
       }
     }
-    if (page.content_brief && page.content_brief.length > 0) card.appendChild(renderContentBrief(page.content_brief));
+    var isExistingPage = page.role === 'existing';
+    var cmpBox = renderPageComparison(comparisonOf(index), false); // NEU: inhaltlicher Vergleich (nur bestehende Seiten)
+    if (cmpBox) card.appendChild(cmpBox);
+    if (page.content_brief && page.content_brief.length > 0) card.appendChild(renderContentBrief(page.content_brief, isExistingPage ? 'Was an dieser Seite verbessert wird:' : null));
+    var pageLinks = renderPageLinks(index); // NEU: Links dieser Seite
+    if (pageLinks) card.appendChild(pageLinks);
     if (page.commodity_risk && page.commodity_reasoning) {
       card.appendChild(el('p', { class: 'cvz-cs-commodity-note' }, ['Risiko austauschbarer Inhalt: ' + page.commodity_reasoning]));
     }
@@ -4417,9 +4945,10 @@
     return outer;
   }
 
-  function renderContentBrief(brief) {
+  // GEÄNDERT: optionaler Titel. Bei bestehenden Seiten heißt der Brief "Was an dieser Seite verbessert wird", weil er Umbauten beschreibt.
+  function renderContentBrief(brief, label) {
     var box = el('div', { class: 'cvz-cs-brief' });
-    box.appendChild(el('p', { class: 'cvz-cs-brief-label' }, ['Content-Brief:']));
+    box.appendChild(el('p', { class: 'cvz-cs-brief-label' }, [label || 'Content-Brief:']));
     var list = el('ul', { class: 'cvz-cs-brief-list' });
     brief.forEach(function (item) { list.appendChild(el('li', {}, [item])); });
     box.appendChild(list);
@@ -4695,46 +5224,47 @@
     return box;
   }
 
-  function renderGeoSection(geo) {
-    if (!geo) return el('div');
-    var box = el('div', { class: 'cvz-cs-geo' });
-    if (geo.citation_strategy_note) box.appendChild(renderProse(geo.citation_strategy_note, 'cvz-cs-citation-note'));
-    var aio = geo.ai_overview;
-    if (aio) {
-      var aioBox = el('div', { class: 'cvz-cs-aio' });
-      if (!aio.present) {
-        aioBox.appendChild(el('h5', {}, ['Google AI Overview']));
-        aioBox.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Kein AI Overview für dieses Thema vorhanden.']));
-      } else if (!aio.references || aio.references.length === 0) {
-        aioBox.appendChild(el('h5', {}, ['Google AI Overview']));
-        aioBox.appendChild(el('p', { class: 'cvz-cs-gsc-hint' }, ['AI Overview vorhanden, aber ohne zitierte Quellen-Links - Hinweis auf Commodity-Charakter dieses Themas.']));
-      } else {
-        aioBox.appendChild(el('h5', {}, ['Google AI Overview' + (aio.own_domain_cited ? ' (eigene Domain wird bereits zitiert)' : ' - zitiert, eigene Domain fehlt noch')]));
-        var aioList = el('ul', {});
-        aio.references.forEach(function (r) {
-          aioList.appendChild(el('li', {}, [el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain]), r.title ? ' – "' + r.title + '"' : '']));
-        });
-        aioBox.appendChild(aioList);
-      }
-      box.appendChild(aioBox);
-    }
-    if (geo.top_serp_results && geo.top_serp_results.length > 0) {
-      box.appendChild(el('h5', {}, ['Top-SEO-Ergebnisse (organisch)']));
-      var serpList = el('ul', {});
-      geo.top_serp_results.forEach(function (r) {
-        serpList.appendChild(el('li', {}, [r.position + '. ', el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain])]));
+  // GEÄNDERT (Sichtbarkeit Google und KI): Die GEO-Darstellung ist in Teile zerlegt, die der Abschnitt "Sichtbarkeit" nach drei Fragen ordnet
+  // (Wo stehst du? Wer wird stattdessen gezeigt? Was ihr tut). Jeder Teil sagt, ob er Google oder KI-Antworten betrifft.
+  function geoAioBlock(geo) {
+    var aio = geo && geo.ai_overview;
+    if (!aio) return null;
+    var aioBox = el('div', { class: 'cvz-cs-aio' });
+    if (!aio.present) {
+      aioBox.appendChild(el('h5', {}, ['Google AI Overview']));
+      aioBox.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Kein AI Overview für dieses Thema vorhanden.']));
+    } else if (!aio.references || aio.references.length === 0) {
+      aioBox.appendChild(el('h5', {}, ['Google AI Overview']));
+      aioBox.appendChild(el('p', { class: 'cvz-cs-gsc-hint' }, ['AI Overview vorhanden, aber ohne zitierte Quellen-Links - Hinweis auf Commodity-Charakter dieses Themas.']));
+    } else {
+      aioBox.appendChild(el('h5', {}, ['Google AI Overview' + (aio.own_domain_cited ? ' (eigene Domain wird bereits zitiert)' : ' - zitiert, eigene Domain fehlt noch')]));
+      var aioList = el('ul', {});
+      aio.references.forEach(function (r) {
+        aioList.appendChild(el('li', {}, [el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain]), r.title ? ' – "' + r.title + '"' : '']));
       });
-      box.appendChild(serpList);
+      aioBox.appendChild(aioList);
     }
-    if (geo.competitor_content_notes && geo.competitor_content_notes.length > 0) {
-      box.appendChild(el('h5', {}, ['Was Wettbewerber-Seiten konkret enthalten']));
-      var compList = el('ul', {});
-      geo.competitor_content_notes.forEach(function (c) {
-        compList.appendChild(el('li', {}, [el('a', { href: c.url, target: '_blank', rel: 'noopener' }, [c.domain]), ': ' + c.structure_summary]));
-      });
-      box.appendChild(compList);
-    }
-    box.appendChild(el('h5', {}, ['Bereits zitierte Portale (LLM-Erwähnungen allgemein)' + (geo.own_domain_already_cited ? ' - eigene Domain bereits darunter' : '')]));
+    return aioBox;
+  }
+  function geoSerpBlock(geo) {
+    if (!geo || !geo.top_serp_results || geo.top_serp_results.length === 0) return null;
+    var serpList = el('ul', {});
+    geo.top_serp_results.forEach(function (r) {
+      serpList.appendChild(el('li', {}, [r.position + '. ', el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain])]));
+    });
+    return el('div', {}, [el('h5', {}, ['Top-Ergebnisse bei Google (organisch)']), serpList]);
+  }
+  function geoCompetitorBlock(geo) {
+    if (!geo || !geo.competitor_content_notes || geo.competitor_content_notes.length === 0) return null;
+    var compList = el('ul', {});
+    geo.competitor_content_notes.forEach(function (c) {
+      compList.appendChild(el('li', {}, [el('a', { href: c.url, target: '_blank', rel: 'noopener' }, [c.domain]), ': ' + c.structure_summary]));
+    });
+    return el('div', {}, [el('h5', {}, ['Was Wettbewerber-Seiten konkret enthalten']), compList]);
+  }
+  function geoPortalsBlock(geo) {
+    if (!geo) return null;
+    var box = el('div', {}, [el('h5', {}, ['Von KI-Assistenten zitierte Portale (allgemein)' + (geo.own_domain_already_cited ? ' - eigene Domain bereits darunter' : '')])]);
     if (geo.top_portals && geo.top_portals.length > 0) {
       var list = el('ul', {});
       geo.top_portals.forEach(function (p) {
@@ -4745,18 +5275,52 @@
     } else {
       box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine zitierten Portale gefunden oder Daten nicht verfügbar.']));
     }
-    if (geo.prompt_tests && geo.prompt_tests.length > 0) {
-      box.appendChild(el('h5', {}, ['Prompt-Test-Ergebnisse']));
-      var ptList = el('ul', {});
-      geo.prompt_tests.forEach(function (r) {
-        var citedText = r.cited_domains && r.cited_domains.length > 0 ? r.cited_domains.join(', ') : 'keine zitierten Domains gefunden';
-        var providerLabel = r.llm_type ? GEO_LLM_TYPE_LABELS[r.llm_type] || r.llm_type : null;
-        var modelText = r.model_name ? ' [' + (providerLabel ? providerLabel + ', Modell: ' : 'Modell: ') + r.model_name + ']' : providerLabel ? ' [' + providerLabel + ']' : '';
-        ptList.appendChild(el('li', {}, ['"' + r.prompt + '"' + modelText + ': eigene Domain zitiert: ' + (r.own_domain_cited ? 'ja' : 'nein') + ' · zitierte Domains: ' + citedText]));
-      });
-      box.appendChild(ptList);
-    }
     return box;
+  }
+  function geoPromptTestsBlock(geo) {
+    if (!geo || !geo.prompt_tests || geo.prompt_tests.length === 0) return null;
+    var ptList = el('ul', {});
+    geo.prompt_tests.forEach(function (r) {
+      var citedText = r.cited_domains && r.cited_domains.length > 0 ? r.cited_domains.join(', ') : 'keine zitierten Domains gefunden';
+      var providerLabel = r.llm_type ? GEO_LLM_TYPE_LABELS[r.llm_type] || r.llm_type : null;
+      var modelText = r.model_name ? ' [' + (providerLabel ? providerLabel + ', Modell: ' : 'Modell: ') + r.model_name + ']' : providerLabel ? ' [' + providerLabel + ']' : '';
+      ptList.appendChild(el('li', {}, ['"' + r.prompt + '"' + modelText + ': eigene Domain zitiert: ' + (r.own_domain_cited ? 'ja' : 'nein') + ' · zitierte Domains: ' + citedText]));
+    });
+    return el('div', {}, [el('h5', {}, ['Prompt-Test-Ergebnisse']), ptList]);
+  }
+
+  // Ein Block mit Kennzeichnung der Quelle (Google oder KI-Antworten), damit eine Momentaufnahme aus ChatGPT nicht wie ein Ranking gelesen wird.
+  function visBlock(source, title, children) {
+    var kids = (children || []).filter(Boolean);
+    var box = el('div', { class: 'cvz-cs-vis-block cvz-cs-vis-' + source }, [
+      el('div', { class: 'cvz-cs-vis-head' }, [el('span', { class: 'cvz-cs-badge cvz-cs-vis-src' }, [source === 'google' ? 'Google' : (source === 'ki' ? 'KI-Antworten' : 'Beides')]), el('strong', {}, [title])]),
+    ]);
+    if (kids.length === 0) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Für diesen Bericht liegen dazu keine Daten vor.']));
+    kids.forEach(function (k) { box.appendChild(k); });
+    return box;
+  }
+
+  // NEU: Abschnitt "Sichtbarkeit: Google und KI-Antworten". Früher verteilt auf GEO-Strategie (mit SEO-Teilen) und den eingeklappten Ist-Zustand.
+  function renderVisibilityOverview(result, session) {
+    var geo = result.geo_strategy || null;
+    var out = [];
+    out.push(el('p', { class: 'cvz-cs-hint' }, ['Google und KI-Antworten messen Verschiedenes: Bei Google sind es Positionen, bei ChatGPT und Gemini Erwähnungen in Antworten, die von Mal zu Mal schwanken. Jeder Block sagt deshalb, woher er stammt.']));
+    out.push(el('h4', { class: 'cvz-cs-vis-q' }, ['1. Wo stehst du heute?']));
+    out.push(el('div', { class: 'cvz-cs-vis-grid' }, [
+      visBlock('google', 'Wofür eure Domain heute rankt', [renderCurrentStateSection(result.current_state)]),
+      visBlock('ki', 'Wirst du in KI-Antworten genannt?', [renderVisibilitySection(session)]),
+    ]));
+    out.push(el('h4', { class: 'cvz-cs-vis-q' }, ['2. Wer wird stattdessen gezeigt?']));
+    out.push(visBlock('google', 'Suchergebnisse und AI Overview', [geoAioBlock(geo), geoSerpBlock(geo), geoCompetitorBlock(geo)]));
+    out.push(visBlock('ki', 'Quellen, die KI-Assistenten zitieren', [geoPortalsBlock(geo), geoPromptTestsBlock(geo)]));
+    out.push(el('h4', { class: 'cvz-cs-vis-q' }, ['3. Was ihr tut']));
+    out.push(visBlock('beides', 'Auf euren Seiten: Formate mit Chancen, zitiert zu werden', [
+      geo && geo.citation_strategy_note ? renderProse(geo.citation_strategy_note, 'cvz-cs-citation-note') : null,
+      el('p', { class: 'cvz-cs-hint' }, ['Welche Seiten das umsetzen, steht im Content-Plan.']),
+    ]));
+    var off = renderOffsiteSection(result.offsite_measures, result.offsite_sources);
+    out.push(visBlock('ki', 'Außerhalb eurer Seiten: Off-Site-Maßnahmen', [off || el('p', { class: 'cvz-cs-hint' }, ['Keine Off-Site-Maßnahmen für dieses Thema.'])]));
+    return out;
   }
 
   var ROADMAP_BUCKETS = [
