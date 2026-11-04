@@ -207,6 +207,15 @@
       '.cvz-cs-rollout-note p{margin:0 0 6px;}',
       '.cvz-cs-rollout-filter{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}',
       '.cvz-cs-notplanned{margin:14px 0 6px;}',
+      '.cvz-cs-prompt-line{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}',
+      '.cvz-cs-prompt-line label{flex:1;min-width:0;overflow-wrap:anywhere;}',
+      '.cvz-cs-prompt-link{background:none;border:0;padding:0;font:inherit;font-size:13px;color:var(--cvz-teal);cursor:pointer;text-decoration:underline;white-space:nowrap;}',
+      '.cvz-cs-prompt-edited{margin-left:8px;}',
+      '.cvz-cs-prompt-editbox{display:flex;flex-direction:column;gap:6px;}',
+      '.cvz-cs-prompt-edit{width:100%;box-sizing:border-box;font:inherit;font-size:14px;padding:8px 10px;}',
+      '.cvz-cs-prompt-edit-error{margin:0;font-size:13px;color:#fca5a5;}',
+      '.cvz-cs-prompt-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;}',
+      '.cvz-cs-prompt-btn{padding:6px 14px;font-size:13px;}',
       '.cvz-cs-roadmap-pages{margin:4px 0 0;font-size:13px;color:var(--cvz-muted);}',
       '.cvz-cs-roadmap-link{color:var(--cvz-teal);text-decoration:none;font-weight:600;}',
       '.cvz-cs-roadmap-link:hover{text-decoration:underline;}',
@@ -951,7 +960,7 @@
       renderAudienceStep(d.audience, d.topic, d.domain, d.validationId, d.originalTopic);
     } else if (draft.step === 'promptplan') {
       state.wizardSteps = wizardStepsFor(null, d.domain);
-      renderPromptPlanStep(d.res, d.topic, d.domain, d.validationId, d.audience, d.originalTopic, d.deselected);
+      renderPromptPlanStep(d.res, d.topic, d.domain, d.validationId, d.audience, d.originalTopic, d.deselected, d.edits);
     }
   }
 
@@ -2058,16 +2067,39 @@
   }
 
   // GEÄNDERT: deselected (optional) = Fragen, die der Kunde abgewählt hatte, z.B. aus einem wiederhergestellten Entwurf.
-  function renderPromptPlanStep(res, topic, domain, validationId, audience, originalTopic, deselected) {
+  // NEU (Fragen bearbeiten): gleiche Regeln wie auf dem Server (checkEditedPrompt in contentStrategyPromptPlan.ts), hier schon beim Tippen.
+  var EDITED_PROMPT_MIN = 12, EDITED_PROMPT_MAX = 200;
+  function cleanPromptText(t) { return String(t || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim(); }
+  function promptBrand(domain) {
+    var host = String(domain || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+    var parts = host.split('.');
+    var label = (parts.length >= 2 ? parts[parts.length - 2] : parts[0] || '').replace(/[^a-z0-9äöüß]/g, '');
+    return label.length >= 4 ? label : '';
+  }
+  function checkEditedPrompt(text, domain) {
+    var t = cleanPromptText(text);
+    if (t.length < EDITED_PROMPT_MIN) return 'Die Frage ist zu kurz (mindestens ' + EDITED_PROMPT_MIN + ' Zeichen).';
+    if (t.length > EDITED_PROMPT_MAX) return 'Die Frage ist zu lang (höchstens ' + EDITED_PROMPT_MAX + ' Zeichen).';
+    if (/https?:\/\/|www\.|\b[a-z0-9-]+\.(de|com|at|ch|io|net|org|eu)\b/i.test(t)) return 'Bitte keine Links oder Domains in die Frage schreiben. Gemessen wird, ob die KI euch von sich aus nennt.';
+    var brand = promptBrand(domain);
+    if (brand && t.toLowerCase().replace(/[^a-z0-9äöüß ]/g, '').indexOf(brand) !== -1) return 'Die Frage enthält euren eigenen Namen. Dann nennt die KI euch fast immer, und die Messung sagt nichts mehr darüber aus, ob ihr empfohlen werdet.';
+    return null;
+  }
+
+  function renderPromptPlanStep(res, topic, domain, validationId, audience, originalTopic, deselected, edits) {
     state.wizardActive = true;
     clear(state.root);
     var plan = res.plan;
     var deselectedMap = {};
     (deselected || []).forEach(function (p) { deselectedMap[p] = true; });
+    var editMap = edits || {}; // NEU: Original-Text -> umformulierter Text
     function savePlanDraft() {
+      var ed = {};
+      checks.forEach(function (c) { if (c.text !== c.prompt) ed[c.prompt] = c.text; });
       saveDraft('promptplan', {
         res: res, topic: topic, domain: domain, validationId: validationId, audience: audience, originalTopic: originalTopic,
         deselected: checks.filter(function (c) { return !c.box.checked; }).map(function (c) { return c.prompt; }),
+        edits: ed,
       });
     }
     var wrap = el('div', { class: 'cvz-cs-topic-check' });
@@ -2075,6 +2107,8 @@
     wrap.appendChild(el('h3', {}, ['Diese Fragen messen wir bei ChatGPT und Gemini']));
     wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [
       'Jede Frage wird je Anbieter 3 Mal gestellt. Das ist eine Momentaufnahme, kein Trend. Du kannst Fragen abwählen, mindestens ' + MIN_PROMPTS_KEEP + ' müssen bleiben.',
+      ' Mit „Bearbeiten“ formulierst du eine Frage so um, wie deine Kunden sie wirklich stellen.',
+      tip('Eine umformulierte Frage zählt als deine eigene Formulierung: Das KI-Suchvolumen der Originalfrage gilt dann nicht mehr, und sie wird als „abgeleitet“ geführt (Kundenfragen aus Vertrieb und Support bleiben Kundenfragen). Euren eigenen Namen bitte nicht in die Frage schreiben: Dann nennt die KI euch fast immer, und die Messung sagt nichts mehr aus.', 'Was passiert beim Bearbeiten?'),
     ]));
     var s = plan.signals || {};
     wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [
@@ -2092,14 +2126,63 @@
         box.checked = !deselectedMap[p.prompt];
         box.addEventListener('change', updateCount);
         box.addEventListener('change', savePlanDraft);
-        checks.push({ box: box, prompt: p.prompt });
-        var meta = ORIGIN_LABEL_MAP[p.origin] || p.origin;
-        if (p.role) meta += ' · ' + p.role;
-        if (typeof p.ai_search_volume === 'number') meta += ' · KI-Suchvolumen ca. ' + p.ai_search_volume;
-        wrap.appendChild(el('div', { class: 'cvz-cs-topic-option' }, [
-          el('label', {}, [box, ' ' + p.prompt]),
-          el('p', { class: 'cvz-cs-hint' }, [meta]),
-        ].concat(p.customer_question ? [el('p', { class: 'cvz-cs-hint' }, ['Ausgangspunkt (deine Kundenfrage): "' + p.customer_question + '"'])] : [])));
+        var entry = { box: box, prompt: p.prompt, text: editMap[p.prompt] ? cleanPromptText(editMap[p.prompt]) : p.prompt };
+        checks.push(entry);
+        var row = el('div', { class: 'cvz-cs-topic-option' });
+        // NEU: Anzeige- und Bearbeitungsmodus je Frage
+        function paintRow(editing, errorText) {
+          clear(row);
+          var edited = entry.text !== entry.prompt;
+          if (editing) {
+            var input = el('textarea', { class: 'cvz-cs-prompt-edit', rows: '2', maxlength: String(EDITED_PROMPT_MAX) });
+            input.value = entry.text;
+            var err = el('p', { class: 'cvz-cs-prompt-edit-error' }, [errorText || '']);
+            if (!errorText) err.style.display = 'none';
+            var save = el('button', { type: 'button', class: 'cvz-cs-submit-btn cvz-cs-prompt-btn' }, ['Übernehmen']);
+            var cancel = el('button', { type: 'button', class: 'cvz-cs-retry-btn cvz-cs-prompt-btn' }, ['Abbrechen']);
+            function validate() {
+              var t = cleanPromptText(input.value);
+              var problem = t === entry.prompt ? null : checkEditedPrompt(t, domain);
+              var dup = !problem && checks.some(function (c) { return c !== entry && c.box.checked && cleanPromptText(c.text).toLowerCase() === t.toLowerCase(); });
+              var msg = problem || (dup ? 'Diese Frage steht schon in der Auswahl.' : '');
+              err.textContent = msg;
+              err.style.display = msg ? '' : 'none';
+              if (msg) save.setAttribute('disabled', 'disabled'); else save.removeAttribute('disabled');
+              return !msg;
+            }
+            input.addEventListener('input', validate);
+            save.addEventListener('click', function () {
+              if (!validate()) return;
+              entry.text = cleanPromptText(input.value);
+              box.checked = true;
+              paintRow(false);
+              updateCount();
+              savePlanDraft();
+            });
+            cancel.addEventListener('click', function () { paintRow(false); });
+            row.appendChild(el('div', { class: 'cvz-cs-prompt-editbox' }, [input, err, el('div', { class: 'cvz-cs-prompt-actions' }, [cancel, save])]));
+            validate();
+            setTimeout(function () { try { input.focus(); } catch (e) { /* ohne Fokus weiter */ } }, 0);
+          } else {
+            var editBtn = el('button', { type: 'button', class: 'cvz-cs-prompt-link' }, ['Bearbeiten']);
+            editBtn.addEventListener('click', function () { paintRow(true); });
+            var labelKids = [box, ' ' + entry.text];
+            if (edited) labelKids.push(el('span', { class: 'cvz-cs-badge cvz-cs-prompt-edited' }, ['von dir umformuliert']));
+            row.appendChild(el('div', { class: 'cvz-cs-prompt-line' }, [el('label', {}, labelKids), editBtn]));
+          }
+          var meta = edited ? (p.origin === 'vertrieb' ? ORIGIN_LABEL_MAP.vertrieb : 'eigene Formulierung, ohne Datenbeleg') : (ORIGIN_LABEL_MAP[p.origin] || p.origin);
+          if (p.role) meta += ' · ' + p.role;
+          if (!edited && typeof p.ai_search_volume === 'number') meta += ' · KI-Suchvolumen ca. ' + p.ai_search_volume;
+          row.appendChild(el('p', { class: 'cvz-cs-hint' }, [meta]));
+          if (edited && !editing) {
+            var reset = el('button', { type: 'button', class: 'cvz-cs-prompt-link' }, ['Original wiederherstellen']);
+            reset.addEventListener('click', function () { entry.text = entry.prompt; paintRow(false); updateCount(); savePlanDraft(); });
+            row.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Ursprünglich: „' + entry.prompt + '“ ', reset]));
+          }
+          if (p.customer_question) row.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Ausgangspunkt (deine Kundenfrage): "' + p.customer_question + '"']));
+        }
+        paintRow(false);
+        wrap.appendChild(row);
       });
     });
 
@@ -2108,12 +2191,14 @@
     var startBtn = el('button', { type: 'button', class: 'cvz-cs-submit-btn' }, ['Fragen bestätigen, Messung und Strategie starten']);
     function updateCount() {
       var n = checks.filter(function (c) { return c.box.checked; }).length;
-      countLine.textContent = n + ' von ' + checks.length + ' Fragen ausgewählt (' + (n * 6) + ' Abfragen).';
+      var ne = checks.filter(function (c) { return c.box.checked && c.text !== c.prompt; }).length;
+      countLine.textContent = n + ' von ' + checks.length + ' Fragen ausgewählt (' + (n * 6) + ' Abfragen)' + (ne ? ', davon ' + ne + ' von dir umformuliert' : '') + '.';
       if (n < MIN_PROMPTS_KEEP) startBtn.setAttribute('disabled', 'disabled'); else startBtn.removeAttribute('disabled');
     }
     updateCount();
     startBtn.addEventListener('click', function () {
-      var selected = checks.filter(function (c) { return c.box.checked; }).map(function (c) { return c.prompt; });
+      // GEÄNDERT: umformulierte Fragen gehen als { original, prompt } an den Server, der sie erneut prüft
+      var selected = checks.filter(function (c) { return c.box.checked; }).map(function (c) { return c.text !== c.prompt ? { original: c.prompt, prompt: c.text } : c.prompt; });
       startGeneration(topic, domain, validationId, null, { prompt_plan_id: res.prompt_plan_id, selected_prompts: selected });
     });
     var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Zurück zur Zielgruppe']);
