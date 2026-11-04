@@ -210,6 +210,11 @@
       '.cvz-cs-rollout-note p{margin:0 0 6px;}',
       '.cvz-cs-rollout-filter{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}',
       '.cvz-cs-notplanned{margin:14px 0 6px;}',
+      '.cvz-cs-vis-query{margin:4px 0 10px;padding:8px 10px;background:rgba(96,165,250,.08);border-left:3px solid #60a5fa;font-size:14px;color:var(--cvz-heading);}',
+      '.cvz-cs-vis-query-label{font-weight:700;}',
+      '.cvz-cs-serp-list{margin:4px 0;padding-left:0;list-style:none;}',
+      '.cvz-cs-serp-list li{margin:0 0 6px;overflow-wrap:anywhere;}',
+      '.cvz-cs-serp-pos{display:inline-block;min-width:58px;font-size:13px;color:var(--cvz-muted);}',
       '.cvz-tp-recheck{margin:14px 0;}',
       '.cvz-tp-reqs{margin:10px 0 14px;padding:10px 12px;background:rgba(79,209,197,.06);border-left:3px solid var(--cvz-teal);}',
       '.cvz-tp-req{margin:8px 0 0;padding-top:8px;border-top:1px solid rgba(148,163,184,.2);}',
@@ -5410,6 +5415,24 @@
 
   // GEÄNDERT (Sichtbarkeit Google und KI): Die GEO-Darstellung ist in Teile zerlegt, die der Abschnitt "Sichtbarkeit" nach drei Fragen ordnet
   // (Wo stehst du? Wer wird stattdessen gezeigt? Was ihr tut). Jeder Teil sagt, ob er Google oder KI-Antworten betrifft.
+  // NEU: Zu welcher Suchanfrage gehören die Google-Daten? Neue Berichte speichern sie (serp_keyword), ältere nicht: Dann ist es laut
+  // Arbeitsanweisung das Kernthema, und das steht ausdrücklich so da.
+  function geoSerpQuery(geo, result) {
+    if (geo && geo.serp_keyword) return { text: geo.serp_keyword, exact: true, date: geo.serp_measured_at || null };
+    var topic = result && (result.seed_topic || (result.topic_validation && result.topic_validation.seed_topic));
+    return topic ? { text: topic, exact: false, date: null } : null;
+  }
+  function geoQueryLine(geo, result) {
+    var q = geoSerpQuery(geo, result);
+    if (!q) return null;
+    var when = q.date ? ', abgerufen am ' + new Date(q.date).toLocaleDateString('de-DE') : '';
+    return el('p', { class: 'cvz-cs-vis-query' }, [
+      el('span', { class: 'cvz-cs-vis-query-label' }, ['Suchanfrage bei Google:']),
+      ' „' + q.text + '“',
+      el('span', { class: 'cvz-cs-hint' }, [q.exact ? ' (Deutschland' + when + ')' : ' (das Kernthema; ältere Berichte haben die genaue Suchanfrage nicht gespeichert)']),
+      tip('Die Ergebnisse darunter stammen aus genau einer Google-Suche nach diesem Begriff: das AI Overview oben auf der Ergebnisseite und die organischen Treffer darunter. Für andere Formulierungen kann Google andere Seiten zeigen.', 'Woher stammen die Ergebnisse?'),
+    ]);
+  }
   function geoAioBlock(geo) {
     var aio = geo && geo.ai_overview;
     if (!aio) return null;
@@ -5421,7 +5444,7 @@
       aioBox.appendChild(el('h5', {}, ['Google AI Overview']));
       aioBox.appendChild(el('p', { class: 'cvz-cs-gsc-hint' }, ['AI Overview vorhanden, aber ohne zitierte Quellen-Links - Hinweis auf Commodity-Charakter dieses Themas.']));
     } else {
-      aioBox.appendChild(el('h5', {}, ['Google AI Overview' + (aio.own_domain_cited ? ' (eigene Domain wird bereits zitiert)' : ' - zitiert, eigene Domain fehlt noch')]));
+      aioBox.appendChild(el('h5', {}, ['Google AI Overview: diese Quellen werden zitiert' + (aio.own_domain_cited ? ' (eure Domain ist dabei)' : ' (eure Domain fehlt noch)')]));
       var aioList = el('ul', {});
       aio.references.forEach(function (r) {
         aioList.appendChild(el('li', {}, [el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain]), r.title ? ' – "' + r.title + '"' : '']));
@@ -5430,13 +5453,29 @@
     }
     return aioBox;
   }
+  // GEÄNDERT: Google-eigene Einträge (google.com, google.de, keine Unterdomains wie cloud.google.com) ausblenden, auch in älteren Berichten,
+  // und den Seitentitel zeigen, damit erkennbar ist, welche Seite rankt.
+  function geoIsGoogleSelf(r) {
+    var host = String(r.domain || '').toLowerCase();
+    try { if (r.url) host = new URL(r.url).hostname.toLowerCase(); } catch (e) { /* Domain verwenden */ }
+    return /^(www\.)?google\.[a-z]{2,3}(\.[a-z]{2})?$/.test(host);
+  }
   function geoSerpBlock(geo) {
     if (!geo || !geo.top_serp_results || geo.top_serp_results.length === 0) return null;
-    var serpList = el('ul', {});
-    geo.top_serp_results.forEach(function (r) {
-      serpList.appendChild(el('li', {}, [r.position + '. ', el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain])]));
+    var shown = geo.top_serp_results.filter(function (r) { return !geoIsGoogleSelf(r); });
+    var hidden = (geo.top_serp_results.length - shown.length) + (geo.serp_google_hidden || 0);
+    var serpList = el('ol', { class: 'cvz-cs-serp-list' });
+    shown.forEach(function (r) {
+      serpList.appendChild(el('li', {}, [
+        el('span', { class: 'cvz-cs-serp-pos' }, ['Platz ' + r.position]),
+        ' ', el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain]),
+        r.title ? el('span', { class: 'cvz-cs-funnel-todo-meta' }, [r.title]) : null,
+      ]));
     });
-    return el('div', {}, [el('h5', {}, ['Top-Ergebnisse bei Google (organisch)']), serpList]);
+    var box = el('div', {}, [el('h5', {}, ['Top-Ergebnisse bei Google (organisch)']), serpList]);
+    if (hidden > 0) box.appendChild(el('p', { class: 'cvz-cs-hint' }, [hidden + (hidden === 1 ? ' Google-eigener Eintrag' : ' Google-eigene Einträge') + ' (z. B. Verweise auf die Google-Suche) ausgeblendet, das sind keine Wettbewerber. Die Platzzahlen bleiben die von Google.']));
+    if (shown.length === 0) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Keine Treffer außer Google-eigenen Einträgen.']));
+    return box;
   }
   function geoCompetitorBlock(geo) {
     if (!geo || !geo.competitor_content_notes || geo.competitor_content_notes.length === 0) return null;
@@ -5446,9 +5485,14 @@
     });
     return el('div', {}, [el('h5', {}, ['Was Wettbewerber-Seiten konkret enthalten']), compList]);
   }
-  function geoPortalsBlock(geo) {
+  function geoPortalsBlock(geo, result) {
     if (!geo) return null;
-    var box = el('div', {}, [el('h5', {}, ['Von KI-Assistenten zitierte Portale (allgemein)' + (geo.own_domain_already_cited ? ' - eigene Domain bereits darunter' : '')])]);
+    var q = geoSerpQuery(geo, result);
+    var box = el('div', {}, [el('h5', {}, ['Welche Domains Googles KI-Antworten am häufigsten nennen' + (geo.own_domain_already_cited ? ' (eure Domain ist dabei)' : '')])]);
+    // NEU: Worauf sich die Zählung bezieht. Das sind keine Antworten auf eure Testfragen, sondern ausgewertete KI-Antworten von Google zum Thema.
+    box.appendChild(el('p', { class: 'cvz-cs-hint' }, [
+      'Gezählt wird, wie oft eine Domain in Googles KI-Antworten (AI Overviews) zu Suchanfragen ' + (q ? 'rund um „' + q.text + '“' : 'zum Thema') + ' genannt wird. Grundlage ist eine laufende Auswertung des Datenanbieters, nicht eure eigenen Testfragen. Die stehen weiter unten.',
+    ]));
     if (geo.top_portals && geo.top_portals.length > 0) {
       var list = el('ul', {});
       geo.top_portals.forEach(function (p) {
@@ -5470,7 +5514,7 @@
       var modelText = r.model_name ? ' [' + (providerLabel ? providerLabel + ', Modell: ' : 'Modell: ') + r.model_name + ']' : providerLabel ? ' [' + providerLabel + ']' : '';
       ptList.appendChild(el('li', {}, ['"' + r.prompt + '"' + modelText + ': eigene Domain zitiert: ' + (r.own_domain_cited ? 'ja' : 'nein') + ' · zitierte Domains: ' + citedText]));
     });
-    return el('div', {}, [el('h5', {}, ['Prompt-Test-Ergebnisse']), ptList]);
+    return el('div', {}, [el('h5', {}, ['Eure Testfragen: wer in der Antwort zitiert wird']), el('p', { class: 'cvz-cs-hint' }, ['Jede Zeile ist eine Frage, die wir der KI gestellt haben, mit den Domains, die die Antwort als Quelle nennt.']), ptList]);
   }
 
   // Ein Block mit Kennzeichnung der Quelle (Google oder KI-Antworten), damit eine Momentaufnahme aus ChatGPT nicht wie ein Ranking gelesen wird.
@@ -5495,8 +5539,8 @@
       visBlock('ki', 'Wirst du in KI-Antworten genannt?', [renderVisibilitySection(session)]),
     ]));
     out.push(el('h4', { class: 'cvz-cs-vis-q' }, ['2. Wer wird stattdessen gezeigt?']));
-    out.push(visBlock('google', 'Suchergebnisse und AI Overview', [geoAioBlock(geo), geoSerpBlock(geo), geoCompetitorBlock(geo)]));
-    out.push(visBlock('ki', 'Quellen, die KI-Assistenten zitieren', [geoPortalsBlock(geo), geoPromptTestsBlock(geo)]));
+    out.push(visBlock('google', 'Suchergebnisse und AI Overview', [geoQueryLine(geo, result), geoAioBlock(geo), geoSerpBlock(geo), geoCompetitorBlock(geo)]));
+    out.push(visBlock('ki', 'Quellen, die KI-Assistenten zitieren', [geoPortalsBlock(geo, result), geoPromptTestsBlock(geo)]));
     out.push(el('h4', { class: 'cvz-cs-vis-q' }, ['3. Was ihr tut']));
     out.push(visBlock('beides', 'Auf euren Seiten: Formate mit Chancen, zitiert zu werden', [
       geo && geo.citation_strategy_note ? renderProse(geo.citation_strategy_note, 'cvz-cs-citation-note') : null,
