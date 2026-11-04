@@ -980,12 +980,24 @@
   function renderStepError(err, label, options) {
     state.wizardActive = true;
     clear(state.root);
+    // GEÄNDERT (Live-Fall: Datendienst langsam oder mit HTTP 500): Der Server nennt die Fehlerart (body.code). Statt der rohen Meldung
+    // ("... nach 60000ms abgebrochen (Timeout-Schutz ...)") steht dann, was los ist und was der Nutzer tun kann. Details bleiben aufklappbar.
+    var code = err && err.body && err.body.code;
+    var SAVED = ' Deine Eingaben sind gespeichert.';
+    var NOT_YOU = ' Das liegt nicht an deiner Eingabe.';
     var text = err && err.network
-      ? label + ': Die Verbindung zum Server wurde unterbrochen, vermutlich durch ein kurzes Update. Deine Eingaben sind gespeichert. Bitte versuche es in ein paar Sekunden erneut.'
-      : err && err.name === 'AbortError'
-        ? label + ': Zeitüberschreitung. Deine Eingaben sind gespeichert. Bitte versuche es erneut.'
-        : label + ' fehlgeschlagen: ' + (err && err.message ? err.message : 'unbekannter Fehler') + '. Deine Eingaben sind gespeichert.';
+      ? label + ': Die Verbindung zum Server wurde unterbrochen, vermutlich durch ein kurzes Update.' + SAVED + ' Bitte versuche es in ein paar Sekunden erneut.'
+      : code === 'zeitlimit' || (err && err.name === 'AbortError')
+        ? label + ': Ein externer Dienst, von dem wir Suchdaten oder KI-Antworten beziehen, hat zu lange gebraucht.' + NOT_YOU + ' Meist klappt es nach ein paar Minuten wieder.' + SAVED
+        : code === 'datenanbieter'
+          ? label + ': Unser Anbieter für Suchdaten meldet gerade einen Fehler.' + NOT_YOU + ' Solche Störungen sind meist nach kurzer Zeit behoben. Bitte versuche es in ein paar Minuten erneut.' + SAVED
+          : code === 'ki_ueberlastet'
+            ? label + ': Der KI-Dienst ist gerade stark ausgelastet.' + NOT_YOU + ' Bitte versuche es in ein bis zwei Minuten erneut.' + SAVED
+            : label + ' fehlgeschlagen: ' + (err && err.message ? err.message : 'unbekannter Fehler') + '.' + SAVED;
     var box = el('div', { class: 'cvz-cs-error' }, [el('p', {}, [text])]);
+    if (code && code !== 'fehler' && err.message) {
+      box.appendChild(el('details', { class: 'cvz-cs-expand' }, [el('summary', {}, ['Technische Details']), el('p', { class: 'cvz-cs-hint' }, [err.message])]));
+    }
     var actions = [];
     if (options.back) {
       var backBtn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, [options.backLabel || 'Zurück']);
