@@ -10267,7 +10267,12 @@
       rows = rows.map(function (r) {
         var bc = r.by_channel && r.by_channel[ch];
         if (!bc) return r;
-        return Object.assign({}, r, { total_runs: bc.total_runs, own_cited_runs: bc.own_cited_runs, domains: bc.domains || {} });
+        return Object.assign({}, r, {
+          total_runs: bc.total_runs, own_cited_runs: bc.own_cited_runs, domains: bc.domains || {},
+          // NEU (06.11.2026): Status je Frage für den gewählten Kanal (dashboard.py: _own_named_metrics)
+          status: bc.status, evaluated_runs: bc.evaluated_runs, own_named_runs: bc.own_named_runs,
+          retrieval_known_runs: bc.retrieval_known_runs, own_retrieved_runs: bc.own_retrieved_runs, fan_out_top: bc.fan_out_top
+        });
       }).filter(function (r) { return (r.total_runs || 0) > 0; });
     }
     if (!rows.length) return null;
@@ -10369,9 +10374,72 @@
       escapeHtml(label) + '</button>';
   }
 
+  // NEU (06.11.2026): Status einer Frage für die eigene Marke (dashboard.py: _own_prompt_status).
+  // Gilt je Frage, wenn es in mindestens einer Antwort zutrifft, wie die Zahl "zitiert bei X von Y Fragen".
+  var SM_STATUS = {
+    named:     { label: 'Genannt', tip: 'Eure Marke steht in mindestens einer Antwort im Antworttext.' },
+    cited:     { label: 'Zitiert, nicht genannt', tip: 'Eine Seite von euch wird als Quelle genutzt, die Marke steht aber in keiner Antwort im Text.' },
+    retrieved: { label: 'Gefunden, nicht gewählt', tip: 'Eine Seite von euch stand unter den Suchergebnissen von ChatGPT, wurde aber nie zitiert.' },
+    not_found: { label: 'Nicht gefunden', tip: 'ChatGPT hat Suchergebnisse geliefert, keine Seite von euch war dabei.' },
+    absent:    { label: 'Nicht zitiert', tip: 'Weder zitiert noch genannt. Ob eine Seite gefunden wurde, ist nicht erkennbar (nur bei ChatGPT sichtbar).' },
+    unknown:   { label: 'Noch nicht ausgewertet', tip: 'Für diese Antworten liegt die Auswertung „im Text genannt“ noch nicht vor.' }
+  };
+  // Reihenfolge in der Liste: zuerst, wo ein Hebel am nächsten liegt.
+  var SM_STATUS_ORDER = { retrieved: 0, cited: 1, not_found: 2, absent: 3, named: 4, unknown: 5 };
+
+  function smStatusChip(r) {
+    var st = SM_STATUS[r.status];
+    if (!st) return '';
+    return '<span class="cvz-sm-status cvz-sm-status-' + r.status + '" title="' + escapeHtml(st.tip) + '"><i></i>' + escapeHtml(st.label) + '</span>';
+  }
+
+  // Trichter einer Frage: gefunden (nur ChatGPT), zitiert, genannt, jeweils in Antworten.
+  function smFunnelText(r) {
+    var parts = [];
+    if (r.retrieval_known_runs) parts.push('gefunden ' + (r.own_retrieved_runs || 0) + ' von ' + r.retrieval_known_runs);
+    parts.push('zitiert ' + (r.own_cited_runs || 0) + ' von ' + r.total_runs);
+    if (r.evaluated_runs) parts.push('genannt ' + (r.own_named_runs || 0) + ' von ' + r.evaluated_runs);
+    return parts.join(' · ');
+  }
+
+  function smFanOutLine(r) {
+    var q = (r.fan_out_top || []).slice(0, 2);
+    if (!q.length) return '';
+    return '<div class="cvz-sm-fanout">ChatGPT suchte intern nach: ' +
+      q.map(function (x) { return '„' + escapeHtml(x.q) + '“'; }).join(', ') + '</div>';
+  }
+
+  // Kernsatz und Statusleiste über der Tabelle, folgt den Filtern Phase und Rolle sowie dem Kanal.
+  function smStatusSummaryHtml(rows) {
+    var counts = {}, any = false;
+    rows.forEach(function (r) {
+      if (r.status && SM_STATUS[r.status]) { any = true; counts[r.status] = (counts[r.status] || 0) + 1; }
+    });
+    if (!any) return '';
+    function c(k) { return counts[k] || 0; }
+    var lead = 'Bei <b>' + c('named') + ' von ' + rows.length + '</b> Fragen steht eure Marke im Antworttext.';
+    if (c('cited')) lead += ' Bei ' + c('cited') + ' wird eure Seite zitiert, die Marke fällt aber nicht.';
+    if (c('retrieved')) lead += ' Bei ' + c('retrieved') + ' taucht eure Seite in den Suchergebnissen auf, wird aber nicht gewählt.';
+    if (c('not_found')) lead += ' Bei ' + c('not_found') + ' taucht sie nicht einmal in den Suchergebnissen auf.';
+    var chips = ['named', 'cited', 'retrieved', 'not_found', 'absent', 'unknown'].filter(function (k) {
+      return c(k) > 0 || (k !== 'absent' && k !== 'unknown');
+    }).map(function (k) {
+      return '<span class="cvz-sm-status cvz-sm-status-' + k + (c(k) ? '' : ' cvz-sm-status-zero') + '" title="' +
+        escapeHtml(SM_STATUS[k].tip) + '"><i></i>' + escapeHtml(SM_STATUS[k].label) + ' <b>' + c(k) + '</b></span>';
+    }).join('');
+    var foot = 'Gezählt wird je Frage, ob es in mindestens einer Antwort zutrifft. „Gefunden“ und „nicht gefunden“ gibt es nur für ChatGPT, nur dort sind die Suchergebnisse sichtbar.';
+    if (c('unknown')) foot += ' Für ' + c('unknown') + (c('unknown') === 1 ? ' Frage' : ' Fragen') + ' liegt die Auswertung „im Text genannt“ noch nicht vor.';
+    return '<div class="cvz-sm-status-sum"><p class="cvz-sm-status-line">' + lead + '</p>' +
+      '<div class="cvz-sm-status-chips">' + chips + '</div><p class="cvz-sm-status-foot">' + foot + '</p></div>';
+  }
+
   // Liste der Fragen hinter einer Zeile: Lücken (ihr nicht zitiert) zuerst.
   function smPromptListHtml(model, rows, domain) {
     var sorted = rows.slice().sort(function (a, b) {
+      // NEU (06.11.2026): mit Status nach Hebel sortieren (gefunden-nicht-gewählt, zitiert-nicht-genannt, ...)
+      if (a.status && b.status && a.status !== b.status) {
+        return (SM_STATUS_ORDER[a.status] - SM_STATUS_ORDER[b.status]);
+      }
       var ga = a.own_cited_runs > 0 ? 1 : 0, gb = b.own_cited_runs > 0 ? 1 : 0;
       if (ga !== gb) return ga - gb;
       return PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase);
@@ -10382,6 +10450,9 @@
       var ownTag = ownCited
         ? '<span class="cvz-sm-own cvz-sm-own-yes">Ihr: zitiert (' + r.own_cited_runs + ' von ' + r.total_runs + ' Antworten)</span>'
         : '<span class="cvz-sm-own cvz-sm-own-no">Ihr: nicht zitiert</span>';
+      if (SM_STATUS[r.status]) {
+        ownTag = smStatusChip(r) + '<span class="cvz-sm-funnel">' + escapeHtml(smFunnelText(r)) + '</span>';
+      }
       var detailLine;
       if (domain) {
         detailLine = escapeHtml(domain) + ' in ' + r.domains[domain] + ' von ' + r.total_runs + ' Antworten';
@@ -10397,7 +10468,7 @@
         '<div class="cvz-sm-prompt-meta">' +
           '<span class="cvz-sm-role">' + escapeHtml(smRoleLabel(model, r)) + '</span>' +
           '<span>' + detailLine + '</span>' + ownTag +
-        '</div></div>';
+        '</div>' + (domain ? '' : smFanOutLine(r)) + '</div>';
     });
     return html + '</div>';
   }
@@ -10470,6 +10541,9 @@
     }
     var visible = state.sourceShowAll ? agg : agg.slice(0, SM_TOP_ROWS);
 
+    // NEU (06.11.2026): Kernsatz und Status je Frage (nur, wenn das Backend ihn liefert)
+    html += smStatusSummaryHtml(scoped);
+
     html += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table class="cvz-sm-table"><thead><tr>' +
       '<th>Domain</th><th>Typ</th><th>Zitiert bei</th><th>Phasen</th><th>Rollen</th>' +
       '</tr></thead><tbody>';
@@ -10532,7 +10606,7 @@
     html += '</tbody></table></div>';
 
     if (agg.length > SM_TOP_ROWS) {
-      html += '<p style="margin:10px 0 0;"><button type="button" class="cvz-link-btn" data-cvz-sm-more="1">' +
+      html += '<p style="margin:10px 0 0;"><button type="button" class="cvz-link-btn cvz-sm-more-btn" data-cvz-sm-more="1">' +
         (state.sourceShowAll ? 'Weniger anzeigen' : 'Alle ' + agg.length + ' Domains anzeigen') + '</button></p>';
     }
     if (!agg.length) {
@@ -12475,6 +12549,29 @@
       '.cvz-sm-own-no { color: var(--cvz-red, #de5b50); }' +
       '.cvz-sm-own-yes { color: var(--cvz-teal, #4fd1c5); }' +
       '.cvz-sm-foot { margin: 12px 0 0; font-size: 11px; color: var(--cvz-text-muted); }' +
+      // NEU (06.11.2026): Status je Frage (genannt, zitiert, gefunden, nicht gefunden)
+      '.cvz-sm-status-sum { margin: 12px 0 14px; padding: 12px 14px; border: 1px solid var(--cvz-border); background: var(--cvz-navy-raised); }' +
+      '.cvz-sm-status-line { margin: 0 0 10px; font-size: 13px; line-height: 1.5; }' +
+      '.cvz-sm-status-chips { display: flex; gap: 8px; flex-wrap: wrap; }' +
+      '.cvz-sm-status { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; border: 1px solid; white-space: nowrap; }' +
+      '.cvz-sm-status i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }' +
+      '.cvz-sm-status-named { color: #4fd1c5; border-color: rgba(79,209,197,.5); }' +
+      '.cvz-sm-status-cited { color: #8fa6c0; border-color: rgba(143,166,192,.5); }' +
+      '.cvz-sm-status-retrieved { color: #e0a458; border-color: rgba(224,164,88,.5); }' +
+      '.cvz-sm-status-not_found { color: var(--cvz-red, #de5b50); border-color: rgba(222,91,80,.5); }' +
+      '.cvz-sm-status-absent { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
+      '.cvz-sm-status-unknown { color: var(--cvz-text-muted); border-color: var(--cvz-border); border-style: dashed; }' +
+      '.cvz-sm-status-zero { opacity: .45; }' +
+      '.cvz-sm-status-foot { margin: 10px 0 0; font-size: 11px; line-height: 1.5; color: var(--cvz-text-muted); }' +
+      '.cvz-sm-funnel { font-size: 11px; color: var(--cvz-text-muted); }' +
+      '.cvz-sm-fanout { margin-top: 5px; font-size: 11px; line-height: 1.45; color: var(--cvz-text-muted); }' +
+      // NEU (06.11.2026): cvz-link-btn hatte bisher keinen Stil (Browser-Voreinstellung: weißer Balken). Grundstil = Textlink
+      // (genutzt für "Erneut versuchen" mitten im Text), cvz-sm-more-btn = Umriss-Button wie "Wettbewerber bearbeiten".
+      '.cvz-link-btn { font: inherit; padding: 0; margin: 0; background: none; border: none; border-radius: 0; color: var(--cvz-teal, #4fd1c5); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }' +
+      '.cvz-link-btn:hover { text-decoration-thickness: 2px; }' +
+      '.cvz-link-btn:focus-visible { outline: 1px solid var(--cvz-teal, #4fd1c5); outline-offset: 2px; }' +
+      '.cvz-sm-more-btn { font-family: "Geist", sans-serif; font-size: 13px; padding: 6px 12px; border: 1px solid var(--cvz-teal, #4fd1c5); text-decoration: none; }' +
+      '.cvz-sm-more-btn:hover { background: rgba(79,209,197,.08); text-decoration: none; }' +
       '.cvz-sm-cell-dom { display: flex; align-items: center; gap: 4px; margin-bottom: 3px; white-space: nowrap; }' +
       '.cvz-sm-cell-name { font-size: 12px; font-weight: 600; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }' +
       '.cvz-sm-cell-n { font-size: 11px; color: var(--cvz-text-muted); margin-left: 4px; }' +
