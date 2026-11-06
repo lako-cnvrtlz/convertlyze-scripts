@@ -13037,7 +13037,7 @@
   }
 
   // NEU (16.10.2026): KI-Wissens-Check als Einzeiler für den Tab Situation.
-  // Der vollständige Check steht im Tab Wettbewerb.
+  // GEÄNDERT (06.11.2026): Der vollständige Check steht eingeklappt direkt darunter.
   function renderKnowledgeOneLiner(detail) {
     var k = detail.ai_knowledge;
     if (!k) return null;
@@ -13064,12 +13064,6 @@
     text.textContent = facts;
     text.title = 'Geprüft am ' + (formatShortDate(k.checked_at) || '') + '. Abdeckung: wie vollständig die Modelle eure wichtigsten Wissensbereiche kennen.';
     card.appendChild(text);
-    var link = document.createElement('button');
-    link.type = 'button';
-    link.className = 'cvz-journey-hint-link';
-    link.setAttribute('data-cvz-tab', 'wettbewerb');
-    link.textContent = 'Details im Tab Wettbewerb →';
-    card.appendChild(link);
     section.appendChild(card);
     return section;
   }
@@ -13502,7 +13496,7 @@
     // KI-Wissens-Check) und fehlgeschlagen sind, fehlen oder gerade laufen.
     // GEÄNDERT (16.10.2026): ai_knowledge zeigt seinen Hinweis jetzt im Tab
     // Wettbewerb, wo der vollständige Check steht.
-    var situationStepNotice = renderStepNotice(detail, ['summary', 'opportunities']);
+    var situationStepNotice = renderStepNotice(detail, ['summary', 'opportunities', 'ai_knowledge']);
     if (situationStepNotice) wrap.appendChild(situationStepNotice);
 
     // Phase-Score-Übersicht (Dashboard-Daten, falls geladen)
@@ -13540,16 +13534,29 @@
     // GEÄNDERT (16.10.2026): Situation ist der 30-Sekunden-Check. Hier stehen
     // nur noch Kennzahlen mit Link zur Stelle, wo die Details stehen. Jede
     // Auswertung gibt es genau einmal:
-    //   Wettbewerbs-Chart, Quellen ("Wer wird stattdessen zitiert?"),
-    //   KI-Wissens-Check vollständig  → Tab Wettbewerb
+    //   Wettbewerbs-Chart, Quellen ("Wer wird stattdessen zitiert?") → Tab Wettbewerb
+    //   KI-Wissens-Check vollständig (eingeklappt)                    → Tab Situation
     //   Sichtbarkeit je Rolle, Content-Typen pro Phase → Tab Journey
     if (dashData && !dashError && !state.isLoadingDashboard) {
       wrap.appendChild(renderSituationPhaseTiles(dashData));
     }
 
-    // KI-Wissens-Check als Einzeiler (vollständig im Tab Wettbewerb)
+    // GEÄNDERT (06.11.2026): KI-Wissens-Check: Einzeiler als Kopfzeile,
+    // der vollständige Check liegt eingeklappt darunter (vorher im Tab Wettbewerb).
     var knowledgeLine = renderKnowledgeOneLiner(detail);
     if (knowledgeLine) wrap.appendChild(knowledgeLine);
+
+    var knowledgeFull = renderKnowledgeSection(detail);
+    if (knowledgeFull) {
+      var kDetails = document.createElement('details');
+      kDetails.className = 'cvz-section';
+      var kSummary = document.createElement('summary');
+      kSummary.style.cssText = 'cursor:pointer;font-size:13px;color:var(--cvz-text-muted);margin-bottom:12px;';
+      kSummary.textContent = 'Alle Wissensbereiche anzeigen';
+      kDetails.appendChild(kSummary);
+      kDetails.appendChild(knowledgeFull);
+      wrap.appendChild(kDetails);
+    }
 
     // Beste Content-Chancen
     var bestChances = SHOW_LEGACY_RECOMMENDATIONS ? renderBestContentChancesSection(detail.best_content_chances, detail.topic) : null;
@@ -14295,7 +14302,7 @@
   function renderWettbewerbTab(topicId, detail) {
     var wrap = document.createElement('div');
 
-    var stepNotice = renderStepNotice(detail, ['source_analysis', 'competitor_suggestions', 'ai_knowledge']);
+    var stepNotice = renderStepNotice(detail, ['source_analysis', 'competitor_suggestions']);
     if (stepNotice) wrap.appendChild(stepNotice);
 
     if (state.isLoadingDashboard) {
@@ -14359,12 +14366,8 @@
       wrap.appendChild(renderSourceProfilesSection(detail.source_profiles, topicId, _sov));
     }
 
-    // 3. Warum? Was die Modelle über euch wissen, und was für einen
-    // vollständigen Vergleich mit Wettbewerbern fehlt.
-    var knowledgeSection = renderKnowledgeSection(detail);
-    if (knowledgeSection) wrap.appendChild(knowledgeSection);
-
-    // 4. Welche Domains als Wettbewerber gelten.
+    // 3. Welche Domains als Wettbewerber gelten.
+    // GEÄNDERT (06.11.2026): Der KI-Wissens-Check steht jetzt im Tab Situation.
     wrap.appendChild(renderCompetitorManageBlock(detail, topicId));
 
     return wrap;
