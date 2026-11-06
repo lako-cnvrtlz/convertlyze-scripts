@@ -14358,6 +14358,54 @@
     }
     return [];
   }
+  // NEU (06.11.2026): Wettbewerber und Content-Lücken werden wie die GSC-Zeilen
+  // auf das jeweilige Item eingegrenzt. Vorher zeigte jede Maßnahme dieser
+  // Kategorien die komplette Liste des Topics. Lässt sich nichts eindeutig
+  // zuordnen, erscheint keine Tabelle (wie bei _pickGscRowsForItem).
+  function _itemMatchText(item) {
+    var parts = [item && item.title, item && item.situation, item && item.recommendation];
+    ((item && item.sources) || []).forEach(function (src) { parts.push(src && src.label); });
+    return parts.join(' ').toLowerCase();
+  }
+  function _normDomain(d) {
+    return String(d || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').trim();
+  }
+  function _pickCompetitorsForItem(comps, item) {
+    var ev = (item && item.evidence) || {};
+    // 1) Der Hauptwettbewerber aus dem Beleg des Items
+    var top = _normDomain(ev.top_competitor);
+    if (top) {
+      var byTop = comps.filter(function (c) {
+        var d = _normDomain(c.domain);
+        return d && (d === top || d.indexOf(top) !== -1 || top.indexOf(d) !== -1);
+      });
+      if (byTop.length) return byTop;
+    }
+    // 2) Wettbewerber, die im Text oder in den Quellen des Items vorkommen
+    var text = _itemMatchText(item);
+    return comps.filter(function (c) {
+      var d = _normDomain(c.domain);
+      if (!d) return false;
+      if (text.indexOf(d) !== -1) return true;
+      var name = d.split('.')[0]; // z. B. "unbounce" aus "unbounce.com"
+      return name.length >= 5 && text.indexOf(name) !== -1;
+    });
+  }
+  function _pickGapPromptsForItem(gaps, item) {
+    var ev = (item && item.evidence) || {};
+    // 1) Der Beispiel-Prompt aus dem Beleg des Items
+    var ex = String(ev.example_prompt || '').toLowerCase().trim();
+    if (ex) {
+      var byEx = gaps.filter(function (p) { return String(p.prompt_text || '').toLowerCase().trim() === ex; });
+      if (byEx.length) return byEx;
+    }
+    // 2) Prompts, die im Text oder in den Quellen des Items vorkommen
+    var text = _itemMatchText(item);
+    return gaps.filter(function (p) {
+      var t = String(p.prompt_text || '').toLowerCase().trim();
+      return t.length >= 15 && text.indexOf(t) !== -1;
+    });
+  }
   function _buildSupportingDataTable(catKey, phase, detail, item) {
     var rows = [];
     var headers = [];
@@ -14395,6 +14443,7 @@
       });
     } else if (catKey === 'wettbewerb') {
       var comps = (detail.competitor_insights || []).filter(function (c) { return c.domain; });
+      comps = _pickCompetitorsForItem(comps, item);
       if (comps.length === 0) return null;
       headers = ['Wettbewerber', 'Stärke', 'Schwäche'];
       rows = comps.map(function (c) {
@@ -14409,6 +14458,7 @@
         return (phase === 'alle_phasen' || p.messymiddle_phase === phase)
           && p.cited_count === 0 && p.total_runs > 0;
       });
+      gaps = _pickGapPromptsForItem(gaps, item);
       if (gaps.length === 0) return null;
       headers = ['Prompt ohne eigene Zitierung', 'Läufe'];
       rows = gaps.map(function (p) {
@@ -14433,7 +14483,7 @@
     var trh = document.createElement('tr');
     headers.forEach(function (h, hi) {
       var th = document.createElement('th');
-      th.style.cssText = 'text-align:' + (hi === 0 ? 'left' : 'right') + ';padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#232b36);white-space:nowrap;';
+      th.style.cssText = 'text-align:' + ((hi === 0 || catKey === 'wettbewerb') ? 'left' : 'right') + ';padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#232b36);white-space:nowrap;';
       th.textContent = h;
       trh.appendChild(th);
     });
@@ -14441,13 +14491,23 @@
     tbl.appendChild(thead);
 
     var tbody = document.createElement('tbody');
+    // GEÄNDERT (06.11.2026): Nur Zahlenspalten sind umbruchfrei und rechtsbündig.
+    // Beim Wettbewerb stehen in allen Spalten Sätze. Mit nowrap wurde die Tabelle
+    // tausende Pixel breit und hat die ganze Seite über den Bildschirm hinaus gezogen.
+    var textTable = (catKey === 'wettbewerb');
     rows.forEach(function (row, ri) {
       var tr = document.createElement('tr');
       tr.style.cssText = (ri % 2 === 0 ? 'background:transparent;' : 'background:rgba(255,255,255,.03);');
       row.forEach(function (cell, ci) {
         var td = document.createElement('td');
-        td.style.cssText = 'padding:5px 8px;color:var(--cvz-text-muted,#8b98a5);vertical-align:top;' +
-          (ci === 0 ? 'text-align:left;word-break:break-word;max-width:220px;' : 'text-align:right;white-space:nowrap;');
+        var base = 'padding:5px 8px;color:var(--cvz-text-muted,#8b98a5);vertical-align:top;';
+        if (ci === 0) {
+          td.style.cssText = base + 'text-align:left;word-break:break-word;max-width:220px;';
+        } else if (textTable) {
+          td.style.cssText = base + 'text-align:left;word-break:break-word;min-width:140px;';
+        } else {
+          td.style.cssText = base + 'text-align:right;white-space:nowrap;';
+        }
         td.textContent = cell;
         tr.appendChild(td);
       });
@@ -14456,7 +14516,7 @@
     tbl.appendChild(tbody);
 
     var scrollWrap = document.createElement('div');
-    scrollWrap.style.cssText = 'overflow-x:auto;border:1px solid var(--cvz-border,#232b36);border-radius:0;';
+    scrollWrap.style.cssText = 'overflow-x:auto;min-width:0;max-width:100%;border:1px solid var(--cvz-border,#232b36);border-radius:0;';
     scrollWrap.appendChild(tbl);
     wrapper.appendChild(scrollWrap);
     return wrapper;
@@ -14470,6 +14530,8 @@
   // phasengerecht mit typisierten Evidence-Bloecken.
   function renderAktionsplanTab(detail) {
     var wrap = document.createElement('div');
+    // NEU (06.11.2026): Inhalt darf die Seite nie breiter als den Bildschirm machen.
+    wrap.style.cssText = 'min-width:0;max-width:100%;';
 
     // NEU (20.09.2026): Retry-Hinweis, falls die Aktionsplan-Generierung
     // fehlgeschlagen ist oder noch fehlt.
@@ -14657,7 +14719,7 @@
 
           var card = document.createElement('div');
           card.className = 'cvz-card';
-          card.style.cssText = 'padding:0;overflow:hidden;' + (isCompleted ? 'opacity:0.45;' : '');
+          card.style.cssText = 'padding:0;overflow:hidden;min-width:0;max-width:100%;' + (isCompleted ? 'opacity:0.45;' : '');
 
           var impactLvl = (item.impact || 'mittel').toLowerCase();
           var impColor  = IMPACT_COLOR_MAP[impactLvl] || '#d97706';
