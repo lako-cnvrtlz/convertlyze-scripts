@@ -12242,6 +12242,27 @@
       '.cvz-vf-row .cvz-vf-name { display: flex; align-items: center; gap: 8px; font-weight: 500; }' +
       '.cvz-vf-row .cvz-vf-count b { font-size: 14px; }' +
       '.cvz-vf-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #e0a458; border: 1px solid rgba(224,164,88,.5); padding: 1px 5px; }' +
+      // NEU (06.11.2026): Zitiert oder genannt? und Hinweis zur Quellenabdeckung in den Journey-Karten
+      '.cvz-bp { margin-top: 28px; }' +
+      '.cvz-bp-legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 0 0 12px; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-bp-legend span { display: inline-flex; align-items: center; gap: 6px; }' +
+      '.cvz-bp-key { width: 10px; height: 10px; display: inline-block; }' +
+      '.cvz-bp-key.both, .cvz-bp-seg.both { background: #4fd1c5; }' +
+      '.cvz-bp-key.cited, .cvz-bp-seg.cited { background: #6b86a3; }' +
+      '.cvz-bp-key.named, .cvz-bp-seg.named { background: #d8b4fe; }' +
+      '.cvz-bp-row { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--cvz-border); }' +
+      '.cvz-bp-row.own { border: 1px solid var(--cvz-teal); background: var(--cvz-navy-raised); padding: 12px 14px; }' +
+      '.cvz-bp-name { display: flex; align-items: center; gap: 8px; font-weight: 500; min-width: 0; }' +
+      '.cvz-bp-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }' +
+      '.cvz-bp-bar { display: flex; height: 14px; background: var(--cvz-border); }' +
+      '.cvz-bp-seg { display: block; height: 100%; min-width: 2px; }' +
+      '.cvz-bp-count { font-size: 12px; color: var(--cvz-text-muted); white-space: nowrap; text-align: right; }' +
+      '.cvz-bp-count b { color: var(--cvz-text); font-size: 14px; }' +
+      '.cvz-bp-split { display: block; font-size: 11px; }' +
+      '.cvz-bp-msg { margin: 8px 0 14px; font-size: 13px; line-height: 1.5; color: var(--cvz-text); }' +
+      '.cvz-bp-foot { margin: 12px 0 0; font-size: 11px; line-height: 1.5; color: var(--cvz-text-muted); }' +
+      '@media (max-width: 640px) { .cvz-bp-row { grid-template-columns: 1fr auto; } .cvz-bp-row .cvz-bp-bar { grid-column: 1 / -1; grid-row: 2; } }' +
+      '.cvz-journey-cov-note { margin: 6px 0 0; font-size: 11px; line-height: 1.4; color: var(--cvz-text-muted); }' +
       '@media (max-width: 640px) { .cvz-vf-row { grid-template-columns: 1fr auto; } .cvz-vf-row .cvz-vf-bar { grid-column: 1 / -1; grid-row: 2; } .cvz-vf-row .cvz-vf-engines { display: none; } }' +
       // NEU (21.10.2026): erledigte Maßnahmen im Aktionsplan
       '.cvz-done-section { margin-top: 36px; padding-top: 22px; border-top: 1px solid var(--cvz-border); }' +
@@ -13975,6 +13996,21 @@
         card.appendChild(row);
       });
 
+      // NEU (06.11.2026): Liefert ein Kanal in dieser Phase selten Quellen (Gemini antwortet auf
+      // Wissensfragen oft ohne), sagt ein niedriger Wert wenig über euch. Hinweis nur bei
+      // mindestens 10 Antworten und unter 25 % Antworten mit Quellen.
+      visibleChannels().forEach(function (channel) {
+        var cov = jc && jc.source_coverage && jc.source_coverage[channel] && jc.source_coverage[channel][phase];
+        if (!cov || cov.runs < 10 || cov.with_sources / cov.runs >= 0.25) return;
+        var covNote = document.createElement('p');
+        covNote.className = 'cvz-journey-cov-note';
+        covNote.textContent = (CHANNEL_LABELS[channel] || channel) + ' nennt in dieser Phase selten Quellen (' +
+          cov.with_sources + ' von ' + cov.runs + ' Antworten). Ein niedriger Wert sagt hier wenig über euch.';
+        covNote.title = 'Prompts mit Quellen: ' + cov.prompts_with_sources + ' von ' + cov.prompts + '. ' +
+          'Ob eure Marke im Text genannt wird, steht im Wettbewerb-Tab unter „Zitiert oder genannt?“.';
+        card.appendChild(covNote);
+      });
+
       // NEU (02.10.2026): AI Overview als eigene Monatszeile (nur wenn das
       // Backend den Block liefert, sonst wäre "noch nicht geprüft" falsch).
       if (data.ai_overview_by_phase) {
@@ -14177,6 +14213,10 @@
     var vField = renderVisibilityField(_jc, detail);
     if (vField) wrap.appendChild(vField);
 
+    // NEU (06.11.2026): zitiert oder im Text genannt? (dashboard.py: brand_presence)
+    var bPresence = renderBrandPresence(_jc, detail);
+    if (bPresence) wrap.appendChild(bPresence);
+
     // GEÄNDERT (21.10.2026): Das Liniendiagramm "Sichtbarkeit im Wettbewerbsvergleich"
     // (Domains je Phase) entfällt, das Sichtbarkeitsfeld beantwortet dieselbe
     // Frage, die Aufteilung nach Phase steht im Journey-Tab. Nur noch als
@@ -14301,6 +14341,118 @@
       more.textContent = 'Daneben wurden ' + vf.other_count + ' weitere Domains zitiert. Details pro Frage weiter unten unter „Wer wird zitiert?“.';
       section.appendChild(more);
     }
+    return section;
+  }
+
+  // NEU (06.11.2026): "Zitiert oder genannt?" Eine KI kann eine Marke im Antworttext nennen, eine
+  // Seite der Marke als Quelle zitieren oder beides. Das sind verschiedene Signale. Pro Marke ein
+  // Balken: beides / nur zitiert / nur genannt, bezogen auf die ausgewerteten Antworten der letzten
+  // 28 Tage. Folgt dem Kanal-Umschalter. Daten: journey_comparison.brand_presence (dashboard.py).
+  function renderBrandPresence(jc, detail) {
+    var bp = jc && jc.brand_presence;
+    if (!bp || !bp.by_channel) return null;
+    var ch = activeChannel();
+    var d = bp.by_channel[ch];
+    if (!d || !d.runs_total) return null;
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section cvz-bp';
+    var label = document.createElement('p');
+    label.className = 'cvz-section-label';
+    label.textContent = 'Zitiert oder genannt?';
+    section.appendChild(label);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = 'Eine KI kann eine Marke im Antworttext nennen, eine Seite der Marke als Quelle zitieren oder beides. ' +
+      'Das sind verschiedene Signale. Gezählt wird je Antwort der letzten ' + bp.window_days + ' Tage (' + activeChannelLabel() + ').';
+    section.appendChild(sub);
+
+    var evaluated = d.runs_evaluated || 0;
+    if (!evaluated) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = 'Für diese Antworten liegt die Auswertung „im Text genannt“ noch nicht vor. ' +
+        'Sie wird bei jeder neuen Messung mitberechnet, ältere Antworten werden einmalig nachgetragen.';
+      section.appendChild(none);
+      return section;
+    }
+
+    var legend = document.createElement('div');
+    legend.className = 'cvz-bp-legend';
+    legend.innerHTML =
+      '<span><i class="cvz-bp-key both"></i>beides: genannt und zitiert</span>' +
+      '<span><i class="cvz-bp-key cited"></i>nur zitiert: Quelle, Marke steht nicht im Text</span>' +
+      '<span><i class="cvz-bp-key named"></i>nur genannt: im Text, ohne Quelle</span>';
+    section.appendChild(legend);
+
+    function fav(dom) {
+      return '<img src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(dom) +
+        '" width="18" height="18" alt="" onerror="this.style.visibility=\'hidden\'">';
+    }
+    function bar(st) {
+      var h = '<div class="cvz-bp-bar" aria-hidden="true">';
+      [['both', st.both], ['cited', st.cited_only], ['named', st.named_only]].forEach(function (seg) {
+        if (seg[1] > 0) h += '<i class="cvz-bp-seg ' + seg[0] + '" style="width:' + (seg[1] / evaluated * 100).toFixed(2) + '%"></i>';
+      });
+      return h + '</div>';
+    }
+    function count(st) {
+      var present = st.both + st.cited_only + st.named_only;
+      return '<span class="cvz-bp-count" title="' + escapeHtml('In ' + present + ' von ' + evaluated + ' Antworten zitiert oder genannt') + '">' +
+        '<b>' + present + '</b>/' + evaluated +
+        '<span class="cvz-bp-split">' + st.both + ' beides · ' + st.cited_only + ' zitiert · ' + st.named_only + ' genannt</span></span>';
+    }
+
+    var own = d.own || {};
+    var ownDomain = (detail.topic && detail.topic.own_domain) || 'Eure Domain';
+    var ownNamed = (own.both || 0) + (own.named_only || 0);
+    var ownCited = (own.both || 0) + (own.cited_only || 0);
+    var msg;
+    if (!ownNamed && !ownCited) {
+      msg = 'Eure Marke wurde in keiner Antwort zitiert oder genannt.';
+    } else if (ownCited && !ownNamed) {
+      msg = 'Eure Seite dient als Quelle (' + ownCited + ' von ' + evaluated + ' Antworten), eure Marke steht aber in keiner Antwort im Text.';
+    } else if (ownNamed && !ownCited) {
+      msg = 'Eure Marke steht in ' + ownNamed + ' von ' + evaluated + ' Antworten im Text, eine Seite von euch wird dabei nie als Quelle zitiert.';
+    } else {
+      msg = 'Eure Marke wird in ' + ownNamed + ' Antworten genannt und in ' + ownCited + ' Antworten als Quelle zitiert (von ' + evaluated + ').';
+    }
+    var ownRow = document.createElement('div');
+    ownRow.className = 'cvz-bp-row own';
+    ownRow.innerHTML = '<span class="cvz-bp-name">' + fav(ownDomain) + '<span>' + escapeHtml(ownDomain) + '</span></span>' + bar(own) + count(own);
+    section.appendChild(ownRow);
+    var msgEl = document.createElement('p');
+    msgEl.className = 'cvz-bp-msg';
+    msgEl.textContent = msg;
+    section.appendChild(msgEl);
+
+    (d.competitors || []).forEach(function (c) {
+      var row = document.createElement('div');
+      row.className = 'cvz-bp-row';
+      row.innerHTML = '<span class="cvz-bp-name" title="Beobachteter Wettbewerber">' + fav(c.domain) +
+        '<span style="color:#e0a458;">' + escapeHtml(c.domain) + '</span></span>' + bar(c) + count(c);
+      section.appendChild(row);
+    });
+    if (d.competitors_hidden) {
+      var more = document.createElement('p');
+      more.className = 'cvz-chart-caption';
+      more.textContent = 'Weitere ' + d.competitors_hidden + ' beobachtete Wettbewerber kommen ebenfalls vor und sind hier nicht aufgeführt.';
+      section.appendChild(more);
+    }
+
+    var foot = document.createElement('p');
+    foot.className = 'cvz-bp-foot';
+    var notes = ['Gezeigt werden eure beobachteten Wettbewerber, die vorkommen. Neu hinzugefügte Wettbewerber werden für ältere Antworten erst nach einer Neuberechnung erkannt.'];
+    if (ch !== 'chat_gpt') {
+      notes.push('Bei Gemini erkennen wir Nennungen nur im Antworttext, die Zahlen sind eher eine Untergrenze. ChatGPT meldet genannte Marken selbst.');
+    }
+    if (evaluated < d.runs_total) {
+      notes.push('Ausgewertet: ' + evaluated + ' von ' + d.runs_total + ' Antworten.');
+    }
+    foot.textContent = notes.join(' ');
+    section.appendChild(foot);
     return section;
   }
 
