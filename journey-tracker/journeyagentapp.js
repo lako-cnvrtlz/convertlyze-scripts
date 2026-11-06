@@ -2561,6 +2561,18 @@
       submitManualPrompt(manualPromptSubmit.getAttribute('data-cvz-manual-prompt-submit'));
       return;
     }
+    // NEU (06.11.2026): Keywords-Tabelle unter der GSC-Kurve (renderGscKeywordsTable)
+    var gkMore = event.target.closest('[data-cvz-gk-more]');
+    if (gkMore) {
+      state.gscKwShowAll = !state.gscKwShowAll;
+      render();
+      return;
+    }
+    var gkToggle = event.target.closest('[data-cvz-gk-toggle]');
+    if (gkToggle) {
+      toggleGscKeywordRow(state.activeTopicId, gkToggle.getAttribute('data-cvz-gk-toggle'));
+      return;
+    }
     // NEU (15.09.2026): GSC-Zeilen im selben Auf-/Zuklapp-Stil wie Keywords,
     // siehe renderGscBlock/toggleGscRowExpansion.
     var gscToggle = event.target.closest('#cvz-visibility-app a[href]') ? null : event.target.closest('[data-cvz-gsc-toggle]');
@@ -12003,6 +12015,14 @@
       // Die Mindestbreite verhindert, dass table-layout:fixed Spalten ineinander quetscht.
       '.cvz-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }' +
       ':where(.cvz-table-scroll) > table { min-width: 560px; }' +
+      // NEU (06.11.2026): Keywords-Tabelle unter der GSC-Kurve
+      '.cvz-gk { margin-top: 24px; }' +
+      '.cvz-gk-table { min-width: 520px; }' +
+      '.cvz-gk-table th.cvz-gk-num, .cvz-gk-table td.cvz-gk-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }' +
+      '.cvz-gk-row { cursor: pointer; }' +
+      '.cvz-gk-row:hover { background: rgba(79,209,197,.06); }' +
+      '.cvz-gk-sum td { font-weight: 600; border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-gk-foot { margin: 10px 0 0; font-size: 11px; line-height: 1.5; color: var(--cvz-text-muted); }' +
       '.cvz-gsc-table { min-width: 1100px; }' +
       '.cvz-gsc-table td { overflow-wrap: anywhere; vertical-align: top; }' +
       '.cvz-gsc-table td.cvz-gsc-cell-url { overflow-wrap: normal; }' +
@@ -16120,9 +16140,11 @@
     heading.textContent = 'Google-Suche (Search Console)';
     head.appendChild(heading);
     head.appendChild(makeTip(
-      'Klicks, Impressionen und durchschnittliche Position aller aktiven Keywords dieses Themas, laut Google Search Console. ' +
+      'Ihr seht Klicks, Impressionen und die durchschnittliche Position aller aktiven Keywords dieses Themas, laut Google Search Console. ' +
+      'Jeder Punkt fasst die 28 Tage bis zu seinem Datum zusammen, ein Punkt pro Woche. ' +
       'Die Position ist nach Impressionen gewichtet, wie in der Search Console selbst. ' +
-      'Den Verlauf einzelner Suchanfragen seht ihr unter Daten → GSC, wenn ihr eine Zeile aufklappt.'
+      'Die Tabelle darunter zeigt die Keywords hinter dem letzten Punkt, per Klick auf eine Zeile seht ihr deren Verlauf. ' +
+      'Sie weicht von der Tabelle unter Daten → GSC ab: Dort stehen Monatsstände, hier Tageswerte.'
     ));
     section.appendChild(head);
 
@@ -16152,7 +16174,131 @@
       return section;
     }
     section.appendChild(renderGscRollingBlock(rolling, topicId, {}));
+    // NEU (06.11.2026): welche Keywords stecken in der Kurve? (main.py: _get_gsc_keyword_table)
+    var kwTable = renderGscKeywordsTable(rolling.keywords, topicId);
+    if (kwTable) section.appendChild(kwTable);
     return section;
+  }
+
+  // NEU (06.11.2026): Die Keywords hinter dem letzten Punkt der Kurve. Gleiche Regel wie die Kurve
+  // (nur aktive Keywords, 28 Tage, Position nach Impressionen gewichtet), deshalb entspricht die
+  // Summenzeile dem letzten Kurvenpunkt. Klick auf eine Zeile zeigt den Verlauf der Suchanfrage.
+  var GSC_KW_TOP_ROWS = 10;
+
+  function renderGscKeywordsTable(kw, topicId) {
+    if (!kw || !kw.rows || !kw.rows.length) return null;
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-gk';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Diese Keywords stecken in der Kurve';
+    wrap.appendChild(heading);
+
+    var basis = document.createElement('p');
+    basis.className = 'cvz-card-placeholder-text';
+    basis.style.marginBottom = '10px';
+    basis.textContent = 'Basis: ' + (kw.tracked === 1 ? '1 aktives Keyword' : kw.tracked + ' aktive Keywords') +
+      ', davon ' + kw.with_impressions + ' mit Impressionen vom ' + formatShortDate(kw.window.start) +
+      ' bis ' + formatShortDate(kw.window.end) + ' (letzter Punkt der Kurve).';
+    wrap.appendChild(basis);
+
+    function num(v) { return v == null ? '–' : Number(v).toLocaleString('de-DE'); }
+    function pos(v) { return v == null ? '–' : fmtNum1(v); }
+
+    var showAll = !!state.gscKwShowAll;
+    var visible = showAll ? kw.rows : kw.rows.slice(0, GSC_KW_TOP_ROWS);
+
+    var scroll = document.createElement('div');
+    scroll.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;';
+    var table = document.createElement('table');
+    table.className = 'cvz-table cvz-gk-table';
+    table.innerHTML = '<thead><tr><th>Suchanfrage</th>' +
+      '<th class="cvz-gk-num">Impressionen</th><th class="cvz-gk-num" title="Impressionen in den 28 Tagen davor">Vorher</th>' +
+      '<th class="cvz-gk-num">Klicks</th><th class="cvz-gk-num" title="Nach Impressionen gewichtet">Ø Position</th>' +
+      '<th class="cvz-gk-num" title="Anteil an allen Impressionen der Kurve">Anteil</th></tr></thead>';
+    var tbody = document.createElement('tbody');
+
+    visible.forEach(function (r) {
+      var openKey = topicId + '|' + r.keyword_normalized;
+      var isOpen = state.gscKwOpen === openKey;
+      var tr = document.createElement('tr');
+      tr.className = 'cvz-gk-row';
+      tr.tabIndex = 0;
+      tr.setAttribute('data-cvz-gk-toggle', r.keyword_normalized);
+      tr.setAttribute('title', 'Klicken, um den Verlauf dieser Suchanfrage zu sehen');
+      tr.innerHTML = '<td class="cvz-row-title">' + escapeHtml(r.keyword) + '</td>' +
+        '<td class="cvz-gk-num">' + num(r.impressions) + '</td>' +
+        '<td class="cvz-gk-num">' + num(r.impressions_prev) + '</td>' +
+        '<td class="cvz-gk-num">' + num(r.clicks) + '</td>' +
+        '<td class="cvz-gk-num">' + pos(r.position) + '</td>' +
+        '<td class="cvz-gk-num">' + (r.share == null ? '–' : fmtNum1(r.share) + ' %') + '</td>';
+      tbody.appendChild(tr);
+
+      if (isOpen) {
+        var exTr = document.createElement('tr');
+        var exTd = document.createElement('td');
+        exTd.colSpan = 6;
+        var hKey = gscHistoryKey(topicId, r.keyword_normalized);
+        var hist = state.gscHistoryCache[hKey];
+        if (state.loadingGscHistory[hKey] && !(hKey in state.gscHistoryCache)) {
+          exTd.innerHTML = '<p class="cvz-card-placeholder-text">Lädt Verlauf …</p>';
+        } else if (hist && hist.points && hist.points.length) {
+          exTd.appendChild(renderGscRollingBlock(hist, topicId, { compact: true }));
+        } else if (state.gscHistoryError && state.gscHistoryError[hKey]) {
+          exTd.innerHTML = '<p class="cvz-card-placeholder-text">Der Verlauf konnte gerade nicht geladen werden.</p>';
+        } else {
+          exTd.innerHTML = '<p class="cvz-card-placeholder-text">Für diese Suchanfrage liegen noch nicht genug Tageswerte für einen Verlauf vor (mindestens 28 Tage).</p>';
+        }
+        exTr.appendChild(exTd);
+        tbody.appendChild(exTr);
+      }
+    });
+
+    var t = kw.total || {};
+    var sum = document.createElement('tr');
+    sum.className = 'cvz-gk-sum';
+    sum.innerHTML = '<td>' + (kw.rows_hidden || kw.rows.length > visible.length ? 'Summe aller ' : 'Summe ') + kw.with_impressions + ' Keywords</td>' +
+      '<td class="cvz-gk-num">' + num(t.impressions) + '</td><td class="cvz-gk-num"></td>' +
+      '<td class="cvz-gk-num">' + num(t.clicks) + '</td><td class="cvz-gk-num">' + pos(t.position) + '</td>' +
+      '<td class="cvz-gk-num">100 %</td>';
+    tbody.appendChild(sum);
+    table.appendChild(tbody);
+    scroll.appendChild(table);
+    wrap.appendChild(scroll);
+
+    if (kw.rows.length > GSC_KW_TOP_ROWS) {
+      var more = document.createElement('p');
+      more.style.margin = '10px 0 0';
+      more.innerHTML = '<button type="button" class="cvz-link-btn cvz-sm-more-btn" data-cvz-gk-more="1">' +
+        (showAll ? 'Nur die Top ' + GSC_KW_TOP_ROWS + ' anzeigen' : 'Alle ' + kw.rows.length + ' Keywords anzeigen') + '</button>';
+      wrap.appendChild(more);
+    }
+    if (kw.rows_hidden) {
+      var hidden = document.createElement('p');
+      hidden.className = 'cvz-chart-caption';
+      hidden.textContent = 'Weitere ' + kw.rows_hidden + ' Keywords mit weniger Impressionen sind in der Summe enthalten, aber nicht aufgeführt.';
+      wrap.appendChild(hidden);
+    }
+
+    var foot = document.createElement('p');
+    foot.className = 'cvz-gk-foot';
+    foot.textContent = 'Die Kurve zählt nur aktive Keywords. Deaktiviert ihr ein Keyword, verschwindet es auch rückwirkend aus der Kurve. ' +
+      'Klicks und Impressionen sind Summen über 28 Tage, „Vorher“ sind die 28 Tage davor.';
+    wrap.appendChild(foot);
+    return wrap;
+  }
+
+  function toggleGscKeywordRow(topicId, keywordNormalized) {
+    var openKey = topicId + '|' + keywordNormalized;
+    if (state.gscKwOpen === openKey) {
+      state.gscKwOpen = null;
+      render();
+      return;
+    }
+    state.gscKwOpen = openKey;
+    maybeLoadGscHistory(topicId, keywordNormalized);
+    render();
   }
 
   function buildRollingMarkers(changes, points) {
