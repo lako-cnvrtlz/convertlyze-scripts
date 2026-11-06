@@ -65,6 +65,7 @@
     activeTopicId:    null,
     activeSubTab:     'themen',
     summaryDetailsOpen: false,
+    knowledgeDetailsOpen: false,   // NEU (06.11.2026): Auf-/Zu-Zustand des KI-Wissens-Checks im Tab Situation
     topicDetailCache: {},
     isLoadingDetail:  false,
     activePersonaFilter: null,
@@ -11755,7 +11756,7 @@
       '.cvz-sit-tile-row .cvz-journey-channel-delta { margin-left: 0; cursor: default; }' +
       '.cvz-sit-tile-meta { margin: 6px 0 0; font-size: 11px; color: var(--cvz-text-muted); }' +
       '.cvz-sit-knowledge { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; padding: 14px 16px; }' +
-      '.cvz-sit-knowledge-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--cvz-text-muted); }' +
+      '.cvz-sit-knowledge-label { font-size: 12px; font-weight: 700; letter-spacing: .06em; color: var(--cvz-text-muted); }' +
       '.cvz-sit-knowledge-text { font-size: 14px; color: var(--cvz-text); }' +
       '.cvz-sit-knowledge .cvz-journey-hint-link { margin: 0 0 0 auto; }' +
       '@media (max-width: 600px) { .cvz-opp-rec-col { display: none; } .cvz-opp-rec-header { display: none; } }' +
@@ -13548,13 +13549,21 @@
 
     var knowledgeFull = renderKnowledgeSection(detail);
     if (knowledgeFull) {
+      // Gleiche Klassen wie "Details zur Zusammenfassung": Pfeil ▸/▾, Teal-Farbe, Trennlinie.
+      var kDimCount = ((detail.ai_knowledge && detail.ai_knowledge.dimensions) || []).length;
+      knowledgeFull.style.marginBottom = '0';
       var kDetails = document.createElement('details');
-      kDetails.className = 'cvz-section';
+      kDetails.className = 'cvz-summary-details';
+      kDetails.style.marginBottom = '24px';
+      if (state.knowledgeDetailsOpen) kDetails.open = true;
       var kSummary = document.createElement('summary');
-      kSummary.style.cssText = 'cursor:pointer;font-size:13px;color:var(--cvz-text-muted);margin-bottom:12px;';
-      kSummary.textContent = 'Alle Wissensbereiche anzeigen';
+      kSummary.className = 'cvz-summary-details-toggle';
+      kSummary.textContent = kDimCount
+        ? 'Alle ' + kDimCount + ' Wissensbereiche anzeigen'
+        : 'Alle Wissensbereiche anzeigen';
       kDetails.appendChild(kSummary);
       kDetails.appendChild(knowledgeFull);
+      kDetails.addEventListener('toggle', function () { state.knowledgeDetailsOpen = kDetails.open; });
       wrap.appendChild(kDetails);
     }
 
