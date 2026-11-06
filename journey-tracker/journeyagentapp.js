@@ -998,9 +998,12 @@
       var data = await apiFetch('/topics/' + topicId + '/gsc-history' +
         (keyword ? '?keyword=' + encodeURIComponent(keyword) : ''));
       state.gscHistoryCache[key] = (data && data.rolling) || null;
+      // NEU (06.11.2026): Fehler getrennt merken, damit "Abruf fehlgeschlagen" nicht wie "noch keine Daten" aussieht
+      (state.gscHistoryError = state.gscHistoryError || {})[key] = !!(data && data.error);
     } catch (e) {
       console.error('[CVZ Visibility] GSC-Verlauf konnte nicht geladen werden:', e);
       state.gscHistoryCache[key] = null;
+      (state.gscHistoryError = state.gscHistoryError || {})[key] = true;
     }
     state.loadingGscHistory[key] = false;
     render();
@@ -16142,7 +16145,9 @@
       none.className = 'cvz-card-placeholder-text';
       none.textContent = project && project.gsc_connected === false
         ? 'Für diese Domain ist keine Google Search Console verbunden.'
-        : 'Noch keine GSC-Tageswerte. Sie werden beim nächsten GSC-Abruf geladen, rückwirkend für rund 16 Monate.';
+        : (state.gscHistoryError && state.gscHistoryError[key])
+          ? 'Der GSC-Verlauf konnte gerade nicht geladen werden. Die Daten sind vorhanden, bitte später noch einmal versuchen.'
+          : 'Noch keine GSC-Tageswerte. Sie werden beim nächsten GSC-Abruf geladen, rückwirkend für rund 16 Monate.';
       section.appendChild(none);
       return section;
     }
