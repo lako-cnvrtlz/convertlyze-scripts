@@ -108,6 +108,7 @@
     // NEU (21.10.2026): Kanal-Umschalter oben im Thema ('all' | 'chat_gpt' | 'gemini').
     // Gilt für Situation, Journey, Wettbewerb und Verlauf gleichzeitig.
     activeChannel: 'all',
+    openGooglePhases: {},   // NEU (08.11.2026): aufgeklappte Keyword-Listen je Thema und Phase
     // NEU (21.10.2026): Verlauf-Tab, gewählte Phase ('total' = alle Phasen) und
     // ob die Wochentabelle aufgeklappt ist.
     rollingPhaseByTopic: {},
@@ -12513,6 +12514,15 @@
         'font-size: 11px; font-weight: 600; color: var(--cvz-teal); text-align: left;' +
       '}' +
       '.cvz-journey-hint-link:hover { text-decoration: underline; }' +
+      '.cvz-gp { margin: 8px 0 10px; padding-top: 8px; border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-gp-line { margin: 0; font-size: 12px; line-height: 1.45; color: var(--cvz-text); cursor: default; }' +
+      '.cvz-gp-label { display: inline-block; margin-right: 8px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--cvz-text-muted); }' +
+      '.cvz-gp-hint { margin: 6px 0 0; font-size: 11px; line-height: 1.45; color: var(--cvz-text-muted); }' +
+      '.cvz-gp-details { margin-top: 6px; }' +
+      '.cvz-gp-details > summary { cursor: pointer; font-size: 11px; font-weight: 600; color: var(--cvz-teal); padding: 2px 0; }' +
+      '.cvz-gp-kw { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 4px 6px; font-size: 12px; }' +
+      '.cvz-gp-kw-name { min-width: 0; overflow-wrap: anywhere; }' +
+      '.cvz-gp-kw-pos { flex: 0 0 auto; font-size: 11px; color: var(--cvz-text-muted); white-space: nowrap; }' +
 
       '.cvz-sov-phase-block { margin-bottom: 8px; border: 1px solid var(--cvz-border); }' +
       '.cvz-sov-phase-header {' +
@@ -14034,6 +14044,86 @@
     return null;
   }
 
+  // NEU (08.11.2026): Google-Sicht je Journey-Phase. Backend: dashboard.py, _compute_google_by_phase.
+  // Bewusst ohne Urteil (Badge): Es werden nur Zählungen gezeigt, der Vergleich bleibt beim Leser.
+  var GP_KEYWORDS_SHOWN = 5;
+  var GP_HINT_MIN_TOP10 = 3;   // Hinweissatz erst ab so vielen Top-10-Keywords
+
+  function renderGooglePhaseBlock(data, phase, cfg) {
+    var g = data.google_by_phase && data.google_by_phase[phase];
+    if (!g || !g.keywords) return null;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-gp';
+
+    var parts = [g.top10 + ' von ' + g.keywords + (g.keywords === 1 ? ' Keyword' : ' Keywords') + ' in den Top 10'];
+    if (g.page2) parts.push(g.page2 + ' auf Seite 2');
+    if (g.below) parts.push(g.below + ' weiter hinten');
+    if (g.unranked) parts.push(g.unranked + ' ohne Platz');
+
+    var line = document.createElement('p');
+    line.className = 'cvz-gp-line';
+    line.tabIndex = 0;
+    line.title = 'Aktive Keywords dieser Phase mit belegter Nachfrage (ohne reine Ideen). ' +
+      'Position laut Google-Prüfung, sonst Search Console. Die Phase hat Claude den Keywords zugeordnet. ' +
+      'Die Zahlen sind nicht direkt mit der KI-Zitierrate vergleichbar: Die KI misst eure festen Fragen, Google den Keyword-Pool.';
+    var label = document.createElement('span');
+    label.className = 'cvz-gp-label';
+    label.textContent = 'Google';
+    line.appendChild(label);
+    line.appendChild(document.createTextNode(parts.join(' · ')));
+    wrap.appendChild(line);
+
+    // Hinweis nur im eindeutigen Fall, mit genug KI-Antworten.
+    // Wer ihn nicht will: diesen ganzen if-Block löschen.
+    var ai = ownPhaseTotal(data, phase);
+    if (ai.total >= cfg.minAnswers && ai.cited === 0 && g.top10 >= GP_HINT_MIN_TOP10) {
+      var hint = document.createElement('p');
+      hint.className = 'cvz-gp-hint';
+      hint.textContent = 'Bei Google gut platziert, in ' + ai.total + ' KI-Antworten nie als Quelle genannt. ' +
+        'Hier lohnt sich ein Blick, wie die Fragen dieser Phase beantwortet werden.';
+      wrap.appendChild(hint);
+    }
+
+    var kws = (g.top_keywords || []).slice(0, GP_KEYWORDS_SHOWN);
+    if (kws.length) {
+      var openKey = state.activeTopicId + '|' + phase;
+      var details = document.createElement('details');
+      details.className = 'cvz-gp-details';
+      if (state.openGooglePhases[openKey]) details.open = true;
+      var summary = document.createElement('summary');
+      summary.textContent = 'Wichtigste Keywords (' + kws.length + ')';
+      details.appendChild(summary);
+
+      kws.forEach(function (k) {
+        var row = document.createElement('div');
+        row.className = 'cvz-gp-kw';
+        // Gleiche Attribute wie die Zeilen im Daten-Tab: handleContainerClick öffnet damit
+        // die Google-Ansicht, inklusive ‹ › durch alle Keywords der vier Karten.
+        if (k.keyword_id) {
+          row.className += ' cvz-row-open';
+          row.tabIndex = 0;
+          row.setAttribute('data-cvz-keyword-toggle', k.keyword_id);
+          row.setAttribute('data-cvz-kv-open', k.keyword_id);
+        }
+        var name = document.createElement('span');
+        name.className = 'cvz-gp-kw-name cvz-row-title';
+        name.textContent = k.keyword || '';
+        row.appendChild(name);
+        var pos = document.createElement('span');
+        pos.className = 'cvz-gp-kw-pos';
+        pos.textContent = k.rank != null ? 'Pos. ' + fmtNum1(Number(k.rank)) : 'ohne Platz';
+        if (k.label) pos.title = k.label;
+        row.appendChild(pos);
+        details.appendChild(row);
+      });
+
+      details.addEventListener('toggle', function () { state.openGooglePhases[openKey] = details.open; });
+      wrap.appendChild(details);
+    }
+    return wrap;
+  }
+
   function renderJourneyPhaseSection(data, detail) {
     var jc = data.journey_comparison || null;
     var cfg = {
@@ -14152,6 +14242,9 @@
       if (data.ai_overview_by_phase) {
         card.appendChild(_renderAiOverviewLine(data.ai_overview_by_phase[phase]));
       }
+
+      var gpBlock = renderGooglePhaseBlock(data, phase, cfg);
+      if (gpBlock) card.appendChild(gpBlock);
 
       // Meistzitierte Quellen
       if (sources.length > 0) {
