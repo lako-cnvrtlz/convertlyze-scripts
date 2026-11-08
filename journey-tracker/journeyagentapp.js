@@ -109,6 +109,8 @@
     // Gilt für Situation, Journey, Wettbewerb und Verlauf gleichzeitig.
     activeChannel: 'all',
     openGooglePhases: {},   // NEU (08.11.2026): aufgeklappte Keyword-Listen je Thema und Phase
+    rcPhaseByTopic: {},     // NEU (08.11.2026): gewählte Phase im Wettbewerber-Liniendiagramm
+    rcInit: {},             // NEU (08.11.2026): Standardauswahl der Linien wurde schon gesetzt
     // NEU (21.10.2026): Verlauf-Tab, gewählte Phase ('total' = alle Phasen) und
     // ob die Wochentabelle aufgeklappt ist.
     rollingPhaseByTopic: {},
@@ -2426,6 +2428,14 @@
     if (rollingPhaseBtn) {
       state.rollingPhaseByTopic[rollingPhaseBtn.getAttribute('data-cvz-rolling-topic')] =
         rollingPhaseBtn.getAttribute('data-cvz-rolling-phase');
+      render();
+      return;
+    }
+
+    // NEU (08.11.2026): Phase im Wettbewerber-Liniendiagramm.
+    var rcPhaseBtn = event.target.closest('[data-cvz-rc-phase]');
+    if (rcPhaseBtn) {
+      state.rcPhaseByTopic[rcPhaseBtn.getAttribute('data-cvz-rc-topic')] = rcPhaseBtn.getAttribute('data-cvz-rc-phase');
       render();
       return;
     }
@@ -14446,6 +14456,10 @@
     var bPresence = renderBrandPresence(_jc, detail);
     if (bPresence) wrap.appendChild(bPresence);
 
+    // NEU (08.11.2026): Liniendiagramm über die Zeit, eure Domain und Wettbewerber, nach Phase filterbar.
+    var cRollingSection = renderCompetitorRolling(topicId, data, detail);
+    if (cRollingSection) wrap.appendChild(cRollingSection);
+
     // GEÄNDERT (21.10.2026): Das Liniendiagramm "Sichtbarkeit im Wettbewerbsvergleich"
     // (Domains je Phase) entfällt, das Sichtbarkeitsfeld beantwortet dieselbe
     // Frage, die Aufteilung nach Phase steht im Journey-Tab. Nur noch als
@@ -14695,6 +14709,181 @@
     }
     foot.textContent = notes.join(' ');
     section.appendChild(foot);
+    return section;
+  }
+
+  // NEU (08.11.2026): Liniendiagramm "Wettbewerber im Verlauf". Daten: dashData.competitor_rolling
+  // (Backend: dashboard.py, _compute_competitor_rolling). Linien lassen sich über die Legende aus- und
+  // einblenden (gleicher Mechanismus wie die alte Wettbewerbs-Grafik, eigener Schlüssel topicId#rc).
+  var RC_DEFAULT_VISIBLE = 5;   // so viele Wettbewerber sind zu Beginn sichtbar, der Rest ist ausgegraut
+  var RC_OWN_KEY = '__own__';
+  var RC_COLORS = ['#c98e2a', '#de5b50', '#8878ca', '#4ec68a', '#5aacd2', '#e8855b', '#a3c97a', '#c97ab5', '#7b8794', '#b8a04a', '#6aa6a0', '#d27a9a'];
+
+  function renderCompetitorRolling(topicId, dashData, detail) {
+    var cr = dashData && dashData.competitor_rolling;
+    if (!cr || !cr.points || cr.points.length < 2 || !cr.totals) return null;
+
+    var key = topicId + '#rc';
+    var ch = activeChannel();
+    var phase = state.rcPhaseByTopic[topicId] || 'total';
+    var points = cr.points;
+    var totals = ((cr.totals[ch] || {})[phase]) || [];
+    var ownCited = ((cr.own && cr.own[ch]) || {})[phase] || [];
+    var domains = cr.domains || [];
+
+    // Beim ersten Anzeigen nur die wichtigsten Linien einblenden, sonst wird das Diagramm unlesbar.
+    if (!state.rcInit[topicId]) {
+      state.rcInit[topicId] = true;
+      domains.forEach(function (d, i) {
+        if (i >= RC_DEFAULT_VISIBLE && !isChartDomainHidden(key, d.domain)) toggleChartDomain(key, d.domain);
+      });
+    }
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+    section.style.marginTop = '28px';
+
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Wettbewerber im Verlauf';
+    head.appendChild(heading);
+    head.appendChild(makeTip(
+      'Anteil der Antworten, die eine Domain als Quelle nennen, jeweils über die ' + cr.window_days + ' Tage bis zum Datum, ein Punkt pro Woche. ' +
+      'Über die Legende blendet ihr Linien aus und ein, um einzelne Verläufe anzusehen. Über die Phase seht ihr, wie sich die Sichtbarkeit in einer Kaufphase entwickelt. ' +
+      'Das schattierte Band um eure Linie zeigt, wie weit der Wert allein durch Zufall schwanken kann.'
+    ));
+    section.appendChild(head);
+
+    // Phasenauswahl
+    var chips = document.createElement('div');
+    chips.className = 'cvz-persona-filter';
+    chips.style.margin = '8px 0 6px';
+    [['total', 'Alle Phasen']].concat(PHASE_ORDER.map(function (ph) { return [ph, PHASE_LABELS[ph]]; })).forEach(function (pair) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cvz-persona-chip' + (phase === pair[0] ? ' cvz-persona-chip-active' : '');
+      if (pair[0] !== 'total') b.style.borderLeftColor = PHASE_COLORS[pair[0]] || '';
+      b.setAttribute('data-cvz-rc-phase', pair[0]);
+      b.setAttribute('data-cvz-rc-topic', topicId);
+      b.textContent = pair[1];
+      chips.appendChild(b);
+    });
+    section.appendChild(chips);
+
+    function rates(cited) {
+      return points.map(function (_pt, i) {
+        var n = totals[i] || 0;
+        return n >= ROLLING_MIN_ANSWERS ? ((cited[i] || 0) / n) * 100 : null;
+      });
+    }
+    function tips(cited) {
+      return points.map(function (_pt, i) { return (cited[i] || 0) + ' von ' + (totals[i] || 0) + ' Antworten'; });
+    }
+    function lastValue(values) {
+      for (var i = values.length - 1; i >= 0; i--) if (values[i] != null) return values[i];
+      return null;
+    }
+
+    var ownDomain = (detail.topic && detail.topic.own_domain) || 'Eure Domain';
+    var ownColor = CHANNEL_LINE_COLORS.all;
+    var entries = [{
+      id: RC_OWN_KEY, label: ownDomain, color: ownColor, own: true, values: rates(ownCited), cited: ownCited,
+    }];
+    domains.forEach(function (d, i) {
+      var cited = ((d.cited || {})[ch] || {})[phase] || [];
+      entries.push({
+        id: d.domain, label: d.domain, color: RC_COLORS[i % RC_COLORS.length], own: false,
+        isCompetitor: !!d.is_competitor, values: rates(cited), cited: cited,
+      });
+    });
+
+    var lines = [];
+    var maxVal = 0;
+    entries.forEach(function (e) {
+      if (isChartDomainHidden(key, e.id)) return;
+      var line = { label: e.label, color: e.color, width: e.own ? 3 : 2, values: e.values, tips: tips(e.cited), band: null };
+      if (e.own) {
+        line.band = points.map(function (_pt, i) {
+          var n = totals[i] || 0;
+          return n >= ROLLING_MIN_ANSWERS ? wilsonInterval(e.cited[i] || 0, n, ROLLING_BAND_Z) : null;
+        });
+      }
+      lines.push(line);
+      e.values.forEach(function (v) { if (v != null && v > maxVal) maxVal = v; });
+      (line.band || []).forEach(function (b) { if (b && b.high > maxVal) maxVal = b.high; });
+    });
+
+    var anyData = entries.some(function (e) { return e.values.some(function (v) { return v != null; }); });
+    if (!anyData) {
+      var thin = document.createElement('p');
+      thin.className = 'cvz-card-placeholder-text';
+      thin.textContent = 'Für diese Auswahl gibt es zu wenige Antworten (unter ' + ROLLING_MIN_ANSWERS +
+        ' pro 28 Tage), um einen Verlauf zu zeigen. Wählt „Alle Phasen“ oder den Kanal „Gesamt“.';
+      section.appendChild(thin);
+      return section;
+    }
+
+    // Legende (anklickbar), mit dem aktuellen Wert
+    var legend = document.createElement('div');
+    legend.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px 14px;margin:8px 0 12px;';
+    entries.forEach(function (e) {
+      var hidden = isChartDomainHidden(key, e.id);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cvz-chart-legend-item';
+      btn.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;background:none;border:none;padding:0;margin:0;cursor:pointer;font-family:inherit;' +
+        (hidden ? 'opacity:.4;text-decoration:line-through;' : '') +
+        (e.own ? 'color:var(--cvz-text,#e6edf3);font-weight:600;' : 'color:var(--cvz-text-muted,#8b98a5);');
+      btn.setAttribute('data-cvz-chart-domain-toggle', e.id);
+      btn.setAttribute('data-cvz-chart-domain-topic', key);
+      btn.title = hidden ? 'Klicken zum Einblenden' : 'Klicken zum Ausblenden';
+      var sw = document.createElement('span');
+      sw.style.cssText = 'width:22px;height:3px;flex-shrink:0;background:' + e.color + ';';
+      btn.appendChild(sw);
+      var img = document.createElement('img');
+      img.src = 'https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(e.id === RC_OWN_KEY ? ownDomain : e.id);
+      img.width = 14; img.height = 14; img.alt = '';
+      img.onerror = function () { this.style.visibility = 'hidden'; };
+      btn.appendChild(img);
+      var cur = lastValue(e.values);
+      btn.appendChild(document.createTextNode(e.label + (cur != null ? ' · ' + fmtPct(cur) : '')));
+      if (e.isCompetitor) {
+        var mark = document.createElement('span');
+        mark.className = 'cvz-sm-badge';
+        mark.style.marginLeft = '2px';
+        mark.textContent = 'Wettbewerber';
+        btn.appendChild(mark);
+      }
+      legend.appendChild(btn);
+    });
+    section.appendChild(legend);
+
+    if (!lines.length) {
+      var allOff = document.createElement('p');
+      allOff.className = 'cvz-card-placeholder-text';
+      allOff.textContent = 'Alle Linien sind ausgeblendet. Klickt in der Legende auf einen Namen, um sie wieder einzublenden.';
+      section.appendChild(allOff);
+    } else {
+      var complete = points.map(function (pt) { return !!pt.complete; });
+      var xLabels = points.map(function (pt) { return (formatShortDate(pt.end) || pt.end).slice(0, 6); });
+      var markers = buildRollingMarkers(state.contentChangesCache[topicId] || [], points);
+      var card = document.createElement('div');
+      card.className = 'cvz-card';
+      card.innerHTML = buildRollingSvg(lines, xLabels, complete, { maxY: niceChartMax(maxVal), markers: markers });
+      section.appendChild(card);
+    }
+
+    var cap = document.createElement('p');
+    cap.className = 'cvz-chart-caption';
+    cap.textContent = 'Zitierrate von ' + activeChannelLabel() + (phase === 'total' ? '' : ', Phase ' + (PHASE_LABELS[phase] || phase)) +
+      ', jeweils über die ' + cr.window_days + ' Tage bis zum Datum. Punkte mit weniger als ' + ROLLING_MIN_ANSWERS + ' Antworten werden nicht gezeichnet. ' +
+      'Gezeigt werden die ' + domains.length + ' am häufigsten zitierten Domains des Zeitraums plus eure beobachteten Wettbewerber, zu Beginn die ersten ' + RC_DEFAULT_VISIBLE + '. ' +
+      'Ändert ihr Prompts oder Rollen, verschieben sich alle Quoten, dann kann ein Knick am neuen Prompt-Set liegen und nicht an der Sichtbarkeit. ' +
+      'Gestrichelt: Aufbauphase. Rauten: eingetragene Änderungen.';
+    section.appendChild(cap);
     return section;
   }
 
