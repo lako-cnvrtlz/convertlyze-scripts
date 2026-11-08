@@ -14505,7 +14505,8 @@
     var boxes = Math.min(total, VF_MAX_BOXES);
     sub.textContent = (boxes === total ? 'Ein Kästchen je Antwort' : 'Jedes Kästchen steht für etwa ' + fmtNum1(total / boxes) + ' Antworten') +
       ' (' + total + ' Antworten, letzte ' + vf.window_days + ' Tage, ' + activeChannelLabel() + '). Ausgefüllt heißt: in dieser Antwort als Quelle zitiert. ' +
-      'Gelb: von euch beobachtete Wettbewerber.';
+      'Gelb: von euch beobachtete Wettbewerber.' +
+      (vf.own_trend ? ' Pfeile vergleichen mit den ' + vf.window_days + ' Tagen davor und erscheinen nur bei einer Veränderung, die größer ist als die normale Schwankung.' : '');
     section.appendChild(sub);
 
     function bar(n, isComp) {
@@ -14528,17 +14529,32 @@
     }
 
     var ownDomain = (detail.topic && detail.topic.own_domain) || 'Eure Domain';
+    // NEU (08.11.2026): Entwicklung gegenüber den 28 Tagen davor (Backend: _compute_visibility_field,
+    // gleiche Rausch-Schwelle wie die Journey-Karten). Ohne diese Felder (altes Backend) erscheint nichts.
+    var prevTotal = (vf.previous_totals || {})[ch] || 0;
+    var ownT = vf.own_trend && vf.own_trend[ch];
+    var trendCfg = { windowDays: vf.window_days, minAnswers: (jc && jc.min_answers) || 15, minDeltaPp: (jc && jc.min_delta_pp) || 3 };
+    function trendBadgeHtml(t, kind, name, curN) {
+      if (!t || !t.trend || t.trend === 'no_data') return '';
+      var el = renderJourneyTrendBadge(kind === 'own'
+        ? { trend: t.trend, cited: curN, total: total, previous_cited: t.previous, previous_total: prevTotal, previous_score: t.previous_rate, delta_pp: t.delta_pp }
+        : { trend: t.trend, total_runs: total, previous_rate: t.previous_rate, previous_total_runs: prevTotal, delta_pp: t.delta_pp },
+        kind, trendCfg, name);
+      return el ? ' ' + el.outerHTML : '';
+    }
+
     var ownN = vf.own[ch] || 0;
     var own = document.createElement('div');
     own.className = 'cvz-vf-own' + (ownN ? ' cvz-vf-own-hit' : '');
     own.innerHTML =
       '<div class="cvz-vf-row-head">' + fav(ownDomain) + '<span class="cvz-vf-name">' + escapeHtml(ownDomain) + '</span>' +
-        '<span class="cvz-vf-count"><b>' + ownN + '</b> von ' + total + '</span></div>' +
+        '<span class="cvz-vf-count"><b>' + ownN + '</b> von ' + total + trendBadgeHtml(ownT, 'own', ownDomain, ownN) + '</span></div>' +
       bar(ownN, false) +
       '<div class="cvz-vf-own-foot">' + engines(vf.own) +
         '<span>' + (ownN
           ? 'In ' + fmtPct(ownN / total * 100) + ' der Antworten als Quelle zitiert.'
-          : 'In keiner der ' + total + ' Antworten als Quelle zitiert.') + '</span></div>';
+          : 'In keiner der ' + total + ' Antworten als Quelle zitiert.') +
+          (ownT && prevTotal ? ' Davor: ' + ownT.previous + ' von ' + prevTotal + '.' : '') + '</span></div>';
     section.appendChild(own);
 
     var rows = (vf.domains || []).map(function (d) { return Object.assign({}, d, { n: d[ch] || 0 }); })
@@ -14556,7 +14572,8 @@
           '<span class="cvz-vf-name"' + (d.is_competitor ? ' title="Beobachteter Wettbewerber"' : '') + '>' + fav(d.domain) +
             '<span style="overflow:hidden;text-overflow:ellipsis;' + (d.is_competitor ? 'color:#e0a458;' : '') + '">' + escapeHtml(d.domain) + '</span></span>' +
           bar(d.n, d.is_competitor) + engines(d) +
-          '<span class="cvz-vf-count"><b>' + d.n + '</b>/' + total + '</span>';
+          '<span class="cvz-vf-count"><b>' + d.n + '</b>/' + total +
+            ((d.trend && d.trend[ch] && d.trend[ch].trend !== 'insufficient') ? trendBadgeHtml(d.trend[ch], 'source', d.domain, d.n) : '') + '</span>';
         section.appendChild(row);
       });
     }
