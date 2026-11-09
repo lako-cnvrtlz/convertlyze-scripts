@@ -55,6 +55,17 @@
 
   var MOCK_CITATION_TREND = {};
 
+  // NEU (09.11.2026): Zeitraum der KI-Auswertung (Dashboard-Daten). Standard 28 Tage, verglichen
+  // mit den 28 Tagen davor. Das Backend (dashboard.py, Parameter window_days) rechnet damit
+  // Phasen, Quellen, Wettbewerber und Verläufe. Dasselbe gilt für "Sichtbarkeit je Rolle"
+  // (main.py/window_api.py: GET /topics/{id}/prompt-stats) und die Domain-Übersicht (eigener Umschalter,
+  // GET /projects/{id}/dashboard?window_days=). Nicht betroffen (feste 28 Tage): Prompt-Zahlen im
+  // Daten-Tab, Fan-out und Search Console.
+  var DEFAULT_WINDOW_DAYS = 28;
+  // 0 = "Seit Start" (Backend: window_days=0, vom ersten Lauf bis heute, ohne Vorperiode)
+  var WINDOW_PRESETS = [28, 90, 180, 0];
+  var WINDOW_SWITCH_TABS = ['situation', 'journey', 'wettbewerb', 'verlauf'];
+
   var state = {
     memberstackId: null,
     memberToken:   null,
@@ -108,6 +119,16 @@
     // NEU (21.10.2026): Kanal-Umschalter oben im Thema ('all' | 'chat_gpt' | 'gemini').
     // Gilt für Situation, Journey, Wettbewerb und Verlauf gleichzeitig.
     activeChannel: 'all',
+    // NEU (09.11.2026): gewählter Zeitraum je Thema (Tage, nur Sitzung + URL cvz_window)
+    // und ein Zähler je Thema, damit nur die zuletzt angeforderte Antwort gespeichert wird.
+    windowDaysByTopic: {},
+    dashboardLoadToken: {},
+    // NEU (09.11.2026): Prompt-Zahlen für einen anderen Zeitraum als 28 Tage (Schlüssel topicId|Tage),
+    // gewählter Zeitraum der Domain-Übersicht je Projekt, Zähler gegen späte alte Antworten.
+    promptStatsCache: {},
+    promptStatsLoading: {},
+    windowDaysByProject: {},
+    domainLoadToken: {},
     openGooglePhases: {},   // NEU (08.11.2026): aufgeklappte Keyword-Listen je Thema und Phase
     rcPhaseByTopic: {},     // NEU (08.11.2026): gewählte Phase im Wettbewerber-Liniendiagramm
     rcInit: {},             // NEU (08.11.2026): Standardauswahl der Linien wurde schon gesetzt
@@ -270,6 +291,9 @@
     }
     delete state.topicDetailCache[topicId];
     delete state.dashboardDataCache[topicId];
+    Object.keys(state.promptStatsCache).forEach(function (k) {
+      if (k.indexOf(topicId + '|') === 0) delete state.promptStatsCache[k];
+    });
     delete state.contentChangesCache[topicId];
     delete state.visibilityTrendCache[topicId];
     delete state.monthlyOverviewTrendCache[topicId];
@@ -306,6 +330,9 @@
       maybeLoadDashboardData(topicId);
       maybeLoadContentChanges(topicId);
     }
+    // NEU (09.11.2026): "Sichtbarkeit je Rolle" (Tab Journey) braucht bei einem anderen Zeitraum als 28 Tage
+    // eigene Prompt-Zahlen.
+    if (state.activeSubTab === 'journey') maybeLoadPromptStats(topicId);
     // NEU (06.10.2026): Fan-out-Queries nur laden, wenn der Unterbereich offen ist.
     if (state.activeSubTab === 'daten' && state.activeDataView === 'fanout') {
       maybeLoadFanOut(topicId);
@@ -529,6 +556,13 @@
     // NEU (21.10.2026): Kanal aus der URL (cvz_channel).
     var paramChannel = new URLSearchParams(window.location.search).get('cvz_channel');
     if (paramChannel === 'chat_gpt' || paramChannel === 'gemini') state.activeChannel = paramChannel;
+    // NEU (09.11.2026): Zeitraum aus der URL (cvz_window), gilt für das Thema aus cvz_topic.
+    var _urlParams = new URLSearchParams(window.location.search);
+    var paramWindow = parseInt(_urlParams.get('cvz_window'), 10);
+    var paramWindowTopic = _urlParams.get('cvz_topic');
+    if (paramWindowTopic && WINDOW_PRESETS.indexOf(paramWindow) !== -1) {
+      state.windowDaysByTopic[paramWindowTopic] = paramWindow;
+    }
     var paramView = new URLSearchParams(window.location.search).get('cvz_view');
     if (paramView && isValidDataView(paramView)) state.activeDataView = paramView;
 
@@ -740,7 +774,10 @@
   }
 
   async function loadDomainDashboardData(projectId) {
-    var data = await apiFetch('/projects/' + projectId + '/dashboard');
+    // NEU (09.11.2026): gewählter Zeitraum der Domain-Übersicht. Der Standard (28) wird nicht mitgeschickt.
+    var wd = requestedDomainWindowDays(projectId);
+    var data = await apiFetch('/projects/' + projectId + '/dashboard' +
+      (wd !== DEFAULT_WINDOW_DAYS ? '?window_days=' + wd : ''));
     return {
       trend: data.trend || [],
       // NEU (21.10.2026): gleitender Verlauf und Tabelle pro Thema (main.py: _get_domain_rolling)
@@ -754,16 +791,23 @@
     if (!projectId || CONFIG.useMockData) return;
     if (!force && (state.domainDashboardCache[projectId] || state.isLoadingDomainDashboard)) return;
 
+    // Nur die zuletzt gestartete Anfrage darf ihr Ergebnis speichern (schneller Wechsel des Zeitraums).
+    var token = (state.domainLoadToken[projectId] || 0) + 1;
+    state.domainLoadToken[projectId] = token;
     state.isLoadingDomainDashboard = true;
     render();
 
+    var result;
     try {
-      state.domainDashboardCache[projectId] = await loadDomainDashboardData(projectId);
+      result = await loadDomainDashboardData(projectId);
     } catch (e) {
       console.error('[CVZ Visibility] Domain-Dashboard konnte nicht geladen werden:', e);
-      state.domainDashboardCache[projectId] = { trend: [], opportunities: [], contentIdeas: [] };
+      result = { trend: [], opportunities: [], contentIdeas: [] };
+      // Zeitraum zurücksetzen, sonst bliebe die Ansicht ohne Umschalter auf dem fehlgeschlagenen Zeitraum hängen.
+      state.windowDaysByProject[projectId] = DEFAULT_WINDOW_DAYS;
     }
-
+    if (token !== state.domainLoadToken[projectId]) return;
+    state.domainDashboardCache[projectId] = result;
     state.isLoadingDomainDashboard = false;
     render();
   }
@@ -859,23 +903,55 @@
         content_changes: [],
       };
     }
-    var data = await apiFetch('/topics/' + topicId + '/dashboard-data');
+    // GEÄNDERT (09.11.2026): gewählter Zeitraum als window_days. Der Standard (28) wird nicht
+    // mitgeschickt, damit ein Backend ohne diesen Parameter genauso antwortet wie bisher.
+    var wd = requestedWindowDays(topicId);
+    var data = await apiFetch('/topics/' + topicId + '/dashboard-data' +
+      (wd !== DEFAULT_WINDOW_DAYS ? '?window_days=' + wd : ''));
     return data;
   }
 
   async function maybeLoadDashboardData(topicId) {
     if (!topicId || state.dashboardDataCache[topicId]) return;
+    // NEU (09.11.2026): Wechselt jemand schnell den Zeitraum, laufen mehrere Anfragen. Nur die
+    // zuletzt gestartete darf ihr Ergebnis speichern, sonst überschreibt eine späte alte Antwort
+    // (anderer Zeitraum) die neue.
+    var token = (state.dashboardLoadToken[topicId] || 0) + 1;
+    state.dashboardLoadToken[topicId] = token;
     state.isLoadingDashboard = true;
     render();
+    var result;
     try {
-      state.dashboardDataCache[topicId] = await loadDashboardData(topicId);
+      result = await loadDashboardData(topicId);
     } catch (e) {
       console.error('[CVZ Visibility] Journey-Map-Daten konnten nicht geladen werden:', e);
       // Sentinel-Objekt statt null: truthy, damit maybeLoadDashboardData nicht bei
       // jedem Render einen neuen Request startet (null wäre falsy -> Endlosschleife).
-      state.dashboardDataCache[topicId] = { _error: true };
+      result = { _error: true };
     }
+    if (token !== state.dashboardLoadToken[topicId]) return;
+    state.dashboardDataCache[topicId] = result;
     state.isLoadingDashboard = false;
+    render();
+  }
+
+  // NEU (09.11.2026): Prompt-Zahlen (zitiert, erwähnt, Antworten je Prompt und Kanal) für den gewählten
+  // Zeitraum. Bei 28 Tagen nicht nötig, die stehen schon im Themen-Detail.
+  async function maybeLoadPromptStats(topicId) {
+    if (!topicId || CONFIG.useMockData) return;
+    var wd = requestedWindowDays(topicId);
+    if (wd === DEFAULT_WINDOW_DAYS) return;
+    var key = topicId + '|' + wd;
+    if (state.promptStatsCache[key] || state.promptStatsLoading[key]) return;
+    state.promptStatsLoading[key] = true;
+    render();
+    try {
+      state.promptStatsCache[key] = await apiFetch('/topics/' + topicId + '/prompt-stats?window_days=' + wd);
+    } catch (e) {
+      console.error('[CVZ Visibility] Prompt-Zahlen (window_days=' + wd + ') konnten nicht geladen werden:', e);
+      state.promptStatsCache[key] = { _error: true };
+    }
+    state.promptStatsLoading[key] = false;
     render();
   }
 
@@ -1695,7 +1771,11 @@
   // Schlüssel: Tab-ID, beim Tab "Daten" 'daten:' + Unterbereich.
   var TAB_QUESTIONS = {
     'situation':     { eyebrow: 'Situation', q: 'Wie sichtbar seid ihr gerade in KI-Antworten?',
-                       lead: 'Wie oft ChatGPT und Gemini eure Domain in den letzten 28 Tagen als Quelle nennen, und wo die größten Chancen liegen.' },
+                       lead: function () {
+                         return 'Wie oft ChatGPT und Gemini eure Domain in den letzten ' +
+                           dashWindowDays(state.dashboardDataCache[state.activeTopicId]) +
+                           ' Tagen als Quelle nennen, und wo die größten Chancen liegen.';
+                       } },
     'journey':       { eyebrow: 'Journey', q: 'In welcher Phase der Kaufentscheidung fehlt ihr?',
                        lead: 'Eure Zielgruppe fragt in jeder Phase anders. Hier seht ihr, wo ihr in den Antworten vorkommt und wo andere den Platz haben.' },
     'wettbewerb':    { eyebrow: 'Wettbewerb', q: 'Wer besetzt euren Platz in den Antworten?',
@@ -1725,10 +1805,12 @@
     if (!cfg) return null;
     var el = document.createElement('div');
     el.className = 'cvz-tab-intro';
+    // GEÄNDERT (09.11.2026): lead darf eine Funktion sein (Text hängt vom gewählten Zeitraum ab).
+    var leadText = typeof cfg.lead === 'function' ? cfg.lead() : cfg.lead;
     el.innerHTML =
       '<p class="cvz-tab-intro-eyebrow">' + escapeHtml(cfg.eyebrow) + '</p>' +
       '<h2 class="cvz-tab-intro-q">' + escapeHtml(cfg.q) + '</h2>' +
-      (cfg.lead ? '<p class="cvz-tab-intro-lead">' + escapeHtml(cfg.lead) + '</p>' : '');
+      (leadText ? '<p class="cvz-tab-intro-lead">' + escapeHtml(leadText) + '</p>' : '');
     return el;
   }
 
@@ -2413,6 +2495,38 @@
 
     // NEU (25.09.2026, Kundenwunsch): Zeitraum-Presets (4/12/26 Wochen) für
     // "Sichtbarkeits-Verlauf pro Phase".
+    // NEU (09.11.2026): Zeitraum-Umschalter der Domain-Übersicht. Lädt Verlauf und Themen-Tabelle neu.
+    var domWinBtn = event.target.closest('[data-cvz-dwindow]');
+    if (domWinBtn) {
+      var domProject = domWinBtn.getAttribute('data-cvz-dwindow-project');
+      var domDays = parseInt(domWinBtn.getAttribute('data-cvz-dwindow'), 10);
+      if (!domProject || WINDOW_PRESETS.indexOf(domDays) === -1) return;
+      if (domDays === requestedDomainWindowDays(domProject)) return;
+      state.windowDaysByProject[domProject] = domDays;
+      delete state.domainDashboardCache[domProject];
+      loadDomainDashboard(domProject, true);
+      return;
+    }
+
+    // NEU (09.11.2026): Zeitraum-Umschalter (28 / 90 / 180 Tage / Seit Start). Verwirft die geladenen
+    // Dashboard-Daten des Themas und lädt sie für den neuen Zeitraum neu.
+    var windowBtn = event.target.closest('[data-cvz-window]');
+    if (windowBtn) {
+      var winTopic = windowBtn.getAttribute('data-cvz-window-topic');
+      var winDays = parseInt(windowBtn.getAttribute('data-cvz-window'), 10);
+      if (!winTopic || WINDOW_PRESETS.indexOf(winDays) === -1) return;
+      if (winDays === requestedWindowDays(winTopic)) return;
+      state.windowDaysByTopic[winTopic] = winDays;
+      updateUrlParams({ cvz_window: winDays === DEFAULT_WINDOW_DAYS ? null : winDays });
+      delete state.dashboardDataCache[winTopic];
+      // Ein früher fehlgeschlagener Abruf der Prompt-Zahlen soll bei erneuter Wahl neu versucht werden.
+      var _psKey = winTopic + '|' + winDays;
+      if (state.promptStatsCache[_psKey] && state.promptStatsCache[_psKey]._error) delete state.promptStatsCache[_psKey];
+      maybeLoadDashboardData(winTopic);
+      if (state.activeSubTab === 'journey') maybeLoadPromptStats(winTopic);
+      return;
+    }
+
     // NEU (21.10.2026): Kanal-Umschalter (Gesamt / ChatGPT / Gemini).
     var channelBtn = event.target.closest('[data-cvz-channel]');
     if (channelBtn) {
@@ -4330,6 +4444,15 @@
   // Klartext-Zahlen statt nur Farben: Eine Zelle beruht oft auf 1-2 Prompts.
   function renderRoleVisibilitySection(topicId, detail) {
     var bc = state.buyingCenterCache[topicId];
+    // NEU (09.11.2026): Zeitraum. Bei 28 Tagen kommen die Zahlen aus dem Themen-Detail, bei einem anderen
+    // Zeitraum aus GET /topics/{id}/prompt-stats (state.promptStatsCache). Schlägt das fehl, bleiben die
+    // 28-Tage-Zahlen stehen, mit Hinweis.
+    var winReq = requestedWindowDays(topicId);
+    var statsOverlay = winReq !== DEFAULT_WINDOW_DAYS ? state.promptStatsCache[topicId + '|' + winReq] : null;
+    var overlayWaiting = winReq !== DEFAULT_WINDOW_DAYS && !statsOverlay;
+    var overlayFailed = !!(statsOverlay && statsOverlay._error);
+    var overlayOk = !!(statsOverlay && !statsOverlay._error);
+    var roleWinDays = overlayOk ? (statsOverlay.window_days || winReq) : DEFAULT_WINDOW_DAYS;
     var section = document.createElement('div');
     section.className = 'cvz-section';
     section.style.marginTop = '24px';
@@ -4345,7 +4468,7 @@
       // GEÄNDERT (02.10.2026): positiv formuliert (Zweck statt Einschränkung).
       // Die kleine Fragenzahl je Zelle bleibt über die Zählweise "x von y"
       // sichtbar, wird aber nicht mehr als Schwäche benannt.
-      'Jede Zelle zeigt, bei wie vielen Fragen dieser Rolle in dieser Phase eure Domain in den letzten 28 Tagen in mindestens einer KI-Antwort zitiert wurde, zum Beispiel 1 von 2. ' +
+      'Jede Zelle zeigt, bei wie vielen Fragen dieser Rolle in dieser Phase eure Domain in den letzten ' + roleWinDays + ' Tagen in mindestens einer KI-Antwort zitiert wurde, zum Beispiel 1 von 2. ' +
       'So seht ihr auf einen Blick, für welche Rolle in welcher Phase passender Content fehlt: Zellen mit 0 sind die ersten Kandidaten für neue Inhalte. ' +
       'Rollen, die später in den Kaufprozess einsteigen, werden erst ab ihrer Einstiegsphase gemessen.'
     ));
@@ -4393,6 +4516,15 @@
       return section;
     }
 
+    // Zahlen für einen anderen Zeitraum sind noch unterwegs: nichts Falsches anzeigen.
+    if (overlayWaiting) {
+      var waitMsg = document.createElement('p');
+      waitMsg.className = 'cvz-card-placeholder-text';
+      waitMsg.innerHTML = '<span class="cvz-spinner"></span>Zahlen für den gewählten Zeitraum werden geladen …';
+      section.appendChild(waitMsg);
+      return section;
+    }
+
     var prompts = (detail.prompts || []).filter(function (p) { return p.is_active !== false; });
     var rows = roles.map(function (r) { return { key: r.role_id, label: r.rolle, champion: r.ist_champion, entry: r.einstiegsphase || 'exploration' }; });
     var unassigned = prompts.filter(function (p) { return !p.role_id; });
@@ -4401,6 +4533,15 @@
     // GEÄNDERT (23.09.2026): zählt Fragen statt KI-Antworten, wie die
     // Zusammenfassung. Eine Frage gilt als zitiert, wenn eure Domain in
     // mindestens einer Antwort als Quelle genannt wurde.
+    function roleStatsOf(p) {
+      if (!overlayOk) return promptStats(p);
+      var e = statsOverlay.prompts && statsOverlay.prompts[p.id];
+      if (!e) return { cited: 0, total: 0, status: null };
+      var chn = activeChannel();
+      var src = (chn !== 'all' && e.by_channel && e.by_channel[chn]) ? e.by_channel[chn] : e;
+      return { cited: src.cited_count || 0, total: src.total_runs || 0, status: src.visibility_status || null };
+    }
+
     function cellStats(roleKey, phase) {
       var n = 0, measured = 0, cited = 0;
       prompts.forEach(function (p) {
@@ -4409,7 +4550,8 @@
         n++;
         // GEÄNDERT (21.10.2026): letzte 28 Tage, gewählter Kanal. Vorher alle
         // Läufe seit Start: Eine Zelle, die einmal grün war, blieb es für immer.
-        var ps = promptStats(p);
+        // GEÄNDERT (09.11.2026): bei einem anderen Zeitraum die Zahlen aus prompt-stats.
+        var ps = roleStatsOf(p);
         if (ps.total > 0) {
           measured++;
           if (ps.cited > 0) cited++;
@@ -4481,9 +4623,10 @@
 
     var caption = document.createElement('p');
     caption.className = 'cvz-chart-caption';
-    caption.textContent = 'Anteil der Fragen, bei denen eure Domain in den letzten 28 Tagen in mindestens einer Antwort (' + activeChannelLabel() + ') zitiert wurde, je Rolle und Journey-Phase. ' +
+    caption.textContent = 'Anteil der Fragen, bei denen eure Domain in den letzten ' + roleWinDays + ' Tagen in mindestens einer Antwort (' + activeChannelLabel() + ') zitiert wurde, je Rolle und Journey-Phase. ' +
       'Rot: in diesem Zeitraum bei keiner Frage zitiert. „Steigt später ein“: Die Rolle recherchiert erst ab ihrer Einstiegsphase mit, änderbar unter „Rollen bearbeiten“. ' +
-      '„Nicht gemessen“: Der Prompt für diese Zelle fehlt noch (z. B. keine freien Plätze), über „+ Prompt“ legt ihr ihn selbst an.';
+      '„Nicht gemessen“: Der Prompt für diese Zelle fehlt noch (z. B. keine freien Plätze), über „+ Prompt“ legt ihr ihn selbst an.' +
+      (overlayFailed ? ' Die Zahlen für den gewählten Zeitraum konnten nicht geladen werden, gezeigt werden die letzten ' + DEFAULT_WINDOW_DAYS + ' Tage.' : '');
     section.appendChild(caption);
 
     if (unassigned.length) {
@@ -4589,7 +4732,11 @@
           tabContent.appendChild(renderTrendChart(MOCK_DOMAIN_TREND[project.id]));
         } else if (data.rolling || state.isLoadingDomainDashboard) {
           // NEU (21.10.2026): gleitender 28-Tage-Verlauf mit Kanal-Umschalter und Tabelle pro Thema
-          tabContent.appendChild(renderChannelSwitch());
+          var domainSwitchRow = document.createElement('div');
+          domainSwitchRow.className = 'cvz-switch-row';
+          domainSwitchRow.appendChild(renderChannelSwitch());
+          domainSwitchRow.appendChild(renderDomainWindowSwitch(projectId));
+          tabContent.appendChild(domainSwitchRow);
           tabContent.appendChild(renderDomainRollingSection(data.rolling, state.isLoadingDomainDashboard));
         } else {
           // Rückfall für ein Backend ohne "rolling"
@@ -4611,6 +4758,7 @@
   // nicht aller Antworten zusammen. Sonst bestimmt das Thema mit den meisten
   // Prompts die Linie. Details: main.py, _get_domain_rolling.
   function renderDomainRollingSection(rolling, isLoading) {
+    var domWin = (rolling && rolling.window_days) || DEFAULT_WINDOW_DAYS;
     var section = document.createElement('div');
     section.className = 'cvz-section';
 
@@ -4623,7 +4771,7 @@
     head.appendChild(heading);
     head.appendChild(makeTip(
       'Durchschnitt der Zitierraten aller aktiven Themen dieser Domain, jedes Thema zählt gleich viel. ' +
-      'Jeder Punkt fasst die letzten 28 Tage zusammen, ein Punkt pro Woche. ' +
+      'Jeder Punkt fasst die letzten ' + domWin + ' Tage zusammen, ein Punkt pro Woche. ' +
       'Ein Thema fließt in einen Punkt nur ein, wenn es dort genug Antworten hat. ' +
       'Das schattierte Band zeigt, wie weit der Wert allein durch Zufall schwanken kann.'
     ));
@@ -4694,7 +4842,7 @@
       var card = document.createElement('div');
       card.className = 'cvz-card';
       card.style.marginTop = '10px';
-      card.innerHTML = buildRollingSvg(lines, xLabels, complete, { maxY: niceChartMax(maxVal) });
+      card.innerHTML = buildRollingSvg(lines, xLabels, complete, { maxY: niceChartMax(maxVal), windowDays: rolling.window_days });
       section.appendChild(card);
       var legend = document.createElement('div');
       legend.className = 'cvz-chart-legend';
@@ -5160,8 +5308,17 @@
     if (tabIntro) wrap.appendChild(tabIntro);
 
     // NEU (21.10.2026): Kanal-Umschalter nur in den Tabs, in denen er wirkt.
-    if (CHANNEL_SWITCH_TABS.indexOf(state.activeSubTab) !== -1 ||
-        (state.activeSubTab === 'daten' && state.activeDataView === 'prompts')) {
+    var showChannelSwitch = CHANNEL_SWITCH_TABS.indexOf(state.activeSubTab) !== -1 ||
+        (state.activeSubTab === 'daten' && state.activeDataView === 'prompts');
+    // NEU (09.11.2026): Zeitraum-Umschalter, wirkt auf die KI-Auswertung dieser Tabs.
+    var showWindowSwitch = WINDOW_SWITCH_TABS.indexOf(state.activeSubTab) !== -1;
+    if (showChannelSwitch && showWindowSwitch) {
+      var switchRow = document.createElement('div');
+      switchRow.className = 'cvz-switch-row';
+      switchRow.appendChild(renderChannelSwitch());
+      switchRow.appendChild(renderWindowSwitch(state.activeTopicId));
+      wrap.appendChild(switchRow);
+    } else if (showChannelSwitch) {
       wrap.appendChild(renderChannelSwitch());
     }
 
@@ -10514,7 +10671,7 @@
     heading.textContent = 'Wer wird zitiert? Quellen und Wettbewerber';
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
-      'Zeigt, welche Domains in den KI-Antworten der letzten 28 Tage als Quelle auftauchen, und bei welchen Fragen und Rollen. ' +
+      'Zeigt, welche Domains in den KI-Antworten der letzten ' + dashWindowDays(dashData) + ' Tage als Quelle auftauchen, und bei welchen Fragen und Rollen. ' +
       '"Bei 3 von 5 Fragen" heißt: In mindestens einer Antwort auf 3 von 5 Fragen wurde die Domain zitiert. ' +
       'Das ist bewusst keine Prozent-Zitierrate pro Antwort, damit die Zahlen zu "Sichtbarkeit je Rolle" passen. ' +
       'Zeile anklicken, um die Fragen dahinter zu sehen. Fragen mit "Ihr: nicht zitiert" sind die konkreten Content-Lücken.'
@@ -10663,7 +10820,7 @@
     heading.textContent = 'Wer wird stattdessen zitiert?';
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
-      'Pro Rolle und Journey-Phase die zwei Domains, die in den KI-Antworten der letzten 28 Tage bei den meisten Fragen als Quelle genannt wurden. ' +
+      'Pro Rolle und Journey-Phase die zwei Domains, die in den KI-Antworten der letzten ' + dashWindowDays(dashData) + ' Tage bei den meisten Fragen als Quelle genannt wurden. ' +
       '"2/3" heißt: bei 2 von 3 Fragen. Die vollständige Liste mit den Fragen dahinter steht im Tab Wettbewerb.'
     ));
     var link = document.createElement('button');
@@ -11819,6 +11976,11 @@
       '.cvz-channel-btn-active { color: var(--cvz-navy); background: var(--cvz-teal); font-weight: 600; }' +
       '.cvz-channel-btn-active:hover { color: var(--cvz-navy); }' +
       '.cvz-channel-btn:focus-visible { outline: 1px solid var(--cvz-teal); outline-offset: 2px; }' +
+      '.cvz-channel-btn:disabled { opacity: .5; cursor: default; }' +
+      // NEU (09.11.2026): Kanal- und Zeitraum-Umschalter nebeneinander
+      '.cvz-switch-row { display: flex; align-items: center; gap: 10px 32px; flex-wrap: wrap; margin: -8px 0 20px; }' +
+      '.cvz-switch-row .cvz-channel-switch { margin: 0; }' +
+      '.cvz-window-note { font-size: 12px; color: var(--cvz-text-muted); }' +
       '.cvz-rolling-summary { padding: 14px 16px; margin-bottom: 4px; }' +
       '.cvz-rolling-summary-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }' +
       '.cvz-rolling-split { display: flex; gap: 18px; flex-wrap: wrap; margin: 10px 0 0; font-size: 13px; color: var(--cvz-text); }' +
@@ -12898,7 +13060,7 @@
     return shareOfVoiceForChannel(dashData);
   }
 
-  // Quellen pro Phase (12 Wochen) für den aktiven Kanal.
+  // Quellen pro Phase (Fenster window_days, Standard 28 Tage) für den aktiven Kanal.
   function shareOfVoiceForChannel(dashData) {
     var ch = activeChannel();
     if (ch !== 'all' && dashData && dashData.share_of_voice_by_channel && dashData.share_of_voice_by_channel[ch]) {
@@ -12925,6 +13087,112 @@
 
   function promptWindowLabel(p) {
     return p && p.citation_window_days ? 'letzte ' + p.citation_window_days + ' Tage' : 'seit Start';
+  }
+
+  // NEU (09.11.2026): Zeitraum der KI-Auswertung.
+  // Gewählt (Anfrage) und tatsächlich gerechnet (Antwort des Backends) können abweichen, falls der
+  // Server den Parameter nicht kennt. Für alle Beschriftungen gilt deshalb die Antwort, nicht die Wahl.
+  function requestedWindowDays(topicId) {
+    var n = state.windowDaysByTopic[topicId];
+    return WINDOW_PRESETS.indexOf(n) !== -1 ? n : DEFAULT_WINDOW_DAYS;
+  }
+
+  function dashWindowDays(dashData) {
+    if (dashData && !dashData._error) {
+      if (dashData.window_days) return dashData.window_days;
+      var jc = dashData.journey_comparison;
+      if (jc && jc.window_days) return jc.window_days;
+    }
+    return DEFAULT_WINDOW_DAYS;
+  }
+
+  function requestedDomainWindowDays(projectId) {
+    var n = state.windowDaysByProject[projectId];
+    return WINDOW_PRESETS.indexOf(n) !== -1 ? n : DEFAULT_WINDOW_DAYS;
+  }
+
+  // Baut den Zeitraum-Umschalter. opts: daysAttr und idAttr (Namen der data-Attribute für den Klick-Handler),
+  // id, requested (Wunsch), loaded (was der Server gerechnet hat: 0 = seit Start, sonst Tage, null = noch nichts),
+  // days (gerechnete Tage), capped, loading, noun ("das Thema" oder "die Domain"), tip (Erklärtext).
+  function buildWindowSwitchBar(opts) {
+    var bar = document.createElement('div');
+    bar.className = 'cvz-channel-switch';
+    var label = document.createElement('span');
+    label.className = 'cvz-channel-switch-label';
+    label.textContent = 'Zeitraum';
+    bar.appendChild(label);
+
+    var active = (opts.loading || opts.loaded === null) ? opts.requested : opts.loaded;
+    var group = document.createElement('div');
+    group.className = 'cvz-channel-switch-group';
+    group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', 'Zeitraum wählen');
+    WINDOW_PRESETS.forEach(function (days) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      var isActive = active === days;
+      btn.className = 'cvz-channel-btn' + (isActive ? ' cvz-channel-btn-active' : '');
+      btn.setAttribute(opts.daysAttr, String(days));
+      btn.setAttribute(opts.idAttr, opts.id);
+      btn.setAttribute('role', 'radio');
+      btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
+      if (opts.loading) btn.disabled = true;
+      btn.textContent = days === 0 ? 'Seit Start' : days + ' Tage';
+      group.appendChild(btn);
+    });
+    bar.appendChild(group);
+    bar.appendChild(makeTip(opts.tip));
+
+    // Ehrlicher Hinweis, falls der Server den gewünschten Zeitraum nicht gerechnet hat.
+    if (!opts.loading && opts.loaded !== null && opts.loaded !== opts.requested) {
+      var note = document.createElement('span');
+      note.className = 'cvz-window-note';
+      note.textContent = 'Der Server hat ' + (opts.requested === 0 ? '„Seit Start“' : opts.requested + ' Tage') +
+        ' nicht übernommen und rechnet mit ' + opts.days + ' Tagen.';
+      bar.appendChild(note);
+    } else if (!opts.loading && opts.loaded === 0) {
+      // Seit Start: sagen, wie viele Tage das sind und warum es keinen Vergleich gibt.
+      var startNote = document.createElement('span');
+      startNote.className = 'cvz-window-note';
+      startNote.textContent = opts.days + ' Tage' +
+        (opts.capped ? ' (nur die letzten ' + opts.days + ', ' + opts.noun + ' ist älter)' : '') +
+        ', ohne Vergleich mit davor.';
+      bar.appendChild(startNote);
+    }
+    return bar;
+  }
+
+  function renderWindowSwitch(topicId) {
+    var data = state.dashboardDataCache[topicId];
+    var ok = !!(data && !data._error);
+    return buildWindowSwitchBar({
+      daysAttr: 'data-cvz-window', idAttr: 'data-cvz-window-topic', id: topicId,
+      requested: requestedWindowDays(topicId),
+      loaded: ok ? (data.window_mode === 'since_start' ? 0 : dashWindowDays(data)) : null,
+      days: dashWindowDays(data), capped: ok && !!data.window_capped,
+      loading: !!state.isLoadingDashboard, noun: 'das Thema',
+      tip: 'Gilt für die KI-Auswertung: Phasen, Quellen, Wettbewerber, Verlauf und Sichtbarkeit je Rolle. ' +
+        'Gezeigt werden die letzten Tage, verglichen mit dem gleich langen Zeitraum davor. Ein längerer Zeitraum ' +
+        'glättet Schwankungen, zeigt echte Veränderungen aber später. „Seit Start“ reicht bis zur ersten Messung ' +
+        '(höchstens 365 Tage), davor gibt es keine Daten, deshalb zeigt dieser Zeitraum keine Pfeile. ' +
+        'Fest bei 28 Tagen bleiben die Zahlen der einzelnen Prompts im Tab Daten, Fan-out und die Search Console.',
+    });
+  }
+
+  // NEU (09.11.2026): Zeitraum der Domain-Übersicht (Verlauf und Themen-Tabelle).
+  function renderDomainWindowSwitch(projectId) {
+    var live = state.domainDashboardCache[projectId];
+    var rolling = live && live.rolling;
+    return buildWindowSwitchBar({
+      daysAttr: 'data-cvz-dwindow', idAttr: 'data-cvz-dwindow-project', id: projectId,
+      requested: requestedDomainWindowDays(projectId),
+      loaded: rolling ? (rolling.window_mode === 'since_start' ? 0 : (rolling.window_days || DEFAULT_WINDOW_DAYS)) : null,
+      days: (rolling && rolling.window_days) || DEFAULT_WINDOW_DAYS, capped: !!(rolling && rolling.window_capped),
+      loading: !!state.isLoadingDomainDashboard, noun: 'die Domain',
+      tip: 'Gilt für den Verlauf und die Themen-Tabelle dieser Domain. Gezeigt werden die letzten Tage, verglichen ' +
+        'mit dem gleich langen Zeitraum davor. „Seit Start“ reicht bis zur ersten Messung des ältesten aktiven Themas ' +
+        '(höchstens 365 Tage), davor gibt es keine Daten, deshalb zeigt dieser Zeitraum keine Pfeile.',
+    });
   }
 
   function renderChannelSwitch() {
@@ -13099,7 +13367,7 @@
     // Karte unterschiedliche Prozentwerte. Fallback auf 12 Wochen nur, wenn
     // das Backend den Vergleichsblock nicht liefert (Fehler, alte API).
     var _cjc = dashData.journey_comparison || null;
-    var windowLabel = _cjc ? 'letzte ' + _cjc.window_days + ' Tage' : 'letzte 12 Wochen';
+    var windowLabel = 'letzte ' + (_cjc ? _cjc.window_days : dashWindowDays(dashData)) + ' Tage';
     // GEÄNDERT (21.10.2026): Quellen und eigene Werte für den gewählten Kanal.
     var sov = journeySourcesForChannel(dashData);
     var ownPhaseScores = _cjc ? (_cjc.phase_scores || {}) : dashData.phase_scores;
@@ -14160,10 +14428,13 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '12px';
-    sub.textContent = jc
+    sub.textContent = (jc && data.window_mode === 'since_start')
+      ? 'Wie oft eure Domain in KI-Antworten als Quelle genannt wird: seit Start (' + cfg.windowDays +
+        ' Tage). Einen Vergleich mit einem Zeitraum davor gibt es nicht, deshalb keine Pfeile.'
+      : jc
       ? 'Wie oft eure Domain in KI-Antworten als Quelle genannt wird: letzte ' + cfg.windowDays +
         ' Tage, verglichen mit den ' + cfg.windowDays + ' Tagen davor. Pfeile markieren echte Veränderungen.'
-      : 'Wie oft eure Domain in KI-Antworten als Quelle genannt wird (letzte 12 Wochen).';
+      : 'Wie oft eure Domain in KI-Antworten als Quelle genannt wird (letzte ' + dashWindowDays(data) + ' Tage).';
     section.appendChild(sub);
 
     var grid = document.createElement('div');
@@ -14821,7 +15092,7 @@
       var thin = document.createElement('p');
       thin.className = 'cvz-card-placeholder-text';
       thin.textContent = 'Für diese Auswahl gibt es zu wenige Antworten (unter ' + ROLLING_MIN_ANSWERS +
-        ' pro 28 Tage), um einen Verlauf zu zeigen. Wählt „Alle Phasen“ oder den Kanal „Gesamt“.';
+        ' pro ' + cr.window_days + ' Tage), um einen Verlauf zu zeigen. Wählt „Alle Phasen“ oder den Kanal „Gesamt“.';
       section.appendChild(thin);
       return section;
     }
@@ -14872,7 +15143,7 @@
       var markers = buildRollingMarkers(state.contentChangesCache[topicId] || [], points);
       var card = document.createElement('div');
       card.className = 'cvz-card';
-      card.innerHTML = buildRollingSvg(lines, xLabels, complete, { maxY: niceChartMax(maxVal), markers: markers });
+      card.innerHTML = buildRollingSvg(lines, xLabels, complete, { maxY: niceChartMax(maxVal), markers: markers, windowDays: cr.window_days });
       section.appendChild(card);
     }
 
@@ -16263,7 +16534,7 @@
       ln.values.forEach(function (v, i) {
         if (v == null) return;
         var cx = xAt(i).toFixed(1), cy = yAt(v).toFixed(1);
-        var tip = ln.label + ', 28 Tage bis ' + xLabels[i] + ': ' + fmtPct(v) + (ln.tips && ln.tips[i] ? ' (' + ln.tips[i] + ')' : '');
+        var tip = ln.label + ', ' + (opts.windowDays || DEFAULT_WINDOW_DAYS) + ' Tage bis ' + xLabels[i] + ': ' + fmtPct(v) + (ln.tips && ln.tips[i] ? ' (' + ln.tips[i] + ')' : '');
         p.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + (ln.width > 2 ? 3.5 : 2.5) + '" fill="' + ln.color + '"/>');
         p.push('<circle cx="' + cx + '" cy="' + cy + '" r="9" fill="transparent"><title>' + escapeHtml(tip) + '</title></circle>');
       });
@@ -16646,10 +16917,10 @@
     heading.textContent = 'Sichtbarkeit im Verlauf';
     head.appendChild(heading);
     head.appendChild(makeTip(
-      'Jeder Punkt zeigt, bei wie vielen Antworten der letzten 28 Tage eure Domain als Quelle genannt wurde. ' +
-      'Ein Punkt pro Woche, über die ganze Laufzeit des Themas. 28 statt 7 Tage, weil einzelne Wochen bei KI-Antworten stark schwanken. ' +
+      'Jeder Punkt zeigt, bei wie vielen Antworten der letzten ' + dashWindowDays(dashData) + ' Tage eure Domain als Quelle genannt wurde. ' +
+      'Ein Punkt pro Woche, über die ganze Laufzeit des Themas. ' + dashWindowDays(dashData) + ' statt 7 Tage, weil einzelne Wochen bei KI-Antworten stark schwanken. ' +
       'Das schattierte Band zeigt, wie weit die Rate allein durch Zufall schwanken kann. ' +
-      'Gestrichelt: Aufbauphase, das 28-Tage-Fenster beginnt noch vor der ersten Messung.'
+      'Gestrichelt: Aufbauphase, das ' + dashWindowDays(dashData) + '-Tage-Fenster beginnt noch vor der ersten Messung.'
     ));
     section.appendChild(head);
 
@@ -16726,7 +16997,7 @@
       var thin = document.createElement('p');
       thin.className = 'cvz-card-placeholder-text';
       thin.textContent = 'Für diese Auswahl gibt es zu wenige Antworten (unter ' + ROLLING_MIN_ANSWERS +
-        ' pro 28 Tage), um einen Verlauf zu zeigen. Wählt „Alle Phasen“ oder „Gesamt“.';
+        ' pro ' + rt.window_days + ' Tage), um einen Verlauf zu zeigen. Wählt „Alle Phasen“ oder „Gesamt“.';
       section.appendChild(thin);
     } else {
       var maxVal = 0;
@@ -16739,7 +17010,7 @@
 
       var card = document.createElement('div');
       card.className = 'cvz-card';
-      card.innerHTML = buildRollingSvg(lines, xLabels, complete, { maxY: maxY, markers: markers });
+      card.innerHTML = buildRollingSvg(lines, xLabels, complete, { maxY: maxY, markers: markers, windowDays: rt.window_days });
       section.appendChild(card);
 
       var legend = document.createElement('div');
@@ -16755,7 +17026,7 @@
       var cap = document.createElement('p');
       cap.className = 'cvz-chart-caption';
       cap.textContent = 'Zitierrate von ' + activeChannelLabel() + (phase === 'total' ? '' : ', Phase ' + (PHASE_LABELS[phase] || phase)) +
-        ', jeweils über die 28 Tage bis zum angegebenen Datum. Punkte mit weniger als ' + ROLLING_MIN_ANSWERS +
+        ', jeweils über die ' + rt.window_days + ' Tage bis zum angegebenen Datum. Punkte mit weniger als ' + ROLLING_MIN_ANSWERS +
         ' Antworten werden nicht gezeichnet. Eine Veränderung ist erst belegt, wenn sich die Schwankungsbereiche zweier Punkte nicht mehr überschneiden. ' +
         'Content-Änderungen wirken in KI-Antworten meist erst nach einigen Wochen.';
       section.appendChild(cap);
