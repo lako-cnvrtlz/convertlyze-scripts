@@ -498,6 +498,7 @@
       '.cvz-cs-goal-line{margin:2px 0;font-size:14px;color:var(--cvz-text);overflow-wrap:anywhere;}',
       /* NEU: Abschnitt "Ziel der Strategie" (vor der Executive Summary) */
       '.cvz-cs-goal-overview{display:flex;flex-direction:column;gap:14px;}',
+      '.cvz-cs-trade-media{display:flex;flex-direction:column;gap:10px;margin-top:16px;}',
       '.cvz-cs-goal-block{padding:14px 16px;border:1px solid var(--cvz-border);background:var(--cvz-surface);min-width:0;}',
       '.cvz-cs-goal-block--primary{border-left:3px solid var(--cvz-teal);}',
       '.cvz-cs-goal-headline{font-size:17px;line-height:1.35;font-weight:600;color:var(--cvz-heading);margin:0 0 8px;overflow-wrap:anywhere;}',
@@ -4236,6 +4237,58 @@
     return row.status === 'ok' || !!row.covered_by_own;
   }
 
+  // NEU (Google heute): gleiche Logik und gleicher Wortlaut wie computeGoogleToday und googleTodayText in
+  // services/contentStrategyGoalOverview.js (PDF-Export). Summen aus demand_signals (alle themenrelevanten Suchanfragen),
+  // sonst aus den current_state-Zeilen zum Thema. Ohne Search Console nur die Schätzung, ohne beides keine Zeile.
+  function computeGoogleToday(result) {
+    var cs = result && result.current_state;
+    var signals = result && result.demand_signals && result.demand_signals.source === 'google_search_console' ? result.demand_signals : null;
+    var source = signals ? 'google_search_console' : (cs && typeof cs.source === 'string' ? cs.source : 'none');
+    if (source === 'none') return null;
+    var rows = (cs && cs.rows && cs.rows.length ? cs.rows : []).filter(function (r) { return r && r.relevance === 'topic' && typeof r.query === 'string'; });
+    function pos(r) { return r.avg_position != null && Number(r.avg_position) > 0 ? Number(r.avg_position) : null; }
+    function imp(r) { return Number(r.impressions) > 0 ? Number(r.impressions) : 0; }
+    var top;
+    if (source === 'google_search_console') {
+      var withImp = rows.filter(function (r) { return imp(r) > 0; });
+      top = withImp.slice().sort(function (a, b) { return imp(b) - imp(a) || (pos(a) || 999) - (pos(b) || 999); })[0] || null;
+      return {
+        source: 'google_search_console',
+        window_days: signals ? signals.window_days : 90,
+        queries: signals ? signals.topic_queries : withImp.length,
+        impressions: signals ? signals.topic_impressions : withImp.reduce(function (s, r) { return s + imp(r); }, 0),
+        clicks: signals ? signals.topic_clicks : withImp.reduce(function (s, r) { return s + (Number(r.clicks) > 0 ? Number(r.clicks) : 0); }, 0),
+        top_query: top ? top.query : null,
+        top_position: top ? pos(top) : null,
+      };
+    }
+    var ranked = rows.filter(function (r) { return pos(r) != null && pos(r) <= 100; });
+    top = ranked.slice().sort(function (a, b) { return pos(a) - pos(b); })[0] || null;
+    return { source: 'dataforseo_estimate', window_days: null, queries: ranked.length, impressions: null, clicks: null, top_query: top ? top.query : null, top_position: top ? pos(top) : null };
+  }
+  function googleTodayText(g) {
+    if (!g) return null;
+    function fi(n) { return Math.round(n).toLocaleString('de-DE'); }
+    var top = g.top_query && g.top_position != null ? ', stärkster Suchbegriff „' + g.top_query + '“ auf Position ' + g.top_position.toFixed(1).replace('.', ',') : '';
+    if (g.source === 'google_search_console') {
+      if (!g.impressions) return 'Bei Google heute: noch keine Impressionen für Suchbegriffe zum Thema (Search Console, letzte ' + g.window_days + ' Tage).';
+      var q = g.queries > 0 ? ' für ' + fi(g.queries) + ' ' + (g.queries === 1 ? 'Suchbegriff' : 'Suchbegriffe') + ' zum Thema' : ' für Suchbegriffe zum Thema';
+      return 'Bei Google heute: ' + fi(g.impressions) + ' Impressionen und ' + fi(g.clicks) + ' ' + (g.clicks === 1 ? 'Klick' : 'Klicks') + ' in ' + g.window_days + ' Tagen' + q + top + ' (Search Console).';
+    }
+    if (!g.queries) return 'Bei Google heute: laut Schätzung noch keine Rankings für Suchbegriffe zum Thema (ohne Search Console).';
+    return 'Bei Google heute: laut Schätzung Rankings für ' + fi(g.queries) + ' ' + (g.queries === 1 ? 'Suchbegriff' : 'Suchbegriffe') + ' zum Thema' + top + ' (geschätzt, ohne Search Console keine Klickzahlen).';
+  }
+  // Sprung zur Tabelle "Wofür eure Domain heute rankt" im Abschnitt Sichtbarkeit.
+  function openCurrentState() {
+    var root = state.root || document;
+    var box = root.querySelector('.cvz-cs-current-state');
+    var target = box ? (box.closest ? box.closest('.cvz-cs-vis-block') : null) || box : null;
+    if (!target) return;
+    var nav = document.querySelector('#cvz-content-strategy-agent .cvz-cs-anchor-nav');
+    var offset = (nav ? nav.offsetHeight : 0) + getSiteNavHeight() + 12;
+    window.scrollTo({ top: target.getBoundingClientRect().top + window.scrollY - offset, behavior: 'smooth' });
+  }
+
   function computeGoalOverview(result, prompts) {
     if (!result || typeof result !== 'object') return null;
     var goal = result.strategy_goal || null;
@@ -4271,6 +4324,7 @@
     return {
       goal: goal ? { offer_type: goal.offer_type, also_offers: goal.also_offers || [], end_goal: goal.end_goal, cta_label: goal.cta_label || null } : null,
       audience: (conv && conv.primary_audience) || null,
+      google_today: computeGoogleToday(result), // NEU
       conversion_topic: (conv && conv.topic) || null,
       phases: phases,
       progress: {
@@ -4374,8 +4428,17 @@
       var sourceText = o.progress.prompts_total === 0
         ? 'KI-Sichtbarkeit wurde für diesen Bericht nicht gemessen.'
         : (fresh ? 'KI-Antworten: Einzelmessung' + (fresh.measured_at ? ' vom ' + new Date(fresh.measured_at).toLocaleDateString('de-DE') : '') + ', eine Momentaufnahme.' : 'KI-Antworten aus deinen Tracker-Daten.') + ' Details im Abschnitt Sichtbarkeit.';
+      // NEU: stärkste Google-Zahlen vor der Tabelle, mit Sprung zu den Details
+      var googleLine = googleTodayText(o.google_today);
+      var googleP = null;
+      if (googleLine) {
+        var gLink = el('a', { href: '#', class: 'cvz-cs-goal-link' }, ['Details ansehen']);
+        gLink.addEventListener('click', function (e) { e.preventDefault(); openCurrentState(); });
+        googleP = el('p', { class: 'cvz-cs-goal-line cvz-cs-goal-google' }, [googleLine + ' ', gLink]);
+      }
       wrap.appendChild(el('div', { class: 'cvz-cs-goal-block' }, [
         el('p', { class: 'cvz-cs-brief-label' }, ['Heute: Stand je Kaufphase', tip('Seiten im Plan: neue und bestehende Seiten der Strategie, eigene Seiten aus dem Content-Flow zählen mit. Nächster Schritt: ob eine Seite der Phase einen Zwischenschritt bietet (Check, Vorlage, Fallstudie, Produkt ausprobieren), aus dem Funnel-Befund. KI-Antworten: bei wie vielen Fragen eurer Zielgruppe aus dieser Phase eure Domain in ChatGPT und Gemini stabil als Quelle genannt wird.', 'Was zeigen die Werte?')]),
+        googleP,
         grid,
         el('p', { class: 'cvz-cs-hint' }, [sourceText]),
       ]));
@@ -4921,9 +4984,10 @@
     box.appendChild(head);
     if (r && r.volume_total > 0) {
       box.appendChild(el('p', { class: 'cvz-cs-traffic-range' }, [
-        'ca. ' + r.visits_low.toLocaleString('de-DE') + ' bis ' + r.visits_high.toLocaleString('de-DE') + ' Besuche pro Monat aus der Google-Suche',
+        'ca. ' + r.visits_low.toLocaleString('de-DE') + ' bis ' + r.visits_high.toLocaleString('de-DE') + ' Besuche pro Monat aus der Google-Suche ', // GEÄNDERT: Leerzeichen am Ende, sonst klebt der Text beim Kopieren zusammen
         el('span', { class: 'cvz-cs-traffic-sub' }, [r.horizon + ', wenn die Seiten auf die erste Ergebnisseite kommen. Eine Spanne, keine Prognose.']),
       ]));
+      if (r.horizon_note) box.appendChild(el('p', { class: 'cvz-cs-hint' }, [r.horizon_note])); // NEU: Zeitraum aus der Ausgangslage
     } else if (r) {
       box.appendChild(el('p', { class: 'cvz-cs-traffic-range' }, ['Keine Zahl möglich', el('span', { class: 'cvz-cs-traffic-sub' }, ['Für keine geplante Seite ist ein Suchvolumen messbar. Bei B2B-Themen heißt das oft nur "unter der Messgrenze".'])]));
     }
@@ -5586,6 +5650,31 @@
     return wrap;
   }
 
+  // NEU: Fachmedien für Gastbeiträge und PR (result.trade_media). Kommen aus einer gepflegten Branchenliste (per Google-Suche geprüft,
+  // ob das Medium über das Thema schreibt) und optional aus Link-Lücken. Sie müssen nicht von KI-Assistenten zitiert werden.
+  function renderTradeMedia(tm) {
+    if (!tm || ((!tm.items || tm.items.length === 0) && !tm.note)) return null;
+    var box = el('div', { class: 'cvz-cs-trade-media' });
+    box.appendChild(el('h5', {}, ['Fachmedien für Gastbeiträge und PR']));
+    if (tm.note) box.appendChild(el('p', { class: 'cvz-cs-hint' }, [tm.note]));
+    (tm.items || []).forEach(function (it) {
+      var head = el('p', { class: 'cvz-cs-goal-line' }, [
+        el('strong', {}, [it.name + (it.name !== it.domain ? ' (' + it.domain + ')' : '')]), ' ',
+        el('span', { class: 'cvz-cs-badge' }, [it.kind_label]),
+        it.basis === 'backlinks' ? ' ' : '', it.basis === 'backlinks' ? el('span', { class: 'cvz-cs-badge' }, ['aus Link-Lücken']) : '',
+        it.cited_prompts ? ' ' : '', it.cited_prompts ? el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--ok' }, ['in KI-Antworten zitiert']) : '', // NEU
+        it.country ? ' ' : '', it.country ? el('span', { class: 'cvz-cs-badge' }, [it.country === 'at' ? 'Österreich' : 'Schweiz']) : '', // NEU
+      ]);
+      var card = el('div', { class: 'cvz-cs-goal-block' }, [head]);
+      card.appendChild(el('p', { class: 'cvz-cs-hint' }, [it.evidence + (it.example_title ? ' Beispiel: „' + it.example_title + '“' : '')]));
+      card.appendChild(el('p', { class: 'cvz-cs-goal-line' }, [it.action]));
+      card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Aufwand: ' + it.effort + (it.branch_label ? ' · Branche: ' + it.branch_label : '')]));
+      box.appendChild(card);
+    });
+    if (tm.branches && tm.branches.length) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Geprüfte Branchen: ' + tm.branches.join(', ') + '. Die Liste der Medien wird von Convertlyze gepflegt.']));
+    return box;
+  }
+
   function renderOffsiteSection(measures, sources) {
     var hasM = measures && measures.length > 0;
     var hasS = sources && sources.length > 0;
@@ -5815,7 +5904,7 @@
       el('p', { class: 'cvz-cs-hint' }, ['Welche Seiten das umsetzen, steht im Content-Plan.']),
     ]));
     var off = renderOffsiteSection(result.offsite_measures, result.offsite_sources);
-    out.push(visBlock('ki', 'Außerhalb eurer Seiten: Off-Site-Maßnahmen', [off || el('p', { class: 'cvz-cs-hint' }, ['Keine Off-Site-Maßnahmen für dieses Thema.'])]));
+    out.push(visBlock('ki', 'Außerhalb eurer Seiten: Off-Site-Maßnahmen', [off || el('p', { class: 'cvz-cs-hint' }, ['Keine Off-Site-Maßnahmen für dieses Thema.']), renderTradeMedia(result.trade_media)])); // NEU: Fachmedien
     return out;
   }
 
@@ -7560,7 +7649,7 @@
       kategorie: 'z. B. SAP-Beratung oder Managed Hosting',
       kann: ['Was leistest du?', 'Eine Leistung pro Zeile, auch eigene Ressourcen wie Rechenzentren, Team oder Zertifizierungen und die Systeme, die du einführst oder betreibst.', 'z. B. Betrieb von SAP-Systemen in eigenen Rechenzentren'],
       kann_nicht: ['Was bietest du NICHT an?', 'Besonders wichtig. Die Strategie empfiehlt nichts, was hier steht. Zum Beispiel "keine Rechtsberatung", "kein Betrieb außerhalb der EU" oder "keine Projekte unter 20 Personentagen".', 'z. B. keine reine Lizenz ohne Projekt'],
-      ergaenzt: ['Mit welchen Herstellern und Plattformen arbeitest du? (kein Wettbewerb)', 'Nur Dritte: Software, Clouds oder Hersteller, die du einführst, betreibst oder mit denen du als Partner arbeitest. Dagegen wird nie verglichen. Eigene Leistungen gehören nicht hierher, sondern zu deinen Leistungen.', 'z. B. SAP S/4HANA, Microsoft Azure, STACKIT'],
+      ergaenzt: ['Mit welchen Herstellern und Plattformen arbeitest du? (kein Wettbewerb)', 'Nur Dritte: Software, Clouds oder Hersteller, die du einführst, betreibst oder mit denen du als Partner arbeitest. Dagegen wird nie verglichen. Eigene Leistungen wie eigene Rechenzentren gehören nicht hierher, sondern zu deinen Leistungen.', 'z. B. SAP S/4HANA, Microsoft Azure, STACKIT'],
       ersetzt: ['Gegen wen trittst du an?', 'Was deine Kunden stattdessen wählen würden, zum Beispiel die eigene IT oder ein anderes Systemhaus. Nur dagegen wird verglichen.', 'z. B. interne IT-Abteilung'],
       konkurrenten: 'z. B. wettbewerber.de',
     },
