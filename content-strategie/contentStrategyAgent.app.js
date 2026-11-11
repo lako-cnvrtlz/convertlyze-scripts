@@ -1898,7 +1898,7 @@
     wrap.appendChild(el('h3', {}, ['Stimmt diese Zielgruppe?']));
     wrap.appendChild(el('div', { class: 'cvz-cs-callout' }, [
       el('strong', {}, ['Das ist jetzt zu tun: ']),
-      'Prüfe den Vorschlag von Claude und ändere, was nicht stimmt. Lege genau eine Rolle als Champion fest. Aus diesen Rollen werden danach die Fragen für die Messung abgeleitet.',
+      'Prüfe den Vorschlag und ändere, was nicht stimmt. Lege genau eine Rolle als Champion fest. Aus diesen Rollen werden danach die Fragen für die Messung abgeleitet.',
     ]));
 
     // 1. Zielgruppe
@@ -1971,7 +1971,7 @@
       champion.addEventListener('change', refresh);
       nameInput.addEventListener('input', refresh);
       card.appendChild(el('div', { class: 'cvz-cs-role-head' }, [title, championLabel]));
-      if (role.begruendung) card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Warum Claude diese Rolle vorschlägt: ' + role.begruendung]));
+      if (role.begruendung) card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Warum diese Rolle vorgeschlagen wird: ' + role.begruendung]));
       card.appendChild(el('div', { class: 'cvz-cs-role-grid' }, [field('Name der Rolle', nameInput), field('Steigt ein in Phase', phaseSelect)]));
       card.appendChild(field('Motivation: Was will diese Rolle erreichen?', motivation));
       card.appendChild(field('Einwand: Was hält diese Rolle zurück?', objection));
