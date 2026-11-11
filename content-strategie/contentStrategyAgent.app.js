@@ -7560,7 +7560,7 @@
       kategorie: 'z. B. SAP-Beratung oder Managed Hosting',
       kann: ['Was leistest du?', 'Eine Leistung pro Zeile, auch eigene Ressourcen wie Rechenzentren, Team oder Zertifizierungen und die Systeme, die du einführst oder betreibst.', 'z. B. Betrieb von SAP-Systemen in eigenen Rechenzentren'],
       kann_nicht: ['Was bietest du NICHT an?', 'Besonders wichtig. Die Strategie empfiehlt nichts, was hier steht. Zum Beispiel "keine Rechtsberatung", "kein Betrieb außerhalb der EU" oder "keine Projekte unter 20 Personentagen".', 'z. B. keine reine Lizenz ohne Projekt'],
-      ergaenzt: ['Mit welchen Herstellern und Plattformen arbeitest du? (kein Wettbewerb)', 'Nur Dritte: Software, Clouds oder Hersteller, die du einführst, betreibst oder mit denen du als Partner arbeitest. Dagegen wird nie verglichen. Eigene Leistungen wie eigene Rechenzentren gehören nicht hierher, sondern zu deinen Leistungen.', 'z. B. SAP S/4HANA, Microsoft Azure, STACKIT'],
+      ergaenzt: ['Mit welchen Herstellern und Plattformen arbeitest du? (kein Wettbewerb)', 'Nur Dritte: Software, Clouds oder Hersteller, die du einführst, betreibst oder mit denen du als Partner arbeitest. Dagegen wird nie verglichen. Eigene Leistungen gehören nicht hierher, sondern zu deinen Leistungen.', 'z. B. SAP S/4HANA, Microsoft Azure, STACKIT'],
       ersetzt: ['Gegen wen trittst du an?', 'Was deine Kunden stattdessen wählen würden, zum Beispiel die eigene IT oder ein anderes Systemhaus. Nur dagegen wird verglichen.', 'z. B. interne IT-Abteilung'],
       konkurrenten: 'z. B. wettbewerber.de',
     },
