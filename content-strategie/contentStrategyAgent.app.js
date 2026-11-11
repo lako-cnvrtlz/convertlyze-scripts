@@ -1356,8 +1356,10 @@
     if ((goalPrefill.also_offers || []).length > 0) alsoBox.setAttribute('open', 'open');
     form.appendChild(alsoBox);
     form.appendChild(el('label', { class: 'cvz-cs-label' }, [
-      el('span', { class: 'cvz-cs-label-text' }, ['Welche Handlung soll ein Interessent am Ende ausführen?', tip('Das ist die Zielaktion, auf die die ganze Strategie einzahlt. Sie zeigt den Weg dorthin, mit Zwischenschritten je Phase der Customer Journey. Der Weg richtet sich nach der Zielaktion: Eine Demo braucht anderes Vertrauen als ein Pilot oder eine Partnerschaft.')]),
+      // GEÄNDERT: "am Ende ausführen" lud zur Antwort "Kauf" ein. Gemeint ist der letzte Schritt, den die Website auslöst.
+      el('span', { class: 'cvz-cs-label-text' }, ['Was soll ein Interessent auf deiner Website als Letztes tun?', tip('Das ist die Zielaktion, auf die die ganze Strategie einzahlt. Sie zeigt den Weg dorthin, mit Zwischenschritten je Phase der Customer Journey. Der Weg richtet sich nach der Zielaktion: Eine Demo braucht anderes Vertrauen als ein Pilot oder eine Partnerschaft.')]),
       goalSelect,
+      el('span', { class: 'cvz-cs-hint' }, ['Gemeint ist nicht der Vertragsabschluss, sondern der Schritt, den deine Website auslöst, zum Beispiel eine Demo-Anfrage. Den Kauf selbst wickelt im B2B meist der Vertrieb ab.']),
     ]));
     form.appendChild(el('label', { class: 'cvz-cs-label' }, [
       el('span', { class: 'cvz-cs-label-text' }, ['Text deines Haupt-Buttons (optional)', tip('Leer lassen, dann schlägt die Strategie einen Text passend zur Zielaktion vor.')]),
@@ -4159,8 +4161,11 @@
     var header = el('div', { class: 'cvz-cs-report-header' });
     var topRow = el('div', { class: 'cvz-cs-report-header-top' });
     var titleBlock = el('div', {});
-    titleBlock.appendChild(el('p', { class: 'cvz-cs-report-eyebrow' }, ['Content-Strategie-Bericht']));
+    // GEÄNDERT: "Content-Strategie" statt "Content-Strategie-Bericht" (das Ergebnis ist die Strategie, kein Report).
+    titleBlock.appendChild(el('p', { class: 'cvz-cs-report-eyebrow' }, ['Content-Strategie']));
     titleBlock.appendChild(el('h2', { class: 'cvz-cs-report-title' }, [result.seed_topic]));
+    // NEU: Umfang klarstellen. Gleicher Wortlaut wie im PDF (STRATEGY_SCOPE_LINE) und auf der Website.
+    titleBlock.appendChild(el('p', { class: 'cvz-cs-report-meta' }, ['Für ein Thema, ein Produkt oder eine Dienstleistung.']));
     var dateSource = (session && session.created_at) ? new Date(session.created_at) : new Date();
     var dateStr = dateSource.toLocaleDateString('de-DE', { year: 'numeric', month: 'long', day: 'numeric' });
     titleBlock.appendChild(el('p', { class: 'cvz-cs-report-meta' }, ['Erstellt am ' + dateStr]));
