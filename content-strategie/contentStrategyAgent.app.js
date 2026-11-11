@@ -495,8 +495,22 @@
       /* NEU: Ziel der Strategie, Conversion-Pfad, Zwischenziel */
       '.cvz-cs-page-acc-goal{font-size:13px;color:var(--cvz-teal);margin:6px 0 0;overflow-wrap:anywhere;}',
       '.cvz-cs-page-acc[open] .cvz-cs-page-acc-goal{display:none;}',
-      '.cvz-cs-goal-box{padding:12px 16px;border:1px solid var(--cvz-border);border-left:3px solid var(--cvz-teal);background:var(--cvz-surface);margin:0 0 16px;}',
       '.cvz-cs-goal-line{margin:2px 0;font-size:14px;color:var(--cvz-text);overflow-wrap:anywhere;}',
+      /* NEU: Abschnitt "Ziel der Strategie" (vor der Executive Summary) */
+      '.cvz-cs-goal-overview{display:flex;flex-direction:column;gap:14px;}',
+      '.cvz-cs-goal-block{padding:14px 16px;border:1px solid var(--cvz-border);background:var(--cvz-surface);min-width:0;}',
+      '.cvz-cs-goal-block--primary{border-left:3px solid var(--cvz-teal);}',
+      '.cvz-cs-goal-headline{font-size:17px;line-height:1.35;font-weight:600;color:var(--cvz-heading);margin:0 0 8px;overflow-wrap:anywhere;}',
+      '.cvz-cs-goal-block p{overflow-wrap:anywhere;}',
+      '.cvz-cs-goal-phases{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;margin-top:8px;}',
+      '.cvz-cs-goal-phase{padding:10px;border:1px solid var(--cvz-border);min-width:0;}',
+      '#cvz-content-strategy-agent .cvz-cs-goal-phase h5{margin:0 0 8px;font-size:14px;text-transform:none;letter-spacing:0;color:var(--cvz-heading);overflow-wrap:break-word;}',
+      '.cvz-cs-goal-phase-row{margin:0 0 6px;font-size:13px;color:var(--cvz-text);}',
+      '.cvz-cs-goal-phase-row .cvz-cs-brief-label{margin:0 0 2px;}',
+      '.cvz-cs-goal-progress{margin:6px 0 0;padding-left:18px;}',
+      '.cvz-cs-goal-progress li{margin:0 0 8px;font-size:14px;color:var(--cvz-text);}',
+      '.cvz-cs-goal-now{display:block;font-size:13px;color:var(--cvz-muted);margin-top:2px;}',
+      '.cvz-cs-goal-link{color:var(--cvz-teal);text-decoration:underline;cursor:pointer;}',
       '.cvz-cs-path{margin:22px 0 8px;}',
       '.cvz-cs-path-step{position:relative;padding:0 0 12px 18px;border-left:2px solid var(--cvz-border);margin-left:6px;}',
       '.cvz-cs-path-step::before{content:"";position:absolute;left:-6px;top:4px;width:10px;height:10px;background:var(--cvz-surface);border:2px solid var(--cvz-teal);}',
@@ -1747,7 +1761,7 @@
 
   // ==================== NEU: ZIELGRUPPE + PROMPT-PLAN (nur ohne Tracker-Daten) ====================
   var PHASE_OPTIONS = [
-    { value: 'exploration', label: 'Orientierung' },
+    { value: 'exploration', label: 'Erforschung' }, // GEÄNDERT: war "Orientierung", jetzt wie im restlichen Bericht
     { value: 'evaluation', label: 'Bewertung' },
     { value: 'comparison', label: 'Vergleich' },
     { value: 'decision', label: 'Entscheidung' },
@@ -3920,6 +3934,7 @@
     state.visibilityPrompts = getVisibilityPrompts(session);
     state.wizardActive = false;
     state.funnelRefresh = null; // NEU: wird vom Funnel-Abschnitt neu gesetzt, falls der Bericht einen hat
+    state.goalRefresh = null; // NEU: wird vom Abschnitt Ziel der Strategie gesetzt
     clear(state.root);
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
     wrap.appendChild(renderReportHeader(result, session, sessionId));
@@ -3933,6 +3948,8 @@
     wrap.appendChild(anchorNav.nav);
     wrap.appendChild(anchorNav.spacer);
     // GEÄNDERT (Übersicht): Reihenfolge Überblick, Plan, Grundlagen. Die Grundlagen sind eingeklappt, die Sprungleiste öffnet sie bei Bedarf.
+    // NEU: Ziel der Strategie vor allem anderen. Fehlt nur bei sehr alten Berichten ohne Zielaktion, Phasen und Seiten.
+    var sec_goal = secNo.goal ? renderReportSection(secNo.goal, 'Ziel der Strategie', [renderGoalOverview(result, session)]) : null;
     var sec_summary = renderReportSection(secNo.summary, 'Executive Summary', [el('div', { class: 'cvz-cs-executive-summary' }, [renderProse(result.executive_summary)]), renderTrafficBlock(result), renderProfileWarnings(result)]);
     var sec_roadmap = renderReportSection(secNo.roadmap, 'Empfohlene Roadmap', [renderRoadmapSection(result.roadmap, result)]);
     var sec_cluster = renderReportSection(secNo.cluster, 'Content-Plan: Seiten, Content-Flow und was ihr bauen müsst', buildContentPlanChildren(sessionId, result, session));
@@ -3941,6 +3958,7 @@
     var sec_validation = renderReportSection(secNo.validation, 'Themen-Check', [renderTopicValidationSection(result.topic_validation, result.seed_topic)]);
     var sec_ausgangslage = renderReportSection(secNo.ausgangslage, 'Ausgangslage', [renderTrackerSourceNote(session), renderProse(result.ausgangslage), renderProfileBox(result)]);
     wrap.appendChild(el('p', { class: 'cvz-cs-group-label' }, ['Überblick']));
+    if (sec_goal) wrap.appendChild(sec_goal);
     wrap.appendChild(sec_summary);
     wrap.appendChild(sec_roadmap);
     wrap.appendChild(el('p', { class: 'cvz-cs-group-label' }, ['Plan']));
@@ -3982,6 +4000,7 @@
   // GEÄNDERT (Übersicht): Der Bericht folgt jetzt der Arbeit statt der Entstehung. Überblick (Zusammenfassung, Roadmap), Plan (Cluster, Flow,
   // Funnel, Touchpoints, GEO), Grundlagen (Themen-Check, Ausgangslage, Ist-Zustand, eingeklappt). GEO liegt im Plan, weil dort Maßnahmen stehen.
   var REPORT_NAV_BASE = [
+    { key: 'goal', label: 'Ziel', optional: true }, // NEU: Ziel der Strategie
     { key: 'summary', label: 'Zusammenfassung' },
     { key: 'roadmap', label: 'Roadmap' },
     { key: 'cluster', label: 'Content-Plan & Flow' }, // GEÄNDERT: Cluster, Content-Flow und Funnel sind ein Abschnitt
@@ -3996,6 +4015,7 @@
     var out = [];
     REPORT_NAV_BASE.forEach(function (item) {
       if (item.optional && item.key === 'touchpoints' && !hasTouchpointSection(result, session)) return;
+      if (item.optional && item.key === 'goal' && !computeGoalOverview(result, [])) return;
       n++;
       out.push({ key: item.key, n: n, label: item.label });
     });
@@ -4178,16 +4198,221 @@
     return container;
   }
 
-  // NEU: Ziel der Strategie (aus dem Startformular). Fehlt bei älteren Berichten.
-  function renderStrategyGoalBox(goal) {
-    if (!goal) return null;
-    var lines = [
-      el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Angebot: ']), optionLabel(OFFER_TYPE_OPTIONS, goal.offer_type)]),
-      (goal.also_offers || []).length > 0 ? el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Gehört auch dazu: ']), goal.also_offers.filter(function (o) { return o !== goal.offer_type; }).map(function (o) { return optionLabel(OFFER_TYPE_OPTIONS, o); }).join('; ')]) : null,
-      el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Zielaktion: ']), optionLabel(END_GOAL_OPTIONS, goal.end_goal)]),
-    ];
-    if (goal.cta_label) lines.push(el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Haupt-Button: ']), '„' + goal.cta_label + '“']));
-    return el('div', { class: 'cvz-cs-goal-box' }, [el('p', { class: 'cvz-cs-brief-label' }, ['Ziel der Strategie']), el('div', {}, lines)]);
+  // ENTFERNT: renderStrategyGoalBox (Ziel-Box im Content-Plan). Ersetzt durch den Abschnitt "Ziel der Strategie" (renderGoalOverview).
+
+  // ==================== NEU: ZIEL DER STRATEGIE ====================
+  // Der Bericht zeigte einen Plan, aber nicht auf den ersten Blick, wofür. Jetzt steht vor der Executive Summary:
+  //   1. Geschäftsziel (Zielaktion aus dem Startformular), 2. Hebel (Sichtbarkeit je Kaufphase und nächster Schritt),
+  //   3. Stand je Phase (Seiten, Zwischenschritt, KI-Sichtbarkeit), 4. Woran ihr Fortschritt erkennt (Richtung, keine erfundenen Zielwerte),
+  //   5. Prüftermin (drei Monate nach Erstellung, mit Entscheidungsregel), 6. Fokus (was bewusst nicht im Plan ist).
+  // Alle Zahlen kommen aus vorhandenen Feldern, nichts formuliert die KI.
+  // WICHTIG: Gleiche Logik wie services/contentStrategyGoalOverview.js im Backend (PDF-Export). Wer hier etwas ändert, ändert es dort mit.
+  // Das Widget rechnet live, weil sich funnel_check ändert, sobald im Content-Flow eigene Seiten dazukommen.
+  var GOAL_PHASES = [
+    { value: 'exploration', label: 'Erforschung' },
+    { value: 'evaluation', label: 'Bewertung' },
+    { value: 'comparison', label: 'Vergleich' },
+    { value: 'decision', label: 'Entscheidung' },
+  ];
+  var GOAL_MEASURED_VERDICTS = ['stabil', 'wackelig', 'luecke'];
+  var GOAL_STEP_TEXT = { ok: 'vorhanden', schwach: 'nur Weiterlesen', luecke: 'fehlt', keine_seiten: 'keine Seite', via_conversion: 'Zielaktion auf der Conversion-Seite' };
+  var GOAL_STEP_BADGE = { ok: 'ok', via_conversion: 'ok', schwach: 'schwach', luecke: 'luecke', keine_seiten: 'luecke' };
+
+  function goalEmptyVisibility() { return { total: 0, measured: 0, stabil: 0, wackelig: 0, luecke: 0, zu_wenig_daten: 0 }; }
+  function goalCountVerdict(bucket, verdict) {
+    bucket.total++;
+    if (GOAL_MEASURED_VERDICTS.indexOf(verdict) !== -1) { bucket.measured++; bucket[verdict]++; } else { bucket.zu_wenig_daten++; }
+  }
+  // Entscheidung ohne eigene Seite, die die Conversion-Seite übernimmt (via_conversion): Dort steht die Zielaktion, das ist der Schritt.
+  function goalPhaseHasStep(row) {
+    if (!row) return null;
+    if (row.via_conversion) return true;
+    if (row.status === 'keine_seiten') return false;
+    return row.status === 'ok' || !!row.covered_by_own;
+  }
+
+  function computeGoalOverview(result, prompts) {
+    if (!result || typeof result !== 'object') return null;
+    var goal = result.strategy_goal || null;
+    var funnel = result.funnel_check && result.funnel_check.phases && result.funnel_check.phases.length ? result.funnel_check : null;
+    var pages = result.supporting_pages || [];
+    if (!goal && !funnel && pages.length === 0) return null;
+    var list = prompts || [];
+    var byPhaseRow = {};
+    if (funnel) funnel.phases.forEach(function (r) { if (r && r.phase) byPhaseRow[r.phase] = r; });
+    var phases = GOAL_PHASES.map(function (ph) {
+      var row = byPhaseRow[ph.value] || null;
+      var inPhase = pages.filter(function (p) { return p && p.messy_middle_phase === ph.value; });
+      var vis = goalEmptyVisibility();
+      list.filter(function (p) { return p && p.phase === ph.value; }).forEach(function (p) { goalCountVerdict(vis, p.verdict); });
+      return {
+        phase: ph.value,
+        label: ph.label,
+        // Seiten laut Funnel-Befund (eigene Seiten aus dem Content-Flow zählen mit), sonst aus dem Plan gezählt.
+        pages: row && typeof row.pages === 'number' ? row.pages + (row.own_pages || 0) : inPhase.length,
+        existing_pages: inPhase.filter(function (p) { return p.role === 'existing'; }).length,
+        via_conversion: !!(row && row.via_conversion),
+        has_step: goalPhaseHasStep(row),
+        step_status: row ? (row.via_conversion ? 'via_conversion' : row.status) : null,
+        visibility: vis,
+      };
+    });
+    // Alle Fragen zusammen, auch ohne Phase oder "Entdeckung". Sonst passt die Summe nicht zum Abschnitt Sichtbarkeit.
+    var visTotal = goalEmptyVisibility();
+    list.forEach(function (p) { if (p) goalCountVerdict(visTotal, p.verdict); });
+    var np = result.not_planned && result.not_planned.groups ? result.not_planned : null;
+    var excluded = np ? np.groups.reduce(function (sum, g) { return sum + (typeof g.total === 'number' ? g.total : (g.items || []).length); }, 0) : 0;
+    var conv = result.conversion_page || null;
+    return {
+      goal: goal ? { offer_type: goal.offer_type, also_offers: goal.also_offers || [], end_goal: goal.end_goal, cta_label: goal.cta_label || null } : null,
+      audience: (conv && conv.primary_audience) || null,
+      conversion_topic: (conv && conv.topic) || null,
+      phases: phases,
+      progress: {
+        phases_total: GOAL_PHASES.length,
+        phases_with_step: funnel ? phases.filter(function (p) { return p.has_step === true; }).length : null,
+        phases_with_pages: phases.filter(function (p) { return p.pages > 0 || p.via_conversion; }).length,
+        prompts_measured: visTotal.measured,
+        prompts_stable: visTotal.stabil,
+        prompts_gap: visTotal.luecke,
+        prompts_total: visTotal.total,
+      },
+      focus: {
+        planned_pages: pages.length + (conv ? 1 : 0),
+        existing_pages: pages.filter(function (p) { return p && p.role === 'existing'; }).length,
+        excluded_terms: excluded,
+      },
+    };
+  }
+
+  // NEU (Prüftermin): drei Monate nach Erstellung, mit Entscheidungsregel. Gleiche Logik und gleicher Wortlaut wie
+  // reviewDate und REVIEW_RULES in services/contentStrategyGoalOverview.js (PDF-Export).
+  var REVIEW_MONTHS = 3;
+  var REVIEW_RULES = [
+    { situation: 'Seiten sind online, aber weder bei Google sichtbar noch in KI-Antworten genannt', action: 'Inhalt und Format der Seiten prüfen und die Maßnahmen außerhalb eurer Website verstärken, bevor neue Seiten dazukommen.' },
+    { situation: 'Sichtbar, aber kaum jemand nutzt den nächsten Schritt', action: 'Am Zwischenschritt arbeiten (Angebot, Platzierung, Text), nicht an weiteren Seiten.' },
+    { situation: 'Sichtbar und der nächste Schritt wird genutzt', action: 'Die nächste Phase ausbauen.' },
+  ];
+  // Datum plus Monate. Fällt der Tag weg (31. Januar + 1 Monat), gilt der letzte Tag des Zielmonats.
+  function goalAddMonths(date, months) {
+    var d = new Date(date.getTime());
+    var day = d.getDate();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + months);
+    var lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(Math.min(day, lastDay));
+    return d;
+  }
+  function goalReviewDate(createdAt) {
+    var base = createdAt ? new Date(createdAt) : new Date();
+    return goalAddMonths(isNaN(base.getTime()) ? new Date() : base, REVIEW_MONTHS);
+  }
+
+  function goalVisibilityText(v) {
+    if (!v || v.total === 0) return 'nicht gemessen';
+    if (v.measured === 0) return 'zu wenig Daten';
+    return v.stabil + ' von ' + v.measured + ' Fragen stabil zitiert' + (v.luecke > 0 ? ', ' + v.luecke + ' nie' : '');
+  }
+
+  // Sprung zu "Bewusst nicht im Plan" im Content-Plan (Listenansicht, aufgeklappt).
+  function openNotPlanned() {
+    if (typeof state.showPlanView === 'function') state.showPlanView('list');
+    var root = state.root || document;
+    var box = root.querySelector('details.cvz-cs-notplanned');
+    if (!box) return;
+    box.open = true;
+    var nav = document.querySelector('#cvz-content-strategy-agent .cvz-cs-anchor-nav');
+    var offset = (nav ? nav.offsetHeight : 0) + getSiteNavHeight() + 12;
+    window.scrollTo({ top: box.getBoundingClientRect().top + window.scrollY - offset, behavior: 'smooth' });
+  }
+
+  function renderGoalOverview(result, session) {
+    var wrap = el('div', { class: 'cvz-cs-goal-overview' });
+    var prompts = getVisibilityPrompts(session);
+    var fresh = session && session.visibility_measurement;
+    function paint() {
+      clear(wrap);
+      var o = computeGoalOverview(result, prompts);
+      if (!o) return;
+      // 1. Geschäftsziel
+      var endLabel = o.goal ? optionLabel(END_GOAL_OPTIONS, o.goal.end_goal) : null;
+      var primary = el('div', { class: 'cvz-cs-goal-block cvz-cs-goal-block--primary' }, [el('p', { class: 'cvz-cs-brief-label' }, ['Geschäftsziel'])]);
+      primary.appendChild(el('p', { class: 'cvz-cs-goal-headline' }, [
+        o.goal ? 'Zielaktion: ' + endLabel + (o.goal.cta_label ? ' („' + o.goal.cta_label + '“)' : '') : 'Keine Zielaktion angegeben: Die Strategie zahlt auf die Conversion-Seite ein.',
+      ]));
+      if (o.audience) primary.appendChild(el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Für wen: ']), o.audience]));
+      if (o.conversion_topic) primary.appendChild(el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Wo: ']), 'Conversion-Seite „' + o.conversion_topic + '“']));
+      if (o.goal) {
+        var also = (o.goal.also_offers || []).filter(function (x) { return x !== o.goal.offer_type; }).map(function (x) { return optionLabel(OFFER_TYPE_OPTIONS, x); });
+        primary.appendChild(el('p', { class: 'cvz-cs-goal-line' }, [el('strong', {}, ['Angebot: ']), optionLabel(OFFER_TYPE_OPTIONS, o.goal.offer_type) + (also.length ? ' (gehört auch dazu: ' + also.join('; ') + ')' : '')]));
+      }
+      wrap.appendChild(primary);
+      // 2. Hebel
+      wrap.appendChild(el('div', { class: 'cvz-cs-goal-block' }, [
+        el('p', { class: 'cvz-cs-brief-label' }, ['So zahlt der Content darauf ein']),
+        el('p', { class: 'cvz-cs-goal-line' }, ['Die Seiten im Plan sollen in jeder Kaufphase dort auftauchen, wo eure Zielgruppe fragt: bei Google und in KI-Antworten. Jede Phase bietet einen nächsten Schritt, der näher an die Zielaktion führt. Sichtbarkeit und Themenabdeckung zählen nur, soweit sie Interessenten dorthin bringen.']),
+      ]));
+      // 3. Stand je Phase
+      var grid = el('div', { class: 'cvz-cs-goal-phases' });
+      o.phases.forEach(function (p) {
+        var pagesText = p.via_conversion && p.pages === 0 ? 'Conversion-Seite' : String(p.pages) + (p.existing_pages > 0 ? ' (davon ' + p.existing_pages + ' bestehend)' : '');
+        var stepNode = p.step_status
+          ? el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--' + (GOAL_STEP_BADGE[p.step_status] || 'schwach') }, [GOAL_STEP_TEXT[p.step_status] || p.step_status])
+          : 'unbekannt';
+        grid.appendChild(el('div', { class: 'cvz-cs-goal-phase' }, [
+          el('h5', {}, [p.label]),
+          el('div', { class: 'cvz-cs-goal-phase-row' }, [el('p', { class: 'cvz-cs-brief-label' }, ['Seiten im Plan']), pagesText]),
+          el('div', { class: 'cvz-cs-goal-phase-row' }, [el('p', { class: 'cvz-cs-brief-label' }, ['Nächster Schritt']), stepNode]),
+          el('div', { class: 'cvz-cs-goal-phase-row' }, [el('p', { class: 'cvz-cs-brief-label' }, ['KI-Antworten']), goalVisibilityText(p.visibility)]),
+        ]));
+      });
+      var sourceText = o.progress.prompts_total === 0
+        ? 'KI-Sichtbarkeit wurde für diesen Bericht nicht gemessen.'
+        : (fresh ? 'KI-Antworten: Einzelmessung' + (fresh.measured_at ? ' vom ' + new Date(fresh.measured_at).toLocaleDateString('de-DE') : '') + ', eine Momentaufnahme.' : 'KI-Antworten aus deinen Tracker-Daten.') + ' Details im Abschnitt Sichtbarkeit.';
+      wrap.appendChild(el('div', { class: 'cvz-cs-goal-block' }, [
+        el('p', { class: 'cvz-cs-brief-label' }, ['Heute: Stand je Kaufphase', tip('Seiten im Plan: neue und bestehende Seiten der Strategie, eigene Seiten aus dem Content-Flow zählen mit. Nächster Schritt: ob eine Seite der Phase einen Zwischenschritt bietet (Check, Vorlage, Fallstudie, Produkt ausprobieren), aus dem Funnel-Befund. KI-Antworten: bei wie vielen Fragen eurer Zielgruppe aus dieser Phase eure Domain in ChatGPT und Gemini stabil als Quelle genannt wird.', 'Was zeigen die Werte?')]),
+        grid,
+        el('p', { class: 'cvz-cs-hint' }, [sourceText]),
+      ]));
+      // 4. Woran ihr Fortschritt erkennt
+      var pr = o.progress;
+      var stepCount = pr.phases_with_step != null ? pr.phases_with_step : pr.phases_with_pages;
+      var ol = el('ul', { class: 'cvz-cs-goal-progress' });
+      ol.appendChild(el('li', {}, [el('strong', {}, ['Jede Kaufphase hat eine Seite und einen nächsten Schritt.']), el('span', { class: 'cvz-cs-goal-now' }, ['Heute im Plan: ' + stepCount + ' von ' + pr.phases_total + ' Phasen'])]));
+      ol.appendChild(el('li', {}, [el('strong', {}, ['Bei den Fragen eurer Zielgruppe stabil als Quelle genannt werden.']), el('span', { class: 'cvz-cs-goal-now' }, [
+        pr.prompts_total > 0 ? 'Heute: ' + pr.prompts_stable + ' von ' + pr.prompts_measured + ' gemessenen Fragen' + (pr.prompts_gap > 0 ? ', bei ' + pr.prompts_gap + ' nie' : '') : 'Noch nicht gemessen',
+      ])]));
+      ol.appendChild(el('li', {}, [el('strong', {}, ['Am Ende zählt die Zielaktion' + (endLabel ? ' (' + endLabel + ')' : '') + '.']), el('span', { class: 'cvz-cs-goal-now' }, ['Messt sie nach Einstiegsseite, dann seht ihr, welche Seiten aus dem Plan dorthin führen.'])]));
+      wrap.appendChild(el('div', { class: 'cvz-cs-goal-block' }, [
+        el('p', { class: 'cvz-cs-brief-label' }, ['Woran ihr Fortschritt erkennt']),
+        ol,
+        el('p', { class: 'cvz-cs-hint' }, ['Bewusst ohne Zielwerte in Prozent: Eine einzelne Messung ist keine belastbare Ausgangsbasis, und Vorhersagen für Rankings oder KI-Zitate wären geraten. Den Verlauf zeigt der Customer Journey Tracker.']),
+      ]));
+      // 5. NEU: Prüftermin
+      var due = goalReviewDate(session && session.created_at).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' });
+      var rules = el('ul', { class: 'cvz-cs-goal-progress' });
+      REVIEW_RULES.forEach(function (r) { rules.appendChild(el('li', {}, [el('strong', {}, [r.situation + ':']), el('span', { class: 'cvz-cs-goal-now' }, [r.action])])); });
+      wrap.appendChild(el('div', { class: 'cvz-cs-goal-block' }, [
+        el('p', { class: 'cvz-cs-brief-label' }, ['Prüftermin']),
+        el('p', { class: 'cvz-cs-goal-headline' }, [due]),
+        el('p', { class: 'cvz-cs-goal-line' }, [REVIEW_MONTHS + ' Monate nach Erstellung. Prüft dann die Seiten aus dem Plan, die bis dahin online sind:']),
+        rules,
+        el('p', { class: 'cvz-cs-hint' }, ['KI-Antworten schwanken von Tag zu Tag. Bewertet den Verlauf über mehrere Wochen, nicht eine einzelne Abfrage. Der Customer Journey Tracker zeigt diesen Verlauf.']),
+      ]));
+      // 6. Fokus
+      var f = o.focus;
+      var focusP = el('p', { class: 'cvz-cs-goal-line' }, [f.planned_pages + ' Seiten im Plan' + (f.existing_pages > 0 ? ', davon ' + f.existing_pages + ' bestehende, die überarbeitet werden' : '') + '.']);
+      if (f.excluded_terms > 0) {
+        var link = el('a', { href: '#', class: 'cvz-cs-goal-link' }, ['Begründung ansehen']);
+        link.addEventListener('click', function (e) { e.preventDefault(); openNotPlanned(); });
+        focusP.appendChild(document.createTextNode(' ' + f.excluded_terms + ' weitere Suchbegriffe zum Thema bekommen bewusst keine eigene Seite. '));
+        focusP.appendChild(link);
+      }
+      wrap.appendChild(el('div', { class: 'cvz-cs-goal-block' }, [el('p', { class: 'cvz-cs-brief-label' }, ['Fokus statt Vollständigkeit']), focusP]));
+    }
+    paint();
+    state.goalRefresh = paint;
+    return wrap;
   }
 
   // ==== FUNNEL-ANFANG ====
@@ -4588,6 +4813,7 @@
       result.funnel_check = funnel;
       fill(funnel);
       paintPhaseStatus(funnel);
+      if (typeof state.goalRefresh === 'function') state.goalRefresh(); // NEU: Stand je Phase im Ziel-Abschnitt neu
     };
     return box;
   }
@@ -4861,8 +5087,7 @@
     state.pageComparisons = {};
     (result.page_comparisons || []).forEach(function (c) { state.pageComparisons[c.ref] = c; });
     var children = [];
-    var goalBox = renderStrategyGoalBox(result.strategy_goal);
-    if (goalBox) children.push(goalBox);
+    // GEÄNDERT: Die Ziel-Box steht nicht mehr hier, sondern als eigener Abschnitt "Ziel der Strategie" ganz oben (renderGoalOverview).
     var volumeText = pageVolumeText(result.conversion_page);
     var conversionBadges = [el('span', { class: 'cvz-cs-badge cvz-cs-badge-conversion' }, ['Conversion-Seite'])];
     var conversionCardChildren = [
