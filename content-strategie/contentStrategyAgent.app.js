@@ -1908,7 +1908,7 @@
     return el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, [labelText]), control]);
   }
 
-  // NEU (Übersicht): Feld mit "i" neben der Beschriftung. Gleiche Klassen wie field(), nur die Erklärung steht im Tooltip statt als Dauertext darunter.
+  // NEU (Übersicht): Feld mit "?" neben der Beschriftung. Gleiche Klassen wie field(), nur die Erklärung steht im Tooltip statt als Dauertext darunter.
   function fieldTip(labelText, control, tipText) {
     return el('label', { class: 'cvz-cs-field' }, [el('span', { class: 'cvz-cs-field-label' }, [labelText, tipText ? tip(tipText) : null]), control]);
   }
@@ -7759,7 +7759,7 @@
   // ==== TOUCHPOINT-ENDE ====
 
   // ==== TOOLTIP-ANFANG ====
-  // NEU (Übersicht): Erklärungen stehen nicht mehr als Dauertext im Bericht, sondern hinter einem kleinen "i". Die Blase öffnet bei Hover und
+  // NEU (Übersicht): Erklärungen stehen nicht mehr als Dauertext im Bericht, sondern hinter einem "?". Die Blase öffnet bei Hover und
   // Tastaturfokus sowie per Tipp (Handy, dort gibt es kein Hover). Ein Tipp hält sie offen, ein Tipp daneben oder Esc schließt sie. Beim
   // Scrollen folgt sie dem Symbol. Der Text bleibt im DOM (Bildschirmleser). Wichtige Hinweise (Einwilligung, Warnungen, Hypothesen, Grenzen
   // der Daten) bleiben sichtbar und gehören NICHT in einen Tooltip.
