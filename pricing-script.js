@@ -16,7 +16,7 @@
  *     Memberstack). Die zwei Edge Functions (stripe-portal und
  *     stripe-topic-slot-checkout) brauchen den öffentlichen Key weiterhin zum
  *     Aufrufen und prüfen das Memberstack-Token selbst.
- *  3. Nach dem Kauf eines Aufbau-Pakets landet der Kunde auf /member/aufbau
+ *  3. Nach dem Kauf eines Aufbau-Pakets landet der Kunde auf /member/landingpage-assistant
  *     (vorher /member/landingpage-assistant).
  *
  * Frühere Änderungen (28.09.2026):
@@ -520,7 +520,7 @@
 
       resetBtn(btn);
       var successPath = '/member/danke';
-      if (isAufbauPPU)         successPath = '/member/aufbau';
+      if (isAufbauPPU)         successPath = '/member/landingpage-assistant';
       else if (isStrategiePPU) successPath = '/member/content-strategie';
       else if (isPPU)          successPath = '/analyse/formular';
 
