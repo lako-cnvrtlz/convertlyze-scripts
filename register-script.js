@@ -9,6 +9,7 @@
   // Entfernt: fetchPendingCheckout, deletePendingCheckout und resolvePlan.
   // Das war toter Code, nichts hat ihn aufgerufen. Abgeholt wird der Plan im
   // Site-Footer-Skript (CVZ CHECKOUT RESUME) über /api/user/pending-checkout/claim.
+  // GEÄNDERT (12.11.2026): sign_up-Event für GA4/GTM nach abgeschickter Registrierung.
 
   // ── Konfiguration ────────────────────────────────────────────────────────────
   var CONFIG = {
@@ -44,6 +45,10 @@
 
   // ── Guard: verhindert Doppelausführung von handleAfterSignup ─────────────────
   var checkoutStarted = false;
+
+  // NEU: Nur wer auf dieser Seite das Formular abgeschickt hat, zählt als Registrierung.
+  // Sonst würde ein bereits eingeloggter Besucher auf /register als neue Registrierung gezählt.
+  var signupFormSubmitted = false;
 
   // ── Utilities ────────────────────────────────────────────────────────────────
   function pollUntil(fn, intervalMs, maxAttempts) {
@@ -93,6 +98,17 @@
     }
   }
 
+  // NEU: Registrierung an GTM melden (einmal pro Seitenaufruf)
+  function trackSignup() {
+    if (!signupFormSubmitted) return;
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push({
+      event:   'sign_up',
+      plan:    urlPlan || 'free',
+      billing: urlPlan ? urlBilling : undefined
+    });
+  }
+
   // ── UI layer ─────────────────────────────────────────────────────────────────
   function prefillEmail() {
     if (!urlEmail) return;
@@ -123,6 +139,7 @@
   async function handleAfterSignup() {
     if (checkoutStarted) return;
     checkoutStarted = true;
+    trackSignup(); // NEU
     // Cookie bleibt gesetzt, das site-weite Script auf der Zielseite übernimmt den Checkout
     console.log('[CVZ] Signup erkannt, Checkout wird auf Zielseite gestartet');
   }
@@ -173,16 +190,17 @@
     // E-Mail ins Prefill nochmal versuchen, falls DOM noch nicht bereit
     pollUntil(prefillEmail, 400, 3);
 
-    // pending_checkout speichern, wenn das Formular abgeschickt wird
-    if (urlPlan) {
-      var form = document.querySelector('[data-ms-form="passwordless-signup"]');
-      if (form) {
-        form.addEventListener('submit', function () {
-          var emailInput = form.querySelector('input[type="email"]');
-          var email = emailInput ? emailInput.value.trim() : urlEmail;
-          if (email) savePendingCheckout(email);
-        });
-      }
+    // NEU: Submit immer beobachten (auch ohne Plan), damit sign_up gezählt wird.
+    // pending_checkout wird wie bisher nur mit Plan gespeichert.
+    var form = document.querySelector('[data-ms-form="passwordless-signup"]');
+    if (form) {
+      form.addEventListener('submit', function () {
+        signupFormSubmitted = true;
+        if (!urlPlan) return;
+        var emailInput = form.querySelector('input[type="email"]');
+        var email = emailInput ? emailInput.value.trim() : urlEmail;
+        if (email) savePendingCheckout(email);
+      });
     }
 
     startMemberWatch();
