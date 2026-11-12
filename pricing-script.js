@@ -1,6 +1,11 @@
 /**
  * pricing-script.js
  *
+ * GEÄNDERT (12.11.2026), TRACKING: Nach einem Kauf über /preise enthält die
+ * Erfolgs-URL jetzt ?checkout=success&plan=...&billing=... Daraus erzeugt das
+ * Site-Footer-Script "CVZ PURCHASE TRACKING" das purchase-Event für GA4 und
+ * Google Ads. Am Ablauf selbst ändert sich nichts.
+ *
  * GEÄNDERT (23.10.2026):
  *  1. Keine direkten Supabase-Abfragen mehr. Abo-Status, Team-Rolle und gekaufte
  *     Tracker-Topics kommen jetzt von GET /api/user/account-context. Der Server
@@ -490,7 +495,7 @@
     }
   }
 
-  async function handlePlanClick(btn, memberstackId, priceId) {
+  async function handlePlanClick(btn, memberstackId, priceId, plan, billingKey) {
     setBtnLoading(btn);
     try {
       var currentPriceId = await fetchCurrentPriceId();
@@ -518,6 +523,11 @@
       if (isAufbauPPU)         successPath = '/member/aufbau';
       else if (isStrategiePPU) successPath = '/member/content-strategie';
       else if (isPPU)          successPath = '/analyse/formular';
+
+      // NEU (12.11.2026): Plan und Abrechnung für das purchase-Tracking anhängen
+      successPath += '?checkout=success'
+        + '&plan=' + encodeURIComponent(plan || '')
+        + '&billing=' + encodeURIComponent(billingKey || 'monthly');
 
       window.$memberstackDom.purchasePlansWithCheckout({
         priceId:    priceId,
@@ -575,7 +585,7 @@
         var priceId    = (CONFIG.priceIds[plan] || {})[billingKey];
         if (!priceId) return;
 
-        await handlePlanClick(btn, memberstackId, priceId);
+        await handlePlanClick(btn, memberstackId, priceId, plan, billingKey);
       });
     });
   }
