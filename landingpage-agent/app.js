@@ -1987,6 +1987,19 @@ async function cvzLaunch() {
     const sessionData = await sessionRes.json();
     cvzState.session_id = sessionData.session_id;
     cvzState.page_project_id = page_project_id;
+    // NEU (12.11.2026): aufbau_start an GTM melden. Nur bei einer wirklich neuen
+    // Session (Antwort mit turn_id), nicht wenn eine laufende Session wiederverwendet wird.
+    // plan: 'plan' = Monatskontingent, 'test' = einmaliges Test-Kontingent, 'ppu' = gekaufter Aufbau-Credit.
+    if (sessionData.turn_id) {
+      try {
+        const fromQuota = (cvzQuota.remaining || 0) > 0;
+        window.dataLayer = window.dataLayer || [];
+        window.dataLayer.push({
+          event: 'aufbau_start',
+          plan: fromQuota ? (cvzQuota.recurring ? 'plan' : 'test') : 'ppu'
+        });
+      } catch (e) { /* Tracking darf den Start nie blockieren */ }
+    }
     // FIX: URL jetzt auf dieses konkrete neue Projekt festnageln. Ohne das
     // stand hier weiterhin ?new=1 (oder gar nichts) in der Adresszeile -
     // ein Reload ab jetzt landet wieder ohne ID im Resume-Aufruf und laedt
