@@ -3088,6 +3088,9 @@
   }
 
   async function createTopicWithBuyingCenter(project, topicText, targetGroup, roles) {
+    // NEU (12.11.2026): War der Gratis-Test vor dem Anlegen noch verfügbar, startet
+    // dieses Thema den 7-Tage-Test. Dann geht trial_start an GTM (siehe unten).
+    var trialWasAvailable = !!(state.topicUsage && state.topicUsage.trial && state.topicUsage.trial.state === 'available');
     try {
       var newTopic;
       if (CONFIG.useMockData) {
@@ -3108,6 +3111,13 @@
       }
       state.allTopics.push(newTopic);
       state.activeProjectId = project.id;
+
+      if (trialWasAvailable && !CONFIG.useMockData) {
+        try {
+          window.dataLayer = window.dataLayer || [];
+          window.dataLayer.push({ event: 'trial_start', plan: 'tracker' });
+        } catch (e) { /* Tracking darf das Anlegen nie blockieren */ }
+      }
 
       if (state.topicUsage && newTopic.status !== 'queued') {
         state.topicUsage.current_count += 1;
@@ -3556,6 +3566,9 @@
       var data = await callTopicSlotFunction({
         quantity: 1,
         expected_current_quantity: expectedCurrent,
+        // NEU (12.11.2026): gleiche Rücksprung-URL wie auf /preise, damit das
+        // Site-Footer-Script den Kauf als purchase (plan tracker) erkennt
+        success_path: '/member/customer-journey-tracker?checkout=success',
       });
 
       if (data.mode === 'checkout_created' && data.checkout_url) {
@@ -3563,6 +3576,23 @@
         return;
       }
       if (data.mode === 'quantity_updated') {
+        // NEU (12.11.2026): Slot direkt aufs bestehende Abo gebucht (kein Stripe-Checkout,
+        // keine Erfolgs-URL). Deshalb purchase hier melden. Wert = Anstieg des Monatspreises netto.
+        try {
+          var slotValue = 29;
+          if (preview && typeof preview.new_monthly_cents === 'number' && typeof preview.current_monthly_cents === 'number') {
+            slotValue = Math.max(0, (preview.new_monthly_cents - preview.current_monthly_cents) / 100);
+          }
+          window.dataLayer = window.dataLayer || [];
+          window.dataLayer.push({
+            event: 'purchase',
+            plan: 'tracker',
+            billing: 'monthly',
+            value: slotValue,
+            currency: 'EUR',
+            transaction_id: 'tracker_slot_' + data.new_quantity + '_' + Date.now(),
+          });
+        } catch (e) { /* Tracking darf den Kauf nie blockieren */ }
         state.limitReached = false;
         state.createError = 'Slot gekauft (jetzt ' + data.new_quantity + ' insgesamt).';
         try {
