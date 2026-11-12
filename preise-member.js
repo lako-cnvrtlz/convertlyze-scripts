@@ -7,6 +7,10 @@
  * Vorher las die Seite users, user_effective_credits und pending_checkouts mit dem oeffentlichen Key,
  * und mit der E-Mail-Adresse jedes beliebigen Kontos liess sich der vorgemerkte Plan abrufen und loeschen.
  * Supabase wird hier nur noch fuer die Edge Function stripe-portal angesprochen (Aufruf-Schluessel).
+ *
+ * GEAENDERT (12.11.2026), TRACKING: Die Erfolgs-URLs nach dem Checkout enthalten jetzt
+ * checkout=success, plan und billing. Daraus erzeugt das Site-Footer-Script
+ * "CVZ PURCHASE TRACKING" das purchase-Event. purchase=success fuers Dashboard bleibt erhalten.
  */
 (function () {
   'use strict';
@@ -306,10 +310,26 @@
 
   // ── Actions ──────────────────────────────────────────────────────────────────
 
+  // NEU (12.11.2026): Plan-Key und Abrechnung zu einer priceId finden (fuer das Tracking)
+  function planForPriceId(priceId) {
+    var keys = Object.keys(CONFIG.plans);
+    for (var i = 0; i < keys.length; i++) {
+      var def = CONFIG.plans[keys[i]];
+      if (def.annual.priceId === priceId && def.monthly.priceId !== priceId) return { plan: keys[i], billing: 'annual' };
+      if (def.monthly.priceId === priceId) return { plan: keys[i], billing: 'monthly' };
+    }
+    return { plan: '', billing: 'monthly' };
+  }
+
+  function trackingQuery(priceId) {
+    var p = planForPriceId(priceId);
+    return 'checkout=success&plan=' + encodeURIComponent(p.plan) + '&billing=' + encodeURIComponent(p.billing);
+  }
+
   function startPpuCheckout() {
     window.$memberstackDom.purchasePlansWithCheckout({
       priceId:    CONFIG.ppuPriceId,
-      successUrl: window.location.origin + '/analyse/formular',
+      successUrl: window.location.origin + '/analyse/formular?' + trackingQuery(CONFIG.ppuPriceId),
     }).catch(function (e) { console.error('[CVZ] PPU checkout error:', e); });
   }
 
@@ -318,7 +338,9 @@
     var isPPU = priceId === CONFIG.ppuPriceId;
     window.$memberstackDom.purchasePlansWithCheckout({
       priceId:    priceId,
-      successUrl: window.location.origin + (isPPU ? '/analyse/formular' : '/member/dashboard?purchase=success'),
+      successUrl: window.location.origin + (isPPU
+        ? '/analyse/formular?' + trackingQuery(priceId)
+        : '/member/dashboard?purchase=success&' + trackingQuery(priceId)),
     }).catch(function (e) { console.error('[CVZ] Checkout error:', e); });
   }
 
