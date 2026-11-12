@@ -2508,7 +2508,10 @@
       if (checkoutPriceId) {
         window.$memberstackDom.purchasePlansWithCheckout({
           priceId:    checkoutPriceId,
-          successUrl: window.location.origin + '/member/dashboard?purchase=success',
+          // GEAENDERT (12.11.2026): checkout/plan/billing fuer das purchase-Tracking (Site-Footer-Script)
+          successUrl: window.location.origin + '/member/dashboard?purchase=success&checkout=success'
+            + '&plan=' + encodeURIComponent(savedPlan)
+            + '&billing=' + encodeURIComponent(savedBilling),
         }).catch(function () { document.documentElement.style.visibility = 'visible'; });
         return;
       }
