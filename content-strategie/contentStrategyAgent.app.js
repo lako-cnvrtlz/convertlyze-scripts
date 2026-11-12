@@ -795,9 +795,87 @@
 
     var style = document.createElement('style');
     style.id = 'cvz-cs-styles';
-    style.textContent = css;
+    style.textContent = css + portalCss(css) + CHAT_PANEL_STYLES.join('');
     document.head.appendChild(style);
   }
+
+  // NEU (Chat-Panel): Das Panel hängt am body (#cvz-cs-portal), nicht im Widget. Grund wie bei der Sprungleiste: position:fixed
+  // bricht, sobald ein Webflow-Vorfahre transform oder filter setzt. Am body greifen aber die Regeln mit #cvz-content-strategy-agent
+  // davor nicht (Farben, Schriften, Buttons, Markdown im Chat). portalCss kopiert genau diese Regeln einmal mit #cvz-cs-portal davor.
+  // Bewusst keine :is()-Selektoren, damit ältere Browser nicht das ganze Stylesheet verwerfen.
+  function portalCss(css) {
+    var out = [];
+    function rewriteBlock(text) {
+      var res = '';
+      var i = 0;
+      while (i < text.length) {
+        var open = text.indexOf('{', i);
+        if (open === -1) break;
+        var head = text.slice(i, open).trim();
+        var depth = 1;
+        var j = open + 1;
+        while (j < text.length && depth > 0) { if (text[j] === '{') depth++; else if (text[j] === '}') depth--; j++; }
+        var inner = text.slice(open + 1, j - 1);
+        if (head.charAt(0) === '@') {
+          var sub = head.indexOf('@media') === 0 ? rewriteBlock(inner) : '';
+          if (sub) res += head + '{' + sub + '}';
+        } else {
+          var sels = head.split(',').filter(function (x) { return x.indexOf('#cvz-content-strategy-agent') !== -1; })
+            .map(function (x) { return x.trim().replace(/#cvz-content-strategy-agent(?![\w-])/g, '#cvz-cs-portal'); });
+          if (sels.length) res += sels.join(',') + '{' + inner + '}';
+        }
+        i = j;
+      }
+      return res;
+    }
+    out.push(rewriteBlock(css));
+    // Der Wrapper selbst ist nur ein Halter ohne Fläche (die Widget-Regel gibt ihm sonst Padding und Hintergrund).
+    out.push('#cvz-cs-portal{padding:0 !important;background:transparent !important;position:static;}');
+    return out.join('');
+  }
+
+  var CHAT_PANEL_STYLES = [
+    /* Button "Fragen zum Bericht" rechts in der Sprungleiste. Ohne CSS-Variablen, weil die Leiste beim Scrollen am body hängt. */
+    '.cvz-cs-anchor-row{display:flex;align-items:stretch;gap:0;width:100%;}',
+    '.cvz-cs-anchor-row>.cvz-cs-anchor-inner{flex:1 1 auto;min-width:0;width:auto;}',
+    '.cvz-cs-anchor-row>.cvz-cs-anchor-select{flex:1 1 auto;min-width:0;}',
+    '.cvz-cs-anchor-nav button.cvz-cs-anchor-ask{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px;margin:6px 8px 6px 12px !important;padding:7px 14px !important;',
+      'background:#4fd1c5 !important;color:#0d1117 !important;border:1px solid #4fd1c5 !important;border-radius:0 !important;font-family:"Geist","DM Sans",sans-serif !important;',
+      'font-size:13px !important;font-weight:600 !important;line-height:1.2 !important;cursor:pointer;white-space:nowrap;box-shadow:none !important;text-transform:none !important;letter-spacing:0 !important;}',
+    '.cvz-cs-anchor-nav button.cvz-cs-anchor-ask:hover{background:#38b2ac !important;border-color:#38b2ac !important;}',
+    '.cvz-cs-anchor-nav button.cvz-cs-anchor-ask:focus-visible{outline:2px solid #e6edf3;outline-offset:2px;}',
+    '.cvz-cs-anchor-ask svg{width:15px;height:15px;flex:0 0 auto;}',
+    '@media(max-width:600px){.cvz-cs-anchor-nav button.cvz-cs-anchor-ask{margin:8px 0 8px 8px !important;padding:9px 12px !important;}.cvz-cs-anchor-ask-long{display:none;}}',
+    '@media(min-width:601px){.cvz-cs-anchor-ask-short{display:none;}}',
+    /* Panel: Desktop von rechts, Handy von unten. */
+    '#cvz-cs-portal .cvz-cs-chat-panel{position:fixed;right:0;bottom:0;z-index:10000;width:min(440px,100vw);display:flex;flex-direction:column;',
+      'background:#0d1117;color:#e2e8f0;border-left:1px solid rgba(255,255,255,.16);box-shadow:-12px 0 32px rgba(0,0,0,.45);',
+      'font-family:"Geist","Inter",system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.65;',
+      'transform:translateX(105%);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s;}',
+    '#cvz-cs-portal .cvz-cs-chat-panel.is-open{transform:none;visibility:visible;transition:transform .22s ease,visibility 0s;}',
+    '#cvz-cs-portal .cvz-cs-chat-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08);}',
+    '#cvz-cs-portal .cvz-cs-chat-panel-title{font-family:"Syne",sans-serif;font-weight:700;font-size:1.05rem;color:#f0f4f8;margin:0;}',
+    '#cvz-cs-portal button.cvz-cs-chat-panel-close{background:transparent !important;border:1px solid rgba(255,255,255,.16) !important;color:#e2e8f0 !important;width:34px;height:34px;padding:0 !important;font-size:20px;line-height:1;cursor:pointer;border-radius:0 !important;}',
+    '#cvz-cs-portal button.cvz-cs-chat-panel-close:hover{border-color:#4fd1c5 !important;color:#4fd1c5 !important;}',
+    '#cvz-cs-portal .cvz-cs-chat-panel-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:12px 16px 14px;overflow:hidden;}',
+    '#cvz-cs-portal .cvz-cs-chat-panel .cvz-cs-chat{margin:0;padding:0;border:0;flex:1 1 auto;min-height:0;display:flex;flex-direction:column;}',
+    '#cvz-cs-portal .cvz-cs-chat-panel .cvz-cs-chat-messages{flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto;}',
+    '#cvz-cs-portal .cvz-cs-chat-backdrop{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:none;}',
+    '@media(max-width:600px){',
+      '#cvz-cs-portal .cvz-cs-chat-panel{left:0;right:0;top:auto !important;width:100%;height:85vh;height:85dvh;border-left:0;border-top:1px solid rgba(255,255,255,.16);box-shadow:0 -12px 32px rgba(0,0,0,.45);transform:translateY(105%);}',
+      '#cvz-cs-portal .cvz-cs-chat-panel.is-open{transform:none;}',
+      '#cvz-cs-portal .cvz-cs-chat-backdrop.is-open{display:block;}',
+    '}',
+    '@media print{#cvz-cs-portal{display:none !important;}}',
+    /* Hinweis am Ende des Berichts (früher stand dort der ganze Chat) */
+    '.cvz-cs-chat-teaser{margin-top:36px;padding:20px;border:1px solid var(--cvz-border);background:var(--cvz-surface);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;}',
+    '.cvz-cs-chat-teaser p{margin:0 !important;}',
+    /* Nachfragen direkt in den Seitenkarten */
+    '#cvz-content-strategy-agent button.cvz-cs-ask-link{display:inline-flex;align-items:center;gap:6px;margin:4px 0 12px;padding:0 !important;background:none !important;border:0 !important;',
+      'color:var(--cvz-teal) !important;font:inherit;font-size:14px;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px;}',
+    '#cvz-content-strategy-agent button.cvz-cs-ask-link:hover{color:var(--cvz-teal-hover) !important;}',
+    '.cvz-cs-ask-link svg{width:14px;height:14px;}',
+  ];
 
   // ==================== STYLES-ENDE ====================
 
@@ -1179,6 +1257,12 @@
       try { state.anchorNavCleanup(); } catch (e) { /* egal */ }
       state.anchorNavCleanup = null;
     }
+    // NEU: Das Chat-Panel hängt ebenfalls am body und muss beim Verlassen des Berichts weg.
+    if (node === state.root && state.chatPanel) {
+      try { state.chatPanel.destroy(); } catch (e) { /* egal */ }
+      state.chatPanel = null;
+    }
+    if (node === state.root) state.anchorNavEl = null;
     while (node.firstChild) node.removeChild(node.firstChild);
   }
 
@@ -3939,6 +4023,10 @@
     state.funnelRefresh = null; // NEU: wird vom Funnel-Abschnitt neu gesetzt, falls der Bericht einen hat
     state.goalRefresh = null; // NEU: wird vom Abschnitt Ziel der Strategie gesetzt
     clear(state.root);
+    // NEU: Chat als Panel (am body). Vor den Abschnitten anlegen, weil die Seitenkarten "Nachfragen" nur mit Chat zeigen.
+    // Wie bisher nur für die Person, die den Bericht erstellt hat.
+    var canChat = !!sessionId && (!session || session.user_id === state.userId);
+    if (canChat) state.chatPanel = createChatPanel(sessionId);
     var wrap = el('div', { class: 'cvz-cs-result cvz-cs-report' });
     wrap.appendChild(renderReportHeader(result, session, sessionId));
     // NEU: Sprungleiste direkt unter dem Kopf. Wird erst aktiv, wenn der Bericht im DOM steht (siehe unten).
@@ -3946,7 +4034,7 @@
     var navItems = buildReportNavItems(result, session);
     var secNo = {};
     navItems.forEach(function (it) { secNo[it.key] = it.n; });
-    var anchorNav = buildAnchorNav(navItems);
+    var anchorNav = buildAnchorNav(navItems, canChat ? { onAsk: function () { if (state.chatPanel) state.chatPanel.open(); } } : null);
     wrap.appendChild(anchorNav.sentinel);
     wrap.appendChild(anchorNav.nav);
     wrap.appendChild(anchorNav.spacer);
@@ -3980,8 +4068,7 @@
       el('button', { type: 'button', class: 'cvz-cs-retry-btn', onclick: renderApp }, ['Neue Strategie erstellen']),
     ]);
     wrap.appendChild(footer);
-    var isCreator = !session || session.user_id === state.userId;
-    if (sessionId && isCreator) wrap.appendChild(renderChatSection(sessionId));
+    if (canChat) wrap.appendChild(renderChatTeaser()); // GEÄNDERT: Der Chat selbst steht im Panel, hier nur der Einstieg
     wrap.appendChild(el('p', { class: 'cvz-cs-ki-disclaimer' }, [
       'Diese Analyse wurde vollständig durch ein KI-System erstellt. Alle Empfehlungen sollten durch eine qualifizierte Fachperson geprüft werden. Alle Angaben ohne Gewähr.'
     ]));
@@ -4027,17 +4114,43 @@
 
   function reportSectionId(n) { return 'cvz-cs-sec-' + n; }
 
+  // GEÄNDERT (Bugfix Sprungleiste): Zählt nur, was oben wirklich stehen bleibt. Vorher galt immer die Höhe von .w-nav, auch wenn
+  // die Website-Navigation mit wegscrollt. Dann klebte die Leiste mit einer Lücke darunter, und der Sentinel-Abgleich passte nicht.
+  // Webflow fixiert die Navigation oft über einen Wrapper, deshalb werden auch die Vorfahren geprüft. Blendet die Website ihre
+  // Navigation beim Runterscrollen aus (transform), liegt deren Unterkante über 0 und die Leiste rutscht nach oben.
   function getSiteNavHeight() {
-    // .w-nav ist Webflows eigene Wrapper-Klasse der Navigation (gleiche Messung wie im LP-Report).
+    // .w-nav ist Webflows eigene Wrapper-Klasse der Navigation.
     var webflowNav = document.querySelector('.w-nav');
-    return webflowNav ? webflowNav.offsetHeight : 0;
+    if (!webflowNav || typeof window.getComputedStyle !== 'function') return 0;
+    var node = webflowNav;
+    var pinned = null;
+    while (node && node !== document.body && node !== document.documentElement) {
+      var pos = window.getComputedStyle(node).position;
+      if (pos === 'fixed' || pos === 'sticky') { pinned = node; break; }
+      node = node.parentElement;
+    }
+    if (!pinned) return 0;
+    var bottom = webflowNav.getBoundingClientRect().bottom;
+    return bottom > 0 && bottom < 240 ? Math.round(bottom) : 0;
   }
 
-  function buildAnchorNav(navItems) {
+  // NEU: Die Leiste hängt beim Scrollen am body. document.querySelector('#cvz-content-strategy-agent .cvz-cs-anchor-nav') fand sie
+  // dann nicht mehr, und Sprünge landeten unter der Leiste. Deshalb merkt sich das Widget das Element.
+  function anchorNavHeight() {
+    var nav = state.anchorNavEl;
+    return nav && nav.isConnected !== false ? nav.offsetHeight : 0;
+  }
+
+  function buildAnchorNav(navItems, opts) {
     var items = navItems || buildReportNavItems(null);
+    opts = opts || {};
     var nav = el('nav', { class: 'cvz-cs-anchor-nav', 'aria-label': 'Bericht-Navigation' });
     var inner = el('div', { class: 'cvz-cs-anchor-inner' });
-    nav.appendChild(inner);
+    // NEU: Zeile aus Links (Handy: Auswahl) und rechts dem Button "Fragen zum Bericht", wenn der Chat verfügbar ist.
+    var row = el('div', { class: 'cvz-cs-anchor-row' });
+    nav.appendChild(row);
+    row.appendChild(inner);
+    state.anchorNavEl = nav;
     var sentinel = el('div', { class: 'cvz-cs-anchor-sentinel' });
     var spacer = el('div', {});
     spacer.style.display = 'none';
@@ -4045,7 +4158,16 @@
 
     // NEU (Übersicht): Am Handy sind von zehn Einträgen nur drei sichtbar. Dort ersetzt eine Auswahl die Leiste (siehe CSS), sie springt wie ein Link.
     var jumpSelect = el('select', { class: 'cvz-cs-anchor-select', 'aria-label': 'Zu Abschnitt springen' }, items.map(function (item) { return el('option', { value: String(item.n) }, [item.n + '. ' + item.label]); }));
-    nav.appendChild(jumpSelect);
+    row.appendChild(jumpSelect);
+    if (typeof opts.onAsk === 'function') {
+      var askBtn = el('button', { type: 'button', class: 'cvz-cs-anchor-ask', 'aria-haspopup': 'dialog' }, [
+        chatIcon(),
+        el('span', { class: 'cvz-cs-anchor-ask-long' }, ['Fragen zum Bericht']),
+        el('span', { class: 'cvz-cs-anchor-ask-short' }, ['Fragen']),
+      ]);
+      askBtn.addEventListener('click', function () { opts.onAsk(); });
+      row.appendChild(askBtn);
+    }
     jumpSelect.addEventListener('change', function () {
       var a = links[jumpSelect.value];
       // Klick-Ereignis statt a.click(): löst denselben Sprung aus, ohne dass der Browser zusätzlich zum Anker navigiert.
@@ -4064,6 +4186,7 @@
         // falls jemand alles zugeklappt hat. Seiten-Karten bleiben, wie sie sind.
         var firstFold = target.querySelector('details.cvz-cs-roadmap-fold');
         if (firstFold && !target.querySelector('details.cvz-cs-roadmap-fold[open]')) firstFold.open = true;
+        // Höhe der Leiste, wie sie nach dem Sprung aussieht (fixiert). Steht sie noch im Fluss, wäre sie nach dem Sprung trotzdem oben.
         var offset = nav.offsetHeight + getSiteNavHeight() + 12;
         var top = target.getBoundingClientRect().top + window.scrollY - offset;
         window.scrollTo({ top: top, behavior: 'smooth' });
@@ -4085,14 +4208,16 @@
       else inner.scrollLeft = Math.max(0, left);
     }
 
-    function applyFixed(isFixed) {
+    function applyFixed(isFixed, top) {
       if (isFixed) {
+        nav.style.top = top + 'px'; // jedes Mal, weil sich die Website-Navigation beim Scrollen ein- und ausblenden kann
+        if (nav.classList.contains('cvz-cs-anchor-nav--fixed')) return;
         spacer.style.height = nav.offsetHeight + 'px';
         spacer.style.display = 'block';
-        nav.style.top = getSiteNavHeight() + 'px';
         nav.classList.add('cvz-cs-anchor-nav--fixed');
         if (nav.parentNode !== document.body) document.body.insertBefore(nav, document.body.firstChild);
       } else {
+        if (!nav.classList.contains('cvz-cs-anchor-nav--fixed')) return;
         nav.classList.remove('cvz-cs-anchor-nav--fixed');
         nav.style.top = '';
         spacer.style.display = 'none';
@@ -4103,19 +4228,32 @@
     }
 
     function activate() {
-      if (typeof window.IntersectionObserver !== 'function') return function () {};
-      var stickyObserver = null;
-      function observeSticky() {
-        if (stickyObserver) stickyObserver.disconnect();
-        stickyObserver = new IntersectionObserver(function (entries) {
-          entries.forEach(function (entry) {
-            // Nur fixieren, wenn der Sentinel OBERHALB des Bildschirms ist (nicht, wenn der Bericht noch unterhalb liegt).
-            applyFixed(!entry.isIntersecting && entry.boundingClientRect.top < 0);
-          });
-        }, { rootMargin: '-' + getSiteNavHeight() + 'px 0px 0px 0px', threshold: 0 });
-        stickyObserver.observe(sentinel);
+      // GEÄNDERT (Bugfix): Die Leiste lief nicht mit. Ursache: Der IntersectionObserver meldet nur das Überschreiten der Kante.
+      // Mit einer Website-Navigation (rootMargin oben negativ) lag der Sentinel in diesem Moment noch bei top > 0, die Bedingung
+      // "top < 0" war falsch, und danach kam kein weiteres Ereignis mehr. Jetzt prüft ein Scroll-Handler (einmal je Frame) die Lage
+      // direkt: Sentinel oberhalb der Unterkante der Website-Navigation, dann fixieren. Lauscht im Capture auf document, damit auch
+      // Seiten funktionieren, bei denen nicht das Fenster, sondern ein Container scrollt.
+      var ticking = false;
+      function checkSticky() {
+        ticking = false;
+        if (!sentinel.parentNode) return;
+        var top = getSiteNavHeight();
+        applyFixed(sentinel.getBoundingClientRect().top < top, top);
       }
-      observeSticky();
+      function onScroll() {
+        if (ticking) return;
+        ticking = true;
+        if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(checkSticky);
+        else setTimeout(checkSticky, 16);
+      }
+      document.addEventListener('scroll', onScroll, { capture: true, passive: true });
+      checkSticky();
+      if (typeof window.IntersectionObserver !== 'function') {
+        return function cleanupNoIo() {
+          document.removeEventListener('scroll', onScroll, { capture: true });
+          if (nav.parentNode === document.body) document.body.removeChild(nav);
+        };
+      }
 
       // GEÄNDERT: merkt sich alle Abschnitte im Erkennungsbereich und markiert den hintersten davon. Vorher gewann bei zwei
       // gleichzeitig sichtbaren Abschnitten zufällig einer, und beim Verlassen wurde nicht neu berechnet (falscher Abschnitt aktiv).
@@ -4134,10 +4272,7 @@
         if (sec) activeObserver.observe(sec);
       });
 
-      function onResize() {
-        if (nav.classList.contains('cvz-cs-anchor-nav--fixed')) nav.style.top = getSiteNavHeight() + 'px';
-        observeSticky();
-      }
+      function onResize() { checkSticky(); }
       window.addEventListener('resize', onResize);
       var webflowNav = document.querySelector('.w-nav');
       var navResize = null;
@@ -4147,7 +4282,7 @@
       }
 
       return function cleanup() {
-        if (stickyObserver) stickyObserver.disconnect();
+        document.removeEventListener('scroll', onScroll, { capture: true });
         activeObserver.disconnect();
         if (navResize) navResize.disconnect();
         window.removeEventListener('resize', onResize);
@@ -4284,8 +4419,7 @@
     var box = root.querySelector('.cvz-cs-current-state');
     var target = box ? (box.closest ? box.closest('.cvz-cs-vis-block') : null) || box : null;
     if (!target) return;
-    var nav = document.querySelector('#cvz-content-strategy-agent .cvz-cs-anchor-nav');
-    var offset = (nav ? nav.offsetHeight : 0) + getSiteNavHeight() + 12;
+        var offset = anchorNavHeight() + getSiteNavHeight() + 12;
     window.scrollTo({ top: target.getBoundingClientRect().top + window.scrollY - offset, behavior: 'smooth' });
   }
 
@@ -4380,8 +4514,7 @@
     var box = root.querySelector('details.cvz-cs-notplanned');
     if (!box) return;
     box.open = true;
-    var nav = document.querySelector('#cvz-content-strategy-agent .cvz-cs-anchor-nav');
-    var offset = (nav ? nav.offsetHeight : 0) + getSiteNavHeight() + 12;
+        var offset = anchorNavHeight() + getSiteNavHeight() + 12;
     window.scrollTo({ top: box.getBoundingClientRect().top + window.scrollY - offset, behavior: 'smooth' });
   }
 
@@ -4951,8 +5084,7 @@
     state.openInFlow = function (nodeId) {
       show('diagram');
       if (planSwitch) {
-        var nav = document.querySelector('#cvz-content-strategy-agent .cvz-cs-anchor-nav');
-        var offset = (nav ? nav.offsetHeight : 0) + getSiteNavHeight() + 12;
+                var offset = anchorNavHeight() + getSiteNavHeight() + 12;
         window.scrollTo({ top: planSwitch.getBoundingClientRect().top + window.scrollY - offset, behavior: 'smooth' });
       }
       if (nodeId && state.flowStore && state.flowStore.api && state.flowStore.api.focusNode) state.flowStore.api.focusNode(nodeId);
@@ -5173,6 +5305,7 @@
     if (result.conversion_page.primary_audience) {
       conversionCardChildren.push(el('p', { class: 'cvz-cs-page-acc-audience' }, [el('strong', {}, ['Zielgruppe: ']), result.conversion_page.primary_audience]));
     }
+    conversionCardChildren.push(renderAskLink('Nachfragen zu dieser Seite', 'Was ist auf der Conversion-Seite „' + result.conversion_page.topic + '“ am wichtigsten, und womit fangen wir an?')); // NEU
     conversionCardChildren.push(el('div', { class: 'cvz-cs-flow-note', 'data-ref': '-1', style: 'display:none' })); // NEU: Notiz aus dem Content-Flow
     var convCannibal = cannibalNoteFor(result.cannibalization, -1); // NEU: Kannibalisierung
     if (convCannibal) conversionCardChildren.push(el('p', { class: 'cvz-cs-page-acc-audience' }, [el('strong', {}, ['Kannibalisierung: ']), convCannibal]));
@@ -5348,6 +5481,8 @@
       card.appendChild(el('p', { class: 'cvz-cs-page-card-type-explanation' }, [PAGE_TYPE_EXPLANATIONS[page.page_type]]));
     }
     if (page.reasoning) card.appendChild(renderProse(page.reasoning, 'cvz-cs-page-card-reasoning'));
+    var askPage = renderAskLink('Nachfragen: Warum diese Seite?', 'Warum ist die Seite „' + page.topic + '“ im Plan? Was würde fehlen, wenn wir sie weglassen?'); // NEU
+    if (askPage) card.appendChild(askPage);
     if (page.addresses_prompts && page.addresses_prompts.length > 0) {
       var ev = page.evidence;
       if (ev) {
@@ -5925,8 +6060,7 @@
     var phaseGroup = target.closest ? target.closest('.cvz-cs-phase-group') : null;
     if (phaseGroup) phaseGroup.style.display = '';
     target.style.display = '';
-    var nav = document.querySelector('#cvz-content-strategy-agent .cvz-cs-anchor-nav');
-    var offset = (nav ? nav.offsetHeight : 0) + getSiteNavHeight() + 12;
+        var offset = anchorNavHeight() + getSiteNavHeight() + 12;
     window.scrollTo({ top: target.getBoundingClientRect().top + window.scrollY - offset, behavior: 'smooth' });
     target.classList.add('cvz-cs-flash');
     setTimeout(function () { target.classList.remove('cvz-cs-flash'); }, 1600);
@@ -6029,8 +6163,8 @@
   }
 
   function refreshChatMessagesView() {
-    var listEl = state.root.querySelector('.cvz-cs-chat-messages');
-    var counterEl = state.root.querySelector('.cvz-cs-chat-counter');
+    var listEl = chatQ('.cvz-cs-chat-messages');
+    var counterEl = chatQ('.cvz-cs-chat-counter');
     if (listEl) {
       clear(listEl);
       if (state.chat.messages.length === 0 && !state.chat.sending) {
@@ -6050,8 +6184,8 @@
       counterEl.textContent = state.chat.messagesUsed + ' / ' + state.chat.messagesLimit + ' Fragen gestellt';
     }
     var limitReached = state.chat.messagesUsed >= state.chat.messagesLimit;
-    var formEl = state.root.querySelector('.cvz-cs-chat-form');
-    var limitNoticeEl = state.root.querySelector('.cvz-cs-chat-limit-notice');
+    var formEl = chatQ('.cvz-cs-chat-form');
+    var limitNoticeEl = chatQ('.cvz-cs-chat-limit-notice');
     if (formEl) formEl.style.display = limitReached ? 'none' : '';
     if (limitNoticeEl) limitNoticeEl.style.display = limitReached ? '' : 'none';
   }
@@ -6102,10 +6236,10 @@
     stopChatPolling();
     state.chat.sending = false;
     state.chat._pendingUserMessage = null;
-    var statusEl = state.root.querySelector('.cvz-cs-chat-status');
+    var statusEl = chatQ('.cvz-cs-chat-status');
     if (statusEl) statusEl.textContent = errorMessage || '';
-    var sendBtn = state.root.querySelector('.cvz-cs-chat-send-btn');
-    var inputEl = state.root.querySelector('.cvz-cs-chat-input');
+    var sendBtn = chatQ('.cvz-cs-chat-send-btn');
+    var inputEl = chatQ('.cvz-cs-chat-input');
     if (sendBtn) sendBtn.removeAttribute('disabled');
     if (inputEl) inputEl.removeAttribute('disabled');
     refreshChatMessagesView();
@@ -6115,11 +6249,11 @@
     if (state.chat.sending) return;
     state.chat.sending = true;
     state.chat._pendingUserMessage = text;
-    var sendBtn = state.root.querySelector('.cvz-cs-chat-send-btn');
-    var inputEl = state.root.querySelector('.cvz-cs-chat-input');
+    var sendBtn = chatQ('.cvz-cs-chat-send-btn');
+    var inputEl = chatQ('.cvz-cs-chat-input');
     if (sendBtn) sendBtn.setAttribute('disabled', 'disabled');
     if (inputEl) inputEl.setAttribute('disabled', 'disabled');
-    var statusEl = state.root.querySelector('.cvz-cs-chat-status');
+    var statusEl = chatQ('.cvz-cs-chat-status');
     if (statusEl) statusEl.textContent = '';
     refreshChatMessagesView();
     apiFetch('/api/content-strategy/' + encodeURIComponent(sessionId) + '/chat', {
@@ -6138,9 +6272,101 @@
       });
   }
 
-  function renderChatSection(sessionId) {
+  // NEU: Der Chat steht im Panel am body, nicht mehr in state.root. Alle Chat-Elemente werden dort gesucht.
+  function chatQ(sel) {
+    var scope = (state.chatPanel && state.chatPanel.el) || state.root;
+    return scope ? scope.querySelector(sel) : null;
+  }
+
+  function chatIcon() {
+    var svg = svgEl('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' });
+    svg.appendChild(svgEl('path', { d: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' }));
+    return svg;
+  }
+
+  // NEU: Panel mit dem Chat. Desktop von rechts, Handy von unten (CSS). Öffnen mit Vorschlag füllt nur das Eingabefeld,
+  // abgeschickt wird erst auf Klick, weil jede Frage vom Kontingent abgeht.
+  function createChatPanel(sessionId) {
+    var portal = document.getElementById('cvz-cs-portal');
+    if (portal) portal.parentNode.removeChild(portal);
+    portal = el('div', { id: 'cvz-cs-portal' });
+    var backdrop = el('div', { class: 'cvz-cs-chat-backdrop' });
+    var closeBtn = el('button', { type: 'button', class: 'cvz-cs-chat-panel-close', 'aria-label': 'Schließen' }, ['×']);
+    var panel = el('aside', { class: 'cvz-cs-chat-panel', role: 'dialog', 'aria-label': 'Fragen zum Bericht', 'aria-hidden': 'true' }, [
+      el('div', { class: 'cvz-cs-chat-panel-head' }, [el('p', { class: 'cvz-cs-chat-panel-title' }, ['Fragen zum Bericht']), closeBtn]),
+      el('div', { class: 'cvz-cs-chat-panel-body' }, [renderChatSection(sessionId, { inPanel: true })]),
+    ]);
+    portal.appendChild(backdrop);
+    portal.appendChild(panel);
+    document.body.appendChild(portal);
+    var lastFocus = null;
+    var api = { el: portal, isOpen: false };
+    function onKey(e) { if (e.key === 'Escape' && api.isOpen) api.close(); }
+    api.open = function (prefill) {
+      lastFocus = document.activeElement;
+      panel.style.top = getSiteNavHeight() + 'px'; // Desktop: unter der Website-Navigation (Handy: per CSS unten)
+      panel.classList.add('is-open');
+      backdrop.classList.add('is-open');
+      panel.setAttribute('aria-hidden', 'false');
+      api.isOpen = true;
+      var input = panel.querySelector('.cvz-cs-chat-input');
+      if (input && !input.disabled) {
+        if (prefill) {
+          input.value = prefill;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        setTimeout(function () {
+          try { input.focus({ preventScroll: true }); } catch (e) { input.focus(); }
+          var end = input.value.length;
+          if (typeof input.setSelectionRange === 'function') input.setSelectionRange(end, end);
+        }, 30);
+      }
+    };
+    api.close = function () {
+      panel.classList.remove('is-open');
+      backdrop.classList.remove('is-open');
+      panel.setAttribute('aria-hidden', 'true');
+      api.isOpen = false;
+      if (lastFocus && typeof lastFocus.focus === 'function' && document.body.contains(lastFocus)) {
+        try { lastFocus.focus({ preventScroll: true }); } catch (e) { /* egal */ }
+      }
+    };
+    api.destroy = function () {
+      document.removeEventListener('keydown', onKey);
+      stopChatPolling();
+      if (portal.parentNode) portal.parentNode.removeChild(portal);
+    };
+    closeBtn.addEventListener('click', function () { api.close(); });
+    backdrop.addEventListener('click', function () { api.close(); });
+    document.addEventListener('keydown', onKey);
+    return api;
+  }
+
+  // NEU: Einstieg am Ende des Berichts (früher stand hier der ganze Chat)
+  function renderChatTeaser() {
+    var btn = el('button', { type: 'button', class: 'cvz-cs-retry-btn' }, ['Frage stellen']);
+    btn.addEventListener('click', function () { if (state.chatPanel) state.chatPanel.open(); });
+    return el('div', { class: 'cvz-cs-chat-teaser' }, [
+      el('div', {}, [
+        el('h4', { class: 'cvz-cs-chat-title' }, ['Fragen zum Bericht']),
+        el('p', { class: 'cvz-cs-hint' }, ['Frag zum Beispiel, warum eine Seite empfohlen wurde. Der Chat kennt diesen Bericht und ist oben in der Leiste jederzeit erreichbar.']),
+      ]),
+      btn,
+    ]);
+  }
+
+  // NEU: "Nachfragen" direkt dort, wo die Frage entsteht. Öffnet das Panel mit vorformulierter Frage. Ohne Chat (geteilter Bericht): nichts.
+  function renderAskLink(label, question) {
+    if (!state.chatPanel) return null;
+    var btn = el('button', { type: 'button', class: 'cvz-cs-ask-link' }, [chatIcon(), label]);
+    btn.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); if (state.chatPanel) state.chatPanel.open(question); });
+    return btn;
+  }
+
+  function renderChatSection(sessionId, opts) {
+    opts = opts || {};
     var section = el('div', { class: 'cvz-cs-chat' });
-    section.appendChild(el('h4', { class: 'cvz-cs-chat-title' }, ['Fragen zum Report']));
+    if (!opts.inPanel) section.appendChild(el('h4', { class: 'cvz-cs-chat-title' }, ['Fragen zum Report']));
     section.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Frag zum Beispiel, warum eine Seite empfohlen wurde.', tip('Der Agent kennt diesen Report und kann bei Bedarf auch neue Daten live nachschlagen (kein erneuter GEO-Prompt-Test).', 'Was kann der Agent?')]));
     section.appendChild(el('div', { class: 'cvz-cs-chat-messages' }, []));
     var inputEl = el('textarea', {
@@ -6156,11 +6382,17 @@
       var text = inputEl.value.trim();
       if (!text || state.chat.sending) return;
       inputEl.value = '';
+      inputEl.style.height = '';
       sendChatMessage(sessionId, text);
     }
     form.addEventListener('submit', function (event) { event.preventDefault(); trySend(); });
     inputEl.addEventListener('keydown', function (event) {
       if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); trySend(); }
+    });
+    // NEU: Feld wächst mit (bis 160 px), damit eine vorformulierte Frage aus "Nachfragen" ganz lesbar ist.
+    inputEl.addEventListener('input', function () {
+      inputEl.style.height = 'auto';
+      if (inputEl.scrollHeight) inputEl.style.height = Math.min(inputEl.scrollHeight + 2, 160) + 'px';
     });
     section.appendChild(form);
     section.appendChild(el('p', { class: 'cvz-cs-chat-status', 'aria-live': 'polite' }, ['']));
