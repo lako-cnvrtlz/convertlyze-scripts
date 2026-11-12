@@ -86,6 +86,35 @@
     return plan + ppu;
   }
 
+  // NEU (12.11.2026): Meldet den Analyse-Start an den dataLayer (GTM).
+  // plan: 'test' = kostenlose Test-Analyse (license_type Free), 'plan' = Plan-Kontingent,
+  // 'ppu' = gekaufte Pay-per-Use-Analyse. Liefert die API kein license_type, wird
+  // eine Analyse aus dem Kontingent als 'plan' gezählt.
+  // Die Weiterleitung wartet, bis GTM das Event verarbeitet hat (höchstens 1,5 Sekunden),
+  // sonst geht das Event beim Seitenwechsel verloren.
+  function trackAnalysisStart(credits, next) {
+    var done = false;
+    function go() { if (done) return; done = true; next(); }
+    try {
+      var planLeft = Math.max(0,
+        (parseFloat(credits.credits_limit) || 0) -
+        (parseFloat(credits.credits_used_current_period) || 0) -
+        (parseFloat(credits.reserved_credits) || 0)
+      );
+      var licenseType = String(credits.license_type || '').toLowerCase();
+      var source = planLeft > 0 ? (licenseType === 'free' ? 'test' : 'plan') : 'ppu';
+
+      window.dataLayer = window.dataLayer || [];
+      window.dataLayer.push({
+        event: 'analysis_start',
+        plan: source,
+        eventCallback: go,
+        eventTimeout: 1500,
+      });
+    } catch (e) { /* Tracking darf den Start nie blockieren */ }
+    setTimeout(go, 1500);
+  }
+
   async function submitAnalysis(formEl, memberstackId) {
     // Credits nochmal prüfen direkt vor Submit (serverseitige Absicherung)
     var credits = await fetchCredits(memberstackId);
@@ -119,7 +148,10 @@
     // Der Worker antwortet auch bei "keine Credits" und "Lizenz abgelaufen" mit Status 200.
     // Erfolg heißt deshalb: Status ok UND success === true.
     if (res.ok && data && data.success === true) {
-      window.location.href = '/analyse/in-arbeit';
+      // NEU (12.11.2026): analysis_start an GTM melden, danach weiterleiten
+      trackAnalysisStart(credits, function () {
+        window.location.href = '/analyse/in-arbeit';
+      });
       return;
     }
 
