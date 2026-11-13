@@ -598,6 +598,10 @@
     loadDomainDashboard(state.activeProjectId);
   }
 
+  function sleepMs(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
   async function apiFetch(path, options) {
     options = options || {};
     var headers = Object.assign(
@@ -608,11 +612,30 @@
       options.headers || {}
     );
 
-    var response = await fetch(CONFIG.apiBaseUrl + path, {
-      method: options.method || 'GET',
-      headers: headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
-    });
+    // GEÄNDERT (13.11.2026): Lesezugriffe (GET) bei 503 ("Datenbank kurz ausgelastet", siehe Backend
+    // db_errors.py) oder Netzwerkfehler bis zu 2x wiederholen, nach 3 und 6 Sekunden. Schreibzugriffe
+    // (POST, PUT, PATCH, DELETE) werden NIE wiederholt, sonst könnte etwas doppelt passieren.
+    var method = options.method || 'GET';
+    var maxRetries = method === 'GET' ? 2 : 0;
+    var response;
+    for (var attempt = 0; ; attempt++) {
+      try {
+        response = await fetch(CONFIG.apiBaseUrl + path, {
+          method: method,
+          headers: headers,
+          body: options.body ? JSON.stringify(options.body) : undefined,
+        });
+      } catch (networkErr) {
+        if (attempt < maxRetries) { await sleepMs(3000 * (attempt + 1)); continue; }
+        networkErr.status = 0;
+        throw networkErr;
+      }
+      if (response.status === 503 && attempt < maxRetries) {
+        await sleepMs(3000 * (attempt + 1));
+        continue;
+      }
+      break;
+    }
 
     if (!response.ok) {
       var errBody = {};
@@ -725,10 +748,24 @@
       render();
     }
   }
-  async function loadTopicDetail(topicId) {
+  // NEU (13.11.2026): läuft für ein Thema schon ein Abruf, warten alle weiteren Aufrufer auf DENSELBEN
+  // Abruf, statt einen zweiten zu starten. Im Server-Log vom 13.11.2026 liefen drei identische
+  // GET /topics/{id} gleichzeitig (Öffnen, Polling, Aktionsplan-Polling) und bremsten sich gegenseitig aus.
+  var topicDetailInFlight = {};
+
+  function loadTopicDetail(topicId) {
     if (CONFIG.useMockData) {
-      return MOCK_TOPIC_DETAIL[topicId] || null;
+      return Promise.resolve(MOCK_TOPIC_DETAIL[topicId] || null);
     }
+    if (topicDetailInFlight[topicId]) return topicDetailInFlight[topicId];
+    var p = fetchTopicDetail(topicId);
+    topicDetailInFlight[topicId] = p;
+    var clear = function () { if (topicDetailInFlight[topicId] === p) delete topicDetailInFlight[topicId]; };
+    p.then(clear, clear);
+    return p;
+  }
+
+  async function fetchTopicDetail(topicId) {
     var data = await apiFetch('/topics/' + topicId);
     return {
       topic: data.topic,
@@ -1427,6 +1464,8 @@
     } catch (e) {
       console.error('[CVZ Visibility] Topic-Detail konnte nicht geladen werden:', e);
       state.topicDetailCache[topicId] = null;
+      // NEU (13.11.2026): merken, ob der Server nur kurz ausgelastet war (503/Netzwerk), für einen klaren Hinweis.
+      state.topicDetailLoadError = { topicId: topicId, status: e && typeof e.status === 'number' ? e.status : 0 };
     }
 
     state.isLoadingDetail = false;
@@ -5305,10 +5344,8 @@
     wrap.appendChild(topActionRow);
 
     if (state.isLoadingDetail) {
-      var loading = document.createElement('p');
-      loading.className = 'cvz-card-placeholder-text';
-      loading.textContent = 'Lädt...';
-      wrap.appendChild(loading);
+      // GEÄNDERT (13.11.2026): großer Spinner wie beim Start statt "Lädt...".
+      wrap.appendChild(createDetailLoading());
       return wrap;
     }
 
@@ -5316,7 +5353,12 @@
     if (!detail) {
       var errorMsg = document.createElement('div');
       errorMsg.className = 'cvz-card cvz-card-placeholder';
-      errorMsg.innerHTML = '<p class="cvz-card-placeholder-text">Für dieses Thema liegen noch keine Detaildaten vor (Status noch nicht "Aktiv", oder ein Ladefehler ist aufgetreten).</p>';
+      var loadErr = state.topicDetailLoadError;
+      var serverBusy = loadErr && loadErr.topicId === state.activeTopicId && (loadErr.status === 503 || loadErr.status === 0);
+      errorMsg.innerHTML = serverBusy
+        // NEU (13.11.2026): eigener Hinweis, wenn der Server nur kurz ausgelastet war.
+        ? '<p class="cvz-card-placeholder-text">Der Server ist gerade ausgelastet, das Thema konnte nicht geladen werden. Bitte die Seite in einigen Sekunden neu laden.</p>'
+        : '<p class="cvz-card-placeholder-text">Für dieses Thema liegen noch keine Detaildaten vor (Status noch nicht "Aktiv", oder ein Ladefehler ist aufgetreten).</p>';
       wrap.appendChild(errorMsg);
       return wrap;
     }
@@ -5732,7 +5774,7 @@
       return el;
     }
 
-    if (state.loadingRetrieved[key]) { note('Lädt...'); return section; }
+    if (state.loadingRetrieved[key]) { section.appendChild(createLoadingText('Quellen werden geladen \u2026')); return section; }
     if (state.retrievedErrors[key]) { note('Quellen konnten nicht geladen werden: ' + state.retrievedErrors[key]); return section; }
     var data = state.retrievedCache[key];
     if (!data) { note('Noch keine Daten geladen.'); return section; }
@@ -5967,10 +6009,7 @@
 
 
     if (state.loadingFanOut[key]) {
-      var loading = document.createElement('p');
-      loading.className = 'cvz-card-placeholder-text';
-      loading.textContent = 'Lädt...';
-      section.appendChild(loading);
+      section.appendChild(createLoadingText('Suchanfragen werden geladen \u2026'));
       return section;
     }
     if (state.fanOutErrors[key]) {
@@ -6291,10 +6330,7 @@
     section.appendChild(heading);
 
     if (isLoading) {
-      var loading = document.createElement('p');
-      loading.className = 'cvz-card-placeholder-text';
-      loading.textContent = 'Lädt...';
-      section.appendChild(loading);
+      section.appendChild(createLoadingText('Verlauf wird geladen \u2026'));
       return section;
     }
 
@@ -6493,10 +6529,7 @@
     section.appendChild(heading);
 
     if (isLoading) {
-      var loading = document.createElement('p');
-      loading.className = 'cvz-card-placeholder-text';
-      loading.textContent = 'Lädt...';
-      section.appendChild(loading);
+      section.appendChild(createLoadingText('Verlauf wird geladen \u2026'));
       return section;
     }
 
@@ -7427,14 +7460,8 @@
     gscSection.appendChild(gscHeading);
 
     if (isLoading) {
-      var loading1 = document.createElement('p');
-      loading1.className = 'cvz-card-placeholder-text';
-      loading1.textContent = 'Lädt...';
-      citationSection.appendChild(loading1);
-      var loading2 = document.createElement('p');
-      loading2.className = 'cvz-card-placeholder-text';
-      loading2.textContent = 'Lädt...';
-      gscSection.appendChild(loading2);
+      citationSection.appendChild(createLoadingText('Verlauf wird geladen \u2026'));
+      gscSection.appendChild(createLoadingText('Verlauf wird geladen \u2026'));
       return [citationSection, gscSection];
     }
 
@@ -8116,10 +8143,7 @@
     wrap.innerHTML = linkedHtml + lines.join('') + renderSerpSummaryBlock(kw) + phaseChipsHtml;
 
     if (state.loadingKeywordRankHistory[rowId]) {
-      var loading = document.createElement('p');
-      loading.className = 'cvz-card-placeholder-text';
-      loading.textContent = 'Lädt Verlauf...';
-      wrap.appendChild(loading);
+      wrap.appendChild(createLoadingText('Verlauf wird geladen \u2026'));
       return wrap;
     }
 
@@ -8312,7 +8336,7 @@
     linkedHtml = renderPromptRoleChipsHtml(prompt) + linkedHtml;
 
     if (state.loadingPromptCitations[prompt.id]) {
-      wrap.innerHTML = linkedHtml + '<p class="cvz-card-placeholder-text">Lädt...</p>';
+      wrap.innerHTML = linkedHtml + loadingTextHtml('Antworten werden geladen \u2026');
       return wrap;
     }
     var data = state.promptCitationsCache[prompt.id];
@@ -10691,6 +10715,32 @@
     });
   }
 
+  // NEU (13.11.2026): einheitlicher Ladezustand mit Spinner statt nacktem "Lädt...".
+  // createLoadingText: kleine Zeile (Spinner + Text) für einzelne Bereiche.
+  // createDetailLoading: großer Spinner wie beim Start des Tools, für das ganze Thema.
+  function createLoadingText(text, tagName) {
+    var el = document.createElement(tagName || 'p');
+    el.className = 'cvz-card-placeholder-text';
+    el.setAttribute('role', 'status');
+    var spinner = document.createElement('span');
+    spinner.className = 'cvz-spinner';
+    el.appendChild(spinner);
+    el.appendChild(document.createTextNode(text || 'Wird geladen \u2026'));
+    return el;
+  }
+
+  function loadingTextHtml(text) {
+    return '<p class="cvz-card-placeholder-text" role="status"><span class="cvz-spinner"></span>' +
+      escapeHtml(text || 'Wird geladen \u2026') + '</p>';
+  }
+
+  function createDetailLoading() {
+    var el = document.createElement('div');
+    el.className = 'cvz-detail-loading';
+    el.innerHTML = '<div class="cvz-spinner-lg" role="status" aria-label="Thema wird geladen"></div>';
+    return el;
+  }
+
   function escapeHtml(str) {
     var div = document.createElement('div');
     div.textContent = str == null ? '' : String(str);
@@ -11489,7 +11539,7 @@
       var loadEl = document.createElement('p');
       loadEl.className = 'cvz-card-placeholder-text';
       loadEl.style.marginTop = '12px';
-      loadEl.innerHTML = '<span class="cvz-spinner"></span>Lädt…';
+      loadEl.innerHTML = '<span class="cvz-spinner"></span>Wird geladen \u2026';
       section.appendChild(loadEl);
     } else {
       var hintEl = document.createElement('p');
@@ -11556,6 +11606,33 @@
 
     async function stepPollTick() {
       attempts++;
+
+      // NEU (13.11.2026): während die Analyse läuft, nur den leichten Status abfragen
+      // (GET /topics/{id}/step-status, eine kleine Tabelle). Vorher wurde alle 15 Sekunden die komplette
+      // Themenseite geladen, im Server-Log bis zu 65 Sekunden pro Abruf. Die volle Seite kommt jetzt
+      // erst, wenn nichts mehr läuft. Kennt der Server den Endpunkt noch nicht (älteres Backend),
+      // läuft es wie bisher über die volle Seite.
+      if (!state.stepStatusEndpointMissing) {
+        try {
+          var light = await apiFetch('/topics/' + topicId + '/step-status');
+          var lightSteps = light.step_status || [];
+          var cachedForSteps = state.topicDetailCache[topicId];
+          if (cachedForSteps) cachedForSteps.step_status = lightSteps; // Hinweise ("läuft", "fehlgeschlagen") aktuell halten
+          var lightRunning = lightSteps.some(function (s) { return s.state === 'running'; });
+          if (lightRunning && attempts < 60) {
+            render();
+            return;
+          }
+        } catch (e) {
+          if (e.status === 404 && e.message === 'Not Found') {
+            state.stepStatusEndpointMissing = true; // Backend ohne Endpunkt: ab jetzt wie bisher
+          } else {
+            console.error('[CVZ Visibility] Status-Abfrage während einer Analyse fehlgeschlagen:', e);
+            if (attempts < 60) return; // beim nächsten Durchlauf erneut versuchen
+          }
+        }
+      }
+
       var fresh = null;
       try {
         fresh = await loadTopicDetail(topicId);
@@ -12281,6 +12358,9 @@
 
       '.cvz-initial-loading {' +
         'min-height: 640px; display: flex; align-items: center; justify-content: center;' +
+      '}' +
+      '.cvz-detail-loading {' +
+        'min-height: 360px; display: flex; align-items: center; justify-content: center;' +
       '}' +
       '.cvz-spinner-lg {' +
         'width: 40px; height: 40px; border: 3px solid var(--cvz-border); border-top-color: var(--cvz-teal);' +
@@ -16022,10 +16102,16 @@
                 btn.style.display = 'none';
                 // Pollt alle 10 s max. 12x (2 min), bricht ab wenn generated_at gesetzt
                 var attempts = 0;
+                // GEÄNDERT (13.11.2026): nie zwei Abfragen gleichzeitig. GET /topics/{id} kann länger als
+                // 10 Sekunden dauern, vorher stapelten sich die Abfragen.
+                var pollBusy = false;
                 var poller = setInterval(function() {
+                  if (pollBusy) return;
+                  pollBusy = true;
                   attempts++;
                   delete state.topicDetailCache[topicId];
                   loadTopicDetail(topicId)
+                    .finally(function() { pollBusy = false; })
                     .then(function(freshDetail) {
                       if (freshDetail && freshDetail.action_plan && freshDetail.action_plan.generated_at) {
                         clearInterval(poller);
@@ -16790,10 +16876,7 @@
     section.appendChild(heading);
 
     if (isLoading) {
-      var loading = document.createElement('p');
-      loading.className = 'cvz-card-placeholder-text';
-      loading.textContent = 'Lädt...';
-      section.appendChild(loading);
+      section.appendChild(createLoadingText('Verlauf wird geladen \u2026'));
       return section;
     }
 
@@ -17388,7 +17471,7 @@
         var hKey = gscHistoryKey(topicId, r.keyword_normalized);
         var hist = state.gscHistoryCache[hKey];
         if (state.loadingGscHistory[hKey] && !(hKey in state.gscHistoryCache)) {
-          exTd.innerHTML = '<p class="cvz-card-placeholder-text">Lädt Verlauf …</p>';
+          exTd.innerHTML = loadingTextHtml('Verlauf wird geladen \u2026');
         } else if (hist && hist.points && hist.points.length) {
           exTd.appendChild(renderGscRollingBlock(hist, topicId, { compact: true }));
         } else if (state.gscHistoryError && state.gscHistoryError[hKey]) {
