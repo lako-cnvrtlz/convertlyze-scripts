@@ -1762,29 +1762,48 @@
   // NEU (02.10.2026): Eigene Google-Position eines Keywords.
   // Vorrang hat die Search Console (echte Durchschnittsposition eurer
   // Domain), sonst die Position aus dem monatlichen SERP-Check.
+  // GEÄNDERT (13.11.2026): Search Console hat Vorrang vor der Google-Prüfung, sobald mindestens
+  // GSC_MIN_IMPRESSIONS Impressionen dahinterstehen (gleiche Regel wie keyword_status.effective_rank im
+  // Backend). GSC = echte Daten der Domain, Durchschnitt über 90 Tage; die Prüfung = eine einzelne Abfrage.
+  // Bei 1–2 Impressionen ist die GSC-Position Rauschen, dann zählt die Prüfung, falls vorhanden.
+  // Der jeweils andere Wert steht im Tooltip.
+  var GSC_MIN_IMPRESSIONS = 3;
+
+  function gscPositionTrusted(kw) {
+    if (kw.gsc_position == null || isNaN(Number(kw.gsc_position))) return false;
+    return kw.gsc_impressions == null || Number(kw.gsc_impressions) >= GSC_MIN_IMPRESSIONS;
+  }
+
   function renderOwnPositionCell(kw) {
     var detail = state.topicDetailCache && state.topicDetailCache[state.activeTopicId];
     var depth = (detail && detail.serp_check_depth) || 10;
-    var text, tip, style = 'font-weight:600;color:var(--cvz-text,inherit);';
-    if (kw.gsc_position != null) {
+    var style = 'font-weight:600;color:var(--cvz-text,inherit);';
+    var muted = 'color:var(--cvz-text-muted,#8b98a5);';
+    var hasGsc = kw.gsc_position != null && !isNaN(Number(kw.gsc_position));
+    var checkDate = kw.serp_checked_at ? ' am ' + formatShortDate(kw.serp_checked_at) : '';
+    var gscText = hasGsc ? '\u00d8 ' + Number(kw.gsc_position).toLocaleString('de-DE', { maximumFractionDigits: 1 }) : '';
+    var gscImpr = kw.gsc_impressions != null ? Number(kw.gsc_impressions).toLocaleString('de-DE') + ' Impressionen' : '';
+    var checkText = kw.organic_rank != null ? 'Platz ' + kw.organic_rank : (kw.serp_checked_at ? 'nicht in Top ' + depth : '');
+    var text, tip;
+    if (hasGsc && (gscPositionTrusted(kw) || kw.organic_rank == null)) {
       var p = Number(kw.gsc_position);
-      text = '\u00d8 ' + p.toLocaleString('de-DE', { maximumFractionDigits: 1 });
-      tip = 'Durchschnittliche Position laut Google Search Console' +
-        (kw.gsc_impressions != null ? ' (' + Number(kw.gsc_impressions).toLocaleString('de-DE') + ' Impressionen)' : '') +
-        '. Das sind echte Daten eurer Domain.' +
-        (p > 10 && p <= 20 ? ' Seite 2: Mit gezielter Optimierung ist Seite 1 oft schnell erreichbar.' : '');
+      text = gscText;
+      tip = 'Durchschnittliche Position laut Google Search Console (letzte 90 Tage, alle Geräte und Orte)' +
+        (gscImpr ? ', ' + gscImpr : '') + '. Das sind echte Daten eurer Domain.' +
+        (!gscPositionTrusted(kw) ? ' Achtung: sehr wenige Impressionen, der Wert ist wenig belastbar.' : '') +
+        (p > 10 && p <= 20 ? ' Seite 2: Mit gezielter Optimierung ist Seite 1 oft schnell erreichbar.' : '') +
+        (checkText ? ' Google-Prüfung' + checkDate + ': ' + checkText + ' (einzelne Abfrage).' : '');
     } else if (kw.organic_rank != null) {
       text = String(kw.organic_rank);
-      tip = 'Position bei der letzten Google-Prüfung' +
-        (kw.serp_checked_at ? ' am ' + formatShortDate(kw.serp_checked_at) : '') + ' (Deutschland).';
+      tip = 'Position bei der letzten Google-Prüfung' + checkDate + ' (Deutschland).' +
+        (hasGsc ? ' Search Console: ' + gscText + ' aus nur ' + gscImpr + ', zu wenig für einen belastbaren Durchschnitt.' : '');
     } else if (kw.serp_checked_at) {
       text = 'nicht in Top ' + depth;
-      style = 'color:var(--cvz-text-muted,#8b98a5);';
-      tip = 'Bei der letzten Google-Prüfung' + (kw.serp_checked_at ? ' am ' + formatShortDate(kw.serp_checked_at) : '') +
-        ' war eure Domain nicht unter den ersten ' + depth + ' Ergebnissen.';
+      style = muted;
+      tip = 'Bei der letzten Google-Prüfung' + checkDate + ' war eure Domain nicht unter den ersten ' + depth + ' Ergebnissen.';
     } else {
       text = 'nicht geprüft';
-      style = 'color:var(--cvz-text-muted,#8b98a5);';
+      style = muted;
       tip = 'Die Position wird beim nächsten Monatslauf geprüft.';
     }
     return '<span title="' + escapeHtml(tip) + '" style="' + style + '">' + escapeHtml(text) + '</span>';
@@ -8248,8 +8267,10 @@
   // =========================================================================
 
   // Position eines Keywords wie in der Spalte "Eure Position": GSC, sonst SERP-Check, "nicht in Top x" ganz hinten.
+  // GEÄNDERT (13.11.2026): gleiche Rangfolge wie renderOwnPositionCell (GSC ab 3 Impressionen vor Prüfung).
   function keywordOwnPosition(kw) {
-    if (kw.gsc_position != null) return Number(kw.gsc_position);
+    var hasGsc = kw.gsc_position != null && !isNaN(Number(kw.gsc_position));
+    if (hasGsc && (gscPositionTrusted(kw) || kw.organic_rank == null)) return Number(kw.gsc_position);
     if (kw.organic_rank != null) return Number(kw.organic_rank);
     if (kw.serp_checked_at) return 1000;
     return null;
@@ -10942,7 +10963,7 @@
     heading.textContent = 'Google-Search-Console-Performance';
     gscHeadRow.appendChild(heading);
     gscHeadRow.appendChild(makeTip(
-      'Hier siehst du Keywords, bei denen du in Google auf Position 15+ rankst und mindestens 30 Impressionen hast ("Near-Miss"-Keywords). Das sind Seiten, die knapp an Seite 1 vorbeischrammen, mit gezielter Optimierung oft schnell verbesserbar.'
+      'Hier siehst du die Suchanfragen aus eurer Google Search Console (letzte 90 Tage), die zum Thema passen, mit Klicks, Impressionen und Durchschnittsposition. "Knapp an Seite 1" heißt: ab Position 15 und mindestens 30 Impressionen. Diese Seiten schrammen knapp an Seite 1 vorbei und lassen sich mit gezielter Optimierung oft schnell verbessern.'
     ));
     section.appendChild(gscHeadRow);
 
