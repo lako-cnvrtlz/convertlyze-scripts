@@ -99,6 +99,9 @@
     buyingCenterCache: {},
     loadingBuyingCenter: {},
     bcEditOpen: {},
+    // NEU (13.11.2026): offene Fragen-Ansicht im Journey-Tab, { topicId, roleKey, phase } oder null.
+    // roleKey: Rollen-ID, '' = ohne Rolle, '*' = alle Rollen. phase: Phasen-Schlüssel oder '' = alle Phasen.
+    journeyPromptPanel: null,
     bcEditDraft: {},
     bcEditResult: {},
     isSavingBc: false,
@@ -2463,6 +2466,22 @@
     // NEU (20.09.2026): Klick-Handler für den "Jetzt erstellen"/"Erneut
     // erstellen"-Button aus renderStepNotice, fehlte bisher komplett,
     // der Button (data-cvz-retry-step) tat also nichts.
+    // NEU (13.11.2026): Fragen-Ansicht im Journey-Tab öffnen/schließen (Zelle der Rollen-Tabelle,
+    // "Fragen ansehen" in einer Phasen-Karte, Schließen-Knopf).
+    var jqCell = event.target.closest('[data-cvz-jq-cell]');
+    if (jqCell) {
+      var jqParts = (jqCell.getAttribute('data-cvz-jq-cell') || '').split('|');
+      var jqNext = { topicId: state.activeTopicId, roleKey: jqParts[0] || '', phase: jqParts[1] || '' };
+      var jqCur = state.journeyPromptPanel;
+      var jqSame = jqCur && jqCur.topicId === jqNext.topicId && jqCur.roleKey === jqNext.roleKey && jqCur.phase === jqNext.phase;
+      state.journeyPromptPanel = (jqSame || jqCell.hasAttribute('data-cvz-jq-close')) ? null : jqNext;
+      render();
+      if (state.journeyPromptPanel && jqCell.hasAttribute('data-cvz-jq-scroll')) {
+        var jqPanel = document.getElementById('cvz-jq-panel');
+        if (jqPanel) jqPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      return;
+    }
     var retryStepBtn = event.target.closest('[data-cvz-retry-step]');
     if (retryStepBtn) {
       retryStep(state.activeTopicId, retryStepBtn.getAttribute('data-cvz-retry-step'));
@@ -4564,6 +4583,121 @@
   // Basis: dieselben Zahlen wie in der Prompt-Liste (cited_count/total_runs
   // pro Prompt), summiert je Rolle und Phase. Bewusst als Tabelle mit
   // Klartext-Zahlen statt nur Farben: Eine Zelle beruht oft auf 1-2 Prompts.
+  // NEU (13.11.2026): Fragen-Ansicht unter "Sichtbarkeit je Rolle". Zeigt die Prompts hinter einer Zelle
+  // (Rolle x Phase), hinter "Gesamt" einer Rolle oder hinter einer ganzen Phase (alle Rollen). Pro Frage:
+  // zitiert / nicht zitiert / noch keine Antworten im Zeitraum, mit denselben Zahlen wie die Tabelle
+  // (statsOf = roleStatsOf, berücksichtigt Zeitraum und KI-Kanal). Fragen vor der Einstiegsphase einer Rolle
+  // werden gezeigt, aber als "nicht gewertet" markiert, damit die Zahlen nachvollziehbar bleiben.
+  function renderJourneyPromptPanel(topicId, prompts, roles, statsOf, winDays) {
+    var sel = state.journeyPromptPanel;
+    if (!sel || sel.topicId !== topicId) return null;
+
+    var roleById = {};
+    (roles || []).forEach(function (r) { roleById[r.role_id] = r; });
+    var phaseOf = function (p) { return p.messymiddle_phase || p.phase || null; };
+    var roleLabelOf = function (key) {
+      if (key === '*') return 'Alle Rollen';
+      if (!key) return 'Ohne Rolle';
+      return roleById[key] ? roleById[key].rolle : 'Rolle nicht mehr vorhanden';
+    };
+
+    var list = (prompts || []).filter(function (p) {
+      if (sel.phase && phaseOf(p) !== sel.phase) return false;
+      if (sel.roleKey === '*') return true;
+      return (p.role_id || '') === sel.roleKey;
+    });
+    list.sort(function (a, b) {
+      var pa = entryIndex(phaseOf(a)), pb = entryIndex(phaseOf(b));
+      if (pa !== pb) return pa - pb;
+      return String(a.prompt_text || '').localeCompare(String(b.prompt_text || ''), 'de');
+    });
+
+    var panel = document.createElement('div');
+    panel.id = 'cvz-jq-panel';
+    panel.className = 'cvz-card';
+    panel.style.cssText = 'margin-top:12px;padding:14px 16px;';
+
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:10px;';
+    var title = document.createElement('p');
+    title.style.cssText = 'margin:0;font-weight:700;';
+    title.textContent = roleLabelOf(sel.roleKey) + ' \u00b7 ' + (sel.phase ? (PHASE_LABELS[sel.phase] || sel.phase) : 'alle Phasen') +
+      ': ' + list.length + (list.length === 1 ? ' Frage' : ' Fragen');
+    head.appendChild(title);
+    var close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'cvz-create-toggle-btn';
+    close.style.marginLeft = 'auto';
+    close.setAttribute('data-cvz-jq-cell', '');
+    close.setAttribute('data-cvz-jq-close', '');
+    close.textContent = 'Schließen';
+    head.appendChild(close);
+    panel.appendChild(head);
+
+    if (!list.length) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Hier gibt es keine aktiven Fragen.';
+      panel.appendChild(empty);
+      return panel;
+    }
+
+    var groupByRole = sel.roleKey === '*';
+    var lastGroup = null;
+    var ul = null;
+    list.forEach(function (p) {
+      var groupKey = groupByRole ? (p.role_id || '') : (sel.phase ? '' : (phaseOf(p) || ''));
+      if (!ul || groupKey !== lastGroup) {
+        if (groupByRole || !sel.phase) {
+          var gh = document.createElement('p');
+          gh.style.cssText = 'margin:10px 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--cvz-text-muted,#8b98a5);';
+          gh.textContent = groupByRole ? roleLabelOf(groupKey) : (PHASE_LABELS[groupKey] || 'Ohne Phase');
+          panel.appendChild(gh);
+        }
+        ul = document.createElement('ul');
+        ul.style.cssText = 'list-style:none;margin:0;padding:0;';
+        panel.appendChild(ul);
+        lastGroup = groupKey;
+      }
+      var role = p.role_id ? roleById[p.role_id] : null;
+      var beforeEntry = !!(role && role.einstiegsphase && entryIndex(phaseOf(p)) < entryIndex(role.einstiegsphase));
+      var ps = statsOf(p) || { cited: 0, total: 0 };
+
+      var li = document.createElement('li');
+      li.style.cssText = 'padding:8px 0;border-top:1px solid var(--cvz-border,#232b36);display:flex;gap:12px;align-items:baseline;';
+      var text = document.createElement('span');
+      text.style.cssText = 'flex:1;';
+      text.textContent = p.prompt_text || '';
+      li.appendChild(text);
+
+      var status = document.createElement('span');
+      status.style.cssText = 'font-size:12px;white-space:nowrap;';
+      if (beforeEntry) {
+        status.style.color = 'var(--cvz-text-muted,#8b98a5)';
+        status.textContent = 'vor der Einstiegsphase, nicht gewertet';
+      } else if (!ps.total) {
+        status.style.color = 'var(--cvz-text-muted,#8b98a5)';
+        status.textContent = 'noch keine Antworten (' + winDays + ' Tage)';
+      } else if (ps.cited > 0) {
+        status.style.color = 'var(--cvz-teal,#4fd1c5)';
+        status.textContent = 'zitiert in ' + ps.cited + ' von ' + ps.total + (ps.total === 1 ? ' Antwort' : ' Antworten');
+      } else {
+        status.style.color = 'var(--cvz-red,#de5b50)';
+        status.textContent = 'nicht zitiert (' + ps.total + (ps.total === 1 ? ' Antwort' : ' Antworten') + ')';
+      }
+      li.appendChild(status);
+      ul.appendChild(li);
+    });
+
+    var note = document.createElement('p');
+    note.className = 'cvz-chart-caption';
+    note.style.marginTop = '10px';
+    note.textContent = 'Zitiert = eure Domain wurde in den letzten ' + winDays + ' Tagen in mindestens einer Antwort (' + activeChannelLabel() +
+      ') als Quelle genannt. Fragen ohne Antworten im Zeitraum zählen in der Tabelle nicht mit. Rolle einer Frage ändern: im Daten-Tab den Prompt aufklappen.';
+    panel.appendChild(note);
+    return panel;
+  }
+
   function renderRoleVisibilitySection(topicId, detail) {
     var bc = state.buyingCenterCache[topicId];
     // NEU (09.11.2026): Zeitraum. Bei 28 Tagen kommen die Zahlen aus dem Themen-Detail, bei einem anderen
@@ -4635,6 +4769,10 @@
       none.textContent = 'Für dieses Thema sind noch keine Rollen festgelegt. Legt 2 bis 3 Rollen fest, um zu sehen, ' +
         'ob z. B. die IT-Leitung euch in KI-Antworten findet, die Geschäftsführung aber nicht.';
       section.appendChild(none);
+      // NEU (13.11.2026): Fragen-Ansicht auch ohne Rollen (Einstieg über "Fragen ansehen" in der Phasen-Karte).
+      var jqNoRoles = renderJourneyPromptPanel(topicId, (detail.prompts || []).filter(function (p) { return p.is_active !== false; }),
+        [], function (p) { return promptStats(p); }, DEFAULT_WINDOW_DAYS);
+      if (jqNoRoles) section.appendChild(jqNoRoles);
       return section;
     }
 
@@ -4664,11 +4802,15 @@
       return { cited: src.cited_count || 0, total: src.total_runs || 0, status: src.visibility_status || null };
     }
 
-    function cellStats(roleKey, phase) {
+    function cellStats(roleKey, phase, entry) {
       var n = 0, measured = 0, cited = 0;
       prompts.forEach(function (p) {
         if ((p.role_id || null) !== roleKey) return;
         if (phase && (p.messymiddle_phase || p.phase) !== phase) return;
+        // GEÄNDERT (13.11.2026): "Gesamt" zählt Fragen vor der Einstiegsphase der Rolle nicht mehr mit. Die
+        // Zellen dieser Phasen zeigen "steigt später ein", die Fragen flossen aber trotzdem in die Gesamtzahl
+        // ein (Beispiel 13.11.2026: Geschäftsführung 0 von 5 gesamt, sichtbar nur 2 + 2).
+        if (!phase && entry && entryIndex(p.messymiddle_phase || p.phase) < entryIndex(entry)) return;
         n++;
         // GEÄNDERT (21.10.2026): letzte 28 Tage, gewählter Kanal. Vorher alle
         // Läufe seit Start: Eine Zelle, die einmal grün war, blieb es für immer.
@@ -4707,6 +4849,17 @@
       return pct === 0 ? 'rgba(222,91,80,.10)' : 'rgba(79,209,197,' + (0.08 + pct * 0.42).toFixed(2) + ')';
     }
 
+    // NEU (13.11.2026): Zellen mit Fragen sind klickbar und öffnen darunter die Fragen-Ansicht.
+    // Schließt das style-Attribut der Zelle ab und hängt die Klick-Attribute an.
+    function jqCellAttrs(st, roleKey, phase) {
+      if (!st || st.n === 0) return '">';
+      var key = (roleKey || '') + '|' + (phase || '');
+      var open = state.journeyPromptPanel && state.journeyPromptPanel.topicId === topicId &&
+        state.journeyPromptPanel.roleKey === (roleKey || '') && state.journeyPromptPanel.phase === (phase || '');
+      return 'cursor:pointer;' + (open ? 'box-shadow:inset 0 0 0 2px var(--cvz-teal,#4fd1c5);' : '') + '" ' +
+        'data-cvz-jq-cell="' + escapeHtml(key) + '" title="Fragen dieser Zelle anzeigen" role="button" tabindex="0">';
+    }
+
     var th = 'text-align:center;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
       'color:var(--cvz-text-muted,#8b98a5);border-bottom:1px solid var(--cvz-border,#232b36);white-space:nowrap;';
     var html = '<table style="width:100%;min-width:560px;border-collapse:collapse;font-size:13px;"><thead><tr>' +
@@ -4729,11 +4882,12 @@
           return;
         }
         var st = cellStats(row.key, ph);
-        html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);background:' + cellBg(st) + ';">' + cellHtml(st, false, row.key, ph) + '</td>';
+        html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);background:' + cellBg(st) + ';' +
+          jqCellAttrs(st, row.key, ph) + cellHtml(st, false, row.key, ph) + '</td>';
       });
-      var tot = cellStats(row.key, null);
+      var tot = cellStats(row.key, null, row.entry);
       html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);border-left:1px solid var(--cvz-border,#232b36);background:' +
-        cellBg(tot) + ';">' + cellHtml(tot, true) + '</td></tr>';
+        cellBg(tot) + ';' + jqCellAttrs(tot, row.key, '') + cellHtml(tot, true) + '</td></tr>';
     });
     html += '</tbody></table>';
 
@@ -4742,12 +4896,15 @@
     card.style.cssText = 'padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;';
     card.innerHTML = html;
     section.appendChild(card);
+    var jqPanelEl = renderJourneyPromptPanel(topicId, prompts, roles, roleStatsOf, roleWinDays);
+    if (jqPanelEl) section.appendChild(jqPanelEl);
 
     var caption = document.createElement('p');
     caption.className = 'cvz-chart-caption';
     caption.textContent = 'Anteil der Fragen, bei denen eure Domain in den letzten ' + roleWinDays + ' Tagen in mindestens einer Antwort (' + activeChannelLabel() + ') zitiert wurde, je Rolle und Journey-Phase. ' +
       'Rot: in diesem Zeitraum bei keiner Frage zitiert. „Steigt später ein“: Die Rolle recherchiert erst ab ihrer Einstiegsphase mit, änderbar unter „Rollen bearbeiten“. ' +
-      '„Nicht gemessen“: Der Prompt für diese Zelle fehlt noch (z. B. keine freien Plätze), über „+ Prompt“ legt ihr ihn selbst an.' +
+      '„Nicht gemessen“: Der Prompt für diese Zelle fehlt noch (z. B. keine freien Plätze), über „+ Prompt“ legt ihr ihn selbst an. ' +
+      'Ein Klick auf eine Zelle zeigt die Fragen dahinter.' +
       (overlayFailed ? ' Die Zahlen für den gewählten Zeitraum konnten nicht geladen werden, gezeigt werden die letzten ' + DEFAULT_WINDOW_DAYS + ' Tage.' : '');
     section.appendChild(caption);
 
@@ -15108,6 +15265,17 @@
       nameEl.title = promptCount + ' aktive Prompts in dieser Phase. Jeder wird ' + formatIntervalText(intervalDays) +
         ' in ChatGPT und Gemini abgefragt.';
       card.appendChild(nameEl);
+      // NEU (13.11.2026): zu den Fragen dieser Phase (öffnet die Fragen-Ansicht unter "Sichtbarkeit je Rolle").
+      if (promptCount > 0) {
+        var qLink = document.createElement('button');
+        qLink.type = 'button';
+        qLink.className = 'cvz-journey-hint-link';
+        qLink.style.cssText = 'display:block;margin:-4px 0 8px;padding:0;background:none;border:none;cursor:pointer;text-align:left;';
+        qLink.setAttribute('data-cvz-jq-cell', '*|' + phase);
+        qLink.setAttribute('data-cvz-jq-scroll', '');
+        qLink.textContent = promptCount + (promptCount === 1 ? ' Frage ansehen \u2192' : ' Fragen ansehen \u2192');
+        card.appendChild(qLink);
+      }
 
       visibleChannels().forEach(function (channel) {
         var ch = scores[channel] || { score: null, cited: 0, total: 0 };
