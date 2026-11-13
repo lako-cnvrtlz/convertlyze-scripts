@@ -4611,13 +4611,13 @@
   // zitiert / nicht zitiert / noch keine Antworten im Zeitraum, mit denselben Zahlen wie die Tabelle
   // (statsOf = roleStatsOf, berücksichtigt Zeitraum und KI-Kanal). Fragen vor der Einstiegsphase einer Rolle
   // werden gezeigt, aber als "nicht gewertet" markiert, damit die Zahlen nachvollziehbar bleiben.
-  // NEU (13.11.2026): Phase einer Frage wie im Backend (dashboard.py: _resolve_phase). Fragen ohne gültige
-  // Phase zählen dort als "Erforschung", in der Zahl der Phasen-Karte UND in den KI-Werten der Phase. Ohne
-  // dieselbe Regel hier zeigte die Karte "Erforschung (9)", die Fragen-Ansicht aber nur 4.
-  var PROMPT_PHASE_FALLBACK = 'exploration';
+  // NEU (13.11.2026): Phase einer Frage wie im Backend (dashboard.py: _resolve_phase). GEÄNDERT (13.11.2026,
+  // später am Tag): kein Rückfall auf "Erforschung" mehr, weder hier noch im Backend. Fragen ohne gültige Phase
+  // gehören zu keiner Phase (nur zu "Gesamt"). Hintergrund: Die 5 Fragen, die "Erforschung (9)" statt 4
+  // ergaben, waren Entdeckungsfragen (discovery), die als Vorschläge gelten und nicht gemessen werden.
   function resolvePromptPhase(p) {
     var ph = String((p && (p.messymiddle_phase || p.phase)) || '').toLowerCase().trim();
-    return PHASE_ORDER.indexOf(ph) !== -1 ? ph : PROMPT_PHASE_FALLBACK;
+    return PHASE_ORDER.indexOf(ph) !== -1 ? ph : null;
   }
   function promptHasOwnPhase(p) {
     var ph = String((p && (p.messymiddle_phase || p.phase)) || '').toLowerCase().trim();
@@ -4630,7 +4630,7 @@
 
     var roleById = {};
     (roles || []).forEach(function (r) { roleById[r.role_id] = r; });
-    var phaseOf = resolvePromptPhase;  // GEÄNDERT (13.11.2026): wie Backend, ohne Phase = Erforschung
+    var phaseOf = resolvePromptPhase;  // GEÄNDERT (13.11.2026): wie Backend, ohne Phase = null (keine Phase)
     var roleLabelOf = function (key) {
       if (key === '*') return 'Alle Rollen';
       if (!key) return 'Ohne Rolle';
@@ -4643,7 +4643,8 @@
       return (p.role_id || '') === sel.roleKey;
     });
     list.sort(function (a, b) {
-      var pa = entryIndex(phaseOf(a)), pb = entryIndex(phaseOf(b));
+      // Fragen ohne Phase ans Ende
+      var pa = phaseOf(a) ? entryIndex(phaseOf(a)) : 99, pb = phaseOf(b) ? entryIndex(phaseOf(b)) : 99;
       if (pa !== pb) return pa - pb;
       return String(a.prompt_text || '').localeCompare(String(b.prompt_text || ''), 'de');
     });
@@ -4696,7 +4697,7 @@
         lastGroup = groupKey;
       }
       var role = p.role_id ? roleById[p.role_id] : null;
-      var beforeEntry = !!(role && role.einstiegsphase && entryIndex(phaseOf(p)) < entryIndex(role.einstiegsphase));
+      var beforeEntry = !!(role && role.einstiegsphase && phaseOf(p) && entryIndex(phaseOf(p)) < entryIndex(role.einstiegsphase));
       var ps = statsOf(p) || { cited: 0, total: 0 };
 
       var li = document.createElement('li');
@@ -4708,8 +4709,8 @@
       if (!promptHasOwnPhase(p)) {
         var noPhase = document.createElement('span');
         noPhase.style.cssText = 'margin-left:8px;font-size:11px;color:var(--cvz-amber,#c98e2a);white-space:nowrap;';
-        noPhase.title = 'Für diese Frage ist keine Phase hinterlegt. Sie zählt deshalb, wie in den KI-Werten der Phasen-Karten, zur Erforschung.';
-        noPhase.textContent = 'ohne Phase \u2192 Erforschung';
+        noPhase.title = 'Für diese Frage ist keine Phase hinterlegt. Sie zählt in keiner Phase, nur in "Gesamt". Phase zuweisen: im Daten-Tab den Prompt aufklappen.';
+        noPhase.textContent = 'ohne Phase';
         text.appendChild(noPhase);
       }
       li.appendChild(text);
@@ -4860,11 +4861,11 @@
       var n = 0, measured = 0, cited = 0;
       prompts.forEach(function (p) {
         if ((p.role_id || null) !== roleKey) return;
-        if (phase && resolvePromptPhase(p) !== phase) return;  // GEÄNDERT (13.11.2026): ohne Phase = Erforschung, wie Backend
+        if (phase && resolvePromptPhase(p) !== phase) return;  // GEÄNDERT (13.11.2026): ohne Phase in keiner Phase, wie Backend
         // GEÄNDERT (13.11.2026): "Gesamt" zählt Fragen vor der Einstiegsphase der Rolle nicht mehr mit. Die
         // Zellen dieser Phasen zeigen "steigt später ein", die Fragen flossen aber trotzdem in die Gesamtzahl
         // ein (Beispiel 13.11.2026: Geschäftsführung 0 von 5 gesamt, sichtbar nur 2 + 2).
-        if (!phase && entry && entryIndex(resolvePromptPhase(p)) < entryIndex(entry)) return;
+        if (!phase && entry && resolvePromptPhase(p) && entryIndex(resolvePromptPhase(p)) < entryIndex(entry)) return;
         n++;
         // GEÄNDERT (21.10.2026): letzte 28 Tage, gewählter Kanal. Vorher alle
         // Läufe seit Start: Eine Zelle, die einmal grün war, blieb es für immer.
@@ -4959,7 +4960,7 @@
     caption.textContent = 'Anteil der Fragen, bei denen eure Domain in den letzten ' + roleWinDays + ' Tagen in mindestens einer Antwort (' + activeChannelLabel() + ') zitiert wurde, je Rolle und Journey-Phase. ' +
       'Rot: in diesem Zeitraum bei keiner Frage zitiert. „Steigt später ein“: Die Rolle recherchiert erst ab ihrer Einstiegsphase mit, änderbar unter „Rollen bearbeiten“. ' +
       '„Nicht gemessen“: Der Prompt für diese Zelle fehlt noch (z. B. keine freien Plätze), über „+ Prompt“ legt ihr ihn selbst an. ' +
-      'Ein Klick auf eine Zelle zeigt die Fragen dahinter. Fragen ohne hinterlegte Phase zählen, wie in den Phasen-Karten, zur Erforschung.' +
+      'Ein Klick auf eine Zelle zeigt die Fragen dahinter.' +
       (overlayFailed ? ' Die Zahlen für den gewählten Zeitraum konnten nicht geladen werden, gezeigt werden die letzten ' + DEFAULT_WINDOW_DAYS + ' Tage.' : '');
     section.appendChild(caption);
 
@@ -10220,12 +10221,27 @@
     return { aktiv_gesamt: active, max_gesamt: MAX_TOTAL_PROMPTS, frei_eigene: Math.max(0, MAX_TOTAL_PROMPTS - active) };
   }
 
+  // NEU (13.11.2026): Phasen, die für eine Rolle zur Wahl stehen: erst ab ihrer Einstiegsphase. Fragen davor
+  // würden abgefragt (und kosten), zählen aber nirgends ("steigt später ein"). Ohne Rolle: alle Phasen.
+  function phasesForRole(topicId, roleId) {
+    var bc = state.buyingCenterCache[topicId];
+    var role = roleId && bc && bc.rollen ? bc.rollen.filter(function (r) { return r.role_id === roleId; })[0] : null;
+    var entry = role && role.einstiegsphase;
+    if (!entry || PHASE_ORDER.indexOf(entry) === -1) return PHASE_ORDER.slice();
+    return PHASE_ORDER.slice(PHASE_ORDER.indexOf(entry));
+  }
+
   function renderManualPromptForm(prompts, topicId) {
     var budget = getPromptBudget(prompts, topicId);
     var PROMPT_MAX_CHARS = 400;
     var manualBc = state.buyingCenterCache[topicId];
     var manualRoles = (manualBc && manualBc.rollen) || [];
-    var phaseOptionsHtml = PHASE_ORDER.map(function (phase) {
+    // GEÄNDERT (13.11.2026): nur Phasen ab der Einstiegsphase der gewählten Rolle (siehe phasesForRole).
+    var allowedPhases = phasesForRole(topicId, state.manualPromptDraftRoleId);
+    if (state.manualPromptDraftPhase && allowedPhases.indexOf(state.manualPromptDraftPhase) === -1) {
+      state.manualPromptDraftPhase = allowedPhases[0];
+    }
+    var phaseOptionsHtml = allowedPhases.map(function (phase) {
       return '<option value="' + phase + '"' + (state.manualPromptDraftPhase === phase ? ' selected' : '') + '>' +
         escapeHtml(PHASE_LABELS[phase] || phase) + '</option>';
     }).join('');
@@ -10275,7 +10291,8 @@
     }
     var roleSelectEl = wrap.querySelector('#cvz-manual-prompt-role');
     if (roleSelectEl) {
-      roleSelectEl.addEventListener('change', function () { state.manualPromptDraftRoleId = roleSelectEl.value; });
+      // GEÄNDERT (13.11.2026): neu zeichnen, damit die Phasen-Auswahl zur Einstiegsphase der Rolle passt.
+      roleSelectEl.addEventListener('change', function () { state.manualPromptDraftRoleId = roleSelectEl.value; render(); });
     }
     return wrap;
   }
@@ -10367,8 +10384,11 @@
     var note = document.createElement('p');
     note.className = 'cvz-card-placeholder-text';
     note.textContent =
-      'Das sind KI-Vorschl\u00e4ge, noch keine gemessenen Prompts. Sie flie\u00dfen in keine Auswertung ein, ' +
-      'bis ihr sie zum festen Set hinzuf\u00fcgt. Wählt dazu die passende Phase.';
+      // GEÄNDERT (13.11.2026): klarstellen, dass es offene Entdeckungsfragen ohne Phase sind und dass sie in keiner
+      // Phase mitzählen (auch nicht in der Erforschung). Zur Wahl stehen nur Phasen ab der Einstiegsphase der Rolle.
+      'Das sind offene Entdeckungsfragen der KI, noch keine gemessenen Prompts. Sie haben keine Phase und z\u00e4hlen ' +
+      'in keiner Phase mit, auch nicht in der Erforschung. Beim Hinzuf\u00fcgen zum festen Set w\u00e4hlt ihr die Phase; ' +
+      'angeboten werden nur Phasen ab der Einstiegsphase der jeweiligen Rolle.';
     wrap.appendChild(note);
 
     // NEU (08.10.2026): Platz-Anzeige, bevor jemand einen Vorschlag w\u00e4hlt.
@@ -10413,9 +10433,10 @@
       phaseSelect.className = 'cvz-changelog-custom-input';
       phaseSelect.style.maxWidth = '180px';
       phaseSelect.setAttribute('aria-label', 'Phase w\u00e4hlen');
+      // GEÄNDERT (13.11.2026): nur Phasen ab der Einstiegsphase der Rolle dieses Vorschlags (siehe phasesForRole).
       phaseSelect.innerHTML =
         '<option value="">Phase w\u00e4hlen \u2026</option>' +
-        PHASE_ORDER.map(function (ph) {
+        phasesForRole(state.activeTopicId, sug.role_id).map(function (ph) {
           return '<option value="' + ph + '">' + escapeHtml(PHASE_LABELS[ph] || ph) + '</option>';
         }).join('');
       phaseSelect.disabled = noSlots;
