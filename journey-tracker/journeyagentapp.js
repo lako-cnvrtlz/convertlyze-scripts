@@ -1452,6 +1452,15 @@
     updateUrlParams({ cvz_topic: topicId, cvz_project: state.activeProjectId, cvz_tab: resetTab !== false ? null : state.activeSubTab });
     render();
 
+    // NEU (13.11.2026): Ist das Thema laut Übersicht schon fertig, starten die Daten des offenen Reiters
+    // (z. B. dashboard-data für "Lage") GLEICHZEITIG mit der Themenseite statt erst danach. Im Server-Log
+    // vom 13.11.2026 kam dashboard-data (10,8 s) erst nach der Themenseite (15,5 s): rund 26 s bis "Lage"
+    // vollständig war. Die Reiter-Abrufe brauchen keine Detaildaten (nur topicId und Zeitraum).
+    // Ist der Status unbekannt oder läuft noch ein Lauf, bleibt es beim bisherigen Ablauf (erst danach).
+    var topicForEarlyLoad = getTopicById(topicId);
+    var tabDataStartedEarly = !!topicForEarlyLoad && !isPendingStatus(topicForEarlyLoad.status);
+    if (tabDataStartedEarly) loadTabData(topicId);
+
     try {
       var cachedDetail = state.topicDetailCache[topicId];
       var liveTopic = getTopicById(topicId);
@@ -1479,7 +1488,9 @@
     var hasRunningStep = (loadedDetail.step_status || []).some(function (s) { return s.state === 'running'; });
     if (hasRunningStep) startStepPolling(topicId);
 
-    loadTabData(topicId);
+    // GEÄNDERT (13.11.2026): nicht ein zweites Mal starten, wenn oben schon geschehen. dashboard-data und
+    // content-changes haben keine Sperre gegen parallele Abrufe, ein zweiter Aufruf hätte sie doppelt geladen.
+    if (!tabDataStartedEarly) loadTabData(topicId);
   }
 
   function backToOverview() {
