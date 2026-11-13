@@ -5036,8 +5036,10 @@
 
     var caption = document.createElement('p');
     caption.className = 'cvz-chart-caption';
-    caption.textContent = 'Anteil der Fragen, bei denen eure Domain in den letzten ' + roleWinDays + ' Tagen in mindestens einer Antwort (' + activeChannelLabel() + ') zitiert wurde, je Rolle und Journey-Phase. ' +
-      'Rot: in diesem Zeitraum bei keiner Frage zitiert. „Steigt später ein“: Die Rolle recherchiert erst ab ihrer Einstiegsphase mit, änderbar unter „Rollen bearbeiten“. ' +
+    // GEÄNDERT (13.11.2026): beschreibt die Zitierrate statt des Anteils zitierter Fragen.
+    caption.textContent = 'Zitierrate je Rolle und Journey-Phase: In welchem Anteil der KI-Antworten (' + activeChannelLabel() + ') der letzten ' + roleWinDays +
+      ' Tage eure Domain als Quelle genannt wurde, Durchschnitt über die Fragen der Zelle. Darunter: bei wie vielen Fragen mindestens einmal. ' +
+      'Teal: ab 30 %, gelb: 10 bis 29 %, rot: unter 10 %. „Steigt später ein“: Die Rolle recherchiert erst ab ihrer Einstiegsphase mit, änderbar unter „Rollen bearbeiten“. ' +
       '„Nicht gemessen“: Der Prompt für diese Zelle fehlt noch (z. B. keine freien Plätze), über „+ Prompt“ legt ihr ihn selbst an. ' +
       'Ein Klick auf eine Zelle zeigt die Fragen dahinter.' +
       (overlayFailed ? ' Die Zahlen für den gewählten Zeitraum konnten nicht geladen werden, gezeigt werden die letzten ' + DEFAULT_WINDOW_DAYS + ' Tage.' : '');
