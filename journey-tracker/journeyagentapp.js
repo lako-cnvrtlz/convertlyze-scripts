@@ -188,6 +188,14 @@
     fanOutRunsInfo: {},       // { [promptId]: { total, withField } } Diagnose: was hat der Server geliefert?
     fanOutDaySel: {},         // { [promptId]: 'YYYY-MM-DD' } gewählter Tag, fehlt = Gesamt
     fanOutDaysExpanded: {},   // { [promptId]: true } = alle Tage statt nur die neuesten 8
+    // NEU (13.11.2026): Unterbereich "Quellen" (gefunden vs. zitiert, GET /topics/{id}/retrieved-sources)
+    retrievedCache: {},        // Schlüssel: topicId + '|' + weeks
+    loadingRetrieved: {},
+    retrievedErrors: {},
+    retrievedFilter: {},       // { [topicId]: 'alle' | 'nie_zitiert' | 'selten_zitiert' | 'oft_zitiert' }
+    retrievedShowSingles: {},  // { [topicId]: true } = auch Domains mit nur einem Treffer
+    retrievedShowCompetitors: {}, // { [topicId]: true } = Wettbewerber einblenden
+    openRetrievedDomains: {},  // { [topicId|domain]: true } = aufgeklappt
     keywordRankHistoryCache: {},
     loadingKeywordRankHistory: {},
     expandedKeywordId: null,
@@ -307,6 +315,9 @@
     Object.keys(state.fanOutCache).concat(Object.keys(state.fanOutErrors)).forEach(function (k) {
       if (k.indexOf(topicId + '|') === 0) { delete state.fanOutCache[k]; delete state.fanOutErrors[k]; }
     });
+    Object.keys(state.retrievedCache).concat(Object.keys(state.retrievedErrors)).forEach(function (k) {
+      if (k.indexOf(topicId + '|') === 0) { delete state.retrievedCache[k]; delete state.retrievedErrors[k]; }
+    });
 
     // Auch die Domain-Übersicht (Opportunities über alle Themen) ist dann veraltet.
     var topic = getTopicById(topicId);
@@ -336,6 +347,9 @@
     // NEU (06.10.2026): Fan-out-Queries nur laden, wenn der Unterbereich offen ist.
     if (state.activeSubTab === 'daten' && state.activeDataView === 'fanout') {
       maybeLoadFanOut(topicId);
+    }
+    if (state.activeSubTab === 'daten' && state.activeDataView === 'quellen') {
+      maybeLoadRetrieved(topicId);
     }
     // NEU (02.10.2026): Änderungen und Events werden jetzt im Aktionsplan eingetragen.
     if (state.activeSubTab === 'aktionsplan') {
@@ -1763,6 +1777,7 @@
     { id: 'fragen', label: 'Fragen' },
     { id: 'prompts', label: 'Prompts' },
     { id: 'fanout', label: 'Fan-out' },
+    { id: 'quellen', label: 'Quellen' },
     { id: 'gsc', label: 'Search Console' },
   ];
 
@@ -1792,6 +1807,8 @@
                        lead: 'Die Fragen, die der Tracker regelmäßig an ChatGPT und Gemini stellt. Klickt auf eine Frage, um die Antworten zu sehen.' },
     'daten:fanout':  { eyebrow: 'Daten · Fan-out', q: 'Wonach suchen die KIs im Hintergrund?',
                        lead: 'Die Suchanfragen, die ChatGPT stellt, bevor es antwortet. Wer dafür gut rankt, wird eher zitiert.' },
+    'daten:quellen': { eyebrow: 'Daten · Quellen', q: 'Welche Seiten findet ChatGPT, und welche nennt es?',
+                       lead: 'Bei der Websuche sieht ChatGPT viel mehr Seiten, als es am Ende als Quelle nennt. Hier steht beides nebeneinander, je Domain.' },
     'daten:gsc':     { eyebrow: 'Daten · Search Console', q: 'Über welche Suchen findet man euch heute?',
                        lead: 'Echte Suchanfragen aus eurer Google Search Console, mit Klicks, Impressionen und Position.' },
     'domain:uebersicht': { eyebrow: 'Domain · Übersicht', q: 'Wie sichtbar ist die Domain über alle Themen?',
@@ -2449,6 +2466,9 @@
       updateUrlParams({ cvz_tab: newTab, cvz_view: newTab === 'daten' ? state.activeDataView : null });
       if (newTab === 'daten' && state.activeDataView === 'fanout' && state.activeView === 'topic-detail') {
         maybeLoadFanOut(state.activeTopicId);
+      }
+      if (newTab === 'daten' && state.activeDataView === 'quellen' && state.activeView === 'topic-detail') {
+        maybeLoadRetrieved(state.activeTopicId);
       }
       if ((newTab === 'situation' || newTab === 'daten' || newTab === 'journey' || newTab === 'wettbewerb') && state.activeView === 'topic-detail') {
         maybeLoadBuyingCenter(state.activeTopicId);
@@ -5395,6 +5415,9 @@
     if (view === 'fanout' && state.activeView === 'topic-detail') {
       maybeLoadFanOut(state.activeTopicId);
     }
+    if (view === 'quellen' && state.activeView === 'topic-detail') {
+      maybeLoadRetrieved(state.activeTopicId);
+    }
     render();
   }
 
@@ -5516,6 +5539,10 @@
       fragen: dedupeKeywords(questionRows).length,
       prompts: (detail.prompts || []).length,
       fanout: fanOutData ? (fanOutData.queries.length >= 200 ? '200+' : fanOutData.queries.length) : null,
+      quellen: (function () {
+        var rd = state.retrievedCache[retrievedKey(state.activeTopicId)];
+        return rd ? rd.domains_total : null;
+      })(),
       gsc: Array.isArray(gscFiltered) ? gscFiltered.length : null,
     };
     wrap.appendChild(renderDataSubNav(counts));
@@ -5544,6 +5571,9 @@
     } else if (view === 'fanout') {
       promptNotes();
       wrap.appendChild(renderFanOutView(state.activeTopicId, detail));
+    } else if (view === 'quellen') {
+      promptNotes();
+      wrap.appendChild(renderRetrievedView(state.activeTopicId, detail));
     } else if (view === 'gsc') {
       monthlyNotes('GSC zuletzt aktualisiert');
       wrap.appendChild(renderGscBlock(gscFiltered, state.activeTopicId, allEntries));
@@ -5555,6 +5585,235 @@
     }
 
     return wrap;
+  }
+
+  // =========================================================================
+  // NEU (13.11.2026): Unterbereich "Quellen": gefunden vs. zitiert (nur ChatGPT).
+  // Daten: GET /topics/{id}/retrieved-sources (retrieved_sources.py im Backend).
+  // Wichtig für die Texte: "gefunden" heißt, ChatGPT hatte die Seite unter seinen
+  // Suchtreffern. Ob es sie geöffnet hat, ist nicht bekannt, deshalb nie "gelesen".
+  // =========================================================================
+
+  var RETRIEVED_WEEKS = 4;  // wie Fan-out: 28 Tage, gleiches Fenster wie die übrigen Auswertungen
+  var RETRIEVED_BUCKETS = [
+    { id: 'alle', label: 'Alle' },
+    { id: 'nie_zitiert', label: 'Gefunden, nie zitiert' },
+    { id: 'selten_zitiert', label: 'Selten zitiert' },
+    { id: 'oft_zitiert', label: 'Oft zitiert' },
+  ];
+  var RETRIEVED_BUCKET_LABELS = { nie_zitiert: 'Nie zitiert', selten_zitiert: 'Selten zitiert', oft_zitiert: 'Oft zitiert' };
+  // Spiegelt TYPE_LABELS in outreach_targets.py (Seitentyp aus der Quellen-Analyse).
+  var RETRIEVED_TYPE_LABELS = {
+    review_plattform: 'Bewertungsportal', fachartikel: 'Fachmedium', vergleichsartikel: 'Vergleichsartikel',
+    erklaerseite: 'Erklärseite', dokumentation: 'Dokumentation', forum: 'Forum', video: 'Video',
+    social_media: 'Social Media', produktseite: 'Produktseite',
+  };
+
+  function retrievedKey(topicId) {
+    return topicId + '|' + RETRIEVED_WEEKS;
+  }
+
+  async function maybeLoadRetrieved(topicId) {
+    if (!topicId) return;
+    var key = retrievedKey(topicId);
+    if (state.retrievedCache[key] || state.loadingRetrieved[key]) return;
+
+    if (CONFIG.useMockData) {
+      state.retrievedCache[key] = { runs_total: 0, runs_with_search: 0, coverage_rate: null, bucket_counts: {}, domains_total: 0, domains: [] };
+      return;
+    }
+
+    state.loadingRetrieved[key] = true;
+    delete state.retrievedErrors[key];
+    render();
+    try {
+      state.retrievedCache[key] = await apiFetch('/topics/' + topicId + '/retrieved-sources?weeks=' + RETRIEVED_WEEKS);
+    } catch (e) {
+      console.error('[CVZ Visibility] Gefundene Quellen konnten nicht geladen werden:', e);
+      state.retrievedErrors[key] = e.message || 'Unbekannter Fehler';
+    }
+    state.loadingRetrieved[key] = false;
+    render();
+  }
+
+  function renderRetrievedView(topicId, detail) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Gefunden und zitiert (ChatGPT)';
+    section.appendChild(heading);
+
+    var intro = document.createElement('p');
+    intro.className = 'cvz-card-placeholder-text';
+    intro.style.marginBottom = '10px';
+    intro.textContent =
+      'Gefunden heißt: Die Seite stand unter den Suchtreffern, die ChatGPT bei seiner Recherche gesehen hat. ' +
+      'Ob ChatGPT sie auch geöffnet hat, ist nicht bekannt. Zitiert heißt: ChatGPT nennt die Domain in der Antwort als Quelle. ' +
+      'Domains, die oft gefunden, aber selten zitiert werden, sind Kandidaten für eigene Beiträge mit genau passendem Inhalt. ' +
+      'Nur für ChatGPT, Gemini liefert diese Information nicht.';
+    section.appendChild(intro);
+
+    var key = retrievedKey(topicId);
+    function note(text, cls) {
+      var el = document.createElement('p');
+      el.className = cls || 'cvz-card-placeholder-text';
+      el.textContent = text;
+      section.appendChild(el);
+      return el;
+    }
+
+    if (state.loadingRetrieved[key]) { note('Lädt...'); return section; }
+    if (state.retrievedErrors[key]) { note('Quellen konnten nicht geladen werden: ' + state.retrievedErrors[key]); return section; }
+    var data = state.retrievedCache[key];
+    if (!data) { note('Noch keine Daten geladen.'); return section; }
+
+    var total = data.runs_total || 0;
+    var withSearch = data.runs_with_search || 0;
+    if (total === 0) { note('In den letzten 28 Tagen liegen keine ChatGPT-Läufe vor.', 'cvz-fanout-coverage'); return section; }
+    note('Letzte 28 Tage: Bei ' + withSearch + ' von ' + total + ' ChatGPT-Läufen (' + Math.round(withSearch / total * 100) +
+      ' %) hat ChatGPT im Web gesucht. Nur diese Läufe sind in der Auswertung.', 'cvz-fanout-coverage');
+    if (withSearch < 10) {
+      note('Wenige Läufe mit Websuche: Die Liste ist eine Stichprobe und kann sich mit weiteren Läufen noch deutlich ändern.', 'cvz-fanout-warn');
+    }
+    if (withSearch === 0) return section;
+
+    var domains = data.domains || [];
+
+    // Eigene Domain zuerst als eigene Zeile: "gefunden, aber nicht zitiert" ist für euch selbst die wichtigste Zahl.
+    var own = domains.filter(function (d) { return d.is_own; })[0];
+    var ownNote = document.createElement('p');
+    ownNote.className = 'cvz-retrieved-own';
+    if (own) {
+      ownNote.innerHTML = '<strong>Eure Domain</strong>: in ' + own.runs_found + ' von ' + withSearch +
+        ' Läufen gefunden, in ' + own.runs_cited + ' davon zitiert' +
+        (own.runs_found > own.runs_cited
+          ? '. In ' + (own.runs_found - own.runs_cited) + ' Läufen hat ChatGPT eure Seite gesehen und trotzdem andere Quellen genannt.'
+          : '.');
+    } else {
+      ownNote.innerHTML = '<strong>Eure Domain</strong> stand in den letzten 28 Tagen in keinem Lauf unter den Suchtreffern.';
+    }
+    section.appendChild(ownNote);
+
+    // Filter
+    var filter = state.retrievedFilter[topicId] || 'alle';
+    var showSingles = !!state.retrievedShowSingles[topicId];
+    var showComp = !!state.retrievedShowCompetitors[topicId];
+    var counts = data.bucket_counts || {};
+
+    var toolbar = document.createElement('div');
+    toolbar.className = 'cvz-fanout-toolbar';
+    var picker = document.createElement('div');
+    picker.className = 'cvz-weeks-preset-picker';
+    RETRIEVED_BUCKETS.forEach(function (b) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cvz-weeks-preset-btn' + (filter === b.id ? ' cvz-weeks-preset-btn-active' : '');
+      var n = b.id === 'alle' ? null : counts[b.id];
+      btn.textContent = b.label + (n !== null && n !== undefined ? ' (' + n + ')' : '');
+      btn.addEventListener('click', function () { state.retrievedFilter[topicId] = b.id; render(); });
+      picker.appendChild(btn);
+    });
+    toolbar.appendChild(picker);
+
+    function toggle(label, checked, onChange) {
+      var lab = document.createElement('label');
+      lab.className = 'cvz-retrieved-toggle';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = checked;
+      cb.addEventListener('change', function () { onChange(cb.checked); render(); });
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(' ' + label));
+      return lab;
+    }
+    toolbar.appendChild(toggle('Einzeltreffer zeigen', showSingles, function (v) { state.retrievedShowSingles[topicId] = v; }));
+    toolbar.appendChild(toggle('Wettbewerber zeigen', showComp, function (v) { state.retrievedShowCompetitors[topicId] = v; }));
+    section.appendChild(toolbar);
+
+    // Einzeltreffer = nur in einem Prompt und an einem Tag gefunden. Bei einem Lauf pro Prompt und Tag ist das Rauschen.
+    var isSingle = function (d) { return d.prompts_found < 2 && d.days_found < 2; };
+    var hiddenSingles = 0;
+    var rows = domains.filter(function (d) {
+      if (d.is_own) return false;
+      if (d.is_competitor && !showComp) return false;
+      if (filter !== 'alle' && d.bucket !== filter) return false;
+      if (!showSingles && isSingle(d)) { hiddenSingles++; return false; }
+      return true;
+    });
+
+    if (rows.length === 0) {
+      note(hiddenSingles
+        ? 'Keine Domain mit mehr als einem Treffer in dieser Auswahl. ' + hiddenSingles + ' Einzeltreffer ausgeblendet.'
+        : 'Keine Domain in dieser Auswahl.');
+      return section;
+    }
+
+    var hint = document.createElement('p');
+    hint.className = 'cvz-card-placeholder-text';
+    hint.style.margin = '0 0 6px';
+    hint.textContent = 'Sortiert nach der Zahl der Prompts, in denen die Domain gefunden wurde. Klicke auf eine Domain, um die gefundenen Seiten zu sehen.' +
+      (hiddenSingles ? ' ' + hiddenSingles + ' Einzeltreffer ausgeblendet.' : '');
+    section.appendChild(hint);
+
+    rows.forEach(function (d) {
+      var openKey = topicId + '|' + d.domain;
+      var details = document.createElement('details');
+      details.className = 'cvz-fanout-prompt cvz-retrieved-row';
+      if (state.openRetrievedDomains[openKey]) details.open = true;
+
+      var summary = document.createElement('summary');
+      var pct = Math.round((d.cite_rate || 0) * 100);
+      summary.innerHTML =
+        '<img class="cvz-timeline-logo" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(d.domain) + '" alt="">' +
+        '<span class="cvz-retrieved-domain">' + escapeHtml(d.domain) + '</span>' +
+        '<span class="cvz-retrieved-bucket cvz-retrieved-bucket-' + d.bucket + '">' + escapeHtml(RETRIEVED_BUCKET_LABELS[d.bucket] || '') + '</span>' +
+        (d.is_competitor ? '<span class="cvz-competitor-badge">Wettbewerber</span>' : '') +
+        '<span class="cvz-fanout-prompt-meta">in ' + d.prompts_found + (d.prompts_found === 1 ? ' Prompt' : ' Prompts') +
+          ' gefunden · ' + d.runs_cited + ' von ' + d.runs_found + ' Läufen zitiert (' + pct + ' %)</span>';
+      details.appendChild(summary);
+
+      var body = document.createElement('div');
+      body.className = 'cvz-retrieved-body';
+      var facts = [];
+      facts.push('An ' + d.days_found + (d.days_found === 1 ? ' Tag' : ' Tagen') + ' gefunden');
+      if (d.prompts_cited) facts.push('in ' + d.prompts_cited + ' von ' + d.prompts_found + ' Prompts mindestens einmal zitiert');
+      if (d.phases && d.phases.length) {
+        facts.push('Phasen: ' + d.phases.map(function (ph) { return PHASE_LABELS[ph] || ph; }).join(', '));
+      }
+      if (d.content_type && RETRIEVED_TYPE_LABELS[d.content_type]) facts.push('Seitentyp: ' + RETRIEVED_TYPE_LABELS[d.content_type]);
+      var factsP = document.createElement('p');
+      factsP.className = 'cvz-card-placeholder-text';
+      factsP.style.margin = '6px 0';
+      factsP.textContent = facts.join(' · ') + '.';
+      body.appendChild(factsP);
+
+      var pagesLabel = document.createElement('p');
+      pagesLabel.className = 'cvz-section-label cvz-section-label-sm';
+      pagesLabel.textContent = 'Gefundene Seiten' + (d.pages_total > (d.pages || []).length ? ' (häufigste ' + d.pages.length + ' von ' + d.pages_total + ')' : ' (' + d.pages_total + ')');
+      body.appendChild(pagesLabel);
+
+      var list = document.createElement('div');
+      list.className = 'cvz-prompt-source-list';
+      (d.pages || []).forEach(function (pg) {
+        var a = document.createElement('a');
+        a.className = 'cvz-prompt-source-item';
+        a.href = pg.url || '#';
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.innerHTML = '<span>' + escapeHtml(pg.title || pg.url) + '</span>' +
+          '<span class="cvz-fanout-chip-count">' + pg.runs_found + '× gefunden</span>';
+        list.appendChild(a);
+      });
+      body.appendChild(list);
+      details.appendChild(body);
+
+      details.addEventListener('toggle', function () { state.openRetrievedDomains[openKey] = details.open; });
+      section.appendChild(details);
+    });
+
+    return section;
   }
 
   function renderFanOutView(topicId, detail) {
@@ -8614,6 +8873,25 @@
               ? 'Eure Domain war in keiner dieser ' + topRuns.length + ' Antworten Quelle.'
               : 'Eure Domain: Platz ' + (ownRank + 1) + ' von ' + Object.keys(counts).length + ' Quellen.') + '</p>'
           : '<p class="cvz-pv-muted">Noch keine Quellen.</p>');
+
+      // NEU (13.11.2026): Seiten, die ChatGPT bei der Suche gesehen, aber nicht als Quelle genannt hat.
+      // retrieved_not_cited ist null, wenn die Antwort keine Suchtreffer hat (Gemini oder keine Websuche).
+      if (eng.id === 'chat_gpt' && Array.isArray(run.retrieved_not_cited)) {
+        var rnc = run.retrieved_not_cited.filter(function (r) { return !r.is_own; });
+        var rncOwn = run.retrieved_not_cited.filter(function (r) { return r.is_own; });
+        var rncByDomain = {};
+        rnc.forEach(function (r) { var b = pvBareDomain(r.domain); if (!rncByDomain[b]) rncByDomain[b] = r; });
+        var rncDomains = Object.keys(rncByDomain);
+        card('Gefunden, nicht zitiert (' + rncDomains.length + ')',
+          (rncOwn.length
+            ? '<p class="cvz-pv-muted"><strong>Eure Seite war unter den Suchtreffern, wurde aber nicht zitiert:</strong> ' +
+              rncOwn.map(function (r) { return '<a href="' + escapeHtml(r.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(r.title || r.url) + '</a>'; }).join(', ') + '</p>'
+            : '') +
+          (rncDomains.length
+            ? '<div class="cvz-pv-chips">' + rncDomains.map(function (b) { return chip(b, null, rncByDomain[b].url); }).join('') + '</div>' +
+              '<p class="cvz-pv-muted">Diese Seiten standen unter den Suchtreffern von ChatGPT. Ob ChatGPT sie geöffnet hat, ist nicht bekannt.</p>'
+            : '<p class="cvz-pv-muted">ChatGPT hat alle gefundenen Seiten auch zitiert.</p>'));
+      }
 
       if (eng.id === 'chat_gpt' && Array.isArray(run.fan_out_queries) && run.fan_out_queries.length) {
         card('Wonach ChatGPT gesucht hat', '<div class="cvz-pv-chips">' + run.fan_out_queries.map(function (q) {
@@ -11987,6 +12265,16 @@
       '.cvz-fanout-prompt[open] > summary::before { content: "▾"; }' +
       '.cvz-fanout-prompt > summary:hover { color: var(--cvz-accent, #4fd1c5); }' +
       '.cvz-fanout-prompt-meta { margin-left: 8px; font-size: 12px; color: var(--cvz-text-muted); }' +
+      // NEU (13.11.2026): Unterbereich "Quellen" (gefunden vs. zitiert)
+      '.cvz-retrieved-own { font-size: 13px; color: var(--cvz-text); margin: 4px 0 10px; padding: 8px 10px; border-left: 2px solid var(--cvz-teal); background: rgba(13,148,136,.08); }' +
+      '.cvz-retrieved-toggle { font-size: 12px; color: var(--cvz-text-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }' +
+      '.cvz-retrieved-row > summary { align-items: center; flex-wrap: wrap; }' +
+      '.cvz-retrieved-row > summary .cvz-timeline-logo { width: 16px; height: 16px; }' +
+      '.cvz-retrieved-domain { font-weight: 600; }' +
+      '.cvz-retrieved-bucket { font-size: 10px; padding: 1px 6px; border: 1px solid var(--cvz-border); color: var(--cvz-text-muted); }' +
+      '.cvz-retrieved-bucket-nie_zitiert { border-color: var(--cvz-amber); color: var(--cvz-amber); }' +
+      '.cvz-retrieved-bucket-oft_zitiert { border-color: var(--cvz-teal); color: var(--cvz-teal); }' +
+      '.cvz-retrieved-body { padding: 0 0 4px 18px; }' +
       // NEU (25.09.2026, Kundenwunsch): Zeitraum-Preset-Picker (4/12/26 Wochen).
       '.cvz-weeks-preset-picker { display: flex; gap: 6px; flex-shrink: 0; }' +
       '.cvz-weeks-preset-btn { padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius:0; ' +
