@@ -193,6 +193,7 @@
     loadingRetrieved: {},
     retrievedErrors: {},
     retrievedFilter: {},       // { [topicId]: 'alle' | 'nie_zitiert' | 'selten_zitiert' | 'oft_zitiert' }
+    retrievedPhase: {},        // { [topicId]: 'alle' | 'exploration' | 'evaluation' | 'comparison' | 'decision' }
     retrievedShowSingles: {},  // { [topicId]: true } = auch Domains mit nur einem Treffer
     retrievedShowCompetitors: {}, // { [topicId]: true } = Wettbewerber einblenden
     openRetrievedDomains: {},  // { [topicId|domain]: true } = aufgeklappt
@@ -5609,6 +5610,31 @@
     social_media: 'Social Media', produktseite: 'Produktseite',
   };
 
+  // NEU (13.11.2026): Phasen-Filter. Das Backend liefert je Domain by_phase, die Umrechnung
+  // (Quote, Einordnung, Sortierung) passiert hier, damit der Wechsel ohne neuen Request geht.
+  var RETRIEVED_PHASES = [{ id: 'alle', label: 'Alle Phasen' }].concat(PHASE_ORDER.map(function (ph) {
+    return { id: ph, label: PHASE_LABELS[ph] || ph };
+  }));
+
+  function retrievedBucket(rate, oftenRate) {
+    if (rate >= oftenRate) return 'oft_zitiert';
+    if (rate > 0) return 'selten_zitiert';
+    return 'nie_zitiert';
+  }
+
+  // Sicht auf eine Domain für die gewählte Phase. null = Domain kommt in dieser Phase nicht vor.
+  function retrievedPhaseView(d, phase, oftenRate) {
+    if (phase === 'alle') return d;
+    var bp = (d.by_phase || {})[phase];
+    if (!bp || !bp.runs_found) return null;
+    var rate = bp.runs_cited / bp.runs_found;
+    var v = Object.assign({}, d, {
+      runs_found: bp.runs_found, runs_cited: bp.runs_cited, prompts_found: bp.prompts_found,
+      cite_rate: rate, bucket: retrievedBucket(rate, oftenRate),
+    });
+    return v;
+  }
+
   function retrievedKey(topicId) {
     return topicId + '|' + RETRIEVED_WEEKS;
   }
@@ -5669,30 +5695,50 @@
     var data = state.retrievedCache[key];
     if (!data) { note('Noch keine Daten geladen.'); return section; }
 
-    var total = data.runs_total || 0;
-    var withSearch = data.runs_with_search || 0;
-    if (total === 0) { note('In den letzten 28 Tagen liegen keine ChatGPT-Läufe vor.', 'cvz-fanout-coverage'); return section; }
-    note('Letzte 28 Tage: Bei ' + withSearch + ' von ' + total + ' ChatGPT-Läufen (' + Math.round(withSearch / total * 100) +
+    var phase = state.retrievedPhase[topicId] || 'alle';
+    var oftenRate = data.often_cited_rate || 0.5;
+    var phaseRuns = phase === 'alle' ? data : ((data.runs_by_phase || {})[phase] || { runs_total: 0, runs_with_search: 0 });
+
+    // Phasen-Umschalter steht immer oben, auch wenn eine Phase leer ist.
+    var phasePicker = document.createElement('div');
+    phasePicker.className = 'cvz-weeks-preset-picker cvz-retrieved-phases';
+    RETRIEVED_PHASES.forEach(function (ph) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cvz-weeks-preset-btn' + (phase === ph.id ? ' cvz-weeks-preset-btn-active' : '');
+      btn.textContent = ph.label;
+      btn.addEventListener('click', function () { state.retrievedPhase[topicId] = ph.id; render(); });
+      phasePicker.appendChild(btn);
+    });
+    section.appendChild(phasePicker);
+
+    var phaseText = phase === 'alle' ? '' : ' in der Phase ' + (PHASE_LABELS[phase] || phase);
+    var total = phaseRuns.runs_total || 0;
+    var withSearch = phaseRuns.runs_with_search || 0;
+    if (total === 0) { note('In den letzten 28 Tagen liegen keine ChatGPT-Läufe' + phaseText + ' vor.', 'cvz-fanout-coverage'); return section; }
+    note('Letzte 28 Tage' + phaseText + ': Bei ' + withSearch + ' von ' + total + ' ChatGPT-Läufen (' + Math.round(withSearch / total * 100) +
       ' %) hat ChatGPT im Web gesucht. Nur diese Läufe sind in der Auswertung.', 'cvz-fanout-coverage');
     if (withSearch < 10) {
       note('Wenige Läufe mit Websuche: Die Liste ist eine Stichprobe und kann sich mit weiteren Läufen noch deutlich ändern.', 'cvz-fanout-warn');
     }
     if (withSearch === 0) return section;
 
-    var domains = data.domains || [];
+    var domains = (data.domains || []).map(function (d) { return retrievedPhaseView(d, phase, oftenRate); })
+      .filter(Boolean)
+      .sort(function (a, b) { return (b.prompts_found - a.prompts_found) || (b.runs_found - a.runs_found) || (b.days_found - a.days_found); });
 
     // Eigene Domain zuerst als eigene Zeile: "gefunden, aber nicht zitiert" ist für euch selbst die wichtigste Zahl.
     var own = domains.filter(function (d) { return d.is_own; })[0];
     var ownNote = document.createElement('p');
     ownNote.className = 'cvz-retrieved-own';
     if (own) {
-      ownNote.innerHTML = '<strong>Eure Domain</strong>: in ' + own.runs_found + ' von ' + withSearch +
+      ownNote.innerHTML = '<strong>Eure Domain</strong>' + escapeHtml(phaseText) + ': in ' + own.runs_found + ' von ' + withSearch +
         ' Läufen gefunden, in ' + own.runs_cited + ' davon zitiert' +
         (own.runs_found > own.runs_cited
           ? '. In ' + (own.runs_found - own.runs_cited) + ' Läufen hat ChatGPT eure Seite gesehen und trotzdem andere Quellen genannt.'
           : '.');
     } else {
-      ownNote.innerHTML = '<strong>Eure Domain</strong> stand in den letzten 28 Tagen in keinem Lauf unter den Suchtreffern.';
+      ownNote.innerHTML = '<strong>Eure Domain</strong> stand in den letzten 28 Tagen' + escapeHtml(phaseText) + ' in keinem Lauf unter den Suchtreffern.';
     }
     section.appendChild(ownNote);
 
@@ -5700,7 +5746,8 @@
     var filter = state.retrievedFilter[topicId] || 'alle';
     var showSingles = !!state.retrievedShowSingles[topicId];
     var showComp = !!state.retrievedShowCompetitors[topicId];
-    var counts = data.bucket_counts || {};
+    var counts = { oft_zitiert: 0, selten_zitiert: 0, nie_zitiert: 0 };
+    domains.forEach(function (d) { if (!d.is_own && !d.is_competitor) counts[d.bucket]++; });
 
     var toolbar = document.createElement('div');
     toolbar.className = 'cvz-fanout-toolbar';
@@ -5733,7 +5780,7 @@
     section.appendChild(toolbar);
 
     // Einzeltreffer = nur in einem Prompt und an einem Tag gefunden. Bei einem Lauf pro Prompt und Tag ist das Rauschen.
-    var isSingle = function (d) { return d.prompts_found < 2 && d.days_found < 2; };
+    var isSingle = function (d) { return phase === 'alle' ? (d.prompts_found < 2 && d.days_found < 2) : d.runs_found < 2; };
     var hiddenSingles = 0;
     var rows = domains.filter(function (d) {
       if (d.is_own) return false;
@@ -5770,17 +5817,22 @@
         '<span class="cvz-retrieved-domain">' + escapeHtml(d.domain) + '</span>' +
         '<span class="cvz-retrieved-bucket cvz-retrieved-bucket-' + d.bucket + '">' + escapeHtml(RETRIEVED_BUCKET_LABELS[d.bucket] || '') + '</span>' +
         (d.is_competitor ? '<span class="cvz-competitor-badge">Wettbewerber</span>' : '') +
-        '<span class="cvz-fanout-prompt-meta">in ' + d.prompts_found + (d.prompts_found === 1 ? ' Prompt' : ' Prompts') +
-          ' gefunden · ' + d.runs_cited + ' von ' + d.runs_found + ' Läufen zitiert (' + pct + ' %)</span>';
+        '<span class="cvz-fanout-prompt-meta">in ' + Math.round(d.runs_found / withSearch * 100) + ' % der Antworten gefunden (' +
+          d.prompts_found + (d.prompts_found === 1 ? ' Prompt' : ' Prompts') + ') · ' +
+          d.runs_cited + ' von ' + d.runs_found + ' zitiert (' + pct + ' %)</span>';
       details.appendChild(summary);
 
       var body = document.createElement('div');
       body.className = 'cvz-retrieved-body';
       var facts = [];
-      facts.push('An ' + d.days_found + (d.days_found === 1 ? ' Tag' : ' Tagen') + ' gefunden');
-      if (d.prompts_cited) facts.push('in ' + d.prompts_cited + ' von ' + d.prompts_found + ' Prompts mindestens einmal zitiert');
-      if (d.phases && d.phases.length) {
-        facts.push('Phasen: ' + d.phases.map(function (ph) { return PHASE_LABELS[ph] || ph; }).join(', '));
+      facts.push('An ' + d.days_found + (d.days_found === 1 ? ' Tag' : ' Tagen') + ' gefunden' + (phase === 'alle' ? '' : ' (alle Phasen)'));
+      if (d.prompts_cited && phase === 'alle') facts.push('in ' + d.prompts_cited + ' von ' + d.prompts_found + ' Prompts mindestens einmal zitiert');
+      if (d.by_phase && phase === 'alle') {
+        var phParts = PHASE_ORDER.filter(function (ph) { return d.by_phase[ph]; }).map(function (ph) {
+          var bp = d.by_phase[ph];
+          return (PHASE_LABELS[ph] || ph) + ' ' + bp.runs_cited + '/' + bp.runs_found;
+        });
+        if (phParts.length) facts.push('Zitiert/gefunden je Phase: ' + phParts.join(', '));
       }
       if (d.content_type && RETRIEVED_TYPE_LABELS[d.content_type]) facts.push('Seitentyp: ' + RETRIEVED_TYPE_LABELS[d.content_type]);
       var factsP = document.createElement('p');
@@ -5791,7 +5843,7 @@
 
       var pagesLabel = document.createElement('p');
       pagesLabel.className = 'cvz-section-label cvz-section-label-sm';
-      pagesLabel.textContent = 'Gefundene Seiten' + (d.pages_total > (d.pages || []).length ? ' (häufigste ' + d.pages.length + ' von ' + d.pages_total + ')' : ' (' + d.pages_total + ')');
+      pagesLabel.textContent = 'Gefundene Seiten, alle Phasen' + (d.pages_total > (d.pages || []).length ? ' (häufigste ' + d.pages.length + ' von ' + d.pages_total + ')' : ' (' + d.pages_total + ')');
       body.appendChild(pagesLabel);
 
       var list = document.createElement('div');
@@ -12275,6 +12327,7 @@
       '.cvz-retrieved-bucket-nie_zitiert { border-color: var(--cvz-amber); color: var(--cvz-amber); }' +
       '.cvz-retrieved-bucket-oft_zitiert { border-color: var(--cvz-teal); color: var(--cvz-teal); }' +
       '.cvz-retrieved-body { padding: 0 0 4px 18px; }' +
+      '.cvz-retrieved-phases { margin: 0 0 10px; flex-wrap: wrap; }' +
       // NEU (25.09.2026, Kundenwunsch): Zeitraum-Preset-Picker (4/12/26 Wochen).
       '.cvz-weeks-preset-picker { display: flex; gap: 6px; flex-shrink: 0; }' +
       '.cvz-weeks-preset-btn { padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius:0; ' +
