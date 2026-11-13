@@ -4663,6 +4663,16 @@
   // später am Tag): kein Rückfall auf "Erforschung" mehr, weder hier noch im Backend. Fragen ohne gültige Phase
   // gehören zu keiner Phase (nur zu "Gesamt"). Hintergrund: Die 5 Fragen, die "Erforschung (9)" statt 4
   // ergaben, waren Entdeckungsfragen (discovery), die als Vorschläge gelten und nicht gemessen werden.
+  // NEU (13.11.2026): Stufen der Zitierrate in "Sichtbarkeit je Rolle". Vorläufige Annahme, nach einigen
+  // Wochen echter Daten nachjustieren: ab 30 % stark, 10 bis 29 % mittel, darunter schwach.
+  var RATE_STRONG = 0.30;
+  var RATE_MEDIUM = 0.10;
+  function rateTier(rate) {
+    if (rate >= RATE_STRONG) return 'stark';
+    if (rate >= RATE_MEDIUM) return 'mittel';
+    return 'schwach';
+  }
+
   function resolvePromptPhase(p) {
     var ph = String((p && (p.messymiddle_phase || p.phase)) || '').toLowerCase().trim();
     return PHASE_ORDER.indexOf(ph) !== -1 ? ph : null;
@@ -4786,7 +4796,7 @@
     note.className = 'cvz-chart-caption';
     note.style.marginTop = '10px';
     note.textContent = 'Zitiert = eure Domain wurde in den letzten ' + winDays + ' Tagen in mindestens einer Antwort (' + activeChannelLabel() +
-      ') als Quelle genannt. Fragen ohne Antworten im Zeitraum zählen in der Tabelle nicht mit. Rolle einer Frage ändern: im Daten-Tab den Prompt aufklappen.';
+      ') als Quelle genannt. Die Prozentzahl in der Tabelle ist der Durchschnitt von "zitiert in x von y Antworten" über diese Fragen. Fragen ohne Antworten im Zeitraum zählen nicht mit. Rolle einer Frage ändern: im Daten-Tab den Prompt aufklappen.';
     panel.appendChild(note);
     return panel;
   }
@@ -4817,8 +4827,12 @@
       // GEÄNDERT (02.10.2026): positiv formuliert (Zweck statt Einschränkung).
       // Die kleine Fragenzahl je Zelle bleibt über die Zählweise "x von y"
       // sichtbar, wird aber nicht mehr als Schwäche benannt.
-      'Jede Zelle zeigt, bei wie vielen Fragen dieser Rolle in dieser Phase eure Domain in den letzten ' + roleWinDays + ' Tagen in mindestens einer KI-Antwort zitiert wurde, zum Beispiel 1 von 2. ' +
-      'So seht ihr auf einen Blick, für welche Rolle in welcher Phase passender Content fehlt: Zellen mit 0 sind die ersten Kandidaten für neue Inhalte. ' +
+      // GEÄNDERT (13.11.2026): Prozent = Zitierrate statt Anteil der Fragen mit mindestens einem Treffer.
+      'Die Prozentzahl ist eure Zitierrate: in welchem Anteil der KI-Antworten der letzten ' + roleWinDays + ' Tage eure Domain als Quelle genannt wurde, ' +
+      'als Durchschnitt über die Fragen dieser Rolle in dieser Phase (jede Frage zählt gleich). ' +
+      'Darunter steht, bei wie vielen Fragen ihr überhaupt mindestens einmal zitiert wurdet. ' +
+      'Beispiel: 2 von 2 Fragen, aber nur 9 %: Ihr kommt bei beiden Fragen vor, aber nur in jeder elften Antwort. ' +
+      'Richtwert (vorläufig): ab 30 % stark, 10 bis 29 % ausbaufähig, unter 10 % schwach. ' +
       'Rollen, die später in den Kaufprozess einsteigen, werden erst ab ihrer Einstiegsphase gemessen.'
     ));
     // NEU (13.11.2026): alle Fragen des Themas, nach Rolle gruppiert (zusätzlich zu den klickbaren Zellen).
@@ -4910,7 +4924,7 @@
     }
 
     function cellStats(roleKey, phase, entry) {
-      var n = 0, measured = 0, cited = 0;
+      var n = 0, measured = 0, cited = 0, rateSum = 0;
       prompts.forEach(function (p) {
         if ((p.role_id || null) !== roleKey) return;
         if (phase && resolvePromptPhase(p) !== phase) return;  // GEÄNDERT (13.11.2026): ohne Phase in keiner Phase, wie Backend
@@ -4926,9 +4940,12 @@
         if (ps.total > 0) {
           measured++;
           if (ps.cited > 0) cited++;
+          rateSum += Math.min(ps.cited, ps.total) / ps.total;
         }
       });
-      return { n: n, measured: measured, cited: cited };
+      // NEU (13.11.2026): Zitierrate = Durchschnitt der Raten je Frage (nicht alle Antworten zusammengezählt,
+      // damit eine Frage mit mehr Läufen die Zelle nicht dominiert).
+      return { n: n, measured: measured, cited: cited, rate: measured ? rateSum / measured : 0 };
     }
 
     function cellHtml(st, isTotal, roleKey, phase) {
@@ -4943,18 +4960,24 @@
       if (st.measured === 0) {
         return '<span style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);text-decoration:underline dotted;text-underline-offset:2px;">neu, Daten ab<br>nächstem Lauf</span>';
       }
-      var pct = Math.round((st.cited / st.measured) * 100);
+      // GEÄNDERT (13.11.2026): Prozent = Zitierrate (Anteil der Antworten), siehe cellStats.
+      var pct = Math.round(st.rate * 100);
+      var tier = rateTier(st.rate);
       return '<div style="font-size:' + (isTotal ? '16px' : '14px') + ';font-weight:700;color:' +
-          (pct === 0 ? 'var(--cvz-red,#de5b50)' : 'var(--cvz-text,#e6edf3)') + ';">' + pct + '%</div>' +
+          (tier === 'schwach' ? 'var(--cvz-red,#de5b50)' : tier === 'mittel' ? 'var(--cvz-amber,#c98e2a)' : 'var(--cvz-text,#e6edf3)') + ';">' +
+          pct + '%</div>' +
         // GEÄNDERT (13.11.2026): unterstrichen, damit erkennbar ist, dass die Zelle die Fragen öffnet.
         '<div style="font-size:10px;color:var(--cvz-text-muted,#8b98a5);text-decoration:underline dotted;text-underline-offset:2px;">' +
-          st.cited + ' von ' + st.measured + (st.measured === 1 ? ' Frage' : ' Fragen') + '</div>';
+          'bei ' + st.cited + ' von ' + st.measured + (st.measured === 1 ? ' Frage' : ' Fragen') + ' zitiert</div>';
     }
 
+    // GEÄNDERT (13.11.2026): drei Stufen nach Zitierrate statt Verlauf nach Fragen-Anteil.
     function cellBg(st) {
       if (st.n === 0 || st.measured === 0) return 'transparent';
-      var pct = st.cited / st.measured;
-      return pct === 0 ? 'rgba(222,91,80,.10)' : 'rgba(79,209,197,' + (0.08 + pct * 0.42).toFixed(2) + ')';
+      var tier = rateTier(st.rate);
+      if (tier === 'schwach') return 'rgba(222,91,80,.10)';
+      if (tier === 'mittel') return 'rgba(201,142,42,.12)';
+      return 'rgba(79,209,197,' + (0.18 + Math.min(st.rate, 1) * 0.32).toFixed(2) + ')';
     }
 
     // NEU (13.11.2026): Zellen mit Fragen sind klickbar und öffnen darunter die Fragen-Ansicht.
@@ -11878,7 +11901,7 @@
     headRow.appendChild(makeTip(
       'Zeigt, welche Domains in den KI-Antworten der letzten ' + dashWindowDays(dashData) + ' Tage als Quelle auftauchen, und bei welchen Fragen und Rollen. ' +
       '"Bei 3 von 5 Fragen" heißt: In mindestens einer Antwort auf 3 von 5 Fragen wurde die Domain zitiert. ' +
-      'Das ist bewusst keine Prozent-Zitierrate pro Antwort, damit die Zahlen zu "Sichtbarkeit je Rolle" passen. ' +
+      'So lassen sich auch Domains vergleichen, die nur bei wenigen Fragen vorkommen. ' +
       'Zeile anklicken, um die Fragen dahinter zu sehen. Fragen mit "Ihr: nicht zitiert" sind die konkreten Content-Lücken.'
     ));
     section.appendChild(headRow);
