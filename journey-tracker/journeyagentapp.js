@@ -66,6 +66,10 @@
   var WINDOW_PRESETS = [28, 90, 180, 0];
   var WINDOW_SWITCH_TABS = ['situation', 'journey', 'wettbewerb', 'verlauf'];
 
+  // NEU (13.11.2026): Takt für das automatische Aktualisieren während laufender Analysen.
+  var STEP_POLL_INTERVAL_MS = 15000;
+  var TOPIC_POLL_INTERVAL_MS = 15000;
+
   var state = {
     memberstackId: null,
     memberToken:   null,
@@ -670,7 +674,18 @@
     });
     if (!hasBusyTopic) return;
 
+    // GEÄNDERT (13.11.2026): wie beim Schritt-Polling höchstens eine Abfrage gleichzeitig, Takt 15 Sekunden.
     state.pollTimer = setInterval(async function () {
+      if (state.topicPollBusy) return;
+      state.topicPollBusy = true;
+      try {
+        await topicPollTick();
+      } finally {
+        state.topicPollBusy = false;
+      }
+    }, TOPIC_POLL_INTERVAL_MS);
+
+    async function topicPollTick() {
       try {
         var changedIds = await loadTopics();
         changedIds.forEach(function (id) { purgeTopicCaches(id); });
@@ -690,7 +705,7 @@
         state.pollTimer = null;
       }
       render();
-    }, 5000);
+    }
   }
   async function loadTopicDetail(topicId) {
     if (CONFIG.useMockData) {
@@ -11134,7 +11149,21 @@
     if (state.stepPollTimer) return;
     var attempts = 0;
 
+    // GEÄNDERT (13.11.2026): Takt 15 statt 5 Sekunden und nie zwei Abfragen gleichzeitig. GET /topics/{id}
+    // brauchte im Log bis zu 85 Sekunden, mit festem 5-Sekunden-Takt stapelten sich die Abfragen
+    // (mehrere identische Requests parallel) und bremsten den Server zusätzlich.
+    // 60 Durchläufe x 15 s = 15 Minuten, danach greift ohnehin die Hänger-Erkennung im Backend (20 Minuten).
     state.stepPollTimer = setInterval(async function () {
+      if (state.stepPollBusy) return;
+      state.stepPollBusy = true;
+      try {
+        await stepPollTick();
+      } finally {
+        state.stepPollBusy = false;
+      }
+    }, STEP_POLL_INTERVAL_MS);
+
+    async function stepPollTick() {
       attempts++;
       var fresh = null;
       try {
@@ -11173,7 +11202,7 @@
       if (state.activeView === 'topic-detail' && state.activeTopicId === topicId) {
         loadTabData(topicId);
       }
-    }, 5000);
+    }
   }
 
   // Hinweis mit Button für Schritte, die fehlgeschlagen sind, fehlen oder gerade laufen.
