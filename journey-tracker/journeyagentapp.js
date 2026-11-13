@@ -1470,6 +1470,9 @@
       if (cacheIsStale) {
         state.topicDetailCache[topicId] = await loadTopicDetail(topicId);
       }
+      // NEU (13.11.2026): Detail aus dem Zwischenspeicher: Schritt-Hinweise können veraltet sein, siehe
+      // refreshStepStatus. Im Hintergrund aktualisieren, die Seite erscheint trotzdem sofort.
+      if (!cacheIsStale) refreshStepStatus(topicId);
     } catch (e) {
       console.error('[CVZ Visibility] Topic-Detail konnte nicht geladen werden:', e);
       state.topicDetailCache[topicId] = null;
@@ -11571,6 +11574,28 @@
 
   // --- Retry eines einzelnen Schritts -------------------------------------
 
+  // NEU (13.11.2026): Schritt-Status (step_status) frisch vom Server holen und in den Zwischenspeicher
+  // übernehmen. Anlass: Ein seit Stunden offener Tab zeigte "Suchergebnis-Analyse unterbrochen", obwohl sie
+  // längst erfolgreich gelaufen war. Das Detail wird nur bei einem Wechsel des Themen-Status neu geladen,
+  // nicht bei Änderungen einzelner Schritte. Leichter Abruf (GET /topics/{id}/step-status), kein volles Detail.
+  // Gibt die frische Liste zurück, oder null, wenn der Abruf nicht klappte (dann bleibt alles, wie es war).
+  async function refreshStepStatus(topicId) {
+    if (CONFIG.useMockData || !topicId) return null;
+    var fresh;
+    try {
+      fresh = await apiFetch('/topics/' + topicId + '/step-status');
+    } catch (e) {
+      console.warn('[CVZ Visibility] Schritt-Status konnte nicht aktualisiert werden:', e);
+      return null;
+    }
+    var steps = (fresh && fresh.step_status) || [];
+    var cached = state.topicDetailCache[topicId];
+    if (cached) cached.step_status = steps;
+    render();
+    if (steps.some(function (s) { return s.state === 'running'; })) startStepPolling(topicId);
+    return steps;
+  }
+
   async function retryStep(topicId, step) {
     var key = topicId + '|' + step;
     if (state.retryingSteps[key]) return;
@@ -11588,7 +11613,20 @@
       startStepPolling(topicId);
     } catch (e) {
       console.error('[CVZ Visibility] Schritt konnte nicht gestartet werden:', e);
-      await showCvzAlert('Der Vorgang konnte nicht gestartet werden: ' + (e.message || 'Unbekannter Fehler'));
+      // GEÄNDERT (13.11.2026): 409 heißt meist, dass die Anzeige veraltet ist (Schritt längst erledigt oder
+      // läuft schon). Dann den Status neu holen: Ist der Hinweis danach weg oder läuft der Schritt, keine
+      // Fehlermeldung. Nur wenn der Schritt weiterhin als fehlgeschlagen gilt, die Meldung des Servers zeigen.
+      var showError = true;
+      if (e.status === 409) {
+        var steps = await refreshStepStatus(topicId);
+        if (steps) {
+          var entry = steps.filter(function (s) { return s.step === step; })[0];
+          showError = !!entry && entry.state !== 'running';
+        }
+      }
+      if (showError) {
+        await showCvzAlert('Der Vorgang konnte nicht gestartet werden: ' + (e.message || 'Unbekannter Fehler'));
+      }
     }
     delete state.retryingSteps[key];
     render();
