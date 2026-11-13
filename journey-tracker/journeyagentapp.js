@@ -345,6 +345,8 @@
     // NEU (09.11.2026): "Sichtbarkeit je Rolle" (Tab Journey) braucht bei einem anderen Zeitraum als 28 Tage
     // eigene Prompt-Zahlen.
     if (state.activeSubTab === 'journey') maybeLoadPromptStats(topicId);
+    // NEU (13.11.2026): "Gefunden, nicht zitiert" in den Phasen-Karten
+    if (state.activeSubTab === 'journey') maybeLoadRetrieved(topicId);
     // NEU (06.10.2026): Fan-out-Queries nur laden, wenn der Unterbereich offen ist.
     if (state.activeSubTab === 'daten' && state.activeDataView === 'fanout') {
       maybeLoadFanOut(topicId);
@@ -2469,6 +2471,9 @@
         maybeLoadFanOut(state.activeTopicId);
       }
       if (newTab === 'daten' && state.activeDataView === 'quellen' && state.activeView === 'topic-detail') {
+        maybeLoadRetrieved(state.activeTopicId);
+      }
+      if (newTab === 'journey' && state.activeView === 'topic-detail') {
         maybeLoadRetrieved(state.activeTopicId);
       }
       if ((newTab === 'situation' || newTab === 'daten' || newTab === 'journey' || newTab === 'wettbewerb') && state.activeView === 'topic-detail') {
@@ -5616,6 +5621,10 @@
     return { id: ph, label: PHASE_LABELS[ph] || ph };
   }));
 
+  function retrievedTypeLabel(t) {
+    return CONTENT_TYPE_LABELS[t] || RETRIEVED_TYPE_LABELS[t] || t;
+  }
+
   function retrievedBucket(rate, oftenRate) {
     if (rate >= oftenRate) return 'oft_zitiert';
     if (rate > 0) return 'selten_zitiert';
@@ -5834,7 +5843,9 @@
         });
         if (phParts.length) facts.push('Zitiert/gefunden je Phase: ' + phParts.join(', '));
       }
-      if (d.content_type && RETRIEVED_TYPE_LABELS[d.content_type]) facts.push('Seitentyp: ' + RETRIEVED_TYPE_LABELS[d.content_type]);
+      if (d.content_type) facts.push('Seitentyp: ' + retrievedTypeLabel(d.content_type));
+      if (d.pitchable === true) facts.push('Fremde Beiträge laut Seitenanalyse wahrscheinlich möglich');
+      if (d.pitchable === false) facts.push('Fremde Beiträge laut Seitenanalyse eher nicht möglich');
       var factsP = document.createElement('p');
       factsP.className = 'cvz-card-placeholder-text';
       factsP.style.margin = '6px 0';
@@ -12328,6 +12339,12 @@
       '.cvz-retrieved-bucket-oft_zitiert { border-color: var(--cvz-teal); color: var(--cvz-teal); }' +
       '.cvz-retrieved-body { padding: 0 0 4px 18px; }' +
       '.cvz-retrieved-phases { margin: 0 0 10px; flex-wrap: wrap; }' +
+      '.cvz-journey-retrieved-own { margin: 0 0 4px; font-size: 11px; color: var(--cvz-amber); }' +
+      '.cvz-journey-retrieved-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; margin: 2px 0 0; }' +
+      '.cvz-journey-retrieved-domain { color: var(--cvz-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }' +
+      '.cvz-journey-retrieved-num { color: var(--cvz-text-muted); white-space: nowrap; font-size: 11px; }' +
+      '.cvz-journey-retrieved-meta { margin: 0 0 3px; font-size: 10px; color: var(--cvz-text-muted); }' +
+      '.cvz-journey-retrieved-more { margin-top: 4px; font-size: 11px; }' +
       // NEU (25.09.2026, Kundenwunsch): Zeitraum-Preset-Picker (4/12/26 Wochen).
       '.cvz-weeks-preset-picker { display: flex; gap: 6px; flex-shrink: 0; }' +
       '.cvz-weeks-preset-btn { padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius:0; ' +
@@ -14773,6 +14790,89 @@
     return wrap;
   }
 
+  // NEU (13.11.2026): Block "Gefunden, nicht zitiert" in einer Phasen-Karte des Journey-Tabs.
+  // Gleiche Daten wie Daten > Quellen (state.retrievedCache), nur ChatGPT, letzte 28 Tage.
+  // Zeigt eure eigene Domain, wenn sie gefunden, aber nicht immer zitiert wurde, und die zwei
+  // häufigsten fremden Domains, die in dieser Phase gefunden, aber nie oder selten zitiert werden.
+  // Wettbewerber und Einzeltreffer (nur 1 Lauf) bleiben draußen.
+  var JOURNEY_RETRIEVED_TIP = 'Seiten, die ChatGPT bei seiner Websuche in dieser Phase unter den Suchtreffern hatte, ' +
+    'aber nicht oder selten als Quelle nennt. Ob ChatGPT sie geöffnet hat, ist nicht bekannt. ' +
+    'Kandidaten für eigene Beiträge mit genau passendem Inhalt. Nur ChatGPT, letzte 28 Tage.';
+
+  function renderJourneyRetrievedBlock(topicId, phase) {
+    var data = state.retrievedCache[retrievedKey(topicId)];
+    if (!data || !data.domains) return null;
+    var oftenRate = data.often_cited_rate || 0.5;
+    var views = data.domains.map(function (d) { return retrievedPhaseView(d, phase, oftenRate); }).filter(Boolean);
+    var own = views.filter(function (d) { return d.is_own; })[0];
+    var ownGap = own && own.runs_found > own.runs_cited;
+    var cands = views.filter(function (d) {
+      return !d.is_own && !d.is_competitor && d.bucket !== 'oft_zitiert' && d.runs_found >= 2;
+    }).sort(function (a, b) {
+      // Domains, bei denen fremde Beiträge laut Seitenanalyse unrealistisch sind (z. B. Hersteller-Doku), nach hinten
+      var pa = a.pitchable === false ? 1 : 0, pb = b.pitchable === false ? 1 : 0;
+      return (pa - pb) || (b.prompts_found - a.prompts_found) || (b.runs_found - a.runs_found);
+    });
+    if (!ownGap && !cands.length) return null;
+
+    var wrap = document.createElement('div');
+    var divider = document.createElement('div');
+    divider.style.cssText = 'margin:8px 0 6px;border-top:1px solid var(--cvz-border,#e5e7eb);';
+    wrap.appendChild(divider);
+
+    var label = document.createElement('p');
+    label.style.cssText = 'display:flex;align-items:center;margin:0 0 4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--cvz-text-muted,#6b7280);';
+    label.appendChild(document.createTextNode('Gefunden, nicht zitiert · ChatGPT'));
+    label.appendChild(makeTip(JOURNEY_RETRIEVED_TIP));
+    wrap.appendChild(label);
+
+    if (ownGap) {
+      var ownP = document.createElement('p');
+      ownP.className = 'cvz-journey-retrieved-own';
+      ownP.textContent = 'Eure Domain: ' + own.runs_found + '× gefunden, ' + own.runs_cited + '× zitiert';
+      ownP.title = 'In ' + (own.runs_found - own.runs_cited) + ' Antworten dieser Phase hatte ChatGPT eure Seite unter den Suchtreffern und hat trotzdem andere Quellen genannt.';
+      wrap.appendChild(ownP);
+    }
+
+    cands.slice(0, 2).forEach(function (d) {
+      var row = document.createElement('div');
+      row.className = 'cvz-journey-retrieved-row';
+      var dom = document.createElement('span');
+      dom.className = 'cvz-journey-retrieved-domain';
+      dom.textContent = d.domain;
+      dom.title = d.domain + ': in ' + d.prompts_found + (d.prompts_found === 1 ? ' Prompt' : ' Prompts') + ' dieser Phase gefunden.';
+      row.appendChild(dom);
+      var num = document.createElement('span');
+      num.className = 'cvz-journey-retrieved-num';
+      num.textContent = d.runs_found + '× gefunden, ' + d.runs_cited + '× zitiert';
+      row.appendChild(num);
+      wrap.appendChild(row);
+
+      var metaParts = [];
+      if (d.content_type) metaParts.push(retrievedTypeLabel(d.content_type));
+      if (d.pitchable === false) metaParts.push('fremde Beiträge eher nicht möglich');
+      if (metaParts.length) {
+        var meta = document.createElement('p');
+        meta.className = 'cvz-journey-retrieved-meta';
+        meta.textContent = metaParts.join(' · ');
+        wrap.appendChild(meta);
+      }
+    });
+
+    var more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'cvz-journey-hint-link cvz-journey-retrieved-more';
+    more.textContent = 'Alle Quellen dieser Phase →';
+    more.addEventListener('click', function () {
+      state.retrievedPhase[topicId] = phase;
+      state.retrievedFilter[topicId] = 'alle';
+      state.activeSubTab = 'daten';
+      setDataView('quellen');
+    });
+    wrap.appendChild(more);
+    return wrap;
+  }
+
   function renderJourneyPhaseSection(data, detail) {
     var jc = data.journey_comparison || null;
     var cfg = {
@@ -14958,6 +15058,10 @@
           if (meta.childNodes.length) card.appendChild(meta);
         });
       }
+
+      // NEU (13.11.2026): Gefunden, nicht zitiert (ChatGPT) für diese Phase
+      var retrievedBlock = renderJourneyRetrievedBlock(state.activeTopicId, phase);
+      if (retrievedBlock) card.appendChild(retrievedBlock);
 
       // Sichtbarer Hinweis mit Handlung
       var hint = jc ? _journeyCardHint(scores, sources, cfg) : null;
