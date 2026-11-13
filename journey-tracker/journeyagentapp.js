@@ -2482,9 +2482,12 @@
       var jqSame = jqCur && jqCur.topicId === jqNext.topicId && jqCur.roleKey === jqNext.roleKey && jqCur.phase === jqNext.phase;
       state.journeyPromptPanel = (jqSame || jqCell.hasAttribute('data-cvz-jq-close')) ? null : jqNext;
       render();
+      // GEÄNDERT (13.11.2026): auch beim Klick auf eine Zelle hinscrollen. Die Ansicht öffnet sich unter der
+      // Tabelle und lag oft außerhalb des sichtbaren Bereichs, der Klick wirkte dann wirkungslos.
       if (state.journeyPromptPanel && jqCell.hasAttribute('data-cvz-jq-scroll')) {
         var jqPanel = document.getElementById('cvz-jq-panel');
-        if (jqPanel) jqPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        var jqBlock = jqCell.getAttribute('data-cvz-jq-scroll') === 'nearest' ? 'nearest' : 'start';
+        if (jqPanel) jqPanel.scrollIntoView({ behavior: 'smooth', block: jqBlock });
       }
       return;
     }
@@ -4608,13 +4611,26 @@
   // zitiert / nicht zitiert / noch keine Antworten im Zeitraum, mit denselben Zahlen wie die Tabelle
   // (statsOf = roleStatsOf, berücksichtigt Zeitraum und KI-Kanal). Fragen vor der Einstiegsphase einer Rolle
   // werden gezeigt, aber als "nicht gewertet" markiert, damit die Zahlen nachvollziehbar bleiben.
+  // NEU (13.11.2026): Phase einer Frage wie im Backend (dashboard.py: _resolve_phase). Fragen ohne gültige
+  // Phase zählen dort als "Erforschung", in der Zahl der Phasen-Karte UND in den KI-Werten der Phase. Ohne
+  // dieselbe Regel hier zeigte die Karte "Erforschung (9)", die Fragen-Ansicht aber nur 4.
+  var PROMPT_PHASE_FALLBACK = 'exploration';
+  function resolvePromptPhase(p) {
+    var ph = String((p && (p.messymiddle_phase || p.phase)) || '').toLowerCase().trim();
+    return PHASE_ORDER.indexOf(ph) !== -1 ? ph : PROMPT_PHASE_FALLBACK;
+  }
+  function promptHasOwnPhase(p) {
+    var ph = String((p && (p.messymiddle_phase || p.phase)) || '').toLowerCase().trim();
+    return PHASE_ORDER.indexOf(ph) !== -1;
+  }
+
   function renderJourneyPromptPanel(topicId, prompts, roles, statsOf, winDays) {
     var sel = state.journeyPromptPanel;
     if (!sel || sel.topicId !== topicId) return null;
 
     var roleById = {};
     (roles || []).forEach(function (r) { roleById[r.role_id] = r; });
-    var phaseOf = function (p) { return p.messymiddle_phase || p.phase || null; };
+    var phaseOf = resolvePromptPhase;  // GEÄNDERT (13.11.2026): wie Backend, ohne Phase = Erforschung
     var roleLabelOf = function (key) {
       if (key === '*') return 'Alle Rollen';
       if (!key) return 'Ohne Rolle';
@@ -4688,6 +4704,14 @@
       var text = document.createElement('span');
       text.style.cssText = 'flex:1;';
       text.textContent = p.prompt_text || '';
+      // NEU (13.11.2026): Fragen ohne eigene Phase kenntlich machen (zählen wie im Backend als Erforschung).
+      if (!promptHasOwnPhase(p)) {
+        var noPhase = document.createElement('span');
+        noPhase.style.cssText = 'margin-left:8px;font-size:11px;color:var(--cvz-amber,#c98e2a);white-space:nowrap;';
+        noPhase.title = 'Für diese Frage ist keine Phase hinterlegt. Sie zählt deshalb, wie in den KI-Werten der Phasen-Karten, zur Erforschung.';
+        noPhase.textContent = 'ohne Phase \u2192 Erforschung';
+        text.appendChild(noPhase);
+      }
       li.appendChild(text);
 
       var status = document.createElement('span');
@@ -4748,11 +4772,21 @@
       'So seht ihr auf einen Blick, für welche Rolle in welcher Phase passender Content fehlt: Zellen mit 0 sind die ersten Kandidaten für neue Inhalte. ' +
       'Rollen, die später in den Kaufprozess einsteigen, werden erst ab ihrer Einstiegsphase gemessen.'
     ));
+    // NEU (13.11.2026): alle Fragen des Themas, nach Rolle gruppiert (zusätzlich zu den klickbaren Zellen).
+    var allQBtn = document.createElement('button');
+    allQBtn.type = 'button';
+    allQBtn.className = 'cvz-create-toggle-btn';
+    allQBtn.style.marginLeft = 'auto';
+    allQBtn.setAttribute('data-cvz-jq-cell', '*|');
+    allQBtn.setAttribute('data-cvz-jq-scroll', 'nearest');
+    var allQOpen = state.journeyPromptPanel && state.journeyPromptPanel.topicId === topicId &&
+      state.journeyPromptPanel.roleKey === '*' && state.journeyPromptPanel.phase === '';
+    allQBtn.textContent = allQOpen ? '\u2212 Fragen ausblenden' : 'Alle Fragen ansehen';
+    headRow.appendChild(allQBtn);
     if (bc && !bc._error) {
       var editBtn = document.createElement('button');
       editBtn.type = 'button';
       editBtn.className = 'cvz-create-toggle-btn';
-      editBtn.style.marginLeft = 'auto';
       editBtn.setAttribute('data-cvz-bc-edit-toggle', topicId);
       editBtn.textContent = state.bcEditOpen[topicId] ? '\u2212 Rollen bearbeiten' : ((bc.rollen || []).length ? 'Rollen bearbeiten' : 'Rollen festlegen');
       headRow.appendChild(editBtn);
@@ -4826,11 +4860,11 @@
       var n = 0, measured = 0, cited = 0;
       prompts.forEach(function (p) {
         if ((p.role_id || null) !== roleKey) return;
-        if (phase && (p.messymiddle_phase || p.phase) !== phase) return;
+        if (phase && resolvePromptPhase(p) !== phase) return;  // GEÄNDERT (13.11.2026): ohne Phase = Erforschung, wie Backend
         // GEÄNDERT (13.11.2026): "Gesamt" zählt Fragen vor der Einstiegsphase der Rolle nicht mehr mit. Die
         // Zellen dieser Phasen zeigen "steigt später ein", die Fragen flossen aber trotzdem in die Gesamtzahl
         // ein (Beispiel 13.11.2026: Geschäftsführung 0 von 5 gesamt, sichtbar nur 2 + 2).
-        if (!phase && entry && entryIndex(p.messymiddle_phase || p.phase) < entryIndex(entry)) return;
+        if (!phase && entry && entryIndex(resolvePromptPhase(p)) < entryIndex(entry)) return;
         n++;
         // GEÄNDERT (21.10.2026): letzte 28 Tage, gewählter Kanal. Vorher alle
         // Läufe seit Start: Eine Zelle, die einmal grün war, blieb es für immer.
@@ -4854,13 +4888,14 @@
         return '<div style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);opacity:.7;">nicht gemessen</div>' + addBtn;
       }
       if (st.measured === 0) {
-        return '<span style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);">neu, Daten ab<br>nächstem Lauf</span>';
+        return '<span style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);text-decoration:underline dotted;text-underline-offset:2px;">neu, Daten ab<br>nächstem Lauf</span>';
       }
       var pct = Math.round((st.cited / st.measured) * 100);
       return '<div style="font-size:' + (isTotal ? '16px' : '14px') + ';font-weight:700;color:' +
           (pct === 0 ? 'var(--cvz-red,#de5b50)' : 'var(--cvz-text,#e6edf3)') + ';">' + pct + '%</div>' +
-        '<div style="font-size:10px;color:var(--cvz-text-muted,#8b98a5);">' + st.cited + ' von ' + st.measured +
-          (st.measured === 1 ? ' Frage' : ' Fragen') + '</div>';
+        // GEÄNDERT (13.11.2026): unterstrichen, damit erkennbar ist, dass die Zelle die Fragen öffnet.
+        '<div style="font-size:10px;color:var(--cvz-text-muted,#8b98a5);text-decoration:underline dotted;text-underline-offset:2px;">' +
+          st.cited + ' von ' + st.measured + (st.measured === 1 ? ' Frage' : ' Fragen') + '</div>';
     }
 
     function cellBg(st) {
@@ -4877,7 +4912,7 @@
       var open = state.journeyPromptPanel && state.journeyPromptPanel.topicId === topicId &&
         state.journeyPromptPanel.roleKey === (roleKey || '') && state.journeyPromptPanel.phase === (phase || '');
       return 'cursor:pointer;' + (open ? 'box-shadow:inset 0 0 0 2px var(--cvz-teal,#4fd1c5);' : '') + '" ' +
-        'data-cvz-jq-cell="' + escapeHtml(key) + '" title="Fragen dieser Zelle anzeigen" role="button" tabindex="0">';
+        'data-cvz-jq-cell="' + escapeHtml(key) + '" data-cvz-jq-scroll="nearest" title="Fragen dieser Zelle anzeigen" role="button" tabindex="0">';
     }
 
     var th = 'text-align:center;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;' +
@@ -4924,7 +4959,7 @@
     caption.textContent = 'Anteil der Fragen, bei denen eure Domain in den letzten ' + roleWinDays + ' Tagen in mindestens einer Antwort (' + activeChannelLabel() + ') zitiert wurde, je Rolle und Journey-Phase. ' +
       'Rot: in diesem Zeitraum bei keiner Frage zitiert. „Steigt später ein“: Die Rolle recherchiert erst ab ihrer Einstiegsphase mit, änderbar unter „Rollen bearbeiten“. ' +
       '„Nicht gemessen“: Der Prompt für diese Zelle fehlt noch (z. B. keine freien Plätze), über „+ Prompt“ legt ihr ihn selbst an. ' +
-      'Ein Klick auf eine Zelle zeigt die Fragen dahinter.' +
+      'Ein Klick auf eine Zelle zeigt die Fragen dahinter. Fragen ohne hinterlegte Phase zählen, wie in den Phasen-Karten, zur Erforschung.' +
       (overlayFailed ? ' Die Zahlen für den gewählten Zeitraum konnten nicht geladen werden, gezeigt werden die letzten ' + DEFAULT_WINDOW_DAYS + ' Tage.' : '');
     section.appendChild(caption);
 
