@@ -5853,6 +5853,10 @@
     var questionRows = allQueries.filter(function (q) {
       return q.source === 'paa' || q.source === 'problem_question';
     });
+    // NEU (13.11.2026): echte GSC-Position auch bei doppelt gespeicherten Keywords, siehe enrichKeywordsWithGsc.
+    var gscSourceRows = allQueries.filter(function (q) { return q.source === 'gsc_near_miss'; });
+    thematicKws = enrichKeywordsWithGsc(thematicKws, gscSourceRows);
+    questionRows = enrichKeywordsWithGsc(questionRows, gscSourceRows);
     var gscFiltered = filterGscByTopicRelevance(detail.gsc_rows, detail);
 
     if (!isValidDataView(state.activeDataView)) state.activeDataView = 'keywords';
@@ -8211,6 +8215,17 @@
       if (!keep.messymiddle_phase && other.messymiddle_phase) {
         keep = Object.assign({}, keep, { messymiddle_phase: other.messymiddle_phase });
       }
+      // NEU (13.11.2026): Positionsdaten der Dublette nicht verlieren.
+      if (keep.gsc_position == null && other.gsc_position != null) {
+        keep = Object.assign({}, keep, { gsc_position: other.gsc_position, gsc_impressions: other.gsc_impressions,
+          gsc_clicks: other.gsc_clicks, page_url: keep.page_url || other.page_url || null });
+      }
+      if (keep.organic_rank == null && other.organic_rank != null) {
+        keep = Object.assign({}, keep, { organic_rank: other.organic_rank });
+      }
+      if (!keep.serp_checked_at && other.serp_checked_at) {
+        keep = Object.assign({}, keep, { serp_checked_at: other.serp_checked_at });
+      }
       byKey[key] = keep;
     });
     return order.map(function (k) { return byKey[k]; });
@@ -8293,14 +8308,66 @@
     return state.dataTableFilter[table] || {};
   }
 
+  // GEÄNDERT (13.11.2026): Positionsgruppen heißen jetzt genau wie die Spalte "Eure Position".
+  // Vorher landeten "nicht in Top 20" (geprüft, nicht gefunden) und "nicht geprüft" in einer Gruppe,
+  // das wirkte kaputt. 1000 = "nicht in Top x" (siehe keywordOwnPosition), null = noch nicht geprüft.
+  function positionBucket(pos) {
+    if (pos == null || isNaN(Number(pos))) return 'ungeprueft';
+    pos = Number(pos);
+    if (pos >= 1000) return 'nicht_top';
+    if (pos <= 10) return 'top10';
+    if (pos <= 20) return '11_20';
+    if (pos <= 50) return '21_50';
+    return '51plus';
+  }
+
   function positionBucketOk(pos, bucket) {
     if (!bucket) return true;
-    if (pos == null) return bucket === 'keine';
-    if (bucket === 'top10') return pos <= 10;
-    if (bucket === 'seite2') return pos > 10 && pos <= 20;
-    if (bucket === '21plus') return pos > 20 && pos < 1000;
-    if (bucket === 'keine') return pos >= 1000;
-    return true;
+    return positionBucket(pos) === bucket;
+  }
+
+  // Auswahlliste "Position" mit Anzahl je Gruppe. Leere Gruppen fallen weg (außer der gerade gewählten).
+  function positionFilterOptions(rows, getPos, depth, selected) {
+    var labels = [['top10', 'Top 10'], ['11_20', 'Platz 11–20'], ['21_50', 'Platz 21–50'], ['51plus', 'ab Platz 51'],
+      ['nicht_top', 'nicht in Top ' + (depth || 10)], ['ungeprueft', 'noch nicht geprüft']];
+    var counts = {};
+    (rows || []).forEach(function (r) {
+      var b = positionBucket(getPos(r));
+      counts[b] = (counts[b] || 0) + 1;
+    });
+    var opts = [['', 'Position: alle']];
+    labels.forEach(function (l) {
+      var n = counts[l[0]] || 0;
+      if (n > 0 || selected === l[0]) opts.push([l[0], l[1] + ' (' + n + ')']);
+    });
+    return opts;
+  }
+
+  // NEU (13.11.2026): In search_queries kann dasselbe Keyword doppelt stehen, z. B. als seed_keyword
+  // (ohne GSC-Werte) und als gsc_near_miss (mit Ø-Position). Die Tabelle zeigte dann "nicht in Top 20",
+  // obwohl Search Console eine echte Position kennt. Zeilen ohne eigene GSC-Position übernehmen deshalb
+  // die GSC-Werte desselben Keywords (Groß-/Kleinschreibung und Leerzeichen am Rand egal).
+  // Gibt neue Objekte zurück, die Originaldaten im Cache bleiben unverändert.
+  function enrichKeywordsWithGsc(rows, gscSourceRows) {
+    var byKey = {};
+    (gscSourceRows || []).forEach(function (g) {
+      if (g == null || g.gsc_position == null) return;
+      var key = String(g.keyword || '').trim().toLowerCase();
+      if (!key) return;
+      var cur = byKey[key];
+      if (!cur || (Number(g.gsc_impressions) || 0) > (Number(cur.gsc_impressions) || 0)) byKey[key] = g;
+    });
+    return (rows || []).map(function (kw) {
+      if (kw.gsc_position != null) return kw;
+      var g = byKey[String(kw.keyword || '').trim().toLowerCase()];
+      if (!g) return kw;
+      return Object.assign({}, kw, {
+        gsc_position: g.gsc_position,
+        gsc_impressions: kw.gsc_impressions != null ? kw.gsc_impressions : g.gsc_impressions,
+        gsc_clicks: kw.gsc_clicks != null ? kw.gsc_clicks : g.gsc_clicks,
+        page_url: kw.page_url || g.page_url || null,
+      });
+    });
   }
 
   // Filtert Keyword-/Fragen-Zeilen nach Text, Einschätzung, AI Overview und Position.
@@ -8424,8 +8491,9 @@
     });
     var filterFields = [];
     if (statusOptions.length > 2) filterFields.push({ key: 'status', label: 'Einschätzung', options: statusOptions });
-    filterFields.push({ key: 'pos', label: 'Eure Position', options: [['', 'Position: alle'], ['top10', 'Top 10'],
-      ['seite2', 'Seite 2 (11–20)'], ['21plus', 'ab Platz 21'], ['keine', 'nicht gefunden / nicht geprüft']] });
+    var posDetail = state.topicDetailCache && state.topicDetailCache[state.activeTopicId];
+    filterFields.push({ key: 'pos', label: 'Eure Position', options: positionFilterOptions(keywords, keywordOwnPosition,
+      (posDetail && posDetail.serp_check_depth) || 10, dataTableFilter(tableKey).pos) });
     filterFields.push({ key: 'aio', label: 'AI Overview', options: AIO_FILTER_OPTIONS });
     keywords = filterKeywordRows(tableKey, keywords);
     section.appendChild(renderDataTableFilterBar(tableKey, tableKey === 'fragen' ? 'Fragen durchsuchen …' : 'Keywords durchsuchen …',
@@ -10903,9 +10971,10 @@
     // ineinander. Jetzt ist die Tabelle breiter als der Bildschirm und scrollt seitlich.
     // NEU (13.11.2026): Filterleiste und Sortierung, siehe DATA_TABLE_COLUMNS.
     var gscTotal = gscRows.length;
+    var allGscRows = gscRows;
     gscRows = applyDataTableSort('gsc', filterGscRows(gscRows));
     section.appendChild(renderDataTableFilterBar('gsc', 'Suchanfrage oder URL durchsuchen …', [
-      { key: 'pos', label: 'Position', options: [['', 'Position: alle'], ['top10', 'Top 10'], ['seite2', 'Seite 2 (11–20)'], ['21plus', 'ab Platz 21']] },
+      { key: 'pos', label: 'Position', options: positionFilterOptions(allGscRows, function (r) { return r.position; }, 10, dataTableFilter('gsc').pos) },
       { key: 'aio', label: 'AI Overview', options: AIO_FILTER_OPTIONS },
     ], gscRows.length, gscTotal));
     if (gscRows.length === 0) {
