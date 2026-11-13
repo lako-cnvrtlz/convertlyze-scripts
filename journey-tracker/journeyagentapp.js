@@ -179,6 +179,9 @@
     // NEU (06.10.2026): Unterbereiche im Tab "Daten" (keywords | fragen | prompts | fanout | gsc)
     // und Fan-out-Queries (Daten kommen lazy von GET /topics/{id}/fan-out-queries).
     activeDataView: 'keywords',
+    // NEU (13.11.2026): Sortierung und Filter der Tabellen unter "Daten" (je Tabelle: keywords, fragen, gsc).
+    dataTableSort: {},    // { tabelle: { key, dir: 'asc'|'desc' } }
+    dataTableFilter: {},  // { tabelle: { q, status, aio, pos } }
     fanOutCache: {},          // Schlüssel: topicId + '|' + weeks
     loadingFanOut: {},
     fanOutErrors: {},
@@ -2480,6 +2483,20 @@
       return;
     }
     // NEU (06.10.2026): Unterbereich im Tab "Daten" wechseln.
+    // NEU (13.11.2026): Spaltenkopf anklicken = sortieren (Tabellen unter "Daten").
+    var sortTh = event.target.closest('[data-cvz-sort]');
+    if (sortTh) {
+      var sortParts = sortTh.getAttribute('data-cvz-sort').split('|');
+      toggleDataTableSort(sortParts[0], sortParts[1]);
+      render();
+      return;
+    }
+    var filterReset = event.target.closest('[data-cvz-filter-reset]');
+    if (filterReset) {
+      delete state.dataTableFilter[filterReset.getAttribute('data-cvz-filter-reset')];
+      render();
+      return;
+    }
     var dataViewBtn = event.target.closest('[data-cvz-data-view]');
     if (dataViewBtn) {
       setDataView(dataViewBtn.getAttribute('data-cvz-data-view'));
@@ -5638,6 +5655,7 @@
       wrap.appendChild(renderKeywordsTable(questionRows, true, allEntries, {
         heading: 'Fragen aus Google (People Also Ask) und KI-Vorschläge',
         showManualForm: false,
+        tableKey: 'fragen',
         emptyText: 'Noch keine Fragen verfügbar.',
       }));
     } else if (view === 'prompts') {
@@ -6600,7 +6618,7 @@
     wrap.className = 'cvz-card cvz-week-detail';
 
     if (state.isLoadingWeekDetail) {
-      wrap.innerHTML = '<p class="cvz-card-placeholder-text">L\u00e4dt...</p>';
+      wrap.innerHTML = loadingTextHtml('Wird geladen \u2026');
       return wrap;
     }
 
@@ -7173,7 +7191,7 @@
     if (state.isLoadingCompetitorSuggestions) {
       var loading = document.createElement('p');
       loading.className = 'cvz-card-placeholder-text';
-      loading.textContent = 'L\u00e4dt Vorschl\u00e4ge \u2026';
+      loading.innerHTML = '<span class="cvz-spinner"></span>Vorschl\u00e4ge werden geladen \u2026';
       section.appendChild(loading);
     }
 
@@ -7754,7 +7772,7 @@
       if (state.isLoadingDeletedChangelog) {
         var loadingDeleted = document.createElement('p');
         loadingDeleted.className = 'cvz-card-placeholder-text';
-        loadingDeleted.textContent = 'L\u00e4dt...';
+        loadingDeleted.innerHTML = '<span class="cvz-spinner"></span>Wird geladen \u2026';
         section.appendChild(loadingDeleted);
       } else {
         var deletedEntries = state.deletedChangelogCache[topicId] || [];
@@ -7862,6 +7880,172 @@
   // damit als bestätigt, eine zusätzliche Einschätzung wäre irreführend.
   // GEÄNDERT (06.10.2026): optionaler 4. Parameter opts = { heading, showManualForm, emptyText },
   // damit dieselbe Tabelle auch für den Unterbereich "Fragen" genutzt werden kann.
+  // =========================================================================
+  // NEU (13.11.2026): Sortieren und Filtern in den Tabellen unter "Daten"
+  // (Keywords, Fragen, Search Console). Kundenwunsch: z. B. GSC nach Impressionen, Klicks oder Position
+  // sortieren und die Liste eingrenzen. Alles im Browser, keine neuen Abfragen.
+  // Sortierung: Klick auf einen Spaltenkopf, erneuter Klick dreht die Richtung. Zahlen starten mit dem
+  // sinnvollsten Wert oben (Volumen, Klicks, Impressionen absteigend; Position aufsteigend). Leere Werte
+  // stehen immer unten. Ohne Auswahl bleibt die bisherige Reihenfolge.
+  // =========================================================================
+
+  // Position eines Keywords wie in der Spalte "Eure Position": GSC, sonst SERP-Check, "nicht in Top x" ganz hinten.
+  function keywordOwnPosition(kw) {
+    if (kw.gsc_position != null) return Number(kw.gsc_position);
+    if (kw.organic_rank != null) return Number(kw.organic_rank);
+    if (kw.serp_checked_at) return 1000;
+    return null;
+  }
+
+  var DATA_TABLE_COLUMNS = {
+    keywords: {
+      keyword:  { type: 'text', get: function (k) { return k.keyword; } },
+      volume:   { type: 'num', first: 'desc', get: function (k) { return k.search_volume; } },
+      position: { type: 'num', first: 'asc', get: keywordOwnPosition },
+    },
+    gsc: {
+      query:       { type: 'text', get: function (r) { return r.query; } },
+      clicks:      { type: 'num', first: 'desc', get: function (r) { return r.clicks; } },
+      impressions: { type: 'num', first: 'desc', get: function (r) { return r.impressions; } },
+      ctr:         { type: 'num', first: 'desc', get: function (r) { return r.ctr; } },
+      position:    { type: 'num', first: 'asc', get: function (r) { return r.position; } },
+    },
+  };
+  DATA_TABLE_COLUMNS.fragen = DATA_TABLE_COLUMNS.keywords;
+
+  function toggleDataTableSort(table, key) {
+    var col = (DATA_TABLE_COLUMNS[table] || {})[key];
+    if (!col) return;
+    var cur = state.dataTableSort[table];
+    var dir = (cur && cur.key === key) ? (cur.dir === 'asc' ? 'desc' : 'asc') : (col.first || 'asc');
+    state.dataTableSort[table] = { key: key, dir: dir };
+  }
+
+  // Sortierte Kopie (stabil). Leere Werte immer unten, unabhängig von der Richtung.
+  function applyDataTableSort(table, rows) {
+    var sort = state.dataTableSort[table];
+    var col = sort && (DATA_TABLE_COLUMNS[table] || {})[sort.key];
+    if (!col) return rows;
+    var sign = sort.dir === 'desc' ? -1 : 1;
+    return rows.map(function (r, i) { return { r: r, i: i, v: col.get(r) }; }).sort(function (a, b) {
+      var an = a.v == null || a.v === '' || (col.type === 'num' && isNaN(Number(a.v)));
+      var bn = b.v == null || b.v === '' || (col.type === 'num' && isNaN(Number(b.v)));
+      if (an || bn) return an === bn ? a.i - b.i : (an ? 1 : -1);
+      var c = col.type === 'num' ? Number(a.v) - Number(b.v) : String(a.v).localeCompare(String(b.v), 'de', { sensitivity: 'base' });
+      return c === 0 ? a.i - b.i : sign * c;
+    }).map(function (x) { return x.r; });
+  }
+
+  // <th> mit Sortier-Klick. style: bisherige Inline-Styles der Spalte.
+  function sortableTh(table, key, label, style) {
+    var sort = state.dataTableSort[table];
+    var active = sort && sort.key === key;
+    var arrow = active ? (sort.dir === 'asc' ? ' \u25b2' : ' \u25bc') : ' <span style="opacity:.35;">\u2195</span>';
+    return '<th style="cursor:pointer;user-select:none;' + (style || '') + '" data-cvz-sort="' + table + '|' + key + '"' +
+      ' aria-sort="' + (active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none') + '" title="Sortieren">' +
+      label + arrow + '</th>';
+  }
+
+  function dataTableFilter(table) {
+    return state.dataTableFilter[table] || {};
+  }
+
+  function positionBucketOk(pos, bucket) {
+    if (!bucket) return true;
+    if (pos == null) return bucket === 'keine';
+    if (bucket === 'top10') return pos <= 10;
+    if (bucket === 'seite2') return pos > 10 && pos <= 20;
+    if (bucket === '21plus') return pos > 20 && pos < 1000;
+    if (bucket === 'keine') return pos >= 1000;
+    return true;
+  }
+
+  // Filtert Keyword-/Fragen-Zeilen nach Text, Einschätzung, AI Overview und Position.
+  function filterKeywordRows(table, rows) {
+    var f = dataTableFilter(table);
+    var q = (f.q || '').trim().toLowerCase();
+    return rows.filter(function (k) {
+      if (q && String(k.keyword || '').toLowerCase().indexOf(q) === -1) return false;
+      if (f.status && k.keyword_status !== f.status) return false;
+      if (f.aio && getAiOverviewStatus(k).status !== f.aio) return false;
+      if (f.pos && !positionBucketOk(keywordOwnPosition(k), f.pos)) return false;
+      return true;
+    });
+  }
+
+  function filterGscRows(rows) {
+    var f = dataTableFilter('gsc');
+    var q = (f.q || '').trim().toLowerCase();
+    return rows.filter(function (r) {
+      if (q && (String(r.query || '') + ' ' + String(r.page_url || '')).toLowerCase().indexOf(q) === -1) return false;
+      if (f.aio && getAiOverviewStatus(r).status !== f.aio) return false;
+      if (f.pos && !positionBucketOk(r.position, f.pos)) return false;
+      return true;
+    });
+  }
+
+  // Filterleiste. fields: Liste von { key, label, options: [[wert, text], ...] } für Auswahllisten.
+  // Feste IDs, damit render() den Fokus beim Tippen ins Suchfeld wiederherstellt.
+  function renderDataTableFilterBar(table, placeholder, fields, shown, total) {
+    var f = dataTableFilter(table);
+    var bar = document.createElement('div');
+    bar.className = 'cvz-data-filter-bar';
+    bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px;';
+
+    var input = document.createElement('input');
+    input.type = 'search';
+    input.id = 'cvz-filter-' + table + '-q';
+    input.className = 'cvz-picker-select';
+    input.style.cssText = 'flex:1 1 220px;max-width:320px;';
+    input.placeholder = placeholder;
+    input.value = f.q || '';
+    input.setAttribute('aria-label', placeholder);
+    input.addEventListener('input', function () {
+      state.dataTableFilter[table] = Object.assign({}, dataTableFilter(table), { q: input.value });
+      render();
+    });
+    bar.appendChild(input);
+
+    (fields || []).forEach(function (field) {
+      var sel = document.createElement('select');
+      sel.id = 'cvz-filter-' + table + '-' + field.key;
+      sel.className = 'cvz-picker-select';
+      sel.style.cssText = 'flex:0 1 auto;min-width:0;max-width:220px;';
+      sel.setAttribute('aria-label', field.label);
+      field.options.forEach(function (o) {
+        var opt = document.createElement('option');
+        opt.value = o[0];
+        opt.textContent = o[1];
+        if ((f[field.key] || '') === o[0]) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', function () {
+        var next = Object.assign({}, dataTableFilter(table));
+        next[field.key] = sel.value;
+        state.dataTableFilter[table] = next;
+        render();
+      });
+      bar.appendChild(sel);
+    });
+
+    var active = !!((f.q || '').trim() || (fields || []).some(function (fl) { return f[fl.key]; }));
+    var count = document.createElement('span');
+    count.style.cssText = 'font-size:12px;color:var(--cvz-text-muted,#8b98a5);';
+    count.textContent = active ? shown + ' von ' + total : total + ' Einträge';
+    bar.appendChild(count);
+    if (active) {
+      var reset = document.createElement('button');
+      reset.type = 'button';
+      reset.className = 'cvz-link-btn';
+      reset.setAttribute('data-cvz-filter-reset', table);
+      reset.textContent = 'Filter zurücksetzen';
+      bar.appendChild(reset);
+    }
+    return bar;
+  }
+
+  var AIO_FILTER_OPTIONS = [['', 'AI Overview: alle'], ['yes', 'AI Overview: ja'], ['no', 'AI Overview: nein'], ['unchecked', 'AI Overview: nicht geprüft']];
+
   function renderKeywordsTable(keywords, enableExpansion, changelogEntries, opts) {
     opts = opts || {};
     keywords = dedupeKeywords(keywords);
@@ -7884,6 +8068,33 @@
       return section;
     }
 
+    // NEU (13.11.2026): Filterleiste und Sortierung, siehe DATA_TABLE_COLUMNS.
+    var tableKey = opts.tableKey || 'keywords';
+    var totalCount = keywords.length;
+    var statusOptions = [['', 'Einschätzung: alle']];
+    var seenStatus = {};
+    keywords.forEach(function (k) {
+      if (k.keyword_status && k.keyword_status_label && !seenStatus[k.keyword_status] && k.source !== 'paa') {
+        seenStatus[k.keyword_status] = true;
+        statusOptions.push([k.keyword_status, k.keyword_status_label]);
+      }
+    });
+    var filterFields = [];
+    if (statusOptions.length > 2) filterFields.push({ key: 'status', label: 'Einschätzung', options: statusOptions });
+    filterFields.push({ key: 'pos', label: 'Eure Position', options: [['', 'Position: alle'], ['top10', 'Top 10'],
+      ['seite2', 'Seite 2 (11–20)'], ['21plus', 'ab Platz 21'], ['keine', 'nicht gefunden / nicht geprüft']] });
+    filterFields.push({ key: 'aio', label: 'AI Overview', options: AIO_FILTER_OPTIONS });
+    keywords = filterKeywordRows(tableKey, keywords);
+    section.appendChild(renderDataTableFilterBar(tableKey, tableKey === 'fragen' ? 'Fragen durchsuchen …' : 'Keywords durchsuchen …',
+      filterFields, keywords.length, totalCount));
+    if (keywords.length === 0) {
+      var noHit = document.createElement('p');
+      noHit.className = 'cvz-card-placeholder-text';
+      noHit.textContent = 'Keine Treffer für diese Filter.';
+      section.appendChild(noHit);
+      return section;
+    }
+
     // NEU (21.10.2026): primäres Keyword (source seed_keyword) steht immer oben,
     // unabhängig von seiner Phase, statt unter "Nicht zugeordnet".
     var primary = keywords.filter(function (kw) { return kw.source === 'seed_keyword'; });
@@ -7894,7 +8105,7 @@
       primaryHeading.style.borderLeftColor = 'var(--cvz-teal)';
       primaryHeading.textContent = 'Primäres Keyword';
       section.appendChild(primaryHeading);
-      _appendKeywordGroup(section, primary, enableExpansion, changelogEntries, '__primary__');
+      _appendKeywordGroup(section, primary, enableExpansion, changelogEntries, '__primary__', tableKey);
       if (keywords.length === 0) return section;
     }
 
@@ -7914,7 +8125,7 @@
     var hasAnyPhase = PHASE_ORDER.some(function (p) { return grouped[p].length > 0; });
 
     if (!hasAnyPhase) {
-      _appendKeywordGroup(section, keywords, enableExpansion, changelogEntries, '__all__');
+      _appendKeywordGroup(section, keywords, enableExpansion, changelogEntries, '__all__', tableKey);
       return section;
     }
 
@@ -7926,7 +8137,7 @@
       groupHeading.style.borderLeftColor = phaseColor;
       groupHeading.textContent = PHASE_LABELS[phase] || phase;
       section.appendChild(groupHeading);
-      _appendKeywordGroup(section, grouped[phase], enableExpansion, changelogEntries, phase);
+      _appendKeywordGroup(section, grouped[phase], enableExpansion, changelogEntries, phase, tableKey);
     });
 
     if (grouped['__none__'].length > 0) {
@@ -7935,7 +8146,7 @@
       noneHeading.style.borderLeftColor = '#4a5568';
       noneHeading.textContent = 'Nicht zugeordnet';
       section.appendChild(noneHeading);
-      _appendKeywordGroup(section, grouped['__none__'], enableExpansion, changelogEntries, '__none__');
+      _appendKeywordGroup(section, grouped['__none__'], enableExpansion, changelogEntries, '__none__', tableKey);
     }
 
     return section;
@@ -7946,11 +8157,11 @@
   // Keywords, sondern eingeklappt darunter. Der Auf-/Zuklapp-Zustand pro
   // Phase bleibt in state.openKeywordIdeaGroups erhalten, weil render() die
   // Ansicht bei jeder Interaktion neu aufbaut.
-  function _appendKeywordGroup(section, list, enableExpansion, changelogEntries, groupKey) {
+  function _appendKeywordGroup(section, list, enableExpansion, changelogEntries, groupKey, tableKey) {
     var real = list.filter(function (k) { return k.source !== 'problem_question'; });
     var ideas = list.filter(function (k) { return k.source === 'problem_question'; });
     if (real.length > 0 || ideas.length === 0) {
-      section.appendChild(_buildKeywordTable(real, enableExpansion, changelogEntries));
+      section.appendChild(_buildKeywordTable(real, enableExpansion, changelogEntries, tableKey));
     }
     if (ideas.length === 0) return;
 
@@ -7964,7 +8175,7 @@
     summary.textContent = ideas.length + (ideas.length === 1 ? ' KI-Idee' : ' KI-Ideen') +
       ' ohne Nachfragedaten' + (real.length === 0 ? ' (f\u00fcr diese Phase gibt es keine echten Keywords)' : '');
     details.appendChild(summary);
-    details.appendChild(_buildKeywordTable(ideas, enableExpansion, changelogEntries));
+    details.appendChild(_buildKeywordTable(ideas, enableExpansion, changelogEntries, tableKey));
     details.addEventListener('toggle', function () {
       state.openKeywordIdeaGroups[groupKey] = details.open;
     });
@@ -7974,7 +8185,9 @@
   // NEU (25.09.2026): Baut eine <table> für eine Keyword-Liste, inkl.
   // aufklappbarer Detail-Zeile (gleiches Prinzip wie renderGscBlock:
   // <tr><td colspan> direkt unter der Zeile).
-  function _buildKeywordTable(kwList, enableExpansion, changelogEntries) {
+  function _buildKeywordTable(kwList, enableExpansion, changelogEntries, tableKey) {
+    tableKey = tableKey || 'keywords';
+    kwList = applyDataTableSort(tableKey, kwList);  // NEU (13.11.2026): Sortierung je Phasen-Gruppe
     var table = document.createElement('table');
     table.className = 'cvz-table' + (enableExpansion ? ' cvz-table-clickable' : '');
     // GEÄNDERT (25.09.2026): feste Breiten auf den Nicht-Keyword-Spalten.
@@ -7994,10 +8207,10 @@
     table.style.minWidth = '1170px';
     table.innerHTML =
       '<thead><tr>' +
-        '<th style="width:340px;">Keyword</th>' +
-        '<th style="width:140px;text-align:right;">Suchvolumen/Monat</th>' +
+        sortableTh(tableKey, 'keyword', tableKey === 'fragen' ? 'Frage' : 'Keyword', 'width:340px;') +
+        sortableTh(tableKey, 'volume', 'Suchvolumen/Monat', 'width:140px;text-align:right;') +
         // NEU (02.10.2026): eigene Google-Position (GSC, sonst SERP-Check)
-        '<th style="width:120px;text-align:right;">Eure Position</th>' +
+        sortableTh(tableKey, 'position', 'Eure Position', 'width:120px;text-align:right;') +
         '<th style="width:300px;padding-left:24px;">Einschätzung</th>' +
         // NEU (01.10.2026): AI Overview ja/nein/noch nicht geprüft
         '<th style="width:130px;">AI Overview</th>' +
@@ -10298,15 +10511,30 @@
     // GEÄNDERT (08.10.2026): feste Spaltenbreiten + Mindestbreite. Vorher teilten
     // sich 10 Spalten bei table-layout:fixed die Handybreite, die Inhalte liefen
     // ineinander. Jetzt ist die Tabelle breiter als der Bildschirm und scrollt seitlich.
+    // NEU (13.11.2026): Filterleiste und Sortierung, siehe DATA_TABLE_COLUMNS.
+    var gscTotal = gscRows.length;
+    gscRows = applyDataTableSort('gsc', filterGscRows(gscRows));
+    section.appendChild(renderDataTableFilterBar('gsc', 'Suchanfrage oder URL durchsuchen …', [
+      { key: 'pos', label: 'Position', options: [['', 'Position: alle'], ['top10', 'Top 10'], ['seite2', 'Seite 2 (11–20)'], ['21plus', 'ab Platz 21']] },
+      { key: 'aio', label: 'AI Overview', options: AIO_FILTER_OPTIONS },
+    ], gscRows.length, gscTotal));
+    if (gscRows.length === 0) {
+      var gscNoHit = document.createElement('p');
+      gscNoHit.className = 'cvz-card-placeholder-text';
+      gscNoHit.textContent = 'Keine Treffer für diese Filter.';
+      section.appendChild(gscNoHit);
+      return section;
+    }
+
     var table = document.createElement('table');
     table.className = 'cvz-table cvz-gsc-table';
     table.innerHTML = '<thead><tr>' +
-      '<th style="width:220px;">Suchanfrage</th>' +
+      sortableTh('gsc', 'query', 'Suchanfrage', 'width:220px;') +
       '<th style="width:170px;">Rankende URL</th>' +
-      '<th style="width:70px;">Klicks</th>' +
-      '<th style="width:110px;">Impressionen</th>' +
-      '<th style="width:70px;">CTR</th>' +
-      '<th style="width:80px;">Position</th>' +
+      sortableTh('gsc', 'clicks', 'Klicks', 'width:80px;') +
+      sortableTh('gsc', 'impressions', 'Impressionen', 'width:120px;') +
+      sortableTh('gsc', 'ctr', 'CTR', 'width:70px;') +
+      sortableTh('gsc', 'position', 'Position', 'width:90px;') +
       '<th style="width:120px;">AI Overview</th>' +
       '<th style="width:220px;">Verkn\u00fcpfte \u00c4nderungen</th>' +
       '<th style="width:44px;"></th>' +
@@ -10378,7 +10606,7 @@
     // stark, sie bleiben nur als Rückfall für Themen ohne Tageswerte.
     var gscKey = gscHistoryKey(state.activeTopicId, row.query);
     if (state.loadingGscHistory[gscKey] && !(gscKey in state.gscHistoryCache)) {
-      wrap.innerHTML = serpHtml + '<p class="cvz-card-placeholder-text">L\u00e4dt Verlauf...</p>';
+      wrap.innerHTML = serpHtml + loadingTextHtml('Verlauf wird geladen \u2026');
       return wrap;
     }
     var gscRolling = state.gscHistoryCache[gscKey];
@@ -10389,7 +10617,7 @@
     }
 
     if (state.loadingGscRankHistory[rowId]) {
-      wrap.innerHTML = serpHtml + '<p class="cvz-card-placeholder-text">L\u00e4dt Verlauf...</p>';
+      wrap.innerHTML = serpHtml + loadingTextHtml('Verlauf wird geladen \u2026');
       return wrap;
     }
 
