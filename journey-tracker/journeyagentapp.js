@@ -206,6 +206,8 @@
     retrievedPhase: {},
     retrievedOnlyActionable: {}, // { [topicId]: true } = nur Domains mit Platzierungsmöglichkeit        // { [topicId]: 'alle' | 'exploration' | 'evaluation' | 'comparison' | 'decision' }
     retrievedShowSingles: {},  // { [topicId]: true } = auch Domains mit nur einem Treffer
+    retrievedKindFilter: {},   // NEU (13.11.2026): { [topicId]: 'alle' | Art aus domain_kinds.py (presseportal, ...) }
+    savingDomainKind: {},      // NEU (13.11.2026): { [domain]: true } während die Korrektur gespeichert wird
     retrievedShowCompetitors: {}, // { [topicId]: true } = Wettbewerber einblenden
     openRetrievedDomains: {},  // { [topicId|domain]: true } = aufgeklappt
     keywordRankHistoryCache: {},
@@ -5921,6 +5923,49 @@
       escapeHtml(PLACEMENT_SHORT[pl.kind] || pl.label) + '</span>';
   }
 
+  // NEU (13.11.2026): Art einer Domain (Backend domain_kinds.py). Labels kommen auch vom Backend
+  // (kind_labels), diese Liste ist der Rückfall für ältere Backends.
+  var DOMAIN_KIND_LABELS = {
+    presseportal: 'Presseportale', bewertungsplattform: 'Bewertungs- und Vergleichsportale', fachmedium: 'Fachmedien und Blogs',
+    unternehmen: 'Unternehmens- und Anbieterseiten', forum: 'Foren und Communities', social_media: 'Social Media', video: 'Video',
+    wissen: 'Wissen und Institutionen', wettbewerber: 'Wettbewerber', eigene: 'Eigene Domain', unbekannt: 'Nicht eingeordnet',
+  };
+  var DOMAIN_KIND_SOURCE_TEXT = {
+    manuell: 'von eurem Team festgelegt', thema: 'aus den Einstellungen des Themas', liste: 'bekanntes Portal',
+    muster: 'erkannt am Domainnamen oder an den gefundenen Seiten', seitentyp: 'abgeleitet aus dem Seitentyp der zitierten Seiten',
+    keine: 'keine Hinweise gefunden',
+  };
+  function domainKindLabel(kind, data) {
+    var labels = (data && data.kind_labels) || DOMAIN_KIND_LABELS;
+    return labels[kind] || DOMAIN_KIND_LABELS[kind] || kind;
+  }
+
+  // NEU (13.11.2026): Art einer Domain fürs ganze Team festlegen (kind = null: wieder automatisch).
+  async function saveDomainKind(topicId, domain, kind) {
+    state.savingDomainKind[domain] = true;
+    render();
+    try {
+      await apiFetch('/domain-kinds', { method: 'PUT', body: { domain: domain, kind: kind || null } });
+      if (kind) {
+        // sofort anzeigen; gilt für alle Themen des Teams, deshalb alle geladenen Quellen-Listen anpassen
+        Object.keys(state.retrievedCache).forEach(function (k) {
+          ((state.retrievedCache[k] && state.retrievedCache[k].domains) || []).forEach(function (d) {
+            if (d.domain === domain && !d.is_own) { d.kind = kind; d.kind_source = 'manuell'; }
+          });
+        });
+      } else {
+        // automatische Erkennung neu vom Server holen
+        Object.keys(state.retrievedCache).forEach(function (k) { delete state.retrievedCache[k]; });
+        maybeLoadRetrieved(topicId);
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] Art der Domain konnte nicht gespeichert werden:', e);
+      await showCvzAlert('Die Art konnte nicht gespeichert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    delete state.savingDomainKind[domain];
+    render();
+  }
+
   function retrievedTypeLabel(t) {
     return CONTENT_TYPE_LABELS[t] || RETRIEVED_TYPE_LABELS[t] || t;
   }
@@ -6090,6 +6135,38 @@
     toolbar.appendChild(toggle('Nur mit Platzierungsmöglichkeit', onlyActionable, function (v) { state.retrievedOnlyActionable[topicId] = v; }));
     section.appendChild(toolbar);
 
+    // NEU (13.11.2026): Filter nach Art der Domain (Presseportale, Bewertungsportale, ...). Zählt die Domains,
+    // die mit den übrigen Filtern sichtbar wären, damit die Zahl zur Liste passt.
+    var kindFilter = state.retrievedKindFilter[topicId] || 'alle';
+    var hasKinds = domains.some(function (d) { return d.kind; });
+    var kindCounts = {};
+    if (hasKinds) {
+      var isSingleForCount = function (d) { return phase === 'alle' ? (d.prompts_found < 2 && d.days_found < 2) : d.runs_found < 2; };
+      domains.forEach(function (d) {
+        if (d.is_own || (d.is_competitor && !showComp) || (filter !== 'alle' && d.bucket !== filter)) return;
+        if (onlyActionable && !PLACEMENT_ACTIONABLE[placementOf(d).kind]) return;
+        if (!showSingles && isSingleForCount(d)) return;
+        var kk = d.kind || 'unbekannt';
+        kindCounts[kk] = (kindCounts[kk] || 0) + 1;
+      });
+      if (kindFilter !== 'alle' && !kindCounts[kindFilter]) kindCounts[kindFilter] = 0;
+      var kindBar = document.createElement('div');
+      kindBar.className = 'cvz-weeks-preset-picker cvz-retrieved-kinds';
+      kindBar.style.cssText = 'flex-wrap:wrap;margin:0 0 10px;';
+      kindBar.setAttribute('aria-label', 'Nach Art filtern');
+      var kindOrder = ['alle'].concat(Object.keys(DOMAIN_KIND_LABELS).filter(function (kk) { return kindCounts[kk] !== undefined; }));
+      kindOrder.forEach(function (kk) {
+        var kb = document.createElement('button');
+        kb.type = 'button';
+        kb.className = 'cvz-weeks-preset-btn' + (kindFilter === kk ? ' cvz-weeks-preset-btn-active' : '');
+        kb.setAttribute('data-cvz-kind', kk);
+        kb.textContent = kk === 'alle' ? 'Alle Arten' : domainKindLabel(kk, data) + ' (' + kindCounts[kk] + ')';
+        kb.addEventListener('click', function () { state.retrievedKindFilter[topicId] = kk; render(); });
+        kindBar.appendChild(kb);
+      });
+      section.appendChild(kindBar);
+    }
+
     // Einzeltreffer = nur in einem Prompt und an einem Tag gefunden. Bei einem Lauf pro Prompt und Tag ist das Rauschen.
     var isSingle = function (d) { return phase === 'alle' ? (d.prompts_found < 2 && d.days_found < 2) : d.runs_found < 2; };
     var hiddenSingles = 0;
@@ -6098,6 +6175,7 @@
       if (d.is_competitor && !showComp) return false;
       if (filter !== 'alle' && d.bucket !== filter) return false;
       if (onlyActionable && !PLACEMENT_ACTIONABLE[placementOf(d).kind]) return false;
+      if (hasKinds && kindFilter !== 'alle' && (d.kind || 'unbekannt') !== kindFilter) return false;  // NEU (13.11.2026)
       if (!showSingles && isSingle(d)) { hiddenSingles++; return false; }
       return true;
     });
@@ -6129,6 +6207,9 @@
         '<img class="cvz-timeline-logo" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(d.domain) + '" alt="">' +
         '<span class="cvz-retrieved-domain">' + escapeHtml(d.domain) + '</span>' +
         '<span class="cvz-retrieved-bucket cvz-retrieved-bucket-' + d.bucket + '">' + escapeHtml(RETRIEVED_BUCKET_LABELS[d.bucket] || '') + '</span>' +
+        // NEU (13.11.2026): Art der Domain
+        (d.kind && d.kind !== 'unbekannt' ? '<span class="cvz-retrieved-kind" style="font-size:11px;padding:1px 6px;border:1px solid var(--cvz-border,#2c3644);border-radius:4px;color:var(--cvz-text-muted,#8b98a5);" title="' +
+          escapeHtml(DOMAIN_KIND_SOURCE_TEXT[d.kind_source] || '') + '">' + escapeHtml(domainKindLabel(d.kind, data)) + '</span>' : '') +
         placementChip(d) +
         '<span class="cvz-fanout-prompt-meta">in ' + Math.round(d.runs_found / withSearch * 100) + ' % der Antworten gefunden (' +
           d.prompts_found + (d.prompts_found === 1 ? ' Prompt' : ' Prompts') + ') · ' +
@@ -6164,6 +6245,37 @@
       factsP.style.margin = '6px 0';
       factsP.textContent = facts.join(' · ') + '.';
       body.appendChild(factsP);
+
+      // NEU (13.11.2026): Art anzeigen und korrigieren. Die Korrektur gilt für alle Themen des Teams.
+      if (d.kind && !d.is_own) {
+        var kindRow = document.createElement('div');
+        kindRow.className = 'cvz-retrieved-kind-row';
+        kindRow.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 8px;font-size:12px;';
+        var kindText = document.createElement('span');
+        kindText.textContent = 'Art: ' + domainKindLabel(d.kind, data) + ' (' + (DOMAIN_KIND_SOURCE_TEXT[d.kind_source] || '') + ')';
+        kindRow.appendChild(kindText);
+        var kindSel = document.createElement('select');
+        kindSel.className = 'cvz-picker-select';
+        kindSel.setAttribute('aria-label', 'Art dieser Domain ändern');
+        kindSel.setAttribute('data-cvz-kind-select', d.domain);
+        kindSel.disabled = !!state.savingDomainKind[d.domain];
+        var manualOpts = (data.kind_manual_options || Object.keys(DOMAIN_KIND_LABELS).filter(function (kk) { return kk !== 'eigene' && kk !== 'unbekannt'; }));
+        var optHtml = '<option value="">' + (d.kind_source === 'manuell' ? 'Automatisch erkennen lassen' : 'Art ändern \u2026') + '</option>';
+        manualOpts.forEach(function (kk) {
+          optHtml += '<option value="' + kk + '"' + (d.kind_source === 'manuell' && d.kind === kk ? ' selected' : '') + '>' + escapeHtml(domainKindLabel(kk, data)) + '</option>';
+        });
+        kindSel.innerHTML = optHtml;
+        kindSel.addEventListener('change', function () {
+          if (!kindSel.value && d.kind_source !== 'manuell') return;
+          saveDomainKind(topicId, d.domain, kindSel.value || null);
+        });
+        kindRow.appendChild(kindSel);
+        var kindHint = document.createElement('span');
+        kindHint.style.cssText = 'color:var(--cvz-text-muted,#8b98a5);';
+        kindHint.textContent = 'gilt für alle Themen eures Teams';
+        kindRow.appendChild(kindHint);
+        body.appendChild(kindRow);
+      }
 
       // NEU: bei welchen Prompts die Domain gefunden wurde (in der gewählten Phase)
       var promptRows = (d.prompts || []).filter(function (pr) { return phase === 'alle' || pr.phase === phase; });
