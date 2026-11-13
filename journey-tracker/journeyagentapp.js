@@ -2224,6 +2224,16 @@
       render();
       return;
     }
+    // NEU (13.11.2026): "Einstieg vorziehen" in einer "steigt später ein"-Zelle: Rollen-Editor öffnen (nicht
+    // schließen, falls schon offen) und dorthin scrollen.
+    var bcEditOpenBtn = event.target.closest('[data-cvz-bc-edit-open]');
+    if (bcEditOpenBtn) {
+      var bcOpenTopic = bcEditOpenBtn.getAttribute('data-cvz-bc-edit-open');
+      if (!state.bcEditOpen[bcOpenTopic]) toggleRoleEditor(bcOpenTopic);
+      var roleEditorBox = document.getElementById('cvz-role-editor');
+      if (roleEditorBox) roleEditorBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     var bcEditToggle = event.target.closest('[data-cvz-bc-edit-toggle]');
     if (bcEditToggle) {
       toggleRoleEditor(bcEditToggle.getAttribute('data-cvz-bc-edit-toggle'));
@@ -3480,6 +3490,9 @@
     var promptText = (state.manualPromptDraftText || '').trim();
     if (!promptText) return;
     var phase = state.manualPromptDraftPhase || 'exploration';
+    // NEU (13.11.2026): Phase vor dem Einstieg der Rolle -> nachfragen, dann Einstieg vorziehen
+    var moveEntry = await confirmEntryMove(topicId, state.manualPromptDraftRoleId, phase);
+    if (moveEntry === null) return;
 
     state.isSubmittingManualPrompt = true;
     render();
@@ -3490,8 +3503,10 @@
       } else {
         await apiFetch('/topics/' + topicId + '/prompts', {
           method: 'POST',
-          body: { prompt_text: promptText, messymiddle_phase: phase, role_id: state.manualPromptDraftRoleId || null },
+          body: { prompt_text: promptText, messymiddle_phase: phase, role_id: state.manualPromptDraftRoleId || null,
+            move_entry_phase: moveEntry },
         });
+        delete state.dashboardDataCache[topicId];  // NEU (13.11.2026): Journey-Zahlen nach neuem Prompt/Einstieg neu laden
         state.manualPromptDraftText = '';
         delete state.topicDetailCache[topicId];
         delete state.buyingCenterCache[topicId];
@@ -3518,11 +3533,17 @@
       await showCvzAlert('Im Mock-Modus nicht verf\u00fcgbar.');
       return;
     }
+    // NEU (13.11.2026): Phase vor dem Einstieg der Rolle des Vorschlags -> nachfragen, dann Einstieg vorziehen
+    var sugDetail = state.topicDetailCache[topicId];
+    var sug = sugDetail && (sugDetail.prompt_suggestions || []).filter(function (p) { return p.id === promptId; })[0];
+    var moveEntry = await confirmEntryMove(topicId, sug && sug.role_id, phase);
+    if (moveEntry === null) return;
     try {
       await apiFetch('/topics/' + topicId + '/prompts/' + promptId + '/set-type', {
         method: 'POST',
-        body: { prompt_type: 'stable_core', messymiddle_phase: phase },
+        body: { prompt_type: 'stable_core', messymiddle_phase: phase, move_entry_phase: moveEntry },
       });
+      delete state.dashboardDataCache[topicId];  // NEU (13.11.2026): Journey-Zahlen neu laden
       delete state.topicDetailCache[topicId];
       delete state.buyingCenterCache[topicId];
       await openTopicDetail(topicId, false);
@@ -4491,10 +4512,16 @@
   }
 
   async function setPromptRole(topicId, promptId, roleId) {
+    // NEU (13.11.2026): Liegt der Prompt vor dem Einstieg der neuen Rolle -> nachfragen, dann Einstieg vorziehen
+    var roleDetail = state.topicDetailCache[topicId];
+    var rolePrompt = roleDetail && (roleDetail.prompts || []).filter(function (p) { return p.id === promptId; })[0];
+    var moveEntry = await confirmEntryMove(topicId, roleId, rolePrompt && (rolePrompt.messymiddle_phase || rolePrompt.phase));
+    if (moveEntry === null) return;
     try {
       var resp = await apiFetch('/topics/' + topicId + '/prompts/' + promptId + '/role', {
-        method: 'PATCH', body: { role_id: roleId },
+        method: 'PATCH', body: { role_id: roleId, move_entry_phase: moveEntry },
       });
+      afterEntryMoved(topicId, resp);
       var detail = state.topicDetailCache[topicId];
       var prompt = detail && (detail.prompts || []).filter(function (p) { return p.id === promptId; })[0];
       if (prompt) {
@@ -4815,7 +4842,11 @@
       section.appendChild(fillBtn);
     }
 
-    if (state.bcEditOpen[topicId]) section.appendChild(renderRoleEditor(topicId));
+    if (state.bcEditOpen[topicId]) {
+      var roleEditorEl = renderRoleEditor(topicId);
+      roleEditorEl.id = 'cvz-role-editor';  // NEU (13.11.2026): Ziel für "Einstieg vorziehen"
+      section.appendChild(roleEditorEl);
+    }
 
     var roles = bc.rollen || [];
     if (roles.length === 0) {
@@ -4934,7 +4965,11 @@
         // NEU (23.09.2026): vor der Einstiegsphase wird für die Rolle nichts gemessen
         if (row.entry && entryIndex(ph) < entryIndex(row.entry)) {
           html += '<td style="padding:8px;text-align:center;border-bottom:1px solid var(--cvz-border,#232b36);">' +
-            '<div style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);opacity:.7;">steigt später ein</div></td>';
+            '<div style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);opacity:.7;">steigt später ein</div>' +
+            // NEU (13.11.2026): direkt zu "Rollen bearbeiten", um den Einstieg vorzuziehen
+            (row.key ? '<button type="button" class="cvz-link-btn" style="font-size:11px;margin-top:2px;" data-cvz-bc-edit-open="' +
+              escapeHtml(topicId) + '" title="Einstiegsphase dieser Rolle unter „Rollen bearbeiten“ ändern">Einstieg vorziehen</button>' : '') +
+            '</td>';
           return;
         }
         var st = cellStats(row.key, ph);
@@ -10221,14 +10256,45 @@
     return { aktiv_gesamt: active, max_gesamt: MAX_TOTAL_PROMPTS, frei_eigene: Math.max(0, MAX_TOTAL_PROMPTS - active) };
   }
 
-  // NEU (13.11.2026): Phasen, die für eine Rolle zur Wahl stehen: erst ab ihrer Einstiegsphase. Fragen davor
-  // würden abgefragt (und kosten), zählen aber nirgends ("steigt später ein"). Ohne Rolle: alle Phasen.
-  function phasesForRole(topicId, roleId) {
+  // NEU (13.11.2026): Einstiegsphase einer Rolle (oder null).
+  function roleEntryPhase(topicId, roleId) {
     var bc = state.buyingCenterCache[topicId];
     var role = roleId && bc && bc.rollen ? bc.rollen.filter(function (r) { return r.role_id === roleId; })[0] : null;
     var entry = role && role.einstiegsphase;
-    if (!entry || PHASE_ORDER.indexOf(entry) === -1) return PHASE_ORDER.slice();
-    return PHASE_ORDER.slice(PHASE_ORDER.indexOf(entry));
+    return entry && PHASE_ORDER.indexOf(entry) !== -1 ? { entry: entry, name: role.rolle } : null;
+  }
+
+  // NEU (13.11.2026): true, wenn die Phase vor der Einstiegsphase der Rolle liegt.
+  function isBeforeRoleEntry(topicId, roleId, phase) {
+    var info = roleEntryPhase(topicId, roleId);
+    return !!(info && phase && PHASE_ORDER.indexOf(phase) !== -1 && PHASE_ORDER.indexOf(phase) < PHASE_ORDER.indexOf(info.entry));
+  }
+
+  // GEÄNDERT (13.11.2026, Kundenwunsch): Alle Phasen stehen zur Wahl. Phasen vor der Einstiegsphase der Rolle
+  // sind markiert; wählt man eine, wird nach Rückfrage der Einstieg der Rolle vorgezogen (Backend:
+  // move_entry_phase), damit der Prompt unter Journey auch zählt. Vorher waren diese Phasen ausgeblendet.
+  function phaseOptionLabel(topicId, roleId, phase) {
+    var label = PHASE_LABELS[phase] || phase;
+    return isBeforeRoleEntry(topicId, roleId, phase) ? label + ' (Einstieg wird vorgezogen)' : label;
+  }
+
+  // Fragt nach, ob der Einstieg vorgezogen werden soll. Rückgabe: null = abgebrochen, sonst true/false für move_entry_phase.
+  async function confirmEntryMove(topicId, roleId, phase) {
+    if (!isBeforeRoleEntry(topicId, roleId, phase)) return false;
+    var info = roleEntryPhase(topicId, roleId);
+    var ok = await showCvzConfirm(
+      'Die Rolle \u201e' + (info.name || '') + '\u201c steigt bisher erst in der Phase ' + (PHASE_LABELS[info.entry] || info.entry) + ' ein. ' +
+      'Mit diesem Prompt wird ihr Einstieg auf ' + (PHASE_LABELS[phase] || phase) + ' vorgezogen. Unter Journey wird die Rolle dann ab dort ' +
+      'gemessen; Phasen dazwischen ohne Prompt zeigen \u201enicht gemessen\u201c und lassen sich \u00fcber \u201e+ Prompt\u201c f\u00fcllen.'
+    );
+    return ok ? true : null;
+  }
+
+  // Nach einer Änderung der Einstiegsphase: Rollen und Journey-Daten neu laden.
+  function afterEntryMoved(topicId, resp) {
+    if (!resp || !resp.entry_phase_moved) return;
+    delete state.buyingCenterCache[topicId];
+    delete state.dashboardDataCache[topicId];
   }
 
   function renderManualPromptForm(prompts, topicId) {
@@ -10236,14 +10302,10 @@
     var PROMPT_MAX_CHARS = 400;
     var manualBc = state.buyingCenterCache[topicId];
     var manualRoles = (manualBc && manualBc.rollen) || [];
-    // GEÄNDERT (13.11.2026): nur Phasen ab der Einstiegsphase der gewählten Rolle (siehe phasesForRole).
-    var allowedPhases = phasesForRole(topicId, state.manualPromptDraftRoleId);
-    if (state.manualPromptDraftPhase && allowedPhases.indexOf(state.manualPromptDraftPhase) === -1) {
-      state.manualPromptDraftPhase = allowedPhases[0];
-    }
-    var phaseOptionsHtml = allowedPhases.map(function (phase) {
+    // GEÄNDERT (13.11.2026): alle Phasen; vor dem Einstieg der Rolle markiert (siehe phaseOptionLabel).
+    var phaseOptionsHtml = PHASE_ORDER.map(function (phase) {
       return '<option value="' + phase + '"' + (state.manualPromptDraftPhase === phase ? ' selected' : '') + '>' +
-        escapeHtml(PHASE_LABELS[phase] || phase) + '</option>';
+        escapeHtml(phaseOptionLabel(topicId, state.manualPromptDraftRoleId, phase)) + '</option>';
     }).join('');
 
     var wrap = buildAddForm({
@@ -10388,7 +10450,7 @@
       // Phase mitzählen (auch nicht in der Erforschung). Zur Wahl stehen nur Phasen ab der Einstiegsphase der Rolle.
       'Das sind offene Entdeckungsfragen der KI, noch keine gemessenen Prompts. Sie haben keine Phase und z\u00e4hlen ' +
       'in keiner Phase mit, auch nicht in der Erforschung. Beim Hinzuf\u00fcgen zum festen Set w\u00e4hlt ihr die Phase; ' +
-      'angeboten werden nur Phasen ab der Einstiegsphase der jeweiligen Rolle.';
+      'liegt sie vor dem Einstieg der Rolle, wird der Einstieg nach R\u00fcckfrage vorgezogen.';
     wrap.appendChild(note);
 
     // NEU (08.10.2026): Platz-Anzeige, bevor jemand einen Vorschlag w\u00e4hlt.
@@ -10433,11 +10495,11 @@
       phaseSelect.className = 'cvz-changelog-custom-input';
       phaseSelect.style.maxWidth = '180px';
       phaseSelect.setAttribute('aria-label', 'Phase w\u00e4hlen');
-      // GEÄNDERT (13.11.2026): nur Phasen ab der Einstiegsphase der Rolle dieses Vorschlags (siehe phasesForRole).
+      // GEÄNDERT (13.11.2026): alle Phasen; vor dem Einstieg der Rolle markiert (siehe phaseOptionLabel).
       phaseSelect.innerHTML =
         '<option value="">Phase w\u00e4hlen \u2026</option>' +
-        phasesForRole(state.activeTopicId, sug.role_id).map(function (ph) {
-          return '<option value="' + ph + '">' + escapeHtml(PHASE_LABELS[ph] || ph) + '</option>';
+        PHASE_ORDER.map(function (ph) {
+          return '<option value="' + ph + '">' + escapeHtml(phaseOptionLabel(state.activeTopicId, sug.role_id, ph)) + '</option>';
         }).join('');
       phaseSelect.disabled = noSlots;
       row.appendChild(phaseSelect);
