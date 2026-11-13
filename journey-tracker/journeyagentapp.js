@@ -197,7 +197,8 @@
     loadingRetrieved: {},
     retrievedErrors: {},
     retrievedFilter: {},       // { [topicId]: 'alle' | 'nie_zitiert' | 'selten_zitiert' | 'oft_zitiert' }
-    retrievedPhase: {},        // { [topicId]: 'alle' | 'exploration' | 'evaluation' | 'comparison' | 'decision' }
+    retrievedPhase: {},
+    retrievedOnlyActionable: {}, // { [topicId]: true } = nur Domains mit Platzierungsmöglichkeit        // { [topicId]: 'alle' | 'exploration' | 'evaluation' | 'comparison' | 'decision' }
     retrievedShowSingles: {},  // { [topicId]: true } = auch Domains mit nur einem Treffer
     retrievedShowCompetitors: {}, // { [topicId]: true } = Wettbewerber einblenden
     openRetrievedDomains: {},  // { [topicId|domain]: true } = aufgeklappt
@@ -5636,6 +5637,23 @@
     return { id: ph, label: PHASE_LABELS[ph] || ph };
   }));
 
+  // NEU (13.11.2026): Platzierungsmöglichkeit je Domain (vom Backend: placement.kind/label/reason).
+  var PLACEMENT_ACTIONABLE = { gastbeitrag: 1, eintrag: 1, eigener_beitrag: 1 };
+  var PLACEMENT_ORDER = { gastbeitrag: 0, eintrag: 0, eigener_beitrag: 0, unklar: 1, ungeprueft: 2, keine: 3, wettbewerber: 4, eigene: 5 };
+  var PLACEMENT_SHORT = {
+    gastbeitrag: 'Gastbeitrag möglich', eintrag: 'Eintrag möglich', eigener_beitrag: 'Eigener Beitrag möglich',
+    keine: 'Keine Platzierung', wettbewerber: 'Wettbewerber', eigene: 'Eure Domain',
+    unklar: 'Unklar, prüfen', ungeprueft: 'Noch nicht geprüft',
+  };
+  function placementOf(d) {
+    return d.placement || { kind: 'ungeprueft', label: 'Noch nicht geprüft', reason: '' };
+  }
+  function placementChip(d) {
+    var pl = placementOf(d);
+    return '<span class="cvz-placement cvz-placement-' + escapeHtml(pl.kind) + '" title="' + escapeHtml(pl.reason || pl.label) + '">' +
+      escapeHtml(PLACEMENT_SHORT[pl.kind] || pl.label) + '</span>';
+  }
+
   function retrievedTypeLabel(t) {
     return CONTENT_TYPE_LABELS[t] || RETRIEVED_TYPE_LABELS[t] || t;
   }
@@ -5801,6 +5819,8 @@
     }
     toolbar.appendChild(toggle('Einzeltreffer zeigen', showSingles, function (v) { state.retrievedShowSingles[topicId] = v; }));
     toolbar.appendChild(toggle('Wettbewerber zeigen', showComp, function (v) { state.retrievedShowCompetitors[topicId] = v; }));
+    var onlyActionable = !!state.retrievedOnlyActionable[topicId];
+    toolbar.appendChild(toggle('Nur mit Platzierungsmöglichkeit', onlyActionable, function (v) { state.retrievedOnlyActionable[topicId] = v; }));
     section.appendChild(toolbar);
 
     // Einzeltreffer = nur in einem Prompt und an einem Tag gefunden. Bei einem Lauf pro Prompt und Tag ist das Rauschen.
@@ -5810,6 +5830,7 @@
       if (d.is_own) return false;
       if (d.is_competitor && !showComp) return false;
       if (filter !== 'alle' && d.bucket !== filter) return false;
+      if (onlyActionable && !PLACEMENT_ACTIONABLE[placementOf(d).kind]) return false;
       if (!showSingles && isSingle(d)) { hiddenSingles++; return false; }
       return true;
     });
@@ -5824,7 +5845,8 @@
     var hint = document.createElement('p');
     hint.className = 'cvz-card-placeholder-text';
     hint.style.margin = '0 0 6px';
-    hint.textContent = 'Sortiert nach der Zahl der Prompts, in denen die Domain gefunden wurde. Klicke auf eine Domain, um die gefundenen Seiten zu sehen.' +
+    hint.textContent = 'Sortiert nach der Zahl der Prompts, in denen die Domain gefunden wurde. Klicke auf eine Domain, um Prompts und gefundene Seiten zu sehen. ' +
+      'Die Platzierungsmöglichkeit ist eine Einschätzung aus der Seitenanalyse, keine Zusage.' +
       (hiddenSingles ? ' ' + hiddenSingles + ' Einzeltreffer ausgeblendet.' : '');
     section.appendChild(hint);
 
@@ -5840,7 +5862,7 @@
         '<img class="cvz-timeline-logo" src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(d.domain) + '" alt="">' +
         '<span class="cvz-retrieved-domain">' + escapeHtml(d.domain) + '</span>' +
         '<span class="cvz-retrieved-bucket cvz-retrieved-bucket-' + d.bucket + '">' + escapeHtml(RETRIEVED_BUCKET_LABELS[d.bucket] || '') + '</span>' +
-        (d.is_competitor ? '<span class="cvz-competitor-badge">Wettbewerber</span>' : '') +
+        placementChip(d) +
         '<span class="cvz-fanout-prompt-meta">in ' + Math.round(d.runs_found / withSearch * 100) + ' % der Antworten gefunden (' +
           d.prompts_found + (d.prompts_found === 1 ? ' Prompt' : ' Prompts') + ') · ' +
           d.runs_cited + ' von ' + d.runs_found + ' zitiert (' + pct + ' %)</span>';
@@ -5848,6 +5870,17 @@
 
       var body = document.createElement('div');
       body.className = 'cvz-retrieved-body';
+
+      // Platzierung zuerst und deutlich: das ist die Frage, die sich hier stellt.
+      var pl = placementOf(d);
+      var plBox = document.createElement('div');
+      plBox.className = 'cvz-placement-box cvz-placement-box-' + pl.kind;
+      plBox.innerHTML = '<strong>' + escapeHtml(pl.label) + '</strong>' + (pl.reason ? '<span>' + escapeHtml(pl.reason) + '</span>' : '') +
+        (PLACEMENT_ACTIONABLE[pl.kind] && d.runs_cited < d.runs_found
+          ? '<span>Ein Beitrag hilft nur, wenn er die Prompts unten genauer beantwortet als das, was ChatGPT dort heute findet.</span>'
+          : '');
+      body.appendChild(plBox);
+
       var facts = [];
       facts.push('An ' + d.days_found + (d.days_found === 1 ? ' Tag' : ' Tagen') + ' gefunden' + (phase === 'alle' ? '' : ' (alle Phasen)'));
       if (d.prompts_cited && phase === 'alle') facts.push('in ' + d.prompts_cited + ' von ' + d.prompts_found + ' Prompts mindestens einmal zitiert');
@@ -5859,13 +5892,30 @@
         if (phParts.length) facts.push('Zitiert/gefunden je Phase: ' + phParts.join(', '));
       }
       if (d.content_type) facts.push('Seitentyp: ' + retrievedTypeLabel(d.content_type));
-      if (d.pitchable === true) facts.push('Fremde Beiträge laut Seitenanalyse wahrscheinlich möglich');
-      if (d.pitchable === false) facts.push('Fremde Beiträge laut Seitenanalyse eher nicht möglich');
       var factsP = document.createElement('p');
       factsP.className = 'cvz-card-placeholder-text';
       factsP.style.margin = '6px 0';
       factsP.textContent = facts.join(' · ') + '.';
       body.appendChild(factsP);
+
+      // NEU: bei welchen Prompts die Domain gefunden wurde (in der gewählten Phase)
+      var promptRows = (d.prompts || []).filter(function (pr) { return phase === 'alle' || pr.phase === phase; });
+      if (promptRows.length) {
+        var prLabel = document.createElement('p');
+        prLabel.className = 'cvz-section-label cvz-section-label-sm';
+        prLabel.textContent = 'Gefunden bei diesen Prompts';
+        body.appendChild(prLabel);
+        var prList = document.createElement('ul');
+        prList.className = 'cvz-retrieved-prompts';
+        promptRows.forEach(function (pr) {
+          var li = document.createElement('li');
+          li.innerHTML = '<span>' + escapeHtml(pr.prompt_text || '(Prompt nicht mehr vorhanden)') + '</span>' +
+            '<span class="cvz-retrieved-prompt-meta">' + (pr.phase && PHASE_LABELS[pr.phase] ? escapeHtml(PHASE_LABELS[pr.phase]) + ' · ' : '') +
+            pr.runs_found + '\u00d7 gefunden, ' + pr.runs_cited + '\u00d7 zitiert</span>';
+          prList.appendChild(li);
+        });
+        body.appendChild(prList);
+      }
 
       var pagesLabel = document.createElement('p');
       pagesLabel.className = 'cvz-section-label cvz-section-label-sm';
@@ -12368,6 +12418,16 @@
       '.cvz-retrieved-bucket-oft_zitiert { border-color: var(--cvz-teal); color: var(--cvz-teal); }' +
       '.cvz-retrieved-body { padding: 0 0 4px 18px; }' +
       '.cvz-retrieved-phases { margin: 0 0 10px; flex-wrap: wrap; }' +
+      '.cvz-placement { font-size: 10px; padding: 1px 6px; border: 1px solid var(--cvz-border); color: var(--cvz-text-muted); white-space: nowrap; }' +
+      '.cvz-placement-gastbeitrag, .cvz-placement-eintrag, .cvz-placement-eigener_beitrag { border-color: var(--cvz-green); color: var(--cvz-green); }' +
+      '.cvz-placement-keine, .cvz-placement-wettbewerber { border-color: var(--cvz-red); color: var(--cvz-red); opacity: .8; }' +
+      '.cvz-placement-box { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 4px; padding: 8px 10px; border-left: 2px solid var(--cvz-border); background: rgba(255,255,255,.03); font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-placement-box strong { color: var(--cvz-text); font-size: 13px; }' +
+      '.cvz-placement-box-gastbeitrag, .cvz-placement-box-eintrag, .cvz-placement-box-eigener_beitrag { border-left-color: var(--cvz-green); }' +
+      '.cvz-placement-box-keine, .cvz-placement-box-wettbewerber { border-left-color: var(--cvz-red); }' +
+      '.cvz-retrieved-prompts { list-style: none; margin: 0 0 8px; padding: 0; }' +
+      '.cvz-retrieved-prompts li { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; padding: 3px 0; border-bottom: 1px solid var(--cvz-border); color: var(--cvz-text); }' +
+      '.cvz-retrieved-prompt-meta { color: var(--cvz-text-muted); white-space: nowrap; font-size: 11px; }' +
       '.cvz-journey-retrieved-own { margin: 0 0 4px; font-size: 11px; color: var(--cvz-amber); }' +
       '.cvz-journey-retrieved-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; margin: 2px 0 0; }' +
       '.cvz-journey-retrieved-domain { color: var(--cvz-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }' +
@@ -14836,10 +14896,11 @@
     var own = views.filter(function (d) { return d.is_own; })[0];
     var ownGap = own && own.runs_found > own.runs_cited;
     var cands = views.filter(function (d) {
-      return !d.is_own && !d.is_competitor && d.bucket !== 'oft_zitiert' && d.runs_found >= 2;
+      // GEÄNDERT (13.11.2026): Domains ohne realistische Platzierung (z. B. Firmenblog eines Anbieters) sind hier keine Chance.
+      return !d.is_own && !d.is_competitor && d.bucket !== 'oft_zitiert' && d.runs_found >= 2 && placementOf(d).kind !== 'keine';
     }).sort(function (a, b) {
       // Domains, bei denen fremde Beiträge laut Seitenanalyse unrealistisch sind (z. B. Hersteller-Doku), nach hinten
-      var pa = a.pitchable === false ? 1 : 0, pb = b.pitchable === false ? 1 : 0;
+      var pa = PLACEMENT_ORDER[placementOf(a).kind] || 0, pb = PLACEMENT_ORDER[placementOf(b).kind] || 0;
       return (pa - pb) || (b.prompts_found - a.prompts_found) || (b.runs_found - a.runs_found);
     });
     if (!ownGap && !cands.length) return null;
@@ -14877,9 +14938,8 @@
       row.appendChild(num);
       wrap.appendChild(row);
 
-      var metaParts = [];
+      var metaParts = [PLACEMENT_SHORT[placementOf(d).kind] || placementOf(d).label];
       if (d.content_type) metaParts.push(retrievedTypeLabel(d.content_type));
-      if (d.pitchable === false) metaParts.push('fremde Beiträge eher nicht möglich');
       if (metaParts.length) {
         var meta = document.createElement('p');
         meta.className = 'cvz-journey-retrieved-meta';
