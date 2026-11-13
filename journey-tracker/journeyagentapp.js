@@ -1762,6 +1762,16 @@
   // NEU (02.10.2026): Eigene Google-Position eines Keywords.
   // Vorrang hat die Search Console (echte Durchschnittsposition eurer
   // Domain), sonst die Position aus dem monatlichen SERP-Check.
+  // GEÄNDERT (13.11.2026): Kennen Search Console und Google-Prüfung unterschiedliche Positionen
+  // (andere Positionsgruppe, siehe positionBucket), stehen beide Werte da. Search Console ist ein
+  // Durchschnitt über 90 Tage, alle Geräte und Orte; die Prüfung eine einzelne Abfrage. Hauptwert,
+  // Sortierung und Filter bleiben bei Search Console (keywordOwnPosition).
+  function serpCheckPosition(kw) {
+    if (kw.organic_rank != null) return Number(kw.organic_rank);
+    if (kw.serp_checked_at) return 1000;
+    return null;
+  }
+
   function renderOwnPositionCell(kw) {
     var detail = state.topicDetailCache && state.topicDetailCache[state.activeTopicId];
     var depth = (detail && detail.serp_check_depth) || 10;
@@ -1769,10 +1779,23 @@
     if (kw.gsc_position != null) {
       var p = Number(kw.gsc_position);
       text = '\u00d8 ' + p.toLocaleString('de-DE', { maximumFractionDigits: 1 });
-      tip = 'Durchschnittliche Position laut Google Search Console' +
-        (kw.gsc_impressions != null ? ' (' + Number(kw.gsc_impressions).toLocaleString('de-DE') + ' Impressionen)' : '') +
+      tip = 'Durchschnittliche Position laut Google Search Console (letzte 90 Tage, alle Geräte und Orte)' +
+        (kw.gsc_impressions != null ? ', ' + Number(kw.gsc_impressions).toLocaleString('de-DE') + ' Impressionen' : '') +
         '. Das sind echte Daten eurer Domain.' +
         (p > 10 && p <= 20 ? ' Seite 2: Mit gezielter Optimierung ist Seite 1 oft schnell erreichbar.' : '');
+      var serpPos = serpCheckPosition(kw);
+      // "nicht in Top x" widerspricht nur einer GSC-Position innerhalb der Top x.
+      var conflict = serpPos != null && (serpPos >= 1000 ? p <= depth : positionBucket(serpPos) !== positionBucket(p));
+      if (conflict) {
+        var serpText = serpPos >= 1000 ? 'nicht in Top ' + depth : 'Platz ' + serpPos;
+        var serpDate = kw.serp_checked_at ? ' ' + formatShortDate(kw.serp_checked_at) : '';
+        tip += ' Die Google-Prüfung' + serpDate + ' ergab: ' + serpText + '. Sie ist eine einzelne Abfrage (Deutschland),' +
+          ' Search Console ein Durchschnitt. Weichen beide ab, schwankt die Position oder hat sich kürzlich verändert.';
+        return '<span title="' + escapeHtml(tip) + '" style="display:inline-block;text-align:right;line-height:1.25;">' +
+          '<span style="' + style + '">' + escapeHtml(text) + '</span>' +
+          '<span class="cvz-pos-serp" style="display:block;font-size:11px;color:var(--cvz-text-muted,#8b98a5);font-weight:400;">' +
+          escapeHtml('Prüfung' + serpDate + ': ' + serpText) + '</span></span>';
+      }
     } else if (kw.organic_rank != null) {
       text = String(kw.organic_rank);
       tip = 'Position bei der letzten Google-Prüfung' +
@@ -10942,7 +10965,7 @@
     heading.textContent = 'Google-Search-Console-Performance';
     gscHeadRow.appendChild(heading);
     gscHeadRow.appendChild(makeTip(
-      'Hier siehst du Keywords, bei denen du in Google auf Position 15+ rankst und mindestens 30 Impressionen hast ("Near-Miss"-Keywords). Das sind Seiten, die knapp an Seite 1 vorbeischrammen, mit gezielter Optimierung oft schnell verbesserbar.'
+      'Hier siehst du die Suchanfragen aus eurer Google Search Console (letzte 90 Tage), die zum Thema passen, mit Klicks, Impressionen und Durchschnittsposition. "Knapp an Seite 1" heißt: ab Position 15 und mindestens 30 Impressionen. Diese Seiten schrammen knapp an Seite 1 vorbei und lassen sich mit gezielter Optimierung oft schnell verbessern.'
     ));
     section.appendChild(gscHeadRow);
 
