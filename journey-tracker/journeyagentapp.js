@@ -214,6 +214,8 @@
     ownPagesErrors: {},
     ownPagesFilter: {},        // { [topicId]: 'alle' | 'neu' | 'aktiv' | 'nicht_mehr' | 'einmalig' }
     ownPagesOpen: {},          // { [topicId + '|' + page]: true } aufgeklappte Zeile
+    ownPagesWindowCache: {},   // NEU (14.11.2026): { [topicId + '|' + Tage]: Antwort } für die Journey (Seiten je Frage)
+    loadingOwnPagesWindow: {},
     retrievedShowCompetitors: {}, // { [topicId]: true } = Wettbewerber einblenden
     openRetrievedDomains: {},  // { [topicId|domain]: true } = aufgeklappt
     keywordRankHistoryCache: {},
@@ -340,6 +342,9 @@
     });
     delete state.ownPagesCache[topicId];
     delete state.ownPagesErrors[topicId];
+    Object.keys(state.ownPagesWindowCache).forEach(function (k) {
+      if (k.indexOf(topicId + '|') === 0) delete state.ownPagesWindowCache[k];
+    });
 
     // Auch die Domain-Übersicht (Opportunities über alle Themen) ist dann veraltet.
     var topic = getTopicById(topicId);
@@ -4790,9 +4795,10 @@
 
       var li = document.createElement('li');
       li.style.cssText = 'padding:8px 0;border-top:1px solid var(--cvz-border,#232b36);display:flex;gap:12px;align-items:baseline;';
-      var text = document.createElement('span');
-      text.style.cssText = 'flex:1;';
-      text.textContent = p.prompt_text || '';
+      // GEÄNDERT (14.11.2026): Block statt Zeile, darunter die verlinkten Seiten (renderPromptPagesLine).
+      var text = document.createElement('div');
+      text.style.cssText = 'flex:1;min-width:0;';
+      text.appendChild(document.createTextNode(p.prompt_text || ''));
       // NEU (13.11.2026): Fragen ohne eigene Phase kenntlich machen (zählen wie im Backend als Erforschung).
       if (!promptHasOwnPhase(p)) {
         var noPhase = document.createElement('span');
@@ -4819,6 +4825,10 @@
         status.textContent = 'nicht zitiert (' + ps.total + (ps.total === 1 ? ' Antwort' : ' Antworten') + ')';
       }
       li.appendChild(status);
+      if (!beforeEntry) {
+        var pagesLine = renderPromptPagesLine(topicId, p, ps, winDays);
+        if (pagesLine) text.appendChild(pagesLine);
+      }
       ul.appendChild(li);
     });
 
@@ -6187,6 +6197,67 @@
     }
     state.loadingOwnPages[topicId] = false;
     render();
+  }
+
+  // NEU (14.11.2026): eigene Seiten im Zeitraum der Journey (by_prompt: Seiten je Frage).
+  function ownPagesWindowKey(topicId, days) {
+    return topicId + '|' + days;
+  }
+
+  async function maybeLoadOwnPagesWindow(topicId, days) {
+    if (!topicId || !days || CONFIG.useMockData) return;
+    days = Math.max(1, Math.min(730, Math.round(days)));
+    var key = ownPagesWindowKey(topicId, days);
+    if (key in state.ownPagesWindowCache || state.loadingOwnPagesWindow[key]) return;
+    state.loadingOwnPagesWindow[key] = true;
+    try {
+      state.ownPagesWindowCache[key] = await apiFetch('/topics/' + topicId + '/own-pages?days=' + days);
+    } catch (e) {
+      console.error('[CVZ Visibility] Seiten je Frage konnten nicht geladen werden:', e);
+      state.ownPagesWindowCache[key] = null;  // kein Endlos-Nachladen, Journey zeigt dann einfach keine Seiten
+    }
+    state.loadingOwnPagesWindow[key] = false;
+    render();
+  }
+
+  // Unter einer Frage: welche eigenen Seiten verlinkt wurden, sonst die meistverlinkte fremde Domain.
+  function renderPromptPagesLine(topicId, p, ps, winDays) {
+    var days = Math.max(1, Math.min(730, Math.round(winDays || 28)));
+    var key = ownPagesWindowKey(topicId, days);
+    if (!(key in state.ownPagesWindowCache)) { maybeLoadOwnPagesWindow(topicId, days); return null; }
+    var data = state.ownPagesWindowCache[key];
+    var pages = (data && data.by_prompt && data.by_prompt[p.id]) || [];
+    var box = document.createElement('div');
+    box.className = 'cvz-jq-pages';
+    if (pages.length) {
+      pages.forEach(function (pg) {
+        var chs = [];
+        if (pg.channels && pg.channels.chat_gpt) chs.push('ChatGPT ' + pg.channels.chat_gpt);
+        if (pg.channels && pg.channels.gemini) chs.push('Gemini ' + pg.channels.gemini);
+        var row = document.createElement('div');
+        row.className = 'cvz-jq-page';
+        row.innerHTML = '<span aria-hidden="true" class="cvz-jq-page-arrow">\u2192</span>' +
+          '<a class="cvz-own-page-link" href="' + escapeHtml(pg.page) + '" target="_blank" rel="noopener">' + escapeHtml(pg.path) + '</a>' +
+          '<span class="cvz-jq-page-meta">' + escapeHtml(chs.join(' · ')) + '</span>';
+        box.appendChild(row);
+      });
+      return box;
+    }
+    if (ps.total > 0 && ps.cited === 0) {
+      var dash = state.dashboardDataCache[topicId];
+      var row = ((dash && dash.prompt_source_matrix) || []).filter(function (r) { return r.prompt_id === p.id; })[0];
+      var top = null;
+      Object.keys((row && row.domains) || {}).forEach(function (d) {
+        if (!top || row.domains[d] > row.domains[top]) top = d;
+      });
+      var none = document.createElement('p');
+      none.className = 'cvz-jq-page-none';
+      none.textContent = 'Keine eurer Seiten verlinkt.' +
+        (top ? ' Meist verlinkt: ' + top + ' (in ' + row.domains[top] + (row.domains[top] === 1 ? ' Antwort' : ' Antworten') + ').' : '');
+      box.appendChild(none);
+      return box;
+    }
+    return null;
   }
 
   function ownPageChannelCell(ch) {
@@ -13772,6 +13843,14 @@
       '.cvz-ov-move-kind { font-size: 12px; font-weight: 600; }' +
       '.cvz-ov-move-text { font-weight: 600; }' +
       '.cvz-ov-move-meta { font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-jq-pages { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }' +
+      '.cvz-jq-page { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: 13px; }' +
+      '.cvz-jq-page-arrow { color: var(--cvz-text-muted); }' +
+      '.cvz-jq-page-meta { font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-jq-page-none { margin: 6px 0 0; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-gp-demand { margin: 4px 0 0; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-gp-gsc-missing { margin: 4px 0 0; font-size: 12px; color: var(--cvz-amber); }' +
+      '.cvz-gp-gsc-missing a { color: var(--cvz-teal); }' +
       '.cvz-sit-tile-google { margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--cvz-border); font-size: 12px; color: var(--cvz-text-muted); }' +
       '.cvz-own-page-link { color: var(--cvz-teal); font-weight: 600; text-decoration: none; word-break: break-all; }' +
       '.cvz-own-page-link:hover { text-decoration: underline; }' +
@@ -16185,6 +16264,35 @@
     line.appendChild(label);
     line.appendChild(document.createTextNode(parts.join(' · ')));
     wrap.appendChild(line);
+
+    // NEU (14.11.2026): Suchnachfrage und Klicks der Phase. Ohne Search Console steht das hier.
+    var gpDetail = state.topicDetailCache[state.activeTopicId];
+    var gpProject = gpDetail && gpDetail.topic ? getProjectById(gpDetail.topic.project_id) : null;
+    var gscMissing = !!(gpProject && gpProject.gsc_connected === false);
+    var demandParts = [];
+    if (g.search_volume) demandParts.push('Nachfrage ' + Number(g.search_volume).toLocaleString('de-DE') + ' Suchen/Monat');
+    if (!gscMissing && g.clicks != null) demandParts.push(Number(g.clicks).toLocaleString('de-DE') + ' Klicks (Search Console)');
+    if (demandParts.length) {
+      var demand = document.createElement('p');
+      demand.className = 'cvz-gp-demand';
+      demand.title = 'Nachfrage: Summe des monatlichen Suchvolumens der Keywords dieser Phase. Klicks: Search Console, letzter Abruf (rund 90 Tage).';
+      demand.textContent = demandParts.join(' · ');
+      wrap.appendChild(demand);
+    }
+    if (gscMissing) {
+      var miss = document.createElement('p');
+      miss.className = 'cvz-gp-gsc-missing';
+      miss.textContent = 'Search Console nicht verbunden: keine Klicks, Positionen nur aus der Google-Prüfung. ';
+      if (CONFIG.gscSetupUrl) {
+        var conn = document.createElement('a');
+        conn.href = CONFIG.gscSetupUrl;
+        conn.target = '_blank';
+        conn.rel = 'noopener';
+        conn.textContent = 'Verbinden \u2197';
+        miss.appendChild(conn);
+      }
+      wrap.appendChild(miss);
+    }
 
     // Hinweis nur im eindeutigen Fall, mit genug KI-Antworten.
     // Wer ihn nicht will: diesen ganzen if-Block löschen.
