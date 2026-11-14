@@ -1433,7 +1433,7 @@
         state.expandedPromptRunIndex[promptId] = 0;
         state.expandedPromptRound[promptId] = 0;
       } catch (e) {
-        console.error('[CVZ Visibility] Prompt-Zitationen konnten nicht geladen werden:', e);
+        console.error('[CVZ Visibility] Prompt-Verlinkungen konnten nicht geladen werden:', e);
         state.promptCitationsCache[promptId] = null;
       }
       state.loadingPromptCitations[promptId] = false;
@@ -1567,8 +1567,8 @@
   var SHOW_LEGACY_RECOMMENDATIONS = false;
 
   var OPPORTUNITY_TYPE_LABELS = {
-    high_demand_low_visibility:      'Suchnachfrage da, KI zitiert euch kaum',
-    competitor_citation:             'Wettbewerber wird zitiert',
+    high_demand_low_visibility:      'Suchnachfrage da, KI verlinkt euch kaum',
+    competitor_citation:             'Wettbewerber wird verlinkt',
     google_visible_ai_invisible:     'Google sichtbar, KI unsichtbar',
     ai_visible_competitor_dominates: 'KI-sichtbar, Wettbewerber dominiert',
     new_question:                    'Neue Frage entdeckt',
@@ -1589,11 +1589,11 @@
   // Farb- und Hinweis-Konfiguration fuer Beste-Content-Chancen-Typen.
   var CONTENT_CHANCE_CONFIG = {
     erste_ki_zitierung: {
-      label: 'Erste KI-Zitierung, ausbaufähig',
+      label: 'Erste KI-Verlinkung, ausbaufähig',
       color: '#4fd1c5',
       bg: 'rgba(79,209,197,.08)',
       border: 'rgba(79,209,197,.3)',
-      tip: 'Jetzt ausbauen: Thema tiefer abdecken, um Zitierrate dauerhaft zu steigern.',
+      tip: 'Jetzt ausbauen: Thema tiefer abdecken, um Verlinkungsrate dauerhaft zu steigern.',
     },
     seo_naeher_top10: {
       label: 'Nah an Google Top 10',
@@ -1650,8 +1650,8 @@
   var CONTENT_CHANGE_TYPE_ORDER = ['neue_seite', 'ueberarbeitung', 'kampagne', 'sonstiges'];
 
   var VISIBILITY_LABELS = {
-    green:  'Zitiert',
-    yellow: 'Erwähnt, nicht zitiert',
+    green:  'Verlinkt',
+    yellow: 'Erwähnt, nicht verlinkt',
     // GEÄNDERT (15.09.2026): war "Nicht vorhanden": unklar, WAS nicht
     // vorhanden ist (siehe Chat-Verlauf 15.09.2026). Gemeint ist: die
     // eigene Domain taucht in den ausgewerteten ChatGPT/Gemini-Antworten
@@ -1669,7 +1669,7 @@
   var CHANGELOG_LOCATION_ORDER = ['landingpage', 'blogartikel', 'preisseite', 'meta', 'sonstiges'];
 
   var CHANGELOG_EFFECT_LABELS = {
-    mehr_zitierungen: 'Mehr KI-Zitierungen',
+    mehr_zitierungen: 'Mehr KI-Verlinkungen',
     bessere_position: 'Bessere Google-Position',
     beides:           'Beides',
     unklar:           'Unklar',
@@ -1913,7 +1913,7 @@
                        lead: function () {
                          return 'Wie oft ChatGPT und Gemini eure Domain in den letzten ' +
                            dashWindowDays(state.dashboardDataCache[state.activeTopicId]) +
-                           ' Tagen als Quelle nennen, und wo die größten Chancen liegen.';
+                           ' Tagen verlinken, und wo die größten Chancen liegen.';
                        } },
     'journey':       { eyebrow: 'Journey', q: 'In welcher Phase der Kaufentscheidung fehlt ihr?',
                        lead: 'Eure Zielgruppe fragt in jeder Phase anders. Hier seht ihr, wo ihr in den Antworten vorkommt und wo andere den Platz haben.' },
@@ -1929,9 +1929,9 @@
     'daten:prompts': { eyebrow: 'Daten · Prompts', q: 'Welche Fragen führen zu euch, welche nicht?',
                        lead: 'Die Fragen, die der Tracker regelmäßig an ChatGPT und Gemini stellt. Klickt auf eine Frage, um die Antworten zu sehen.' },
     'daten:fanout':  { eyebrow: 'Daten · Fan-out', q: 'Wonach suchen die KIs im Hintergrund?',
-                       lead: 'Die Suchanfragen, die ChatGPT stellt, bevor es antwortet. Wer dafür gut rankt, wird eher zitiert.' },
+                       lead: 'Die Suchanfragen, die ChatGPT stellt, bevor es antwortet. Wer dafür gut rankt, wird eher verlinkt.' },
     'daten:quellen': { eyebrow: 'Daten · Quellen', q: 'Welche Seiten findet ChatGPT, und welche nennt es?',
-                       lead: 'Bei der Websuche sieht ChatGPT viel mehr Seiten, als es am Ende als Quelle nennt. Hier steht beides nebeneinander, je Domain.' },
+                       lead: 'Bei der Websuche sieht ChatGPT viel mehr Seiten, als es am Ende verlinkt. Hier steht beides nebeneinander, je Domain.' },
     'daten:gsc':     { eyebrow: 'Daten · Search Console', q: 'Über welche Suchen findet man euch heute?',
                        lead: 'Echte Suchanfragen aus eurer Google Search Console, mit Klicks, Impressionen und Position.' },
     'domain:uebersicht': { eyebrow: 'Domain · Übersicht', q: 'Wie sichtbar ist die Domain über alle Themen?',
@@ -2629,7 +2629,17 @@
     // NEU (14.11.2026): Sprung zu einem Abschnitt derselben Seite
     var scrollToBtn = event.target.closest('[data-cvz-scroll-to]');
     if (scrollToBtn) {
-      var scrollTarget = document.getElementById(scrollToBtn.getAttribute('data-cvz-scroll-to'));
+      var scrollId = scrollToBtn.getAttribute('data-cvz-scroll-to');
+      var scrollTarget = document.getElementById(scrollId);
+      // NEU (14.11.2026): Steht das Ziel in einem anderen Tab (data-cvz-scroll-tab), erst dorthin wechseln.
+      var scrollTab = scrollToBtn.getAttribute('data-cvz-scroll-tab');
+      if (!scrollTarget && scrollTab) {
+        state.activeSubTab = normalizeTabId(scrollTab);
+        updateUrlParams({ cvz_tab: state.activeSubTab, cvz_view: null });
+        if (state.activeSubTab === 'situation') maybeLoadOwnPages(state.activeTopicId);
+        render();
+        scrollTarget = document.getElementById(scrollId);
+      }
       if (scrollTarget) scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
@@ -4805,7 +4815,7 @@
       // GEÄNDERT (14.11.2026): Block statt Zeile, darunter die verlinkten Seiten (renderPromptPagesLine).
       var text = document.createElement('div');
       text.style.cssText = 'flex:1;min-width:0;';
-      text.appendChild(document.createTextNode(p.prompt_text || ''));
+      text.appendChild(promptLinkEl(p.id, p.prompt_text || ''));  // GEÄNDERT (14.11.2026): öffnet die Antworten
       // NEU (13.11.2026): Fragen ohne eigene Phase kenntlich machen (zählen wie im Backend als Erforschung).
       if (!promptHasOwnPhase(p)) {
         var noPhase = document.createElement('span');
@@ -4826,10 +4836,10 @@
         status.textContent = 'noch keine Antworten (' + winDays + ' Tage)';
       } else if (ps.cited > 0) {
         status.style.color = 'var(--cvz-teal,#4fd1c5)';
-        status.textContent = 'zitiert in ' + ps.cited + ' von ' + ps.total + (ps.total === 1 ? ' Antwort' : ' Antworten');
+        status.textContent = 'verlinkt in ' + ps.cited + ' von ' + ps.total + (ps.total === 1 ? ' Antwort' : ' Antworten');
       } else {
         status.style.color = 'var(--cvz-red,#de5b50)';
-        status.textContent = 'nicht zitiert (' + ps.total + (ps.total === 1 ? ' Antwort' : ' Antworten') + ')';
+        status.textContent = 'nicht verlinkt (' + ps.total + (ps.total === 1 ? ' Antwort' : ' Antworten') + ')';
       }
       li.appendChild(status);
       if (!beforeEntry) {
@@ -4850,8 +4860,8 @@
     var note = document.createElement('p');
     note.className = 'cvz-chart-caption';
     note.style.marginTop = '10px';
-    note.textContent = 'Zitiert = eure Domain wurde in den letzten ' + winDays + ' Tagen in mindestens einer Antwort (' + activeChannelLabel() +
-      ') als Quelle genannt. Die Prozentzahl in der Tabelle ist der Durchschnitt von "zitiert in x von y Antworten" über diese Fragen. Fragen ohne Antworten im Zeitraum zählen nicht mit. Rolle einer Frage ändern: im Daten-Tab den Prompt aufklappen.';
+    note.textContent = 'Verlinkt = eure Domain wurde in den letzten ' + winDays + ' Tagen in mindestens einer Antwort (' + activeChannelLabel() +
+      ') verlinkt. Die Prozentzahl in der Tabelle ist der Durchschnitt von "verlinkt in x von y Antworten" über diese Fragen. Fragen ohne Antworten im Zeitraum zählen nicht mit. Rolle einer Frage ändern: im Daten-Tab den Prompt aufklappen.';
     panel.appendChild(note);
     return panel;
   }
@@ -4883,9 +4893,9 @@
       // Die kleine Fragenzahl je Zelle bleibt über die Zählweise "x von y"
       // sichtbar, wird aber nicht mehr als Schwäche benannt.
       // GEÄNDERT (13.11.2026): Prozent = Zitierrate statt Anteil der Fragen mit mindestens einem Treffer.
-      'Die Prozentzahl ist eure Zitierrate: in welchem Anteil der KI-Antworten der letzten ' + roleWinDays + ' Tage eure Domain als Quelle genannt wurde, ' +
+      'Die Prozentzahl ist eure Verlinkungsrate: in welchem Anteil der KI-Antworten der letzten ' + roleWinDays + ' Tage eure Domain verlinkt wurde, ' +
       'als Durchschnitt über die Fragen dieser Rolle in dieser Phase (jede Frage zählt gleich). ' +
-      'Darunter steht, bei wie vielen Fragen ihr überhaupt mindestens einmal zitiert wurdet. ' +
+      'Darunter steht, bei wie vielen Fragen ihr überhaupt mindestens einmal verlinkt wurdet. ' +
       'Beispiel: 2 von 2 Fragen, aber nur 9 %: Ihr kommt bei beiden Fragen vor, aber nur in jeder elften Antwort. ' +
       'Richtwert (vorläufig): ab 30 % stark, 10 bis 29 % ausbaufähig, unter 10 % schwach. ' +
       'Rollen, die später in den Kaufprozess einsteigen, werden erst ab ihrer Einstiegsphase gemessen.'
@@ -5023,7 +5033,7 @@
           pct + '%</div>' +
         // GEÄNDERT (13.11.2026): unterstrichen, damit erkennbar ist, dass die Zelle die Fragen öffnet.
         '<div style="font-size:10px;color:var(--cvz-text-muted,#8b98a5);text-decoration:underline dotted;text-underline-offset:2px;">' +
-          'bei ' + st.cited + ' von ' + st.measured + (st.measured === 1 ? ' Frage' : ' Fragen') + ' zitiert</div>';
+          'bei ' + st.cited + ' von ' + st.measured + (st.measured === 1 ? ' Frage' : ' Fragen') + ' verlinkt</div>';
     }
 
     // GEÄNDERT (13.11.2026): drei Stufen nach Zitierrate statt Verlauf nach Fragen-Anteil.
@@ -5092,8 +5102,8 @@
     var caption = document.createElement('p');
     caption.className = 'cvz-chart-caption';
     // GEÄNDERT (13.11.2026): beschreibt die Zitierrate statt des Anteils zitierter Fragen.
-    caption.textContent = 'Zitierrate je Rolle und Journey-Phase: In welchem Anteil der KI-Antworten (' + activeChannelLabel() + ') der letzten ' + roleWinDays +
-      ' Tage eure Domain als Quelle genannt wurde, Durchschnitt über die Fragen der Zelle. Darunter: bei wie vielen Fragen mindestens einmal. ' +
+    caption.textContent = 'Verlinkungsrate je Rolle und Journey-Phase: In welchem Anteil der KI-Antworten (' + activeChannelLabel() + ') der letzten ' + roleWinDays +
+      ' Tage eure Domain verlinkt wurde, Durchschnitt über die Fragen der Zelle. Darunter: bei wie vielen Fragen mindestens einmal. ' +
       'Teal: ab 30 %, gelb: 10 bis 29 %, rot: unter 10 %. „Steigt später ein“: Die Rolle recherchiert erst ab ihrer Einstiegsphase mit, änderbar unter „Rollen bearbeiten“. ' +
       '„Nicht gemessen“: Der Prompt für diese Zelle fehlt noch (z. B. keine freien Plätze), über „+ Prompt“ legt ihr ihn selbst an. ' +
       'Ein Klick auf eine Zelle zeigt die Fragen dahinter.' +
@@ -5241,7 +5251,7 @@
     heading.textContent = 'KI-Sichtbarkeit der Domain';
     head.appendChild(heading);
     head.appendChild(makeTip(
-      'Durchschnitt der Zitierraten aller aktiven Themen dieser Domain, jedes Thema zählt gleich viel. ' +
+      'Durchschnitt der Verlinkungsraten aller aktiven Themen dieser Domain, jedes Thema zählt gleich viel. ' +
       'Jeder Punkt fasst die letzten ' + domWin + ' Tage zusammen, ein Punkt pro Woche. ' +
       'Ein Thema fließt in einen Punkt nur ein, wenn es dort genug Antworten hat. ' +
       'Das schattierte Band zeigt, wie weit der Wert allein durch Zufall schwanken kann.'
@@ -5393,7 +5403,7 @@
 
     var note = document.createElement('p');
     note.className = 'cvz-chart-caption';
-    note.textContent = 'Anteil der Antworten, die eure Domain als Quelle nennen. Pfeile erscheinen nur bei Veränderungen gegenüber den ' +
+    note.textContent = 'Anteil der Antworten, die eure Domain verlinken. Pfeile erscheinen nur bei Veränderungen gegenüber den ' +
       rolling.window_days + ' Tagen davor, die größer sind als die normale Schwankung. Zeile anklicken öffnet das Thema.';
     wrap.appendChild(note);
     return wrap;
@@ -6023,11 +6033,11 @@
   var RETRIEVED_WEEKS = 4;  // wie Fan-out: 28 Tage, gleiches Fenster wie die übrigen Auswertungen
   var RETRIEVED_BUCKETS = [
     { id: 'alle', label: 'Alle' },
-    { id: 'nie_zitiert', label: 'Gefunden, nie zitiert' },
-    { id: 'selten_zitiert', label: 'Selten zitiert' },
-    { id: 'oft_zitiert', label: 'Oft zitiert' },
+    { id: 'nie_zitiert', label: 'Gefunden, nie verlinkt' },
+    { id: 'selten_zitiert', label: 'Selten verlinkt' },
+    { id: 'oft_zitiert', label: 'Oft verlinkt' },
   ];
-  var RETRIEVED_BUCKET_LABELS = { nie_zitiert: 'Nie zitiert', selten_zitiert: 'Selten zitiert', oft_zitiert: 'Oft zitiert' };
+  var RETRIEVED_BUCKET_LABELS = { nie_zitiert: 'Nie verlinkt', selten_zitiert: 'Selten verlinkt', oft_zitiert: 'Oft verlinkt' };
   // Spiegelt TYPE_LABELS in outreach_targets.py (Seitentyp aus der Quellen-Analyse).
   var RETRIEVED_TYPE_LABELS = {
     review_plattform: 'Bewertungsportal', fachartikel: 'Fachmedium', vergleichsartikel: 'Vergleichsartikel',
@@ -6067,7 +6077,7 @@
   };
   var DOMAIN_KIND_SOURCE_TEXT = {
     manuell: 'von eurem Team festgelegt', thema: 'aus den Einstellungen des Themas', liste: 'bekanntes Portal',
-    muster: 'erkannt am Domainnamen oder an den gefundenen Seiten', seitentyp: 'abgeleitet aus dem Seitentyp der zitierten Seiten',
+    muster: 'erkannt am Domainnamen oder an den gefundenen Seiten', seitentyp: 'abgeleitet aus dem Seitentyp der verlinkten Seiten',
     keine: 'keine Hinweise gefunden',
   };
   function domainKindLabel(kind, data) {
@@ -6410,7 +6420,7 @@
       if (open) {
         var inner = '';
         if (p.passages && p.passages.length) {
-          inner += '<p style="margin:0 0 4px;font-weight:600;">Zitierte Textstellen</p><ul style="margin:0 0 8px;padding-left:18px;">';
+          inner += '<p style="margin:0 0 4px;font-weight:600;">Verlinkte Textstellen</p><ul style="margin:0 0 8px;padding-left:18px;">';
           p.passages.forEach(function (ps) {
             inner += '<li class="cvz-own-page-passage">„' + escapeHtml(ps.text) + '“ <span style="color:var(--cvz-text-muted,#8b98a5);font-size:11px;">' +
               ps.count + '×, zuletzt ' + escapeHtml(ddmm(ps.last_seen)) + '</span></li>';
@@ -6421,7 +6431,7 @@
           inner += '<p style="margin:0 0 4px;font-weight:600;">Bei diesen Fragen verlinkt</p><ul style="margin:0;padding-left:18px;">';
           p.prompts.forEach(function (pr) {
             var chs = (pr.channels || []).map(function (c) { return c === 'chat_gpt' ? 'ChatGPT' : c === 'gemini' ? 'Gemini' : c; }).join(', ');
-            inner += '<li class="cvz-own-page-prompt">' + escapeHtml(pr.prompt_text || '(Frage ohne Text)') +
+            inner += '<li class="cvz-own-page-prompt">' + (pr.prompt_text ? promptLinkHtml(pr.prompt_id, pr.prompt_text) : '(Frage ohne Text)') +
               ' <span style="color:var(--cvz-text-muted,#8b98a5);font-size:11px;">' + pr.answers + (pr.answers === 1 ? ' Antwort' : ' Antworten') + ', ' + escapeHtml(chs) + '</span></li>';
           });
           if (p.prompts_total > p.prompts.length) inner += '<li style="color:var(--cvz-text-muted,#8b98a5);">und ' + (p.prompts_total - p.prompts.length) + ' weitere</li>';
@@ -6462,7 +6472,7 @@
 
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
-    heading.textContent = 'Gefunden und zitiert (ChatGPT)';
+    heading.textContent = 'Gefunden und verlinkt (ChatGPT)';
     section.appendChild(heading);
 
     var intro = document.createElement('p');
@@ -6470,8 +6480,8 @@
     intro.style.marginBottom = '10px';
     intro.textContent =
       'Gefunden heißt: Die Seite stand unter den Suchtreffern, die ChatGPT bei seiner Recherche gesehen hat. ' +
-      'Ob ChatGPT sie auch geöffnet hat, ist nicht bekannt. Zitiert heißt: ChatGPT nennt die Domain in der Antwort als Quelle. ' +
-      'Domains, die oft gefunden, aber selten zitiert werden, sind Kandidaten für eigene Beiträge mit genau passendem Inhalt. ' +
+      'Ob ChatGPT sie auch geöffnet hat, ist nicht bekannt. Verlinkt heißt: ChatGPT führt die Domain in der Antwort als Quelle mit Link auf. ' +
+      'Domains, die oft gefunden, aber selten verlinkt werden, sind Kandidaten für eigene Beiträge mit genau passendem Inhalt. ' +
       'Nur für ChatGPT, Gemini liefert diese Information nicht.';
     section.appendChild(intro);
 
@@ -6527,7 +6537,7 @@
     ownNote.className = 'cvz-retrieved-own';
     if (own) {
       ownNote.innerHTML = '<strong>Eure Domain</strong>' + escapeHtml(phaseText) + ': in ' + own.runs_found + ' von ' + withSearch +
-        ' Läufen gefunden, in ' + own.runs_cited + ' davon zitiert' +
+        ' Läufen gefunden, in ' + own.runs_cited + ' davon verlinkt' +
         (own.runs_found > own.runs_cited
           ? '. In ' + (own.runs_found - own.runs_cited) + ' Läufen hat ChatGPT eure Seite gesehen und trotzdem andere Quellen genannt.'
           : '.');
@@ -6653,7 +6663,7 @@
         placementChip(d) +
         '<span class="cvz-fanout-prompt-meta">in ' + Math.round(d.runs_found / withSearch * 100) + ' % der Antworten gefunden (' +
           d.prompts_found + (d.prompts_found === 1 ? ' Prompt' : ' Prompts') + ') · ' +
-          d.runs_cited + ' von ' + d.runs_found + ' zitiert (' + pct + ' %)</span>';
+          d.runs_cited + ' von ' + d.runs_found + ' verlinkt (' + pct + ' %)</span>';
       details.appendChild(summary);
 
       var body = document.createElement('div');
@@ -6671,13 +6681,13 @@
 
       var facts = [];
       facts.push('An ' + d.days_found + (d.days_found === 1 ? ' Tag' : ' Tagen') + ' gefunden' + (phase === 'alle' ? '' : ' (alle Phasen)'));
-      if (d.prompts_cited && phase === 'alle') facts.push('in ' + d.prompts_cited + ' von ' + d.prompts_found + ' Prompts mindestens einmal zitiert');
+      if (d.prompts_cited && phase === 'alle') facts.push('in ' + d.prompts_cited + ' von ' + d.prompts_found + ' Prompts mindestens einmal verlinkt');
       if (d.by_phase && phase === 'alle') {
         var phParts = PHASE_ORDER.filter(function (ph) { return d.by_phase[ph]; }).map(function (ph) {
           var bp = d.by_phase[ph];
           return (PHASE_LABELS[ph] || ph) + ' ' + bp.runs_cited + '/' + bp.runs_found;
         });
-        if (phParts.length) facts.push('Zitiert/gefunden je Phase: ' + phParts.join(', '));
+        if (phParts.length) facts.push('Verlinkt/gefunden je Phase: ' + phParts.join(', '));
       }
       if (d.content_type) facts.push('Seitentyp: ' + retrievedTypeLabel(d.content_type));
       var factsP = document.createElement('p');
@@ -6728,9 +6738,9 @@
         prList.className = 'cvz-retrieved-prompts';
         promptRows.forEach(function (pr) {
           var li = document.createElement('li');
-          li.innerHTML = '<span>' + escapeHtml(pr.prompt_text || '(Prompt nicht mehr vorhanden)') + '</span>' +
+          li.innerHTML = '<span>' + (pr.prompt_text ? promptLinkHtml(pr.prompt_id, pr.prompt_text) : '(Prompt nicht mehr vorhanden)') + '</span>' +
             '<span class="cvz-retrieved-prompt-meta">' + (pr.phase && PHASE_LABELS[pr.phase] ? escapeHtml(PHASE_LABELS[pr.phase]) + ' · ' : '') +
-            pr.runs_found + '\u00d7 gefunden, ' + pr.runs_cited + '\u00d7 zitiert</span>';
+            pr.runs_found + '\u00d7 gefunden, ' + pr.runs_cited + '\u00d7 verlinkt</span>';
           prList.appendChild(li);
         });
         body.appendChild(prList);
@@ -7131,15 +7141,15 @@
     card.innerHTML =
       buildLineChartSvg([
         { label: 'Erwähnt', values: mentionedRate, color: 'var(--cvz-amber)' },
-        { label: 'Zitiert', values: citedRate, color: 'var(--cvz-teal)' },
+        { label: 'Verlinkt', values: citedRate, color: 'var(--cvz-teal)' },
         { label: 'Empfohlen', values: recommendedRate, color: 'var(--cvz-red)' },
       ], xLabels, { maxY: 100 }) +
       '<div class="cvz-chart-legend">' +
         '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-amber)"></span>Erwähnt</span>' +
-        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Zitiert</span>' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Verlinkt</span>' +
         '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-red)"></span>Empfohlen</span>' +
       '</div>' +
-      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-L\u00e4ufe pro Woche (0 bis 100\u202f%), \u00fcber alle aktiven Themen dieser Domain aufsummiert, in dem die eigene Domain erw\u00e4hnt, zitiert bzw. aktiv empfohlen wurde.</p>';
+      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-L\u00e4ufe pro Woche (0 bis 100\u202f%), \u00fcber alle aktiven Themen dieser Domain aufsummiert, in dem die eigene Domain erw\u00e4hnt, verlinkt bzw. aktiv empfohlen wurde.</p>';
     section.appendChild(card);
     return section;
   }
@@ -7338,15 +7348,15 @@
     card.className = 'cvz-card';
     card.innerHTML =
       buildLineChartSvg([
-        { label: 'Prompts: Zitationsrate', values: promptSeries, color: 'var(--cvz-teal)' },
+        { label: 'Prompts: Verlinkungsrate', values: promptSeries, color: 'var(--cvz-teal)' },
         { label: 'Keywords: Sichtbarkeits-Index', values: keywordSeries, color: 'var(--cvz-amber)' },
       ], xLabels, { maxY: 100, markers: markers, xKeys: allWeeks }) +
       '<div class="cvz-chart-legend">' +
-        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Prompts: Zitationsrate</span>' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Prompts: Verlinkungsrate</span>' +
         '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-amber)"></span>Keywords: Sichtbarkeits-Index</span>' +
         (markers.length ? '<span class="cvz-chart-legend-item"><span class="cvz-legend-marker"></span>Eure Eintr\u00e4ge im \u00c4nderungsprotokoll</span>' : '') +
       '</div>' +
-      '<p class="cvz-chart-caption">Zitationsrate: Anteil ausgewerteter ChatGPT/Gemini-L\u00e4ufe pro Woche, in dem eure Domain zitiert wurde. ' +
+      '<p class="cvz-chart-caption">Verlinkungsrate: Anteil ausgewerteter ChatGPT/Gemini-L\u00e4ufe pro Woche, in dem eure Domain verlinkt wurde. ' +
       'Sichtbarkeits-Index: aus Google-Position und GSC-Position abgeleitete Kennzahl (0 bis 100, h\u00f6her ist besser), gemittelt \u00fcber alle ' +
       'in dieser Woche erfassten Keywords. Gestrichelte Linien markieren eure Eintr\u00e4ge im \u00c4nderungsprotokoll ' +
       '(Datum wird auf die n\u00e4chstgelegene Woche gerundet). So seht ihr, welche \u00c4nderungen zeitlich mit einer Entwicklung zusammenfallen. ' +
@@ -7390,20 +7400,20 @@
         // GEÄNDERT: Ein Prompt wird pro Woche und Modell mehrfach abgefragt,
         // das Backend liefert je (Prompt, Modell) EINE Zeile mit Anzahl der Läufe.
         var statusLabel = (p.runs > 1)
-          ? (p.cited_runs === 0 ? (p.mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden') : 'in ' + p.cited_runs + ' von ' + p.runs + ' L\u00e4ufen zitiert')
-          : (p.cited ? 'zitiert' : (p.mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden'));
+          ? (p.cited_runs === 0 ? (p.mentioned ? 'erw\u00e4hnt, nicht verlinkt' : 'nicht vorhanden') : 'in ' + p.cited_runs + ' von ' + p.runs + ' L\u00e4ufen verlinkt')
+          : (p.cited ? 'verlinkt' : (p.mentioned ? 'erw\u00e4hnt, nicht verlinkt' : 'nicht vorhanden'));
         var change;
         if (p.previous_collected_at) {
           var previousLabel = (p.previous_runs > 1)
-            ? (p.previous_cited_runs === 0 ? (p.previous_mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden') : 'in ' + p.previous_cited_runs + ' von ' + p.previous_runs + ' L\u00e4ufen zitiert')
-            : (p.previous_cited ? 'zitiert' : (p.previous_mentioned ? 'erw\u00e4hnt, nicht zitiert' : 'nicht vorhanden'));
+            ? (p.previous_cited_runs === 0 ? (p.previous_mentioned ? 'erw\u00e4hnt, nicht verlinkt' : 'nicht vorhanden') : 'in ' + p.previous_cited_runs + ' von ' + p.previous_runs + ' L\u00e4ufen verlinkt')
+            : (p.previous_cited ? 'verlinkt' : (p.previous_mentioned ? 'erw\u00e4hnt, nicht verlinkt' : 'nicht vorhanden'));
           change = ', davor am ' + formatShortDate(p.previous_collected_at) + ': ' + previousLabel;
         } else {
           change = ', erster erfasster Lauf';
         }
         html +=
           '<p class="cvz-week-detail-row"><strong>' + escapeHtml(MODEL_LABELS[p.engine] || p.engine) + ':</strong> ' +
-          escapeHtml(p.prompt_text) + ': ' + statusLabel + escapeHtml(change) + '</p>';
+          promptLinkHtml(p.prompt_id, p.prompt_text) + ': ' + statusLabel + escapeHtml(change) + '</p>';
       });
     }
 
@@ -7515,7 +7525,7 @@
     if (sources.length) {
       var periodLabel = detail.meistzitierte_quellen_zeitraum === 'aktueller_monat' ? 'letzte 30 Tage' : 'seit Start des Themas';
       html += '<div class="cvz-summary-subsection">' +
-        '<p class="cvz-section-label cvz-section-label-sm">Meistzitierte Quellen (' + periodLabel + ')</p>' +
+        '<p class="cvz-section-label cvz-section-label-sm">Meistverlinkte Quellen (' + periodLabel + ')</p>' +
         '<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">' +
         sources.map(function (q) {
           var pct = q.von_fragen ? Math.round((q.anzahl_fragen / q.von_fragen) * 100) : 0;
@@ -7532,7 +7542,7 @@
           '</div>';
         }).join('') +
         '</div>' +
-        '<p class="cvz-thin-data-note">KI-Antworten nennen meist mehrere Quellen. Ziel ist, neben diesen Quellen mitzitiert zu werden.</p>' +
+        '<p class="cvz-thin-data-note">KI-Antworten nennen meist mehrere Quellen. Ziel ist, neben diesen Quellen mitverlinkt zu werden.</p>' +
         '</div>';
     }
 
@@ -7692,7 +7702,7 @@
         barCol.appendChild(barTrack);
         var rateLbl = document.createElement('p');
         rateLbl.style.cssText = 'margin:0;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
-        rateLbl.textContent = pct + '% Zitierrate';
+        rateLbl.textContent = pct + '% Verlinkungsrate';
         barCol.appendChild(rateLbl);
         statRow.appendChild(barCol);
 
@@ -7842,7 +7852,7 @@
     table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
     var thead = document.createElement('thead');
     var hrow = document.createElement('tr');
-    var COLS = ['Domain', 'Phase', 'Zitierrate', 'Content-Typ', 'Zusammenfassung', 'Differenzierung'];
+    var COLS = ['Domain', 'Phase', 'Verlinkungsrate', 'Content-Typ', 'Zusammenfassung', 'Differenzierung'];
     var COL_WIDTHS = ['150px', '130px', '80px', '110px', '', ''];
     COLS.forEach(function (label, i) {
       var th = document.createElement('th');
@@ -7930,7 +7940,7 @@
     toggleBtn.textContent = (isOpen ? '\u2212 ' : '+ ') + 'Wettbewerber bearbeiten (' + activeDomains.length + ' aktiv)';
     competitorToggleRow.appendChild(toggleBtn);
     competitorToggleRow.appendChild(makeTip(
-      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden f\u00fcr den hochpriorit\u00e4ren Alert \u201eWettbewerber \u00fcberholt euch\u201c genutzt und in den Quellen im Tab \u201eWettbewerb\u201c als Wettbewerber markiert. Die Grafik \u201eSichtbarkeit im Wettbewerbsvergleich\u201c zeigt dagegen ALLE Domains, die KI-Systeme tats\u00e4chlich zitiert haben, auch bisher nicht best\u00e4tigte. Bereits zitierte Domains werden als Vorschl\u00e4ge angezeigt.'
+      'Wettbewerber-Domains, die du hier eintr\u00e4gst, werden f\u00fcr den hochpriorit\u00e4ren Alert \u201eWettbewerber \u00fcberholt euch\u201c genutzt und in den Quellen im Tab \u201eWettbewerb\u201c als Wettbewerber markiert. Die Grafik \u201eSichtbarkeit im Wettbewerbsvergleich\u201c zeigt dagegen ALLE Domains, die KI-Systeme tats\u00e4chlich verlinkt haben, auch bisher nicht best\u00e4tigte. Bereits verlinkte Domains werden als Vorschl\u00e4ge angezeigt.'
     ));
     section.appendChild(competitorToggleRow);
 
@@ -7973,7 +7983,7 @@
         chip.className = 'cvz-persona-chip' + (draft.indexOf(domain) !== -1 ? ' cvz-persona-chip-active' : '');
         chip.setAttribute('data-cvz-competitor-chip', domain);
         chip.setAttribute('data-cvz-competitor-topic', topicId);
-        var hint = citationByDomain[domain] ? ' (' + citationByDomain[domain] + '\u00d7 zitiert)' : '';
+        var hint = citationByDomain[domain] ? ' (' + citationByDomain[domain] + '\u00d7 verlinkt)' : '';
         chip.textContent = domain + hint;
         chipList.appendChild(chip);
       });
@@ -8004,7 +8014,7 @@
     dataWindowNote.style.marginTop = '8px';
     dataWindowNote.textContent =
       'Hinweis: Eine neu hinzugef\u00fcgte Domain zeigt hier nur Daten, wenn sie in bisherigen L\u00e4ufen bereits ' +
-      'zitiert wurde. Wurde sie bisher nie zitiert, erscheint sie erst ab dem n\u00e4chsten Datenlauf, in dem das ' +
+      'verlinkt wurde. Wurde sie bisher nie verlinkt, erscheint sie erst ab dem n\u00e4chsten Datenlauf, in dem das ' +
       'tats\u00e4chlich passiert, nicht sofort nach dem Speichern.';
     section.appendChild(dataWindowNote);
 
@@ -8226,7 +8236,7 @@
     citationSection.className = 'cvz-section';
     var citationHeading = document.createElement('p');
     citationHeading.className = 'cvz-section-label';
-    citationHeading.textContent = 'Prompt-Zitierungen im Zeitverlauf';
+    citationHeading.textContent = 'Prompt-Verlinkungen im Zeitverlauf';
     citationSection.appendChild(citationHeading);
 
     var gscSection = document.createElement('div');
@@ -8264,10 +8274,10 @@
     citationCard.className = 'cvz-card';
     citationCard.innerHTML =
       buildLineChartSvg([
-        { label: 'Zitiert', values: months.map(function (m) { return m.own_domain_cited; }), color: 'var(--cvz-teal)' },
+        { label: 'Verlinkt', values: months.map(function (m) { return m.own_domain_cited; }), color: 'var(--cvz-teal)' },
         { label: 'Ausgewertete L\u00e4ufe', values: months.map(function (m) { return m.total_runs; }), color: 'var(--cvz-border)' },
       ], xLabels, {}) +
-      '<p class="cvz-chart-caption">Wie viele ausgewertete ChatGPT/Gemini-L\u00e4ufe pro Kalendermonat die eigene Domain zitiert haben, gegen die Gesamtzahl ausgewerteter L\u00e4ufe.</p>';
+      '<p class="cvz-chart-caption">Wie viele ausgewertete ChatGPT/Gemini-L\u00e4ufe pro Kalendermonat die eigene Domain verlinkt haben, gegen die Gesamtzahl ausgewerteter L\u00e4ufe.</p>';
     citationSection.appendChild(citationCard);
 
     var newKeywordsLine = document.createElement('p');
@@ -9296,7 +9306,7 @@
     var mentionedOnly = runs.filter(function (r) { return !r.own_domain_cited && r.own_domain_mentioned; }).length;
 
     var headText = engineLabel + ': ' + (total === 1 ? '1 Lauf' : total + ' L\u00e4ufe') + ' \u00b7 eure Domain ' +
-      (cited === 0 ? 'nicht zitiert' : 'in ' + cited + ' von ' + total + ' zitiert');
+      (cited === 0 ? 'nicht verlinkt' : 'in ' + cited + ' von ' + total + ' verlinkt');
     if (mentionedOnly > 0) headText += ', in ' + mentionedOnly + ' nur erw\u00e4hnt';
     var head = document.createElement('p');
     head.className = 'cvz-prompt-round-head';
@@ -9335,7 +9345,7 @@
     if (stable.length > 0) {
       var stableP = document.createElement('div');
       stableP.className = 'cvz-round-sources';
-      stableP.innerHTML = '<span class="cvz-round-sources-label">In jedem Lauf zitiert</span>' + chipsHtml(stable, 10);
+      stableP.innerHTML = '<span class="cvz-round-sources-label">In jedem Lauf verlinkt</span>' + chipsHtml(stable, 10);
       box.appendChild(stableP);
     }
     if (changing.length > 0) {
@@ -9466,8 +9476,8 @@
     }
 
     var _statusText = run.own_domain_cited
-      ? '\u2713 zitiert' + (run.own_domain_citation_position ? ' (Position ' + run.own_domain_citation_position + ')' : '')
-      : (run.own_domain_mentioned ? 'Nur erw\u00e4hnt, nicht zitiert' : '');
+      ? '\u2713 verlinkt' + (run.own_domain_citation_position ? ' (Position ' + run.own_domain_citation_position + ')' : '')
+      : (run.own_domain_mentioned ? 'Nur erw\u00e4hnt, nicht verlinkt' : '');
     if (run.own_domain_recommended === true) _statusText += ' \u00b7 aktiv empfohlen';
     if (_statusText) {
       var statusLine = document.createElement('p');
@@ -9512,7 +9522,7 @@
 
     var sourcesHeading = document.createElement('p');
     sourcesHeading.className = 'cvz-section-label cvz-section-label-sm';
-    sourcesHeading.textContent = 'Zitierte Quellen (' + run.sources.length + ')';
+    sourcesHeading.textContent = 'Verlinkte Quellen (' + run.sources.length + ')';
     wrap.appendChild(sourcesHeading);
 
     if (run.sources.length === 0) {
@@ -9541,7 +9551,7 @@
     if (run.competitor_mentioned_only && run.competitor_mentioned_only.length) {
       var mentionedNote = document.createElement('p');
       mentionedNote.className = 'cvz-card-placeholder-text cvz-prompt-mentioned-note';
-      mentionedNote.textContent = 'Im Text erw\u00e4hnt, aber nicht als Quelle zitiert: ' + run.competitor_mentioned_only.join(', ');
+      mentionedNote.textContent = 'Im Text erw\u00e4hnt, aber nicht als Quelle verlinkt: ' + run.competitor_mentioned_only.join(', ');
       wrap.appendChild(mentionedNote);
     }
 
@@ -9736,6 +9746,32 @@
     [order[i - 1], order[i + 1]].forEach(function (id) { if (id) fetchPromptCitations(id); });
   }
 
+  // NEU (14.11.2026): Wo ein Prompt-Text steht, öffnet ein Klick die Antwort-Ansicht (openPromptViewer über
+  // data-cvz-prompt-toggle, siehe handleContainerClick). Ohne bekannte ID wird über den Text zugeordnet;
+  // gibt es den Prompt nicht mehr, bleibt es normaler Text.
+  function promptIdByText(text) {
+    var t = String(text || '').trim().toLowerCase();
+    if (!t) return null;
+    var detail = state.topicDetailCache[state.activeTopicId];
+    var hit = ((detail && detail.prompts) || []).filter(function (p) {
+      return String(p.prompt_text || '').trim().toLowerCase() === t;
+    })[0];
+    return hit ? hit.id : null;
+  }
+
+  function promptLinkHtml(promptId, text) {
+    var id = promptId || promptIdByText(text);
+    if (!id) return escapeHtml(text || '');
+    return '<button type="button" class="cvz-prompt-link" data-cvz-prompt-toggle="' + escapeHtml(id) +
+      '" title="Antworten zu dieser Frage ansehen">' + escapeHtml(text || '') + '</button>';
+  }
+
+  function promptLinkEl(promptId, text) {
+    var span = document.createElement('span');
+    span.innerHTML = promptLinkHtml(promptId, text);
+    return span;
+  }
+
   async function openPromptViewer(promptId) {
     var wasOpen = !!state.promptViewer;
     state.keywordViewer = null;
@@ -9792,8 +9828,8 @@
   }
 
   function pvRunStatus(run) {
-    if (run.own_domain_cited) return { key: 'cited', label: 'Zitiert' + (run.own_domain_citation_position ? ' · Quelle ' + run.own_domain_citation_position : '') };
-    if (run.own_domain_mentioned) return { key: 'mentioned', label: 'Erwähnt, nicht zitiert' };
+    if (run.own_domain_cited) return { key: 'cited', label: 'Verlinkt' + (run.own_domain_citation_position ? ' · Quelle ' + run.own_domain_citation_position : '') };
+    if (run.own_domain_mentioned) return { key: 'mentioned', label: 'Erwähnt, nicht verlinkt' };
     return { key: 'none', label: 'Nicht genannt' };
   }
 
@@ -9915,7 +9951,7 @@
     summary.className = 'cvz-pv-summary';
     summary.innerHTML =
       '<span class="cvz-pv-summary-main' + (totalCited ? ' cvz-pv-ok' : '') + '">' +
-        (totalCited ? 'Zitiert in ' + totalCited + ' von ' + totalRuns + ' Antworten' : 'In keiner von ' + totalRuns + ' Antworten zitiert') +
+        (totalCited ? 'Verlinkt in ' + totalCited + ' von ' + totalRuns + ' Antworten' : 'In keiner von ' + totalRuns + ' Antworten verlinkt') +
       '</span><span class="cvz-pv-summary-sub">letzte ' + PV_WINDOW_DAYS + ' Tage, ChatGPT und Gemini</span>';
     box.appendChild(summary);
 
@@ -9988,7 +10024,7 @@
     // (vorher Karte in der rechten Spalte, auf dem Handy erst unter der Antwort).
     stage.insertAdjacentHTML('afterbegin', '<div class="cvz-pv-engine-tabs" role="tablist" aria-label="KI-System">' + engines.map(function (e) {
       var pct = e.windowRuns.length ? Math.round(e.cited / e.windowRuns.length * 100) : 0;
-      var sub = e.windowRuns.length ? e.cited + ' von ' + e.windowRuns.length + ' zitiert'
+      var sub = e.windowRuns.length ? e.cited + ' von ' + e.windowRuns.length + ' verlinkt'
         : (e.runs.length ? 'keine in 28 Tagen' : 'noch keine Antwort');
       return '<button type="button" role="tab" aria-selected="' + (e.id === eng.id) + '" class="cvz-pv-engine-tab' + (e.id === eng.id ? ' cvz-pv-engine-tab-active' : '') + '" data-cvz-pv-engine="' + e.id + '"' + (e.runs.length ? '' : ' disabled') +
         ' title="' + escapeHtml(e.label + ': ' + sub + (e.windowRuns.length ? ' (28 Tage)' : '')) + '">' +
@@ -10072,15 +10108,15 @@
         var rncByDomain = {};
         rnc.forEach(function (r) { var b = pvBareDomain(r.domain); if (!rncByDomain[b]) rncByDomain[b] = r; });
         var rncDomains = Object.keys(rncByDomain);
-        card('Gefunden, nicht zitiert (' + rncDomains.length + ')',
+        card('Gefunden, nicht verlinkt (' + rncDomains.length + ')',
           (rncOwn.length
-            ? '<p class="cvz-pv-muted"><strong>Eure Seite war unter den Suchtreffern, wurde aber nicht zitiert:</strong> ' +
+            ? '<p class="cvz-pv-muted"><strong>Eure Seite war unter den Suchtreffern, wurde aber nicht verlinkt:</strong> ' +
               rncOwn.map(function (r) { return '<a href="' + escapeHtml(r.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(r.title || r.url) + '</a>'; }).join(', ') + '</p>'
             : '') +
           (rncDomains.length
             ? '<div class="cvz-pv-chips">' + rncDomains.map(function (b) { return chip(b, null, rncByDomain[b].url); }).join('') + '</div>' +
               '<p class="cvz-pv-muted">Diese Seiten standen unter den Suchtreffern von ChatGPT. Ob ChatGPT sie geöffnet hat, ist nicht bekannt.</p>'
-            : '<p class="cvz-pv-muted">ChatGPT hat alle gefundenen Seiten auch zitiert.</p>'));
+            : '<p class="cvz-pv-muted">ChatGPT hat alle gefundenen Seiten auch verlinkt.</p>'));
       }
 
       if (eng.id === 'chat_gpt' && Array.isArray(run.fan_out_queries) && run.fan_out_queries.length) {
@@ -10310,7 +10346,7 @@
     var pills = [
       { t: 'Eure Position: ' + posText, ok: kw.organic_rank != null && kw.organic_rank <= 10 },
       kw.search_volume != null ? { t: Number(kw.search_volume).toLocaleString('de-DE') + ' Suchen/Monat' } : null,
-      features.indexOf('ai_overview') !== -1 ? { t: aioOwn ? 'In der KI-Übersicht zitiert' : 'KI-Übersicht ohne euch', ok: aioOwn } : null,
+      features.indexOf('ai_overview') !== -1 ? { t: aioOwn ? 'In der KI-Übersicht verlinkt' : 'KI-Übersicht ohne euch', ok: aioOwn } : null,
       kw.gsc_position != null ? { t: 'GSC: Ø Position ' + fmtNum1(Number(kw.gsc_position)) } : null,
     ].filter(Boolean);
     var summary = document.createElement('div');
@@ -10653,11 +10689,11 @@
       card.innerHTML =
         '<p class="cvz-phase-rollup-label">' + escapeHtml(PHASE_LABELS[row.phase] || row.phase) + '</p>' +
         '<div class="cvz-phase-rollup-bar">' +
-          (greenPct ? '<span class="cvz-phase-rollup-segment cvz-dot-green" style="width:' + greenPct + '%" title="' + row.counts.green + ' zitiert"></span>' : '') +
-          (yellowPct ? '<span class="cvz-phase-rollup-segment cvz-dot-yellow" style="width:' + yellowPct + '%" title="' + row.counts.yellow + ' erwähnt, nicht zitiert"></span>' : '') +
+          (greenPct ? '<span class="cvz-phase-rollup-segment cvz-dot-green" style="width:' + greenPct + '%" title="' + row.counts.green + ' verlinkt"></span>' : '') +
+          (yellowPct ? '<span class="cvz-phase-rollup-segment cvz-dot-yellow" style="width:' + yellowPct + '%" title="' + row.counts.yellow + ' erwähnt, nicht verlinkt"></span>' : '') +
           (redPct ? '<span class="cvz-phase-rollup-segment cvz-dot-red" style="width:' + redPct + '%" title="' + (row.counts.red + row.counts.unknown) + ' nicht vorhanden/unbekannt"></span>' : '') +
         '</div>' +
-        '<p class="cvz-phase-rollup-count">' + (row.counts.green > 0 ? row.counts.green + ' von ' + row.total + ' zitiert' : 'Eigene Domain nicht sichtbar') + '</p>';
+        '<p class="cvz-phase-rollup-count">' + (row.counts.green > 0 ? row.counts.green + ' von ' + row.total + ' verlinkt' : 'Eigene Domain nicht sichtbar') + '</p>';
       grid.appendChild(card);
     });
     section.appendChild(grid);
@@ -11126,8 +11162,8 @@
     table.innerHTML =
       '<thead><tr>' +
         '<th>Prompt</th>' +
-        '<th style="width:150px;">Zitierte Quellen</th>' +
-        '<th style="width:150px;">Zitiert (28 Tage)</th>' +
+        '<th style="width:150px;">Verlinkte Quellen</th>' +
+        '<th style="width:150px;">Verlinkt (28 Tage)</th>' +
         '<th style="width:190px;">Typ / Rolle</th>' +
         '<th style="width:50px;"></th>' +
       '</tr></thead>';
@@ -11139,22 +11175,22 @@
       var ps = promptStats(prompt);
       var dotClass = ps.status ? 'cvz-dot-' + ps.status : 'cvz-dot-unknown';
       var statusLabel = (ps.status ? VISIBILITY_LABELS[ps.status] : 'Keine Messung') + ' (' + promptWindowLabel(prompt) + ', ' + activeChannelLabel() + ')';
-      var citationTitle = escapeHtml(ps.cited + ' von ' + ps.total + ' Antworten zitieren eure Domain (' + promptWindowLabel(prompt) + ', ' + activeChannelLabel() + ')');
+      var citationTitle = escapeHtml(ps.cited + ' von ' + ps.total + ' Antworten verlinken eure Domain (' + promptWindowLabel(prompt) + ', ' + activeChannelLabel() + ')');
       var citationBadge = ps.total > 0
         ? (ps.cited > 0
-            ? '<span class="cvz-prompt-citation-count" title="' + citationTitle + '">' + ps.cited + '/' + ps.total + ' zitiert</span>'
-            : '<span class="cvz-prompt-citation-count" style="color:var(--cvz-text-muted,#8b98a5);" title="' + citationTitle + '">0/' + ps.total + ' zitiert</span>')
+            ? '<span class="cvz-prompt-citation-count" title="' + citationTitle + '">' + ps.cited + '/' + ps.total + ' verlinkt</span>'
+            : '<span class="cvz-prompt-citation-count" style="color:var(--cvz-text-muted,#8b98a5);" title="' + citationTitle + '">0/' + ps.total + ' verlinkt</span>')
         : '';
 
       // NEU (18.09.2026): priorisierter Marker fuer Prompts, bei denen die
       // eigene Domain zwar als Quelle genannt wird, aber ohne echten Link
       // (siehe main.py: _compute_unlinked_citation_by_prompt).
       var unlinkedBadge = prompt.cited_without_link
-        ? '<br><span class="cvz-prompt-citation-count" style="color:var(--cvz-orange,#e0a030);border:1px solid var(--cvz-orange,#e0a030);border-radius:0;padding:1px 6px;" title="Wird als Quelle genannt, aber die KI setzt keinen echten Link. Priorisiert beheben (z.B. Struktur/Schema.org/Crawlability pruefen)">\u26a0 ohne Link zitiert</span>'
+        ? '<br><span class="cvz-prompt-citation-count" style="color:var(--cvz-orange,#e0a030);border:1px solid var(--cvz-orange,#e0a030);border-radius:0;padding:1px 6px;" title="Wird verlinkt, aber die KI setzt keinen echten Link. Priorisiert beheben (z.B. Struktur/Schema.org/Crawlability pruefen)">\u26a0 ohne Link verlinkt</span>'
         : '';
 
       var contentTypeBadge = prompt.top_cited_content_type
-        ? '<span class="cvz-prompt-content-type" title="Typ der meistzitierten Quelle: ' + escapeHtml(CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || prompt.top_cited_content_type) + ' (' + escapeHtml(prompt.top_cited_domain || '') + ')">' +
+        ? '<span class="cvz-prompt-content-type" title="Typ der meistverlinkten Quelle: ' + escapeHtml(CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || prompt.top_cited_content_type) + ' (' + escapeHtml(prompt.top_cited_domain || '') + ')">' +
             (CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || escapeHtml(prompt.top_cited_content_type)) +
           '</span>'
         : '';
@@ -11216,7 +11252,7 @@
           '<span class="cvz-dot ' + dotClass + '" title="' + escapeHtml(statusLabel) + '"></span> ' +
           escapeHtml(prompt.prompt_text) + changelogBadgeHtml +
         '</td>' +
-        '<td class="cvz-pt-src" data-label="Zitierte Quellen">' + faviconHtml + '</td>' +
+        '<td class="cvz-pt-src" data-label="Verlinkte Quellen">' + faviconHtml + '</td>' +
         '<td class="cvz-pt-cite" style="white-space:nowrap;">' + citationBadge + unlinkedBadge + '</td>' +
         '<td class="cvz-pt-meta">' + ((contentTypeBadge || personaBadge || aiSearchVolumeBadge)
           ? '<div class="cvz-pt-meta-stack">' + contentTypeBadge + personaBadge + aiSearchVolumeBadge + '</div>' : '') + '</td>' +
@@ -11744,7 +11780,7 @@
     // Prompt-Messungen laufen alle paar Tage, alles andere monatlich.
     if (isoString) {
       p.setAttribute('data-iso', isoString);
-      p.setAttribute('data-cadence', /KI-Antworten|Zitationen|Prompt/i.test(label || '') ? 'prompts' : 'monthly');
+      p.setAttribute('data-cadence', /KI-Antworten|Verlinkungen|Prompt/i.test(label || '') ? 'prompts' : 'monthly');
     }
     if (isoString) {
       var abs = formatShortDate(isoString);
@@ -11917,7 +11953,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '12px';
-    sub.textContent = 'Wie oft wird eure Domain pro Phase und Kanal als Quelle genannt (heller Balken) bzw. mit echtem Link zitiert (dunkler Balken), 0 bis 100 %.';
+    sub.textContent = 'Wie oft eure Domain pro Phase und Kanal in den Quellen steht (heller Balken) und wie oft davon mit Link (dunkler Balken), 0 bis 100 %.';
     section.appendChild(sub);
 
     var grid = document.createElement('div');
@@ -11978,7 +12014,7 @@
         num.className = 'cvz-journey-channel-num';
         num.textContent = pct + '%';
         if (ch.total > 0) {
-          num.title = ch.cited + ' von ' + ch.total + ' Prompts als Quelle genannt, davon ' + ch.cited_with_url + ' mit echtem Link zitiert (' + pctLinked + '%)';
+          num.title = ch.cited + ' von ' + ch.total + ' Prompts in den Quellen, davon ' + ch.cited_with_url + ' mit Link (' + pctLinked + '%)';
         }
         row.appendChild(num);
 
@@ -11993,7 +12029,7 @@
           var deltaFlat = ch.delta_pct === 0;
           deltaEl.className = 'cvz-journey-channel-delta ' + (deltaFlat ? 'cvz-delta-flat' : (deltaUp ? 'cvz-delta-up' : 'cvz-delta-down'));
           deltaEl.textContent = (deltaFlat ? '\u2192 ' : (deltaUp ? '\u25b2 ' : '\u25bc ')) + Math.abs(ch.delta_pct) + ' Pp';
-          deltaEl.title = 'Vs. vorherige Periode gleicher Länge: ' + (deltaUp ? '+' : '') + ch.delta_pct + ' Prozentpunkte (als Quelle genannt)';
+          deltaEl.title = 'Vs. vorherige Periode gleicher Länge: ' + (deltaUp ? '+' : '') + ch.delta_pct + ' Prozentpunkte (in den Quellen)';
           row.appendChild(deltaEl);
         }
 
@@ -12149,10 +12185,10 @@
   // Gilt je Frage, wenn es in mindestens einer Antwort zutrifft, wie die Zahl "zitiert bei X von Y Fragen".
   var SM_STATUS = {
     named:     { label: 'Genannt', tip: 'Eure Marke steht in mindestens einer Antwort im Antworttext.' },
-    cited:     { label: 'Zitiert, nicht genannt', tip: 'Eine Seite von euch wird als Quelle genutzt, die Marke steht aber in keiner Antwort im Text.' },
-    retrieved: { label: 'Gefunden, nicht gewählt', tip: 'Eine Seite von euch stand unter den Suchergebnissen von ChatGPT, wurde aber nie zitiert.' },
+    cited:     { label: 'Verlinkt, nicht genannt', tip: 'Eine Seite von euch wird als Quelle genutzt, die Marke steht aber in keiner Antwort im Text.' },
+    retrieved: { label: 'Gefunden, nicht gewählt', tip: 'Eine Seite von euch stand unter den Suchergebnissen von ChatGPT, wurde aber nie verlinkt.' },
     not_found: { label: 'Nicht gefunden', tip: 'ChatGPT hat Suchergebnisse geliefert, keine Seite von euch war dabei.' },
-    absent:    { label: 'Nicht zitiert', tip: 'Weder zitiert noch genannt. Ob eine Seite gefunden wurde, ist nicht erkennbar (nur bei ChatGPT sichtbar).' },
+    absent:    { label: 'Nicht verlinkt', tip: 'Weder verlinkt noch genannt. Ob eine Seite gefunden wurde, ist nicht erkennbar (nur bei ChatGPT sichtbar).' },
     unknown:   { label: 'Noch nicht ausgewertet', tip: 'Für diese Antworten liegt die Auswertung „im Text genannt“ noch nicht vor.' }
   };
   // Reihenfolge in der Liste: zuerst, wo ein Hebel am nächsten liegt.
@@ -12168,7 +12204,7 @@
   function smFunnelText(r) {
     var parts = [];
     if (r.retrieval_known_runs) parts.push('gefunden ' + (r.own_retrieved_runs || 0) + ' von ' + r.retrieval_known_runs);
-    parts.push('zitiert ' + (r.own_cited_runs || 0) + ' von ' + r.total_runs);
+    parts.push('verlinkt ' + (r.own_cited_runs || 0) + ' von ' + r.total_runs);
     if (r.evaluated_runs) parts.push('genannt ' + (r.own_named_runs || 0) + ' von ' + r.evaluated_runs);
     return parts.join(' · ');
   }
@@ -12189,7 +12225,7 @@
     if (!any) return '';
     function c(k) { return counts[k] || 0; }
     var lead = 'Bei <b>' + c('named') + ' von ' + rows.length + '</b> Fragen steht eure Marke im Antworttext.';
-    if (c('cited')) lead += ' Bei ' + c('cited') + ' wird eure Seite zitiert, die Marke fällt aber nicht.';
+    if (c('cited')) lead += ' Bei ' + c('cited') + ' wird eure Seite verlinkt, die Marke fällt aber nicht.';
     if (c('retrieved')) lead += ' Bei ' + c('retrieved') + ' taucht eure Seite in den Suchergebnissen auf, wird aber nicht gewählt.';
     if (c('not_found')) lead += ' Bei ' + c('not_found') + ' taucht sie nicht einmal in den Suchergebnissen auf.';
     var chips = ['named', 'cited', 'retrieved', 'not_found', 'absent', 'unknown'].filter(function (k) {
@@ -12219,8 +12255,8 @@
     sorted.forEach(function (r) {
       var ownCited = r.own_cited_runs > 0;
       var ownTag = ownCited
-        ? '<span class="cvz-sm-own cvz-sm-own-yes">Ihr: zitiert (' + r.own_cited_runs + ' von ' + r.total_runs + ' Antworten)</span>'
-        : '<span class="cvz-sm-own cvz-sm-own-no">Ihr: nicht zitiert</span>';
+        ? '<span class="cvz-sm-own cvz-sm-own-yes">Ihr: verlinkt (' + r.own_cited_runs + ' von ' + r.total_runs + ' Antworten)</span>'
+        : '<span class="cvz-sm-own cvz-sm-own-no">Ihr: nicht verlinkt</span>';
       if (SM_STATUS[r.status]) {
         ownTag = smStatusChip(r) + '<span class="cvz-sm-funnel">' + escapeHtml(smFunnelText(r)) + '</span>';
       }
@@ -12235,7 +12271,7 @@
           : 'Keine Quellen in den Antworten';
       }
       html += '<div class="cvz-sm-prompt">' +
-        '<div class="cvz-sm-prompt-text">' + smPhaseDot(r.phase) + escapeHtml(r.prompt_text || '') + '</div>' +
+        '<div class="cvz-sm-prompt-text">' + smPhaseDot(r.phase) + promptLinkHtml(r.prompt_id, r.prompt_text || '') + '</div>' +
         '<div class="cvz-sm-prompt-meta">' +
           '<span class="cvz-sm-role">' + escapeHtml(smRoleLabel(model, r)) + '</span>' +
           '<span>' + detailLine + '</span>' + ownTag +
@@ -12255,13 +12291,13 @@
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
     heading.style.margin = '0';
-    heading.textContent = 'Wer wird zitiert? Quellen und Wettbewerber';
+    heading.textContent = 'Wer wird verlinkt? Quellen und Wettbewerber';
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
       'Zeigt, welche Domains in den KI-Antworten der letzten ' + dashWindowDays(dashData) + ' Tage als Quelle auftauchen, und bei welchen Fragen und Rollen. ' +
-      '"Bei 3 von 5 Fragen" heißt: In mindestens einer Antwort auf 3 von 5 Fragen wurde die Domain zitiert. ' +
+      '"Bei 3 von 5 Fragen" heißt: In mindestens einer Antwort auf 3 von 5 Fragen wurde die Domain verlinkt. ' +
       'So lassen sich auch Domains vergleichen, die nur bei wenigen Fragen vorkommen. ' +
-      'Zeile anklicken, um die Fragen dahinter zu sehen. Fragen mit "Ihr: nicht zitiert" sind die konkreten Content-Lücken.'
+      'Zeile anklicken, um die Fragen dahinter zu sehen. Fragen mit "Ihr: nicht verlinkt" sind die konkreten Content-Lücken.'
     ));
     section.appendChild(headRow);
 
@@ -12316,7 +12352,7 @@
     html += smStatusSummaryHtml(scoped);
 
     html += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table class="cvz-sm-table"><thead><tr>' +
-      '<th>Domain</th><th>Typ</th><th>Zitiert bei</th><th>Phasen</th><th>Rollen</th>' +
+      '<th>Domain</th><th>Typ</th><th>Verlinkt bei</th><th>Phasen</th><th>Rollen</th>' +
       '</tr></thead><tbody>';
 
     // Erste Zeile: eure Domain
@@ -12369,8 +12405,8 @@
         if (info && info.differentiation_suggestion) {
           html += '<p class="cvz-sm-tip"><strong>Differenzierung:</strong> ' + escapeHtml(info.differentiation_suggestion) + '</p>';
         }
-        html += '<p class="cvz-sm-expand-head">Zitiert bei ' + a.prompts.length + (a.prompts.length === 1 ? ' Frage' : ' Fragen') +
-          ', bei ' + gaps + ' davon seid ihr nicht zitiert (zuerst gelistet):</p>' +
+        html += '<p class="cvz-sm-expand-head">Verlinkt bei ' + a.prompts.length + (a.prompts.length === 1 ? ' Frage' : ' Fragen') +
+          ', bei ' + gaps + ' davon seid ihr nicht verlinkt (zuerst gelistet):</p>' +
           smPromptListHtml(model, a.prompts, a.domain) + '</td></tr>';
       }
     });
@@ -12381,10 +12417,10 @@
         (state.sourceShowAll ? 'Weniger anzeigen' : 'Alle ' + agg.length + ' Domains anzeigen') + '</button></p>';
     }
     if (!agg.length) {
-      html += '<p class="cvz-card-placeholder-text" style="margin-top:10px;">In dieser Auswahl wurden keine fremden Domains zitiert.</p>';
+      html += '<p class="cvz-card-placeholder-text" style="margin-top:10px;">In dieser Auswahl wurden keine fremden Domains verlinkt.</p>';
     }
     html += '<p class="cvz-sm-foot">Zeitraum: letzte ' + ((dashData && dashData.prompt_source_matrix_window_days) || 28) + ' Tage, Kanal: ' + escapeHtml(activeChannelLabel()) + '. Typ, Zusammenfassung und Differenzierung ' +
-      'liegen nur für die meistzitierten Domains je Phase vor.</p>';
+      'liegen nur für die meistverlinkten Domains je Phase vor.</p>';
 
     var box = document.createElement('div');
     box.innerHTML = html;
@@ -12404,10 +12440,10 @@
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
     heading.style.margin = '0';
-    heading.textContent = 'Wer wird stattdessen zitiert?';
+    heading.textContent = 'Wer wird stattdessen verlinkt?';
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
-      'Pro Rolle und Journey-Phase die zwei Domains, die in den KI-Antworten der letzten ' + dashWindowDays(dashData) + ' Tage bei den meisten Fragen als Quelle genannt wurden. ' +
+      'Pro Rolle und Journey-Phase die zwei Domains, die in den KI-Antworten der letzten ' + dashWindowDays(dashData) + ' Tage bei den meisten Fragen verlinkt wurden. ' +
       '"2/3" heißt: bei 2 von 3 Fragen. Die vollständige Liste mit den Fragen dahinter steht im Tab Wettbewerb.'
     ));
     var link = document.createElement('button');
@@ -12499,7 +12535,7 @@
           '<thead><tr>' +
             '<th>Domain</th>' +
             '<th>Typ</th>' +
-            '<th>Zitierrate</th>' +
+            '<th>Verlinkungsrate</th>' +
             '<th>Differenzierungstipp</th>' +
           '</tr></thead>';
 
@@ -13234,12 +13270,12 @@
           return knowledgeIsOwnDomain(e.domain, ownDomain);
         });
         var chips = knowledgeSourceChipsHtml(own.map(function (e) { return e.id; }), sourceIndex, ownDomain);
-        ownParts.push(chips || ('<span class="cvz-ks-chip"><span class="cvz-ks-chip-engine">' + pair[1] + ':</span> keine eurer Seiten zitiert</span>'));
+        ownParts.push(chips || ('<span class="cvz-ks-chip"><span class="cvz-ks-chip-engine">' + pair[1] + ':</span> keine eurer Seiten verlinkt</span>'));
       });
       if (ownParts.length) {
         var ownBox = document.createElement('div');
         ownBox.className = 'cvz-thin-data-note';
-        ownBox.innerHTML = '<span>Eure Seiten, die die Modelle bei dieser Prüfung zitieren:</span>' +
+        ownBox.innerHTML = '<span>Eure Seiten, die die Modelle bei dieser Prüfung verlinken:</span>' +
           '<div class="cvz-ks-chips">' + ownParts.join('').replace(/<\/?div[^>]*>/g, '') + '</div>';
         section.appendChild(ownBox);
       }
@@ -13359,7 +13395,7 @@
     heading.textContent = 'Mögliche Ziele für Bewertungen und Digital PR';
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
-      'Diese Portale, Medien und Communities werden von ChatGPT, Gemini oder Google AI Overview zu diesem Thema als Quelle genannt oder stehen in den Google-Top-10 zu euren Keywords. ' +
+      'Diese Portale, Medien und Communities werden von ChatGPT, Gemini oder Google AI Overview zu diesem Thema verlinkt oder stehen in den Google-Top-10 zu euren Keywords. ' +
       'Wettbewerber, eure eigene Seite und Anbieter-Seiten sind ausgeschlossen. Ob eine Listung oder Bewertung dort möglich ist, ist nicht geprüft.'
     ));
     section.appendChild(headRow);
@@ -13369,7 +13405,7 @@
     sub.style.marginBottom = '12px';
     sub.textContent = 'Berechnet aus den Quellen der KI-Antworten (' + (o.prompts_gesamt || 0) + ' Prompts) und den Google-Rankings zu ' +
       (o.keywords_mit_serp || 0) + ' Keywords.' +
-      (o.nicht_eingeordnet_anzahl ? ' ' + o.nicht_eingeordnet_anzahl + ' weitere zitierte Quellen sind noch nicht eingeordnet und werden mit dem nächsten Monatslauf geprüft.' : '');
+      (o.nicht_eingeordnet_anzahl ? ' ' + o.nicht_eingeordnet_anzahl + ' weitere verlinkte Quellen sind noch nicht eingeordnet und werden mit dem nächsten Monatslauf geprüft.' : '');
     section.appendChild(sub);
     section.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at));
     section.appendChild(renderNextRunNote(detail.topic, 30));
@@ -13913,6 +13949,10 @@
       '.cvz-jc-more { margin-top: 10px; border-top: 1px solid var(--cvz-border); padding-top: 8px; }' +
       '.cvz-jc-more > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--cvz-teal); min-height: 28px; display: flex; align-items: center; }' +
       '.cvz-own-pages-legend { margin: 0 0 10px; font-size: 12px; color: var(--cvz-text-muted); line-height: 1.6; }' +
+      '.cvz-prompt-link { padding: 0; margin: 0; background: none; border: none; font: inherit; color: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: rgba(79,209,197,.45); text-underline-offset: 3px; }' +
+      '.cvz-prompt-link:hover, .cvz-prompt-link:focus-visible { color: var(--cvz-teal); text-decoration-color: var(--cvz-teal); }' +
+      '.cvz-bp-pages { margin: 4px 0 14px; font-size: 13px; color: var(--cvz-text-muted); line-height: 1.6; }' +
+      '.cvz-bp-pages-label { color: var(--cvz-text); font-weight: 600; }' +
       '.cvz-ap-table-intro { margin: 0 0 6px; font-size: 12px; color: var(--cvz-text-muted); line-height: 1.5; }' +
       '.cvz-ap-table-foot { margin: 6px 0 0; font-size: 11px; color: var(--cvz-text-muted); line-height: 1.5; }' +
       '.cvz-ap-cell-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }' +
@@ -14719,13 +14759,13 @@
 
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
-    heading.textContent = 'Zitierte Content-Typen pro Phase';
+    heading.textContent = 'Verlinkte Content-Typen pro Phase';
     section.appendChild(heading);
 
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Welche Arten von Inhalten KI-Systeme in der jeweiligen Journey-Phase zitieren (Anteil an allen Zitierungen der erfassten Domains, inkl. Wettbewerber). Zeigt, welches Format ihr für eine Phase brauchst.';
+    sub.textContent = 'Welche Arten von Inhalten KI-Systeme in der jeweiligen Journey-Phase verlinken (Anteil an allen Verlinkungen der erfassten Domains, inkl. Wettbewerber). Zeigt, welches Format ihr für eine Phase brauchst.';
     section.appendChild(sub);
 
     var legend = document.createElement('div');
@@ -14757,7 +14797,7 @@
         var pct = row.counts[t] / row.total * 100;
         var seg = document.createElement('div');
         seg.style.cssText = 'width:' + pct.toFixed(2) + '%;background:' + colorFor(t) + ';display:flex;align-items:center;justify-content:center;font-size:10px;color:#0d1117;overflow:hidden;white-space:nowrap;';
-        seg.title = labelFor(t) + ': ' + Math.round(pct) + ' % (' + row.counts[t] + ' Zitierungen)';
+        seg.title = labelFor(t) + ': ' + Math.round(pct) + ' % (' + row.counts[t] + ' Verlinkungen)';
         if (pct >= 9) seg.textContent = Math.round(pct) + ' %';
         bar.appendChild(seg);
       });
@@ -14971,7 +15011,7 @@
     });
     bar.appendChild(group);
     bar.appendChild(makeTip(
-      'Gesamt fasst ChatGPT und Gemini zusammen (alle Zitierungen geteilt durch alle Antworten). ' +
+      'Gesamt fasst ChatGPT und Gemini zusammen (alle Verlinkungen geteilt durch alle Antworten). ' +
       'ChatGPT oder Gemini zeigt nur diesen Kanal. Die Auswahl gilt für Übersicht, Journey, Wettbewerb und Maßnahmen. ' +
       'Google AI Overviews werden monatlich gemessen und stehen getrennt in den Journey-Karten.'
     ));
@@ -15027,7 +15067,7 @@
     heading.textContent = 'Kaufreise auf einen Blick';
     head.appendChild(heading);
     head.appendChild(makeTip(
-      'Anteil der Antworten von ' + activeChannelLabel() + ', die eure Domain als Quelle nennen, je Kaufphase' +
+      'Anteil der Antworten von ' + activeChannelLabel() + ', die eure Domain verlinken, je Kaufphase' +
       (jc ? ', letzte ' + cfg.windowDays + ' Tage. Ein Pfeil erscheint erst bei einer Veränderung, die größer ist als die normale Schwankung von KI-Antworten.' : '.') +
       ' Die Aufschlüsselung nach Kanal und Rolle steht im Tab Journey.'
     ));
@@ -15176,7 +15216,7 @@
       chNote.textContent = 'Hinweis: Für die anderen Domains liegt noch kein Wert je KI-System vor. Ihre Linien zeigen ChatGPT und Gemini zusammen, nur eure Linie ist nach ' + activeChannelLabel() + ' gefiltert.';
       section.appendChild(chNote);
     }
-    sub.textContent = 'Wer wird in welcher Journey-Phase von ChatGPT und Gemini zitiert (' + windowLabel + ')? Eigene Domain vs. alle tats\u00e4chlich zitierten Domains (Zitierrate in %, gleiche Werte wie im Tab \u201eJourney\u201c). Diese Grafik zeigt alle zitierten Domains, auch nicht best\u00e4tigte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck. Ein Klick auf einen Namen in der Legende blendet die Linie aus bzw. wieder ein.';
+    sub.textContent = 'Wer wird in welcher Journey-Phase von ChatGPT und Gemini verlinkt (' + windowLabel + ')? Eigene Domain vs. alle tats\u00e4chlich verlinkten Domains (Verlinkungsrate in %, gleiche Werte wie im Tab \u201eJourney\u201c). Diese Grafik zeigt alle verlinkten Domains, auch nicht best\u00e4tigte Wettbewerber. Der Alert \u201eWettbewerber \u00fcberholt euch\u201c greift nur auf die best\u00e4tigten zur\u00fcck. Ein Klick auf einen Namen in der Legende blendet die Linie aus bzw. wieder ein.';
     section.appendChild(sub);
 
     // Favicon-Hilfsfunktion
@@ -15617,7 +15657,7 @@
         'Vergleich mit den ' + winDays + ' Tagen davor (' + fmtPct(ct.prevRate) + '). Grün oder rot erst, wenn der Unterschied ' +
         'größer ist als die normale Schwankung von KI-Antworten, nach derselben Regel wie die Pfeile bei den Phasen.');
     }
-    grid.appendChild(ovCard('Zitierrate', fmtPct(ct.rate), dHtml,
+    grid.appendChild(ovCard('Verlinkungsrate', fmtPct(ct.rate), dHtml,
       ct.total ? 'In ' + ct.cited + ' von ' + ct.total + ' Antworten mit Link auf eure Domain (' + activeChannelLabel() + ', ' + winDays + ' Tage)'
                : 'Noch keine Antworten im Zeitraum'));
 
@@ -15725,7 +15765,7 @@
     h.style.margin = '0';
     h.textContent = 'Bewegungen';
     head.appendChild(h);
-    head.appendChild(makeTip('Seiten, die neu oder nicht mehr verlinkt werden (an mindestens 2 Messtagen), und Phasen, deren Zitierrate sich ' +
+    head.appendChild(makeTip('Seiten, die neu oder nicht mehr verlinkt werden (an mindestens 2 Messtagen), und Phasen, deren Verlinkungsrate sich ' +
       'stärker verändert hat als die normale Schwankung. Kleine Ausschläge stehen hier bewusst nicht.'));
     section.appendChild(head);
 
@@ -15896,9 +15936,9 @@
       var OPP_FALLBACK_RECOMMENDATION = {
         'near_miss_ranking': 'Content gezielt auf diese Keywords optimieren: Meta-Title/H1 schärfen, Suchintention prüfen (informationell vs. transaktional), interne Verlinkung stärken. Ziel: von Position 15+ in die Top 10.',
         'high_demand_low_visibility': 'Eine Seite erstellen oder ausbauen, die die Suchbegriffe und die KI-Fragen darunter direkt beantwortet. Format je nach Frage: FAQ, Ratgeber oder Vergleichsseite.',
-        'google_visible_ai_invisible': 'Bestehende Seiten so ausbauen, dass KI-Systeme sie als zitierwürdige Quelle einordnen: klare Autorenschaft, konkrete Aussagen mit Zahlen, strukturierte Antworten auf die Fragen hinter dem Keyword.',
-        'competitor_citation': 'Analysieren, welche Inhalte die häufig zitierten Domains zu diesem Thema haben, und ähnliche Inhalte mit klarer Differenzierung erstellen (eigene Daten, Expertise, Perspektive).',
-        'ai_visible_competitor_dominates': 'Eigene Leitseite zum Thema erstellen: strukturierte Antwort auf die Top-Fragen, mit nachprüfbaren Fakten und klarer Autorenschaft, damit KI-Systeme sie als Alternative zitieren.',
+        'google_visible_ai_invisible': 'Bestehende Seiten so ausbauen, dass KI-Systeme sie als verlinkenswerte Quelle einordnen: klare Autorenschaft, konkrete Aussagen mit Zahlen, strukturierte Antworten auf die Fragen hinter dem Keyword.',
+        'competitor_citation': 'Analysieren, welche Inhalte die häufig verlinkten Domains zu diesem Thema haben, und ähnliche Inhalte mit klarer Differenzierung erstellen (eigene Daten, Expertise, Perspektive).',
+        'ai_visible_competitor_dominates': 'Eigene Leitseite zum Thema erstellen: strukturierte Antwort auf die Top-Fragen, mit nachprüfbaren Fakten und klarer Autorenschaft, damit KI-Systeme sie als Alternative verlinken.',
         'new_question': 'Diese neuen Suchintentionen frühzeitig besetzen: dedizierten Content erstellen, bevor der Wettbewerb aufholt. FAQ-Block oder eigenständige Seite je nach Volumen.',
       };
 
@@ -15906,9 +15946,9 @@
       var OPP_TYPE_TOOLTIPS = {
         'near_miss_ranking': 'Ihr ranktet schon auf Seite 2 für dieses Keyword (Position 15+, mind. 30 Impressionen). Kleine SEO-Hebel können hier schnell auf Seite 1 bringen.',
         'high_demand_low_visibility': 'Dieses Keyword hat viel Suchvolumen, aber ihr seid weder in Google noch in KI-Antworten sichtbar. Großes Potenzial, noch kein Fuß in der Tür.',
-        'google_visible_ai_invisible': 'Ihr ranktet gut in Google, aber KI-Systeme wie ChatGPT zitieren euch nicht. Bestehender Content muss "KI-tauglicher" werden.',
-        'competitor_citation': 'Eine konkrete Wettbewerber-Domain wird regelmäßig an eurer Stelle zitiert. Hier lohnt sich ein direkter Inhaltsvergleich.',
-        'ai_visible_competitor_dominates': 'KI-Systeme zitieren euch zwar, aber ein Wettbewerber deutlich häufiger. Eure Positionierung oder Tiefe reicht noch nicht aus.',
+        'google_visible_ai_invisible': 'Ihr ranktet gut in Google, aber KI-Systeme wie ChatGPT verlinken euch nicht. Bestehender Content muss "KI-tauglicher" werden.',
+        'competitor_citation': 'Eine konkrete Wettbewerber-Domain wird regelmäßig an eurer Stelle verlinkt. Hier lohnt sich ein direkter Inhaltsvergleich.',
+        'ai_visible_competitor_dominates': 'KI-Systeme verlinken euch zwar, aber ein Wettbewerber deutlich häufiger. Eure Positionierung oder Tiefe reicht noch nicht aus.',
         'new_question': 'Neue Fragen, die in KI-Prompts auftauchen und die ihr noch nicht beantwortet. Frühzeitig Content erstellen, bevor Wettbewerber das Thema besetzen.',
       };
 
@@ -16078,7 +16118,7 @@
             if (sd.prompts && sd.prompts.length > 0) {
               var pHead = document.createElement('p');
               pHead.style.cssText = 'margin:14px 0 4px;padding:0 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#8b98a5);';
-              pHead.textContent = 'KI-Fragen zum Thema, bei denen ihr nicht zitiert werdet';
+              pHead.textContent = 'KI-Fragen zum Thema, bei denen ihr nicht verlinkt werdet';
               expContent.appendChild(pHead);
               var pList = document.createElement('ul');
               pList.style.cssText = 'margin:0;padding:0 8px 0 24px;font-size:12px;line-height:1.6;max-width:560px;';
@@ -16091,7 +16131,7 @@
               if (sd.questions_total) {
                 var pNote = document.createElement('p');
                 pNote.style.cssText = 'margin:6px 0 0;padding:0 8px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
-                pNote.textContent = 'Insgesamt zitiert bei ' + (sd.questions_cited || 0) + ' von ' + sd.questions_total + ' Fragen. Alle Fragen mit Ergebnis seht ihr im Tab „Daten“.';
+                pNote.textContent = 'Insgesamt verlinkt bei ' + (sd.questions_cited || 0) + ' von ' + sd.questions_total + ' Fragen. Alle Fragen mit Ergebnis seht ihr im Tab „Daten“.';
                 expContent.appendChild(pNote);
               }
             }
@@ -16101,7 +16141,7 @@
             var domains = sd.cited_domains || sd.competitor_domains_cited;
             var domLabel = document.createElement('p');
             domLabel.style.cssText = 'margin:0 0 6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--cvz-text-muted,#8b98a5);';
-            domLabel.textContent = 'Zitierte Domains';
+            domLabel.textContent = 'Verlinkte Domains';
             expContent.appendChild(domLabel);
             var domList = document.createElement('div');
             domList.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
@@ -16156,13 +16196,13 @@
   // =========================================================================
 
   var JOURNEY_SECTION_TIP =
-    'Zeigt, wie oft KI-Antworten eure Domain als Quelle nennen, getrennt nach Kaufphase und KI-Kanal. ' +
+    'Zeigt, wie oft KI-Antworten eure Domain verlinken, getrennt nach Kaufphase und KI-Kanal. ' +
     'Hohe Werte in Vergleich und Entscheidung sind am wertvollsten, weil Käufer dort ihre Shortlist bilden. ' +
     'Niedrige Werte zeigen, in welcher Phase Käufer andere Quellen lesen als eure: Dort setzt der Aktionsplan an. ' +
     'Google AI Overviews stammen aus der Google-Prüfung der Keywords (monatlich, die wichtigsten Keywords zusätzlich wöchentlich) und werden deshalb als Anzahl statt in Prozent gezeigt.';
 
   var JOURNEY_SOURCES_TIP =
-    'Domains, die KI-Antworten in dieser Phase am häufigsten als Quelle nennen, in % der Antworten. ' +
+    'Domains, die KI-Antworten in dieser Phase am häufigsten verlinken, in % der Antworten. ' +
     'Bestätigte Wettbewerber sind markiert. Andere Quellen wie Hersteller-Doku, Verbände oder Fachportale ' +
     'sind Kandidaten für Gastbeiträge, Erwähnungen oder Verlinkungen (Digital PR).';
 
@@ -16201,12 +16241,12 @@
         val.textContent = 'kein Overview';
         val.classList.add('cvz-journey-nodata');
       } else {
-        val.textContent = aio.cited + ' von ' + aio.with_overview + ' zitiert';
+        val.textContent = aio.cited + ' von ' + aio.with_overview + ' verlinkt';
         if (aio.cited > 0) val.classList.add('cvz-journey-aio-hit');
       }
       var lines = (aio.keywords || []).slice(0, 6).map(function (k) {
         var status = !k.has_overview ? 'kein Overview gefunden'
-          : (k.cited ? 'Overview zitiert euch' : 'Overview zitiert andere Quellen');
+          : (k.cited ? 'Overview verlinkt euch' : 'Overview verlinkt andere Quellen');
         return '„' + k.keyword + '“: ' + status;
       });
       var when = aio.last_checked_at ? ' (zuletzt ' + formatShortDate(aio.last_checked_at) + ')' : '';
@@ -16217,7 +16257,7 @@
       } else if (aio.with_overview === 0) {
         tip += 'Für diese Suchbegriffe wurde kein AI Overview gefunden. Hier entscheidet vor allem das klassische Google-Ranking.';
       } else {
-        tip += 'Ihr werdet in allen gefundenen Overviews zitiert. Haltet die zitierten Seiten aktuell.';
+        tip += 'Ihr werdet in allen gefundenen Overviews verlinkt. Haltet die verlinkten Seiten aktuell.';
       }
     }
     val.title = tip;
@@ -16254,12 +16294,12 @@
           'Die Veränderung ist größer als die normale Schwankung von KI-Antworten. ' +
           (up
             ? 'Prüft unter „Maßnahmen“, welche Änderung dazu passt, und baut darauf auf.'
-            : 'Schaut bei den meistzitierten Quellen darunter, wer stattdessen genannt wird, und prüft, ob sich eure zitierte Seite geändert hat.');
+            : 'Schaut bei den meistverlinkten Quellen darunter, wer stattdessen genannt wird, und prüft, ob sich eure verlinkte Seite geändert hat.');
       } else {
-        tip = label + ' wird ' + (up ? 'häufiger' : 'seltener') + ' zitiert: ' + (up ? 'plus ' : 'minus ') + delta +
+        tip = label + ' wird ' + (up ? 'häufiger' : 'seltener') + ' verlinkt: ' + (up ? 'plus ' : 'minus ') + delta +
           ' Prozentpunkte gegenüber den ' + days + ' Tagen davor (davor ' + prev + ' %). ' +
           (up
-            ? 'Lohnt ein Blick auf die zitierte Seite: Welche Frage beantwortet sie, die eure Seiten nicht beantworten?'
+            ? 'Lohnt ein Blick auf die verlinkte Seite: Welche Frage beantwortet sie, die eure Seiten nicht beantworten?'
             : 'Hier wird gerade Platz frei, den eine passende Seite von euch füllen kann.');
       }
     } else if (trend === 'stable') {
@@ -16300,13 +16340,13 @@
       if (e.trend === 'up' && !up) up = ch;
     });
     if (down) {
-      return { kind: 'down', text: 'Rückgang bei ' + (CHANNEL_LABELS[down] || down) + '. Prüft, wer stattdessen zitiert wird.', action: false };
+      return { kind: 'down', text: 'Rückgang bei ' + (CHANNEL_LABELS[down] || down) + '. Prüft, wer stattdessen verlinkt wird.', action: false };
     }
     var top = sources[0];
     if (maxOwn === 0 && measured >= cfg.minAnswers && top && (top.citation_rate || 0) >= 30) {
       return {
         kind: 'gap',
-        text: 'Chance: ' + top.domain + ' wird in ' + Math.round(top.citation_rate) + ' % der Antworten zitiert, eure Domain noch nicht.',
+        text: 'Chance: ' + top.domain + ' wird in ' + Math.round(top.citation_rate) + ' % der Antworten verlinkt, eure Domain noch nicht.',
         action: true,
       };
     }
@@ -16338,7 +16378,7 @@
     line.tabIndex = 0;
     line.title = 'Aktive Keywords dieser Phase mit belegter Nachfrage (ohne reine Ideen). ' +
       'Position laut Google-Prüfung, sonst Search Console. Die Phase hat Claude den Keywords zugeordnet. ' +
-      'Die Zahlen sind nicht direkt mit der KI-Zitierrate vergleichbar: Die KI misst eure festen Fragen, Google den Keyword-Pool.';
+      'Die Zahlen sind nicht direkt mit der KI-Verlinkungsrate vergleichbar: Die KI misst eure festen Fragen, Google den Keyword-Pool.';
     var label = document.createElement('span');
     label.className = 'cvz-gp-label';
     label.textContent = 'Google';
@@ -16381,7 +16421,7 @@
     if (ai.total >= cfg.minAnswers && ai.cited === 0 && g.top10 >= GP_HINT_MIN_TOP10) {
       var hint = document.createElement('p');
       hint.className = 'cvz-gp-hint';
-      hint.textContent = 'Bei Google gut platziert, in ' + ai.total + ' KI-Antworten nie als Quelle genannt. ' +
+      hint.textContent = 'Bei Google gut platziert, in ' + ai.total + ' KI-Antworten nie verlinkt. ' +
         'Hier lohnt sich ein Blick, wie die Fragen dieser Phase beantwortet werden.';
       wrap.appendChild(hint);
     }
@@ -16431,7 +16471,7 @@
   // häufigsten fremden Domains, die in dieser Phase gefunden, aber nie oder selten zitiert werden.
   // Wettbewerber und Einzeltreffer (nur 1 Lauf) bleiben draußen.
   var JOURNEY_RETRIEVED_TIP = 'Seiten, die ChatGPT bei seiner Websuche in dieser Phase unter den Suchtreffern hatte, ' +
-    'aber nicht oder selten als Quelle nennt. Ob ChatGPT sie geöffnet hat, ist nicht bekannt. ' +
+    'aber nicht oder selten verlinkt. Ob ChatGPT sie geöffnet hat, ist nicht bekannt. ' +
     'Kandidaten für eigene Beiträge mit genau passendem Inhalt. Nur ChatGPT, letzte 28 Tage.';
 
   function renderJourneyRetrievedBlock(topicId, phase) {
@@ -16458,14 +16498,14 @@
 
     var label = document.createElement('p');
     label.style.cssText = 'display:flex;align-items:center;margin:0 0 4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--cvz-text-muted,#6b7280);';
-    label.appendChild(document.createTextNode('Gefunden, nicht zitiert · ChatGPT'));
+    label.appendChild(document.createTextNode('Gefunden, nicht verlinkt · ChatGPT'));
     label.appendChild(makeTip(JOURNEY_RETRIEVED_TIP));
     wrap.appendChild(label);
 
     if (ownGap) {
       var ownP = document.createElement('p');
       ownP.className = 'cvz-journey-retrieved-own';
-      ownP.textContent = 'Eure Domain: ' + own.runs_found + '× gefunden, ' + own.runs_cited + '× zitiert';
+      ownP.textContent = 'Eure Domain: ' + own.runs_found + '× gefunden, ' + own.runs_cited + '× verlinkt';
       ownP.title = 'In ' + (own.runs_found - own.runs_cited) + ' Antworten dieser Phase hatte ChatGPT eure Seite unter den Suchtreffern und hat trotzdem andere Quellen genannt.';
       wrap.appendChild(ownP);
     }
@@ -16480,7 +16520,7 @@
       row.appendChild(dom);
       var num = document.createElement('span');
       num.className = 'cvz-journey-retrieved-num';
-      num.textContent = d.runs_found + '× gefunden, ' + d.runs_cited + '× zitiert';
+      num.textContent = d.runs_found + '× gefunden, ' + d.runs_cited + '× verlinkt';
       row.appendChild(num);
       wrap.appendChild(row);
 
@@ -16591,12 +16631,12 @@
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '12px';
     sub.textContent = (jc && data.window_mode === 'since_start')
-      ? 'Wie oft eure Domain in KI-Antworten als Quelle genannt wird: seit Start (' + cfg.windowDays +
+      ? 'Wie oft eure Domain in KI-Antworten verlinkt wird: seit Start (' + cfg.windowDays +
         ' Tage). Einen Vergleich mit einem Zeitraum davor gibt es nicht, deshalb keine Pfeile.'
       : jc
-      ? 'Wie oft eure Domain in KI-Antworten als Quelle genannt wird: letzte ' + cfg.windowDays +
+      ? 'Wie oft eure Domain in KI-Antworten verlinkt wird: letzte ' + cfg.windowDays +
         ' Tage, verglichen mit den ' + cfg.windowDays + ' Tagen davor. Pfeile markieren echte Veränderungen.'
-      : 'Wie oft eure Domain in KI-Antworten als Quelle genannt wird (letzte ' + dashWindowDays(data) + ' Tage).';
+      : 'Wie oft eure Domain in KI-Antworten verlinkt wird (letzte ' + dashWindowDays(data) + ' Tage).';
     section.appendChild(sub);
 
     var grid = document.createElement('div');
@@ -16700,7 +16740,7 @@
         covNote.textContent = (CHANNEL_LABELS[channel] || channel) + ' nennt in dieser Phase selten Quellen (' +
           cov.with_sources + ' von ' + cov.runs + ' Antworten). Ein niedriger Wert sagt hier wenig über euch.';
         covNote.title = 'Prompts mit Quellen: ' + cov.prompts_with_sources + ' von ' + cov.prompts + '. ' +
-          'Ob eure Marke im Text genannt wird, steht im Wettbewerb-Tab unter „Zitiert oder genannt?“.';
+          'Ob eure Marke im Text genannt wird, steht im Wettbewerb-Tab unter „Verlinkt oder genannt?“.';
         card.appendChild(covNote);
       });
 
@@ -16743,7 +16783,7 @@
 
         var srcLabel = document.createElement('p');
         srcLabel.style.cssText = 'display:flex;align-items:center;margin:0 0 4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--cvz-text-muted,#6b7280);';
-        srcLabel.appendChild(document.createTextNode('Meistzitierte Quellen'));
+        srcLabel.appendChild(document.createTextNode('Meistverlinkte Quellen'));
         srcLabel.appendChild(makeTip(JOURNEY_SOURCES_TIP));
         more.appendChild(srcLabel);
 
@@ -16756,7 +16796,7 @@
           dEl.className = 'cvz-journey-channel-label';
           dEl.style.cssText = 'color:var(--cvz-text-muted,#6b7280);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
           dEl.textContent = src.domain;
-          dEl.title = src.domain + ': in ' + src.cited_count + ' von ' + src.total_runs + ' Antworten als Quelle genannt.' +
+          dEl.title = src.domain + ': in ' + src.cited_count + ' von ' + src.total_runs + ' Antworten verlinkt.' +
             (src.summary ? ' ' + src.summary : '');
           srcRow.appendChild(dEl);
 
@@ -16866,8 +16906,8 @@
     // MONATLICHEN Laufs, obwohl die Phasen-Karten täglich neu berechnet
     // werden. Jetzt zwei getrennte, ehrliche Angaben.
     var _jc = data.journey_comparison || null;
-    wrap.appendChild(renderDataFreshnessNote(_jc && _jc.last_run_at, 'Zitationen zuletzt gemessen'));
-    wrap.appendChild(renderNextRunNote(detail.topic, 'prompts', 'Nächster Durchlauf (Zitationen)'));
+    wrap.appendChild(renderDataFreshnessNote(_jc && _jc.last_run_at, 'Verlinkungen zuletzt gemessen'));
+    wrap.appendChild(renderNextRunNote(detail.topic, 'prompts', 'Nächster Durchlauf (Verlinkungen)'));
 
     // GEÄNDERT (02.10.2026): Phasen-Karten mit 28-Tage-Vergleich, Tooltips
     // und Handlungshinweis, siehe renderJourneyPhaseSection.
@@ -16928,7 +16968,7 @@
     }
 
     var _jc = data.journey_comparison || null;
-    wrap.appendChild(renderDataFreshnessNote(_jc && _jc.last_run_at, 'Zitationen zuletzt gemessen'));
+    wrap.appendChild(renderDataFreshnessNote(_jc && _jc.last_run_at, 'Verlinkungen zuletzt gemessen'));
     wrap.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at, 'Quellen und KI-Wissen zuletzt analysiert'));
     wrap.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Quellen, KI-Wissen)'));
 
@@ -17002,7 +17042,7 @@
     sub.style.marginBottom = '14px';
     var boxes = Math.min(total, VF_MAX_BOXES);
     sub.textContent = (boxes === total ? 'Ein Kästchen je Antwort' : 'Jedes Kästchen steht für etwa ' + fmtNum1(total / boxes) + ' Antworten') +
-      ' (' + total + ' Antworten, letzte ' + vf.window_days + ' Tage, ' + activeChannelLabel() + '). Ausgefüllt heißt: in dieser Antwort als Quelle zitiert. ' +
+      ' (' + total + ' Antworten, letzte ' + vf.window_days + ' Tage, ' + activeChannelLabel() + '). Ausgefüllt heißt: in dieser Antwort als Quelle verlinkt. ' +
       'Gelb: von euch beobachtete Wettbewerber.' +
       (vf.own_trend ? ' Pfeile vergleichen mit den ' + vf.window_days + ' Tagen davor und erscheinen nur bei einer Veränderung, die größer ist als die normale Schwankung.' : '');
     section.appendChild(sub);
@@ -17050,8 +17090,8 @@
       bar(ownN, false) +
       '<div class="cvz-vf-own-foot">' + engines(vf.own) +
         '<span>' + (ownN
-          ? 'In ' + fmtPct(ownN / total * 100) + ' der Antworten als Quelle zitiert.'
-          : 'In keiner der ' + total + ' Antworten als Quelle zitiert.') +
+          ? 'In ' + fmtPct(ownN / total * 100) + ' der Antworten als Quelle verlinkt.'
+          : 'In keiner der ' + total + ' Antworten als Quelle verlinkt.') +
           (ownT && prevTotal ? ' Davor: ' + ownT.previous + ' von ' + prevTotal + '.' : '') + '</span></div>';
     section.appendChild(own);
 
@@ -17061,7 +17101,7 @@
     if (rows.length) {
       var head = document.createElement('div');
       head.className = 'cvz-vf-list-head';
-      head.innerHTML = '<span>Am häufigsten zitiert</span><span>' + (ch === 'all' ? 'KI-Systeme' : '') + '</span>';
+      head.innerHTML = '<span>Am häufigsten verlinkt</span><span>' + (ch === 'all' ? 'KI-Systeme' : '') + '</span>';
       section.appendChild(head);
       rows.forEach(function (d) {
         var row = document.createElement('div');
@@ -17078,7 +17118,7 @@
     if (vf.other_count) {
       var more = document.createElement('p');
       more.className = 'cvz-chart-caption';
-      more.textContent = 'Daneben wurden ' + vf.other_count + ' weitere Domains zitiert. Details pro Frage weiter unten unter „Wer wird zitiert?“.';
+      more.textContent = 'Daneben wurden ' + vf.other_count + ' weitere Domains verlinkt. Details pro Frage weiter unten unter „Wer wird verlinkt?“.';
       section.appendChild(more);
     }
     return section;
@@ -17088,6 +17128,39 @@
   // Seite der Marke als Quelle zitieren oder beides. Das sind verschiedene Signale. Pro Marke ein
   // Balken: beides / nur zitiert / nur genannt, bezogen auf die ausgewerteten Antworten der letzten
   // 28 Tage. Folgt dem Kanal-Umschalter. Daten: journey_comparison.brand_presence (dashboard.py).
+  // NEU (14.11.2026): Welche eurer Seiten verlinkt wurden, im selben Zeitraum und Kanal wie der Block.
+  // Daten: GET /topics/{id}/own-pages?days=… (state.ownPagesWindowCache, wie in der Journey).
+  var BP_PAGES_MAX = 3;
+
+  function renderBrandPresencePages(topicId, days) {
+    days = Math.max(1, Math.min(730, Math.round(days || 28)));
+    var key = ownPagesWindowKey(topicId, days);
+    if (!(key in state.ownPagesWindowCache)) { maybeLoadOwnPagesWindow(topicId, days); return null; }
+    var data = state.ownPagesWindowCache[key];
+    if (!data || !data.pages) return null;
+    var ch = activeChannel();
+    var pages = data.pages.map(function (pg) {
+      var n = ch === 'all' ? (pg.answers || 0) : (((pg.channels || {})[ch] || {}).answers || 0);
+      return { page: pg.page, path: pg.path, n: n };
+    }).filter(function (pg) { return pg.n > 0; })
+      .sort(function (a, b) { return (b.n - a.n) || a.path.localeCompare(b.path); });
+    var el = document.createElement('p');
+    el.className = 'cvz-bp-pages';
+    if (!pages.length) {
+      el.textContent = 'Keine eurer Seiten verlinkt.';
+      return el;
+    }
+    var html = '<span class="cvz-bp-pages-label">Verlinkte Seiten:</span> ' +
+      pages.slice(0, BP_PAGES_MAX).map(function (pg) {
+        return '<a class="cvz-own-page-link" href="' + escapeHtml(pg.page) + '" target="_blank" rel="noopener">' +
+          escapeHtml(pg.path) + '</a> (' + pg.n + ')';
+      }).join(', ');
+    if (pages.length > BP_PAGES_MAX) html += ' und ' + (pages.length - BP_PAGES_MAX) + ' weitere';
+    html += '. <button type="button" class="cvz-ov-kpi-link" data-cvz-scroll-to="cvz-ov-pages" data-cvz-scroll-tab="situation">Alle Seiten in der Übersicht</button>';
+    el.innerHTML = html;
+    return el;
+  }
+
   function renderBrandPresence(jc, detail) {
     var bp = jc && jc.brand_presence;
     if (!bp || !bp.by_channel) return null;
@@ -17099,13 +17172,13 @@
     section.className = 'cvz-section cvz-bp';
     var label = document.createElement('p');
     label.className = 'cvz-section-label';
-    label.textContent = 'Zitiert oder genannt?';
+    label.textContent = 'Verlinkt oder genannt?';
     section.appendChild(label);
 
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '12px';
-    sub.textContent = 'Eine KI kann eine Marke im Antworttext nennen, eine Seite der Marke als Quelle zitieren oder beides. ' +
+    sub.textContent = 'Eine KI kann eine Marke im Antworttext nennen, eine Seite der Marke als Quelle verlinken oder beides. ' +
       'Das sind verschiedene Signale. Gezählt wird je Antwort der letzten ' + bp.window_days + ' Tage (' + activeChannelLabel() + ').';
     section.appendChild(sub);
 
@@ -17122,8 +17195,8 @@
     var legend = document.createElement('div');
     legend.className = 'cvz-bp-legend';
     legend.innerHTML =
-      '<span><i class="cvz-bp-key both"></i>beides: genannt und zitiert</span>' +
-      '<span><i class="cvz-bp-key cited"></i>nur zitiert: Quelle, Marke steht nicht im Text</span>' +
+      '<span><i class="cvz-bp-key both"></i>beides: genannt und verlinkt</span>' +
+      '<span><i class="cvz-bp-key cited"></i>nur verlinkt: Quelle, Marke steht nicht im Text</span>' +
       '<span><i class="cvz-bp-key named"></i>nur genannt: im Text, ohne Quelle</span>';
     section.appendChild(legend);
 
@@ -17140,9 +17213,9 @@
     }
     function count(st) {
       var present = st.both + st.cited_only + st.named_only;
-      return '<span class="cvz-bp-count" title="' + escapeHtml('In ' + present + ' von ' + evaluated + ' Antworten zitiert oder genannt') + '">' +
+      return '<span class="cvz-bp-count" title="' + escapeHtml('In ' + present + ' von ' + evaluated + ' Antworten verlinkt oder genannt') + '">' +
         '<b>' + present + '</b>/' + evaluated +
-        '<span class="cvz-bp-split">' + st.both + ' beides · ' + st.cited_only + ' zitiert · ' + st.named_only + ' genannt</span></span>';
+        '<span class="cvz-bp-split">' + st.both + ' beides · ' + st.cited_only + ' verlinkt · ' + st.named_only + ' genannt</span></span>';
     }
 
     var own = d.own || {};
@@ -17151,13 +17224,13 @@
     var ownCited = (own.both || 0) + (own.cited_only || 0);
     var msg;
     if (!ownNamed && !ownCited) {
-      msg = 'Eure Marke wurde in keiner Antwort zitiert oder genannt.';
+      msg = 'Eure Marke wurde in keiner Antwort verlinkt oder genannt.';
     } else if (ownCited && !ownNamed) {
       msg = 'Eure Seite dient als Quelle (' + ownCited + ' von ' + evaluated + ' Antworten), eure Marke steht aber in keiner Antwort im Text.';
     } else if (ownNamed && !ownCited) {
-      msg = 'Eure Marke steht in ' + ownNamed + ' von ' + evaluated + ' Antworten im Text, eine Seite von euch wird dabei nie als Quelle zitiert.';
+      msg = 'Eure Marke steht in ' + ownNamed + ' von ' + evaluated + ' Antworten im Text, eine Seite von euch wird dabei nie als Quelle verlinkt.';
     } else {
-      msg = 'Eure Marke wird in ' + ownNamed + ' Antworten genannt und in ' + ownCited + ' Antworten als Quelle zitiert (von ' + evaluated + ').';
+      msg = 'Eure Marke wird in ' + ownNamed + ' Antworten genannt und in ' + ownCited + ' Antworten als Quelle verlinkt (von ' + evaluated + ').';
     }
     var ownRow = document.createElement('div');
     ownRow.className = 'cvz-bp-row own';
@@ -17167,6 +17240,8 @@
     msgEl.className = 'cvz-bp-msg';
     msgEl.textContent = msg;
     section.appendChild(msgEl);
+    var bpPages = renderBrandPresencePages(state.activeTopicId, bp.window_days);
+    if (bpPages) section.appendChild(bpPages);
 
     (d.competitors || []).forEach(function (c) {
       var row = document.createElement('div');
@@ -17235,7 +17310,7 @@
     heading.textContent = 'Wettbewerber im Verlauf';
     head.appendChild(heading);
     head.appendChild(makeTip(
-      'Anteil der Antworten, die eine Domain als Quelle nennen, jeweils über die ' + cr.window_days + ' Tage bis zum Datum, ein Punkt pro Woche. ' +
+      'Anteil der Antworten, die eine Domain verlinken, jeweils über die ' + cr.window_days + ' Tage bis zum Datum, ein Punkt pro Woche. ' +
       'Über die Legende blendet ihr Linien aus und ein, um einzelne Verläufe anzusehen. Über die Phase seht ihr, wie sich die Sichtbarkeit in einer Kaufphase entwickelt. ' +
       'Das schattierte Band um eure Linie zeigt, wie weit der Wert allein durch Zufall schwanken kann.'
     ));
@@ -17362,9 +17437,9 @@
 
     var cap = document.createElement('p');
     cap.className = 'cvz-chart-caption';
-    cap.textContent = 'Zitierrate von ' + activeChannelLabel() + (phase === 'total' ? '' : ', Phase ' + (PHASE_LABELS[phase] || phase)) +
+    cap.textContent = 'Verlinkungsrate von ' + activeChannelLabel() + (phase === 'total' ? '' : ', Phase ' + (PHASE_LABELS[phase] || phase)) +
       ', jeweils über die ' + cr.window_days + ' Tage bis zum Datum. Punkte mit weniger als ' + ROLLING_MIN_ANSWERS + ' Antworten werden nicht gezeichnet. ' +
-      'Gezeigt werden die ' + domains.length + ' am häufigsten zitierten Domains des Zeitraums plus eure beobachteten Wettbewerber, zu Beginn die ersten ' + RC_DEFAULT_VISIBLE + '. ' +
+      'Gezeigt werden die ' + domains.length + ' am häufigsten verlinkten Domains des Zeitraums plus eure beobachteten Wettbewerber, zu Beginn die ersten ' + RC_DEFAULT_VISIBLE + '. ' +
       'Ändert ihr Prompts oder Rollen, verschieben sich alle Quoten, dann kann ein Knick am neuen Prompt-Set liegen und nicht an der Sichtbarkeit. ' +
       'Gestrichelt: Aufbauphase. Rauten: eingetragene Änderungen.';
     section.appendChild(cap);
@@ -17386,7 +17461,7 @@
     compManageSub.textContent =
       'Diese Domains steuern den Alert „Wettbewerber überholt euch“ ' +
       'und werden in den Quellen oben als Wettbewerber markiert. ' +
-      'Der Wettbewerbsvergleich oben zeigt davon unabhängig alle KI-zitierten Domains.';
+      'Der Wettbewerbsvergleich oben zeigt davon unabhängig alle KI-verlinkten Domains.';
     compManageWrap.appendChild(compManageSub);
     compManageWrap.appendChild(renderCompetitorManageSection(detail, topicId));
     return compManageWrap;
@@ -17491,11 +17566,11 @@
           && p.total_runs > 0;
       }).sort(function (a, b) { return (b.cited_count || 0) - (a.cited_count || 0); });
       if (prompts.length === 0) return null;
-      headers = ['Prompt', 'Zitiert', 'Läufe', 'Rate'];
+      headers = ['Prompt', 'Verlinkt', 'Läufe', 'Rate'];
       rows = prompts.map(function (p) {
         var rate = p.total_runs > 0 ? Math.round((p.cited_count / p.total_runs) * 100) : 0;
         return [
-          p.prompt_text || '',
+          { text: p.prompt_text || '', promptId: p.id },
           String(p.cited_count || 0),
           String(p.total_runs || 0),
           rate + '%'
@@ -17555,9 +17630,9 @@
       });
       gaps = _pickGapPromptsForItem(gaps, item);
       if (gaps.length === 0) return null;
-      headers = ['Prompt ohne eigene Zitierung', 'Läufe'];
+      headers = ['Prompt ohne eigene Verlinkung', 'Läufe'];
       rows = gaps.map(function (p) {
-        return [p.prompt_text || '', String(p.total_runs || 0)];
+        return [{ text: p.prompt_text || '', promptId: p.id }, String(p.total_runs || 0)];
       });
     }
 
@@ -17614,8 +17689,14 @@
           if (!textTable) {
             var clamp = document.createElement('span');
             clamp.className = 'cvz-ap-cell-clamp';
-            clamp.title = cell;
-            clamp.textContent = cell;
+            // NEU (14.11.2026): Prompt-Zellen ({text, promptId}) öffnen die Antworten.
+            if (cell && typeof cell === 'object') {
+              clamp.title = cell.text;
+              clamp.innerHTML = promptLinkHtml(cell.promptId, cell.text);
+            } else {
+              clamp.title = cell;
+              clamp.textContent = cell;
+            }
             td.appendChild(clamp);
             tr.appendChild(td);
             return;
@@ -17971,7 +18052,7 @@
             evSectionLbl.textContent =
               catKey === 'google_ranking' ? 'Ranking-Daten' :
               catKey === 'content_luecke' ? 'Beispiel-Frage' :
-              'Zitierungsrate';
+              'Verlinkungsrate';
             evDiv.appendChild(evSectionLbl);
 
             if (catKey === 'ki_sichtbarkeit' || catKey === 'wettbewerb') {
@@ -17994,7 +18075,7 @@
               if (ev.example_prompt) {
                 var epBox = document.createElement('div');
                 epBox.style.cssText = 'background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:0;padding:8px 10px;font-size:12px;color:var(--cvz-text-muted,#8b98a5);font-style:italic;line-height:1.5;';
-                epBox.textContent = '"' + ev.example_prompt + '"';
+                epBox.innerHTML = '„' + promptLinkHtml(null, ev.example_prompt) + '“';
                 evDiv.appendChild(epBox);
               }
             } else if (catKey === 'google_ranking') {
@@ -18052,7 +18133,7 @@
               if (ev.example_prompt) {
                 var gapQ = document.createElement('div');
                 gapQ.style.cssText = 'background:rgba(136,120,202,.12);border:1px solid rgba(136,120,202,.35);border-radius:0;padding:10px 12px;font-size:13px;color:#8878ca;font-style:italic;line-height:1.55;';
-                gapQ.textContent = '"' + ev.example_prompt + '"';
+                gapQ.innerHTML = '„' + promptLinkHtml(null, ev.example_prompt) + '“';
                 evDiv.appendChild(gapQ);
               }
             }
@@ -18502,8 +18583,8 @@
     var legend = document.createElement('div');
     legend.className = 'cvz-chart-legend';
     legend.innerHTML =
-      '<span class="cvz-chart-legend-item">— Domain wird als Quelle genannt</span>' +
-      '<span class="cvz-chart-legend-item">- - davon mit echtem Link zitiert</span>' +
+      '<span class="cvz-chart-legend-item">— Domain steht in den Quellen</span>' +
+      '<span class="cvz-chart-legend-item">- - davon mit Link</span>' +
       (markers.length ? '<span class="cvz-chart-legend-item"><span style="color:var(--cvz-amber, #e0a030)">◆</span> Content-Änderung</span>' : '');
     section.appendChild(legend);
 
@@ -18557,15 +18638,15 @@
     card.innerHTML =
       buildPhaseTrendSvg([
         { label: 'Erwähnt', values: mentioned, color: 'var(--cvz-amber)' },
-        { label: 'Zitiert', values: cited, color: 'var(--cvz-teal)' },
+        { label: 'Verlinkt', values: cited, color: 'var(--cvz-teal)' },
         { label: 'Empfohlen', values: recommended, color: 'var(--cvz-red)' },
       ], xLabels, { width: 720, height: 220, maxY: maxY, markers: markers, xKeys: xKeys }) +
       '<div class="cvz-chart-legend">' +
         '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-amber)"></span>Erwähnt</span>' +
-        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Zitiert</span>' +
+        '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Verlinkt</span>' +
         '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-red)"></span>Empfohlen</span>' +
       '</div>' +
-      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-Antworten pro Woche (Skala 0 bis ' + maxY + ' %), in dem die eigene Domain erwähnt, zitiert bzw. aktiv empfohlen wurde. Klickt auf einen Punkt oder eine Tabellenzeile für die Details dieser Woche.</p>';
+      '<p class="cvz-chart-caption">Anteil der ausgewerteten ChatGPT/Gemini-Antworten pro Woche (Skala 0 bis ' + maxY + ' %), in dem die eigene Domain erwähnt, verlinkt bzw. aktiv empfohlen wurde. Klickt auf einen Punkt oder eine Tabellenzeile für die Details dieser Woche.</p>';
 
     // Tabelle mit absoluten Zahlen
     var rows = used.slice().reverse().map(function (w) {
@@ -18584,7 +18665,7 @@
           '<th style="padding:5px 8px;text-align:left;font-weight:500;">Woche vom</th>' +
           '<th style="padding:5px 8px;font-weight:500;">Ausgewertete Antworten</th>' +
           '<th style="padding:5px 8px;font-weight:500;">Erwähnt</th>' +
-          '<th style="padding:5px 8px;font-weight:500;">Zitiert</th>' +
+          '<th style="padding:5px 8px;font-weight:500;">Verlinkt</th>' +
           '<th style="padding:5px 8px;font-weight:500;">Empfohlen</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table></div>';
     section.appendChild(card);
@@ -18782,7 +18863,7 @@
     function yAt(v) { return padT + plotH - (Math.min(v, maxY) / maxY) * plotH; }
 
     var p = [];
-    p.push('<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;max-width:100%;height:auto;" role="img" aria-label="Verlauf der Zitierrate">');
+    p.push('<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;max-width:100%;height:auto;" role="img" aria-label="Verlauf der Verlinkungsrate">');
 
     [0, maxY / 2, maxY].forEach(function (tick) {
       var y = yAt(tick);
@@ -19229,7 +19310,7 @@
     heading.textContent = 'Sichtbarkeit im Verlauf';
     head.appendChild(heading);
     head.appendChild(makeTip(
-      'Jeder Punkt zeigt, bei wie vielen Antworten der letzten ' + dashWindowDays(dashData) + ' Tage eure Domain als Quelle genannt wurde. ' +
+      'Jeder Punkt zeigt, bei wie vielen Antworten der letzten ' + dashWindowDays(dashData) + ' Tage eure Domain verlinkt wurde. ' +
       'Ein Punkt pro Woche, über die ganze Laufzeit des Themas. ' + dashWindowDays(dashData) + ' statt 7 Tage, weil einzelne Wochen bei KI-Antworten stark schwanken. ' +
       'Das schattierte Band zeigt, wie weit die Rate allein durch Zufall schwanken kann. ' +
       'Gestrichelt: Aufbauphase, das ' + dashWindowDays(dashData) + '-Tage-Fenster beginnt noch vor der ersten Messung.'
@@ -19337,7 +19418,7 @@
 
       var cap = document.createElement('p');
       cap.className = 'cvz-chart-caption';
-      cap.textContent = 'Zitierrate von ' + activeChannelLabel() + (phase === 'total' ? '' : ', Phase ' + (PHASE_LABELS[phase] || phase)) +
+      cap.textContent = 'Verlinkungsrate von ' + activeChannelLabel() + (phase === 'total' ? '' : ', Phase ' + (PHASE_LABELS[phase] || phase)) +
         ', jeweils über die ' + rt.window_days + ' Tage bis zum angegebenen Datum. Punkte mit weniger als ' + ROLLING_MIN_ANSWERS +
         ' Antworten werden nicht gezeichnet. Eine Veränderung ist erst belegt, wenn sich die Schwankungsbereiche zweier Punkte nicht mehr überschneiden. ' +
         'Content-Änderungen wirken in KI-Antworten meist erst nach einigen Wochen.';
@@ -19435,7 +19516,7 @@
     wrap.innerHTML =
       '<table class="cvz-table" style="min-width:520px;"><thead><tr>' +
         '<th>Woche ab</th><th style="text-align:right;">Antworten</th><th style="text-align:right;">Erwähnt</th>' +
-        '<th style="text-align:right;">Zitiert</th><th style="text-align:right;">Empfohlen</th>' +
+        '<th style="text-align:right;">Verlinkt</th><th style="text-align:right;">Empfohlen</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table>';
     details.appendChild(wrap);
 
