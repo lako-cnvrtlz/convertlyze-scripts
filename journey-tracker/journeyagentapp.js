@@ -216,6 +216,7 @@
     ownPagesOpen: {},          // { [topicId + '|' + page]: true } aufgeklappte Zeile
     ownPagesWindowCache: {},   // NEU (14.11.2026): { [topicId + '|' + Tage]: Antwort } für die Journey (Seiten je Frage)
     loadingOwnPagesWindow: {},
+    ownPagesRefreshTimer: {},  // NEU (14.11.2026): { [Cache-Schlüssel]: true } solange ein Neuladen geplant ist
     retrievedShowCompetitors: {}, // { [topicId]: true } = Wettbewerber einblenden
     openRetrievedDomains: {},  // { [topicId|domain]: true } = aufgeklappt
     keywordRankHistoryCache: {},
@@ -4832,6 +4833,14 @@
       ul.appendChild(li);
     });
 
+    if (ownPagesWindowPending(topicId, winDays)) {
+      var pend = document.createElement('p');
+      pend.className = 'cvz-fanout-warn';
+      pend.style.marginTop = '10px';
+      pend.textContent = 'Die verlinkten Seiten zu älteren Antworten werden gerade nachgerechnet. Die Liste aktualisiert sich gleich von selbst.';
+      panel.appendChild(pend);
+    }
+
     var note = document.createElement('p');
     note.className = 'cvz-chart-caption';
     note.style.marginTop = '10px';
@@ -6220,6 +6229,29 @@
     render();
   }
 
+  // NEU (14.11.2026): Solange das Backend ältere Antworten nachrechnet (backfill_pending, läuft im
+  // Hintergrund), nach OWN_PAGES_REFRESH_MS einmal neu laden. Höchstens ein geplantes Neuladen je Schlüssel.
+  var OWN_PAGES_REFRESH_MS = 30000;
+  function scheduleOwnPagesRefresh(cacheName, key, reload) {
+    if (state.ownPagesRefreshTimer[cacheName + key]) return;
+    state.ownPagesRefreshTimer[cacheName + key] = true;
+    setTimeout(function () {
+      delete state.ownPagesRefreshTimer[cacheName + key];
+      delete state[cacheName][key];
+      reload();
+    }, OWN_PAGES_REFRESH_MS);
+  }
+
+  // Für die Fragen-Ansicht: true, solange noch ältere Antworten nachgerechnet werden (plant das Neuladen).
+  function ownPagesWindowPending(topicId, winDays) {
+    var days = Math.max(1, Math.min(730, Math.round(winDays || 28)));
+    var key = ownPagesWindowKey(topicId, days);
+    var data = state.ownPagesWindowCache[key];
+    if (!data || !data.backfill_pending) return false;
+    scheduleOwnPagesRefresh('ownPagesWindowCache', key, function () { maybeLoadOwnPagesWindow(topicId, days); });
+    return true;
+  }
+
   // Unter einer Frage: welche eigenen Seiten verlinkt wurden, sonst die meistverlinkte fremde Domain.
   function renderPromptPagesLine(topicId, p, ps, winDays) {
     var days = Math.max(1, Math.min(730, Math.round(winDays || 28)));
@@ -6319,16 +6351,10 @@
     });
     if (parts.length) note('Letzte Messung: ' + parts.join(', ') + '. „Neu“ und „nicht mehr“ beziehen sich auf diesen Tag.', 'cvz-fanout-coverage');
     if (gaps.length) note('Keine neue Messung: ' + gaps.join(', ') + '. Die Angaben „zuletzt“ sind deshalb womöglich veraltet.', 'cvz-fanout-warn');
+    // GEÄNDERT (14.11.2026): Das Backend rechnet den Rest im Hintergrund nach, die Liste lädt sich selbst neu.
     if (data.backfill_pending > 0) {
-      var pend = note('Noch ' + data.backfill_pending + ' ältere Antworten werden nachgerechnet. Die Liste ist bis dahin unvollständig. ', 'cvz-fanout-warn');
-      var more = document.createElement('button');
-      more.type = 'button';
-      more.className = 'cvz-journey-hint-link';
-      more.setAttribute('data-cvz-own-pages-reload', topicId);
-      more.style.cssText = 'background:none;border:none;padding:0;cursor:pointer;';
-      more.textContent = 'Weiter nachrechnen';
-      more.addEventListener('click', function () { maybeLoadOwnPages(topicId, true); });
-      pend.appendChild(more);
+      note('Noch ' + data.backfill_pending + ' ältere Antworten werden im Hintergrund nachgerechnet. Die Liste aktualisiert sich gleich von selbst.', 'cvz-fanout-warn');
+      scheduleOwnPagesRefresh('ownPagesCache', topicId, function () { maybeLoadOwnPages(topicId, true); });
     }
 
     var pages = data.pages || [];
