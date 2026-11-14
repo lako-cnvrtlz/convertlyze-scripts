@@ -64,7 +64,7 @@
   var DEFAULT_WINDOW_DAYS = 28;
   // 0 = "Seit Start" (Backend: window_days=0, vom ersten Lauf bis heute, ohne Vorperiode)
   var WINDOW_PRESETS = [28, 90, 180, 0];
-  var WINDOW_SWITCH_TABS = ['situation', 'journey', 'wettbewerb', 'verlauf'];
+  var WINDOW_SWITCH_TABS = ['situation', 'journey', 'wettbewerb', 'massnahmen'];
 
   // NEU (13.11.2026): Takt für das automatische Aktualisieren während laufender Analysen.
   var STEP_POLL_INTERVAL_MS = 15000;
@@ -359,7 +359,7 @@
     // Rang-Historie des Themas werden nicht mehr geladen. Die Grafiken dazu
     // gibt es nicht mehr, die Abfragen liefen trotzdem bei jedem Aufruf.
     if (state.activeSubTab === 'situation' || state.activeSubTab === 'journey' ||
-        state.activeSubTab === 'wettbewerb' || state.activeSubTab === 'verlauf') {
+        state.activeSubTab === 'wettbewerb' || state.activeSubTab === 'massnahmen') {
       maybeLoadDashboardData(topicId);
       maybeLoadContentChanges(topicId);
     }
@@ -374,11 +374,9 @@
     }
     if (state.activeSubTab === 'daten' && state.activeDataView === 'quellen') {
       maybeLoadRetrieved(topicId);
-      maybeLoadOwnPages(topicId);
     }
-    // NEU (02.10.2026): Änderungen und Events werden jetzt im Aktionsplan eingetragen.
-    if (state.activeSubTab === 'aktionsplan') {
-      maybeLoadContentChanges(topicId);
+    if (state.activeSubTab === 'daten' && state.activeDataView === 'seiten') {
+      maybeLoadOwnPages(topicId);
     }
   }
 
@@ -587,7 +585,7 @@
     maybeStartPolling();
 
     var paramTab = new URLSearchParams(window.location.search).get('cvz_tab');
-    if (paramTab) state.activeSubTab = paramTab;
+    if (paramTab) state.activeSubTab = normalizeTabId(paramTab);
     // NEU (06.10.2026): Unterbereich im Tab "Daten" aus der URL (cvz_view).
     // NEU (21.10.2026): Deep-Link auf die Antwort-Ansicht eines Prompts
     state.pendingPromptViewerId = new URLSearchParams(window.location.search).get('cvz_prompt');
@@ -1869,14 +1867,22 @@
   //   Journey    = Finden uns die Käufer, und wann? (Phasen, Rollen, Formate)
   //   Wettbewerb = Wer wird stattdessen genannt, und warum?
   // Die ID 'journey' bleibt, damit alte Links mit cvz_tab=journey weiter gehen.
+  // GEÄNDERT (14.11.2026): neue Struktur nach dem Dashboard-Entwurf. "Situation" heißt "Übersicht"
+  // (ID bleibt 'situation' für alte Links), Aktionsplan und "Verlauf & Änderungen" sind zu
+  // "Maßnahmen" zusammengelegt (ID 'massnahmen'; alte IDs leitet normalizeTabId um).
   var TOPIC_TABS = [
-    { id: 'situation', label: 'Situation' },
+    { id: 'situation', label: 'Übersicht' },
     { id: 'journey', label: 'Journey' },
     { id: 'wettbewerb', label: 'Wettbewerb' },
-    { id: 'aktionsplan', label: 'Aktionsplan' },
-    { id: 'verlauf', label: 'Verlauf & Änderungen' },
+    { id: 'massnahmen', label: 'Maßnahmen' },
     { id: 'daten', label: 'Daten' },
   ];
+
+  // Alte Tab-IDs aus Links, Lesezeichen und E-Mails auf die neuen umleiten.
+  var LEGACY_TAB_IDS = { aktionsplan: 'massnahmen', verlauf: 'massnahmen' };
+  function normalizeTabId(id) {
+    return LEGACY_TAB_IDS[id] || id;
+  }
 
   // NEU (06.10.2026): Unterbereiche des Tabs "Daten". Vorher standen Keywords,
   // PAA-Fragen, Prompts und GSC untereinander auf einer Seite.
@@ -1886,6 +1892,7 @@
     { id: 'prompts', label: 'Prompts' },
     { id: 'fanout', label: 'Fan-out' },
     { id: 'quellen', label: 'Quellen' },
+    { id: 'seiten', label: 'Eure Seiten' },  // NEU (14.11.2026)
     { id: 'gsc', label: 'Search Console' },
   ];
 
@@ -1893,7 +1900,7 @@
   // kurz (Navigation), die Frage sagt neuen Nutzern, wozu der Bereich da ist.
   // Schlüssel: Tab-ID, beim Tab "Daten" 'daten:' + Unterbereich.
   var TAB_QUESTIONS = {
-    'situation':     { eyebrow: 'Situation', q: 'Wie sichtbar seid ihr gerade in KI-Antworten?',
+    'situation':     { eyebrow: 'Übersicht', q: 'Wie sichtbar seid ihr gerade in KI-Antworten?',
                        lead: function () {
                          return 'Wie oft ChatGPT und Gemini eure Domain in den letzten ' +
                            dashWindowDays(state.dashboardDataCache[state.activeTopicId]) +
@@ -1903,10 +1910,9 @@
                        lead: 'Eure Zielgruppe fragt in jeder Phase anders. Hier seht ihr, wo ihr in den Antworten vorkommt und wo andere den Platz haben.' },
     'wettbewerb':    { eyebrow: 'Wettbewerb', q: 'Wer besetzt euren Platz in den Antworten?',
                        lead: 'Welche Anbieter und Quellen ChatGPT und Gemini statt euch nennen, wie oft und bei welchen Fragen.' },
-    'aktionsplan':   { eyebrow: 'Aktionsplan', q: 'Wie kommt ihr in die Antworten, in denen ihr fehlt?',
-                       lead: 'Konkrete Maßnahmen, jeweils an eine Lücke geknüpft und nach Phase sortiert. Weiter unten: was ihr schon umgesetzt habt und was es gebracht hat.' },
-    'verlauf':       { eyebrow: 'Verlauf & Änderungen', q: 'Hat sich etwas bewegt, und woran lag es?',
-                       lead: 'Die Entwicklung über die gesamte Laufzeit, in KI-Antworten und in der Google-Suche, mit euren Änderungen im Zeitverlauf.' },
+    // GEÄNDERT (14.11.2026): Aktionsplan und Verlauf sind ein Tab.
+    'massnahmen':    { eyebrow: 'Maßnahmen', q: 'Was tut ihr, und was hat es gebracht?',
+                       lead: 'Oben die Entwicklung mit euren umgesetzten Maßnahmen im Zeitverlauf. Darunter der Plan: Vorschläge und eigene Maßnahmen, und was sie bewirkt haben.' },
     'daten:keywords':{ eyebrow: 'Daten · Keywords', q: 'Wonach sucht eure Zielgruppe bei Google?',
                        lead: 'Suchbegriffe rund ums Thema mit Suchvolumen, eurer Position und ob Google eine KI-Übersicht zeigt.' },
     'daten:fragen':  { eyebrow: 'Daten · Fragen', q: 'Welche Fragen stellt eure Zielgruppe rund ums Thema?',
@@ -1917,6 +1923,8 @@
                        lead: 'Die Suchanfragen, die ChatGPT stellt, bevor es antwortet. Wer dafür gut rankt, wird eher zitiert.' },
     'daten:quellen': { eyebrow: 'Daten · Quellen', q: 'Welche Seiten findet ChatGPT, und welche nennt es?',
                        lead: 'Bei der Websuche sieht ChatGPT viel mehr Seiten, als es am Ende als Quelle nennt. Hier steht beides nebeneinander, je Domain.' },
+    'daten:seiten':  { eyebrow: 'Daten · Eure Seiten', q: 'Welche eurer Seiten verlinken ChatGPT und Gemini?',
+                       lead: 'Pro Seite: seit wann und wie oft sie verlinkt wird, bei welchen Fragen und welche Textstelle die KI übernimmt.' },
     'daten:gsc':     { eyebrow: 'Daten · Search Console', q: 'Über welche Suchen findet man euch heute?',
                        lead: 'Echte Suchanfragen aus eurer Google Search Console, mit Klicks, Impressionen und Position.' },
     'domain:uebersicht': { eyebrow: 'Domain · Übersicht', q: 'Wie sichtbar ist die Domain über alle Themen?',
@@ -2612,7 +2620,7 @@
     }
     var tabBtn = event.target.closest('[data-cvz-tab]');
     if (tabBtn) {
-      var newTab = tabBtn.getAttribute('data-cvz-tab');
+      var newTab = normalizeTabId(tabBtn.getAttribute('data-cvz-tab'));
       state.activeSubTab = newTab;
       updateUrlParams({ cvz_tab: newTab, cvz_view: newTab === 'daten' ? state.activeDataView : null });
       if (newTab === 'daten' && state.activeDataView === 'fanout' && state.activeView === 'topic-detail') {
@@ -2620,6 +2628,8 @@
       }
       if (newTab === 'daten' && state.activeDataView === 'quellen' && state.activeView === 'topic-detail') {
         maybeLoadRetrieved(state.activeTopicId);
+      }
+      if (newTab === 'daten' && state.activeDataView === 'seiten' && state.activeView === 'topic-detail') {
         maybeLoadOwnPages(state.activeTopicId);
       }
       if (newTab === 'journey' && state.activeView === 'topic-detail') {
@@ -2628,13 +2638,13 @@
       if ((newTab === 'situation' || newTab === 'daten' || newTab === 'journey' || newTab === 'wettbewerb') && state.activeView === 'topic-detail') {
         maybeLoadBuyingCenter(state.activeTopicId);
       }
-      if ((newTab === 'situation' || newTab === 'journey' || newTab === 'wettbewerb' || newTab === 'verlauf') &&
+      if ((newTab === 'situation' || newTab === 'journey' || newTab === 'wettbewerb' || newTab === 'massnahmen') &&
           state.activeView === 'topic-detail') {
         maybeLoadDashboardData(state.activeTopicId);
         maybeLoadContentChanges(state.activeTopicId);
       }
       // NEU (02.10.2026): Änderungen und Events stehen jetzt im Aktionsplan.
-      if (newTab === 'aktionsplan' && state.activeView === 'topic-detail') {
+      if (newTab === 'massnahmen' && state.activeView === 'topic-detail') {
         maybeLoadContentChanges(state.activeTopicId);
       }
       // NEU (17.09.2026): Aktionsplan-Tab: Cache-Busting.
@@ -2642,7 +2652,7 @@
       // UND generated_at ebenfalls fehlt (= Plan wurde noch nie generiert).
       // NICHT re-fetchen wenn Items vorhanden sind (auch wenn generated_at null ist).
       // Das wuerde bei einem NULL-generated_at in der DB eine Endlos-Schleife erzeugen.
-      if (newTab === 'aktionsplan' && state.activeView === 'topic-detail') {
+      if (newTab === 'massnahmen' && state.activeView === 'topic-detail') {
         var _apCached = state.topicDetailCache[state.activeTopicId];
         var _apObj = _apCached && _apCached.action_plan;
         var _apHasItems = _apObj && Array.isArray(_apObj.items) && _apObj.items.length > 0;
@@ -5762,11 +5772,8 @@
       case 'wettbewerb':
         tabContent.appendChild(renderWettbewerbTab(state.activeTopicId, detail));
         break;
-      case 'aktionsplan':
-        tabContent.appendChild(renderAktionsplanTab(detail));
-        break;
-      case 'verlauf':
-        tabContent.appendChild(renderVerlaufTab(state.activeTopicId, detail));
+      case 'massnahmen':
+        tabContent.appendChild(renderMassnahmenTab(state.activeTopicId, detail));
         break;
       case 'daten':
         // GEÄNDERT (06.10.2026): Keywords, Fragen (PAA), Prompts, Fan-out und GSC
@@ -5796,6 +5803,8 @@
     }
     if (view === 'quellen' && state.activeView === 'topic-detail') {
       maybeLoadRetrieved(state.activeTopicId);
+    }
+    if (view === 'seiten' && state.activeView === 'topic-detail') {
       maybeLoadOwnPages(state.activeTopicId);
     }
     render();
@@ -5927,6 +5936,10 @@
         var rd = state.retrievedCache[retrievedKey(state.activeTopicId)];
         return rd ? rd.domains_total : null;
       })(),
+      seiten: (function () {
+        var op = state.ownPagesCache[state.activeTopicId];
+        return op ? (op.pages_total != null ? op.pages_total : (op.pages || []).length) : null;
+      })(),
       gsc: Array.isArray(gscFiltered) ? gscFiltered.length : null,
     };
     wrap.appendChild(renderDataSubNav(counts));
@@ -5958,8 +5971,10 @@
       wrap.appendChild(renderFanOutView(state.activeTopicId, detail));
     } else if (view === 'quellen') {
       promptNotes();
-      wrap.appendChild(renderOwnPagesView(state.activeTopicId));
       wrap.appendChild(renderRetrievedView(state.activeTopicId, detail));
+    } else if (view === 'seiten') {
+      promptNotes();
+      wrap.appendChild(renderOwnPagesView(state.activeTopicId));
     } else if (view === 'gsc') {
       monthlyNotes('GSC zuletzt aktualisiert');
       wrap.appendChild(renderGscBlock(gscFiltered, state.activeTopicId, allEntries));
@@ -6119,7 +6134,7 @@
     neu: { label: 'neu', color: 'var(--cvz-teal,#4fd1c5)', tip: 'Erster Link in den letzten 14 Tagen vor der letzten Messung, an mindestens 2 Messtagen.' },
     aktiv: { label: 'aktiv', color: 'var(--cvz-text,#e6edf3)', tip: 'Wird weiterhin verlinkt.' },
     einmalig: { label: 'einmalig', color: 'var(--cvz-text-muted,#8b98a5)', tip: 'Nur an einem Messtag verlinkt. Das ist oft Zufall.' },
-    nicht_mehr: { label: 'nicht mehr', color: 'var(--cvz-red,#de5b50)', tip: 'Seit mehr als 14 Tagen vor der letzten Messung kein Link mehr.' },
+    nicht_mehr: { label: 'nicht mehr', color: 'var(--cvz-red,#de5b50)', tip: 'Vorher an mehreren Messtagen verlinkt, seit mehr als 14 Tagen vor der letzten Messung nicht mehr.' },
   };
   var OWN_PAGE_FILTERS = [['alle', 'Alle'], ['neu', 'Neu'], ['aktiv', 'Aktiv'], ['nicht_mehr', 'Nicht mehr verlinkt'], ['einmalig', 'Einmalig']];
   var OWN_PAGE_CHANNELS = [['chat_gpt', 'ChatGPT'], ['gemini', 'Gemini']];
@@ -6167,13 +6182,16 @@
   function ownPageChannelCell(ch) {
     if (!ch) return '<td class="cvz-own-page-ch" style="color:var(--cvz-text-muted,#8b98a5);">–</td>';
     var st = OWN_PAGE_STATUS[ch.status] || OWN_PAGE_STATUS.aktiv;
-    var range = ch.first_seen === ch.last_seen ? 'am ' + ddmm(ch.first_seen) : 'seit ' + ddmm(ch.first_seen) + ', zuletzt ' + ddmm(ch.last_seen);
+    // GEÄNDERT (14.11.2026): zwei Zeilen statt drei. Oben Status und Antworten, darunter der Zeitraum.
+    // Die Messtage stehen nur noch im Tooltip.
+    var range = ch.first_seen === ch.last_seen ? ddmm(ch.first_seen) : ddmm(ch.first_seen) + '–' + ddmm(ch.last_seen);
     var tip = st.tip + ' Erster Messtag mit Link: ' + ddmm(ch.first_seen) + ', letzter: ' + ddmm(ch.last_seen) + '. ' +
       ch.days + (ch.days === 1 ? ' Messtag, ' : ' Messtage, ') + ch.answers + (ch.answers === 1 ? ' Antwort.' : ' Antworten.');
     return '<td class="cvz-own-page-ch" title="' + escapeHtml(tip) + '">' +
-      '<span class="cvz-own-page-status" style="font-size:11px;font-weight:600;color:' + st.color + ';">' + escapeHtml(st.label) + '</span>' +
-      '<span style="display:block;font-size:12px;">' + escapeHtml(range) + '</span>' +
-      '<span style="display:block;font-size:11px;color:var(--cvz-text-muted,#8b98a5);">' + ch.days + (ch.days === 1 ? ' Messtag' : ' Messtage') + '</span></td>';
+      '<span style="display:block;font-size:13px;font-weight:600;">' +
+        '<span class="cvz-own-page-status" style="color:' + st.color + ';">' + escapeHtml(st.label) + '</span>' +
+        ' · ' + ch.answers + (ch.answers === 1 ? ' Antwort' : ' Antworten') + '</span>' +
+      '<span style="display:block;font-size:12px;color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(range) + '</span></td>';
   }
 
   function renderOwnPagesView(topicId, now) {
@@ -6263,7 +6281,7 @@
       if (p.prompts_total) extra.push(p.prompts_total + (p.prompts_total === 1 ? ' Frage' : ' Fragen'));
       if (p.passages && p.passages.length) extra.push(p.passages.length + (p.passages.length === 1 ? ' Textstelle' : ' Textstellen'));
       html += '<tr class="cvz-own-page-row" data-cvz-own-page="' + escapeHtml(p.page) + '" style="cursor:pointer;">' +
-        '<td><a href="' + escapeHtml(p.page) + '" target="_blank" rel="noopener" style="word-break:break-all;">' + escapeHtml(p.path) + '</a>' +
+        '<td><a class="cvz-own-page-link" href="' + escapeHtml(p.page) + '" target="_blank" rel="noopener">' + escapeHtml(p.path) + '</a>' +
         (extra.length ? '<span style="display:block;font-size:11px;color:var(--cvz-text-muted,#8b98a5);text-decoration:underline dotted;">' +
           (open ? '▾ ' : '▸ ') + escapeHtml(extra.join(' · ')) + '</span>' : '') + '</td>' +
         ownPageChannelCell((p.channels || {}).chat_gpt) + ownPageChannelCell((p.channels || {}).gemini) +
@@ -12408,7 +12426,7 @@
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '12px';
     sub.textContent = 'Tragt ein, was ihr umgesetzt habt oder was passiert ist, auch Maßnahmen außerhalb des Plans (z. B. Relaunch, Kampagne, Pressebericht). ' +
-      'Als erledigt markierte Maßnahmen aus dem Plan erscheinen hier automatisch. Im Tab „Verlauf & Änderungen“ seht ihr, wie sich die Sichtbarkeit danach entwickelt hat.';
+      'Als erledigt markierte Maßnahmen aus dem Plan erscheinen hier automatisch. Oben in diesem Tab seht ihr, wie sich die Sichtbarkeit danach entwickelt hat.';
     section.appendChild(sub);
 
     // Form
@@ -12994,14 +13012,14 @@
       blockNote.style.marginTop = '12px';
       blockNote.appendChild(document.createTextNode(
         blockers.length + (blockers.length === 1 ? ' Information fehlt' : ' Informationen fehlen') +
-        ' noch, damit ChatGPT und Gemini euch vollständig mit Wettbewerbern vergleichen können. Was wo veröffentlicht werden sollte, steht im Aktionsplan. '
+        ' noch, damit ChatGPT und Gemini euch vollständig mit Wettbewerbern vergleichen können. Was wo veröffentlicht werden sollte, steht unter Maßnahmen. '
       ));
       var blockLink = document.createElement('button');
       blockLink.type = 'button';
       blockLink.className = 'cvz-journey-hint-link';
       blockLink.style.display = 'inline';
-      blockLink.setAttribute('data-cvz-tab', 'aktionsplan');
-      blockLink.textContent = 'Zum Aktionsplan \u2192';
+      blockLink.setAttribute('data-cvz-tab', 'massnahmen');
+      blockLink.textContent = 'Zu den Maßnahmen \u2192';
       blockNote.appendChild(blockLink);
       section.appendChild(blockNote);
     }
@@ -13723,6 +13741,8 @@
       '.cvz-table td { padding: 8px 12px; border-bottom: 1px solid var(--cvz-border); }' +
       '.cvz-table-clickable tbody tr { cursor: pointer; }' +
       '.cvz-table-clickable tbody tr:hover { background: rgba(79, 209, 197, 0.06); }' +
+      '.cvz-own-page-link { color: var(--cvz-teal); font-weight: 600; text-decoration: none; word-break: break-all; }' +
+      '.cvz-own-page-link:hover { text-decoration: underline; }' +
       '.cvz-gsc-page-url { color: var(--cvz-teal); font-size: 11px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; display: inline-block; vertical-align: middle; }' +
         '.cvz-gsc-cell-url { max-width: 150px; overflow: hidden; }' +
         '.cvz-gsc-cell-linked { color: var(--cvz-teal); max-width: 280px; }' +
@@ -14571,7 +14591,7 @@
     { id: 'chat_gpt', label: 'ChatGPT' },
     { id: 'gemini', label: 'Gemini' },
   ];
-  var CHANNEL_SWITCH_TABS = ['situation', 'journey', 'wettbewerb', 'verlauf'];
+  var CHANNEL_SWITCH_TABS = ['situation', 'journey', 'wettbewerb', 'massnahmen'];
   var CHANNEL_LINE_COLORS = { all: '#4fd1c5', chat_gpt: '#5aacd2', gemini: '#8878ca' };
 
   function activeChannel() {
@@ -14762,7 +14782,7 @@
     bar.appendChild(group);
     bar.appendChild(makeTip(
       'Gesamt fasst ChatGPT und Gemini zusammen (alle Zitierungen geteilt durch alle Antworten). ' +
-      'ChatGPT oder Gemini zeigt nur diesen Kanal. Die Auswahl gilt für Situation, Journey, Wettbewerb und Verlauf. ' +
+      'ChatGPT oder Gemini zeigt nur diesen Kanal. Die Auswahl gilt für Übersicht, Journey, Wettbewerb und Maßnahmen. ' +
       'Google AI Overviews werden monatlich gemessen und stehen getrennt in den Journey-Karten.'
     ));
     return bar;
@@ -15310,10 +15330,10 @@
     var link = document.createElement('button');
     link.type = 'button';
     link.className = 'cvz-journey-hint-link';
-    link.setAttribute('data-cvz-tab', 'aktionsplan');
+    link.setAttribute('data-cvz-tab', 'massnahmen');
     link.textContent = (ap.items && ap.items.length > open.length)
-      ? 'Alle ' + ap.items.length + ' Maßnahmen im Aktionsplan \u2192'
-      : 'Zum Aktionsplan \u2192';
+      ? 'Alle ' + ap.items.length + ' Maßnahmen \u2192'
+      : 'Zu den Maßnahmen \u2192';
     card.appendChild(link);
     section.appendChild(card);
     return section;
@@ -15426,7 +15446,7 @@
       var oppSub = document.createElement('p');
       oppSub.className = 'cvz-card-placeholder-text';
       oppSub.style.marginBottom = '14px';
-      oppSub.textContent = 'Automatisch erkannte Chancen auf Basis eurer KI-Sichtbarkeits- und GSC-Daten, sortiert nach Priorität. Konkrete Umsetzungsempfehlungen im Aktionsplan-Tab.';
+      oppSub.textContent = 'Automatisch erkannte Chancen auf Basis eurer KI-Sichtbarkeits- und GSC-Daten, sortiert nach Priorität. Konkrete Umsetzungsempfehlungen im Tab Maßnahmen.';
       oppSection.appendChild(oppSub);
       oppSection.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at));
       oppSection.appendChild(renderNextRunNote(detail.topic, 30));
@@ -15801,7 +15821,7 @@
           '(jetzt ' + entry.cited + ' von ' + curN + ' Antworten, davor ' + entry.previous_cited + ' von ' + prevN + '). ' +
           'Die Veränderung ist größer als die normale Schwankung von KI-Antworten. ' +
           (up
-            ? 'Prüft unter „Verlauf & Änderungen“, welche Inhaltsänderung dazu passt, und baut darauf auf.'
+            ? 'Prüft unter „Maßnahmen“, welche Änderung dazu passt, und baut darauf auf.'
             : 'Schaut bei den meistzitierten Quellen darunter, wer stattdessen genannt wird, und prüft, ob sich eure zitierte Seite geändert hat.');
       } else {
         tip = label + ' wird ' + (up ? 'häufiger' : 'seltener') + ' zitiert: ' + (up ? 'plus ' : 'minus ') + delta +
@@ -15859,7 +15879,7 @@
       };
     }
     if (up) {
-      return { kind: 'up', text: 'Zuwachs bei ' + (CHANNEL_LABELS[up] || up) + '. Prüft unter „Verlauf & Änderungen“, was dazu beigetragen hat.', action: false };
+      return { kind: 'up', text: 'Zuwachs bei ' + (CHANNEL_LABELS[up] || up) + '. Prüft unter „Maßnahmen“, was dazu beigetragen hat.', action: false };
     }
     return null;
   }
@@ -16240,8 +16260,8 @@
           var link = document.createElement('button');
           link.type = 'button';
           link.className = 'cvz-journey-hint-link';
-          link.setAttribute('data-cvz-tab', 'aktionsplan');
-          link.textContent = 'Zum Aktionsplan →';
+          link.setAttribute('data-cvz-tab', 'massnahmen');
+          link.textContent = 'Zu den Maßnahmen →';
           hintEl.appendChild(link);
         }
         card.appendChild(hintEl);
@@ -17940,8 +17960,20 @@
     return section;
   }
 
-  function renderVerlaufTab(topicId, detail) {
+  // NEU (14.11.2026): Tab "Maßnahmen" = Verlauf mit Markierungen oben, darunter Aktionsplan (Vorschläge,
+  // eigene Einträge), danach Wirkung, Google-Verlauf und Chronik aus dem früheren Tab "Verlauf".
+  function renderMassnahmenTab(topicId, detail) {
     var wrap = document.createElement('div');
+    wrap.className = 'cvz-massnahmen';
+    wrap.appendChild(renderRollingTrendSection(topicId, state.dashboardDataCache[topicId], state.isLoadingDashboard));
+    wrap.appendChild(renderAktionsplanTab(detail));
+    wrap.appendChild(renderVerlaufTab(topicId, detail, { embedded: true }));
+    return wrap;
+  }
+
+  function renderVerlaufTab(topicId, detail, opts) {
+    var wrap = document.createElement('div');
+    opts = opts || {};
 
     // GEÄNDERT (20.09.2026): Formular zum Eintragen einer Änderung steht
     // jetzt ganz oben im Tab (vorher stand es hinter Wirkungs-Analyse, Chart
@@ -17959,11 +17991,12 @@
     changesHintBtn.type = 'button';
     changesHintBtn.className = 'cvz-journey-hint-link';
     changesHintBtn.style.marginTop = '0';
-    changesHintBtn.setAttribute('data-cvz-tab', 'aktionsplan');
+    changesHintBtn.setAttribute('data-cvz-tab', 'massnahmen');
     changesHintBtn.textContent = 'Zum Aktionsplan →';
     changesHint.appendChild(changesHintTxt);
     changesHint.appendChild(changesHintBtn);
-    wrap.appendChild(changesHint);
+    // GEÄNDERT (14.11.2026): Im Tab Maßnahmen steht der Plan direkt darüber, der Verweis entfällt.
+    if (!opts.embedded) wrap.appendChild(changesHint);
 
     // NEU (20.09.2026): Bereits umgesetzte Änderungen und ihre gemessene
     // Wirkung (change_history.py), war bisher nur als Funktion vorhanden,
@@ -17973,7 +18006,8 @@
 
     // GEÄNDERT (21.10.2026): gleitender 28-Tage-Verlauf über die ganze Laufzeit
     // statt Wochenwerten mit Zeitraum-Presets, siehe renderRollingTrendSection.
-    wrap.appendChild(renderRollingTrendSection(topicId, state.dashboardDataCache[topicId], state.isLoadingDashboard));
+    // GEÄNDERT (14.11.2026): Im Tab Maßnahmen steht der Verlauf schon oben.
+    if (!opts.embedded) wrap.appendChild(renderRollingTrendSection(topicId, state.dashboardDataCache[topicId], state.isLoadingDashboard));
 
     // NEU (21.10.2026): Google-Suche (Search Console) im selben Raster
     wrap.appendChild(renderGscTopicSection(topicId, detail));
