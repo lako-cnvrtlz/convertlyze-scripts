@@ -214,6 +214,8 @@
     ownPagesErrors: {},
     ownPagesFilter: {},        // { [topicId]: 'alle' | 'neu' | 'aktiv' | 'nicht_mehr' | 'einmalig' }
     ownPagesOpen: {},          // { [topicId + '|' + page]: true } aufgeklappte Zeile
+    ownPagesShowAll: {},       // NEU (14.11.2026): { [topicId]: true } alle Seiten statt der ersten 5
+    journeyCardMoreOpen: {},   // NEU (14.11.2026): { [topicId + '|' + phase]: true } Details einer Phasen-Karte offen
     ownPagesWindowCache: {},   // NEU (14.11.2026): { [topicId + '|' + Tage]: Antwort } für die Journey (Seiten je Frage)
     loadingOwnPagesWindow: {},
     ownPagesRefreshTimer: {},  // NEU (14.11.2026): { [Cache-Schlüssel]: true } solange ein Neuladen geplant ist
@@ -380,9 +382,6 @@
     }
     if (state.activeSubTab === 'daten' && state.activeDataView === 'quellen') {
       maybeLoadRetrieved(topicId);
-    }
-    if (state.activeSubTab === 'daten' && state.activeDataView === 'seiten') {
-      maybeLoadOwnPages(topicId);
     }
     // NEU (14.11.2026): Übersicht braucht eure Seiten (Kennzahl, Bewegungen)
     if (state.activeSubTab === 'situation') maybeLoadOwnPages(topicId);
@@ -610,6 +609,8 @@
     }
     var paramView = new URLSearchParams(window.location.search).get('cvz_view');
     if (paramView && isValidDataView(paramView)) state.activeDataView = paramView;
+    // GEÄNDERT (14.11.2026): "Eure Seiten" steht jetzt in der Übersicht. Alte Links dorthin umleiten.
+    if (paramView === 'seiten') state.activeSubTab = 'situation';
 
     var paramTopicId = new URLSearchParams(window.location.search).get('cvz_topic');
     if (paramTopicId && getTopicById(paramTopicId)) {
@@ -1900,7 +1901,6 @@
     { id: 'prompts', label: 'Prompts' },
     { id: 'fanout', label: 'Fan-out' },
     { id: 'quellen', label: 'Quellen' },
-    { id: 'seiten', label: 'Eure Seiten' },  // NEU (14.11.2026)
     { id: 'gsc', label: 'Search Console' },
   ];
 
@@ -1931,8 +1931,6 @@
                        lead: 'Die Suchanfragen, die ChatGPT stellt, bevor es antwortet. Wer dafür gut rankt, wird eher zitiert.' },
     'daten:quellen': { eyebrow: 'Daten · Quellen', q: 'Welche Seiten findet ChatGPT, und welche nennt es?',
                        lead: 'Bei der Websuche sieht ChatGPT viel mehr Seiten, als es am Ende als Quelle nennt. Hier steht beides nebeneinander, je Domain.' },
-    'daten:seiten':  { eyebrow: 'Daten · Eure Seiten', q: 'Welche eurer Seiten verlinken ChatGPT und Gemini?',
-                       lead: 'Pro Seite: seit wann und wie oft sie verlinkt wird, bei welchen Fragen und welche Textstelle die KI übernimmt.' },
     'daten:gsc':     { eyebrow: 'Daten · Search Console', q: 'Über welche Suchen findet man euch heute?',
                        lead: 'Echte Suchanfragen aus eurer Google Search Console, mit Klicks, Impressionen und Position.' },
     'domain:uebersicht': { eyebrow: 'Domain · Übersicht', q: 'Wie sichtbar ist die Domain über alle Themen?',
@@ -2627,6 +2625,13 @@
       return;
     }
     // NEU (14.11.2026): Sprung in einen Daten-Unterbereich (z. B. "Alle Seiten" in der Übersicht)
+    // NEU (14.11.2026): Sprung zu einem Abschnitt derselben Seite
+    var scrollToBtn = event.target.closest('[data-cvz-scroll-to]');
+    if (scrollToBtn) {
+      var scrollTarget = document.getElementById(scrollToBtn.getAttribute('data-cvz-scroll-to'));
+      if (scrollTarget) scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     var gotoDataBtn = event.target.closest('[data-cvz-goto-data-view]');
     if (gotoDataBtn) {
       state.activeSubTab = 'daten';
@@ -2645,7 +2650,7 @@
       if (newTab === 'daten' && state.activeDataView === 'quellen' && state.activeView === 'topic-detail') {
         maybeLoadRetrieved(state.activeTopicId);
       }
-      if ((newTab === 'situation' || (newTab === 'daten' && state.activeDataView === 'seiten')) && state.activeView === 'topic-detail') {
+      if (newTab === 'situation' && state.activeView === 'topic-detail') {
         maybeLoadOwnPages(state.activeTopicId);
       }
       if (newTab === 'journey' && state.activeView === 'topic-detail') {
@@ -5833,9 +5838,6 @@
     if (view === 'quellen' && state.activeView === 'topic-detail') {
       maybeLoadRetrieved(state.activeTopicId);
     }
-    if (view === 'seiten' && state.activeView === 'topic-detail') {
-      maybeLoadOwnPages(state.activeTopicId);
-    }
     render();
   }
 
@@ -5965,10 +5967,6 @@
         var rd = state.retrievedCache[retrievedKey(state.activeTopicId)];
         return rd ? rd.domains_total : null;
       })(),
-      seiten: (function () {
-        var op = state.ownPagesCache[state.activeTopicId];
-        return op ? (op.pages_total != null ? op.pages_total : (op.pages || []).length) : null;
-      })(),
       gsc: Array.isArray(gscFiltered) ? gscFiltered.length : null,
     };
     wrap.appendChild(renderDataSubNav(counts));
@@ -6001,9 +5999,6 @@
     } else if (view === 'quellen') {
       promptNotes();
       wrap.appendChild(renderRetrievedView(state.activeTopicId, detail));
-    } else if (view === 'seiten') {
-      promptNotes();
-      wrap.appendChild(renderOwnPagesView(state.activeTopicId));
     } else if (view === 'gsc') {
       monthlyNotes('GSC zuletzt aktualisiert');
       wrap.appendChild(renderGscBlock(gscFiltered, state.activeTopicId, allEntries));
@@ -6307,22 +6302,38 @@
       '<span style="display:block;font-size:12px;color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(range) + '</span></td>';
   }
 
+  // GEÄNDERT (14.11.2026): steht jetzt in der Übersicht (vorher Daten > Eure Seiten). Verständlichere
+  // Überschrift, kurze Erklärung, Legende der Status, zunächst OWN_PAGES_COMPACT_ROWS Seiten.
+  var OWN_PAGES_COMPACT_ROWS = 5;
+
   function renderOwnPagesView(topicId, now) {
     var section = document.createElement('div');
     section.className = 'cvz-section cvz-own-pages';
+    section.id = 'cvz-ov-pages';
 
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
-    heading.textContent = 'Eure verlinkten Seiten (ChatGPT und Gemini)';
-    section.appendChild(heading);
+    heading.style.margin = '0';
+    heading.textContent = 'Welche eurer Seiten die KI verlinkt';
+    head.appendChild(heading);
+    head.appendChild(makeTip('Gezählt werden die letzten 180 Tage, damit „seit“ und „nicht mehr“ aussagekräftig sind. ' +
+      '„Seit“ ist der erste Messtag mit Link: Genauer als der Messrhythmus lässt sich nicht sagen, wann ein Modell angefangen hat, die Seite zu nennen.'));
+    section.appendChild(head);
 
     var intro = document.createElement('p');
     intro.className = 'cvz-card-placeholder-text';
-    intro.style.marginBottom = '10px';
-    intro.textContent = 'Welche eurer Seiten die KI-Antworten verlinken, seit wann und wie oft (letzte 180 Tage). ' +
-      '„Seit“ ist der erste Messtag mit Link: Wann das Modell wirklich angefangen hat, die Seite zu nennen, lässt sich nicht genauer sagen als der Messrhythmus. ' +
-      'Bei Gemini steht oft auch die Textstelle dabei, die es zitiert hat. Das zeigt, welche Sätze eurer Seiten als Antwort taugen.';
+    intro.style.marginBottom = '6px';
+    intro.textContent = 'ChatGPT und Gemini nennen in ihren Antworten Quellen mit Link. Hier steht, welche eurer Seiten dabei vorkommen, wie oft und seit wann. ' +
+      'Ein Klick auf eine Seite zeigt die Fragen dazu und die Textstelle, die die KI übernommen hat.';
     section.appendChild(intro);
+
+    var legend = document.createElement('p');
+    legend.className = 'cvz-own-pages-legend';
+    legend.innerHTML = '<strong>aktiv</strong> wird weiter verlinkt · <strong class="cvz-own-pages-legend-new">neu</strong> seit kurzem, an mindestens 2 Tagen · ' +
+      '<strong class="cvz-own-pages-legend-muted">einmalig</strong> nur an einem Tag, oft Zufall · <strong class="cvz-own-pages-legend-lost">nicht mehr</strong> früher verlinkt, seit über 14 Tagen nicht';
+    section.appendChild(legend);
 
     function note(text, cls) {
       var el = document.createElement('p');
@@ -6377,10 +6388,12 @@
     });
     section.appendChild(chips);
 
-    var shown = pages.filter(function (p) { return ownPageMatchesFilter(p, filter); });
+    var filtered = pages.filter(function (p) { return ownPageMatchesFilter(p, filter); });
+    var showAll = !!state.ownPagesShowAll[topicId];
+    var shown = showAll ? filtered : filtered.slice(0, OWN_PAGES_COMPACT_ROWS);
     var table = document.createElement('table');
     table.className = 'cvz-table cvz-own-pages-table';
-    var html = '<thead><tr><th>Seite</th><th>ChatGPT</th><th>Gemini</th><th style="text-align:right;">Antworten</th></tr></thead><tbody>';
+    var html = '<thead><tr><th>Seite</th><th>ChatGPT</th><th>Gemini</th><th style="text-align:right;">Antworten gesamt</th></tr></thead><tbody>';
     shown.forEach(function (p) {
       var openKey = topicId + '|' + p.page;
       var open = !!state.ownPagesOpen[openKey];
@@ -6426,7 +6439,19 @@
       state.ownPagesOpen[k] = !state.ownPagesOpen[k];
       render();
     });
-    section.appendChild(table);
+    var tableWrap = document.createElement('div');
+    tableWrap.style.cssText = 'overflow-x:auto;';
+    tableWrap.appendChild(table);
+    section.appendChild(tableWrap);
+    if (filtered.length > OWN_PAGES_COMPACT_ROWS) {
+      var toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'cvz-ov-kpi-link';
+      toggle.style.marginTop = '8px';
+      toggle.textContent = showAll ? 'Weniger anzeigen' : 'Alle ' + filtered.length + ' Seiten anzeigen';
+      toggle.addEventListener('click', function () { state.ownPagesShowAll[topicId] = !showAll; render(); });
+      section.appendChild(toggle);
+    }
     return section;
   }
 
@@ -13869,6 +13894,28 @@
       '.cvz-ov-move-kind { font-size: 12px; font-weight: 600; }' +
       '.cvz-ov-move-text { font-weight: 600; }' +
       '.cvz-ov-move-meta { font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-main { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 0; }' +
+      '.cvz-jc-value { font-family: "Syne", sans-serif; font-size: 30px; font-weight: 800; line-height: 1; color: var(--cvz-text); }' +
+      '.cvz-jc-meta { margin: 4px 0 0; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-channels { display: flex; flex-wrap: wrap; gap: 12px; margin: 6px 0 0; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-channel { display: inline-flex; gap: 4px; align-items: baseline; }' +
+      '.cvz-jc-channel .cvz-journey-channel-label { font-size: 12px; }' +
+      '.cvz-jc-channel .cvz-journey-channel-num { font-size: 12px; font-weight: 600; color: var(--cvz-text); }' +
+      '.cvz-jc-google { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--cvz-border); font-size: 12px; color: var(--cvz-text); }' +
+      '.cvz-jc-google .cvz-gp-label { margin-right: 6px; }' +
+      '.cvz-jc-pages { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-jc-pages-label { margin: 0 0 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-page { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; font-size: 12px; padding: 2px 0; }' +
+      '.cvz-jc-page .cvz-own-page-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; word-break: normal; }' +
+      '.cvz-jc-page-meta { flex: none; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-pages-none { margin: 0; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-more { margin-top: 10px; border-top: 1px solid var(--cvz-border); padding-top: 8px; }' +
+      '.cvz-jc-more > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--cvz-teal); min-height: 28px; display: flex; align-items: center; }' +
+      '.cvz-own-pages-legend { margin: 0 0 10px; font-size: 12px; color: var(--cvz-text-muted); line-height: 1.6; }' +
+      '.cvz-own-pages-legend strong { color: var(--cvz-text); font-weight: 600; }' +
+      '.cvz-own-pages-legend .cvz-own-pages-legend-new { color: var(--cvz-teal); }' +
+      '.cvz-own-pages-legend .cvz-own-pages-legend-muted { color: var(--cvz-text-muted); }' +
+      '.cvz-own-pages-legend .cvz-own-pages-legend-lost { color: var(--cvz-red); }' +
       '.cvz-jq-pages { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }' +
       '.cvz-jq-page { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: 13px; }' +
       '.cvz-jq-page-arrow { color: var(--cvz-text-muted); }' +
@@ -15597,7 +15644,7 @@
       if (lost) bits.push(lost + ' nicht mehr verlinkt');
       grid.appendChild(ovCard('Verlinkte Seiten', String(linked), '',
         'Eure Seiten, die ChatGPT oder Gemini in den letzten ' + winDays + ' Tagen verlinkt haben' + (bits.length ? '. ' + bits.join(', ') : ''),
-        '<button type="button" class="cvz-ov-kpi-link" data-cvz-goto-data-view="seiten">Alle Seiten →</button>'));
+        '<button type="button" class="cvz-ov-kpi-link" data-cvz-scroll-to="cvz-ov-pages">Welche Seiten? ↓</button>'));
     } else {
       grid.appendChild(ovCard('Verlinkte Seiten', 'k. A.', '', state.ownPagesErrors[topicId] ? 'Konnte nicht geladen werden' : 'Noch keine Daten'));
     }
@@ -15764,6 +15811,8 @@
       ovRow.appendChild(renderOverviewMovements(topicId, dashData));
       ovRow.appendChild(renderTopActionsTeaser(detail));
       wrap.appendChild(ovRow);
+      // NEU (14.11.2026): eure verlinkten Seiten (vorher Daten > Eure Seiten)
+      wrap.appendChild(renderOwnPagesView(topicId));
     } else {
       wrap.appendChild(renderTopActionsTeaser(detail));
     }
@@ -16453,6 +16502,62 @@
     return wrap;
   }
 
+  // NEU (14.11.2026): Eure Seiten in einer Phase: by_prompt (own-pages im Zeitraum der Karten) über die
+  // Fragen dieser Phase zusammengezählt. Höchstens PHASE_PAGES_MAX Seiten, Rest als Zahl.
+  var PHASE_PAGES_MAX = 3;
+
+  function phaseOwnPages(topicId, phase, days) {
+    days = Math.max(1, Math.min(730, Math.round(days || 28)));
+    var key = ownPagesWindowKey(topicId, days);
+    if (!(key in state.ownPagesWindowCache)) { maybeLoadOwnPagesWindow(topicId, days); return null; }
+    var data = state.ownPagesWindowCache[key];
+    var detail = state.topicDetailCache[topicId];
+    if (!data || !data.by_prompt || !detail) return [];
+    var agg = {};
+    (detail.prompts || []).forEach(function (p) {
+      if (resolvePromptPhase(p) !== phase) return;
+      (data.by_prompt[p.id] || []).forEach(function (pg) {
+        var a = agg[pg.page] || (agg[pg.page] = { page: pg.page, path: pg.path, answers: 0, prompts: 0 });
+        a.answers += pg.answers || 0;
+        a.prompts += 1;
+      });
+    });
+    return Object.keys(agg).map(function (k) { return agg[k]; })
+      .sort(function (a, b) { return (b.answers - a.answers) || a.path.localeCompare(b.path); });
+  }
+
+  function renderPhaseOwnPages(topicId, phase, days, tot) {
+    var list = phaseOwnPages(topicId, phase, days);
+    if (list === null) return null;
+    var box = document.createElement('div');
+    box.className = 'cvz-jc-pages';
+    var label = document.createElement('p');
+    label.className = 'cvz-jc-pages-label';
+    label.textContent = 'Eure Seiten in dieser Phase';
+    box.appendChild(label);
+    if (!list.length) {
+      var none = document.createElement('p');
+      none.className = 'cvz-jc-pages-none';
+      none.textContent = tot && tot.total > 0 ? 'Keine eurer Seiten verlinkt.' : 'Noch keine Antworten im Zeitraum.';
+      box.appendChild(none);
+      return box;
+    }
+    list.slice(0, PHASE_PAGES_MAX).forEach(function (pg) {
+      var row = document.createElement('div');
+      row.className = 'cvz-jc-page';
+      row.innerHTML = '<a class="cvz-own-page-link" href="' + escapeHtml(pg.page) + '" target="_blank" rel="noopener" title="' + escapeHtml(pg.path) + '">' +
+        escapeHtml(pg.path) + '</a><span class="cvz-jc-page-meta">' + pg.answers + (pg.answers === 1 ? ' Antwort' : ' Antworten') + '</span>';
+      box.appendChild(row);
+    });
+    if (list.length > PHASE_PAGES_MAX) {
+      var rest = document.createElement('p');
+      rest.className = 'cvz-jc-pages-none';
+      rest.textContent = 'und ' + (list.length - PHASE_PAGES_MAX) + ' weitere';
+      box.appendChild(rest);
+    }
+    return box;
+  }
+
   function renderJourneyPhaseSection(data, detail) {
     var jc = data.journey_comparison || null;
     var cfg = {
@@ -16520,27 +16625,43 @@
         card.appendChild(qLink);
       }
 
+      // GEÄNDERT (14.11.2026): eine Zitierrate mit Trend statt je Kanal ein Balken. Die Kanäle stehen
+      // klein darunter. Details (KI-Übersicht, Keywords, Quellen) liegen aufklappbar unten in der Karte.
+      var tot = ownPhaseTotal(data, phase);
+      var main = document.createElement('div');
+      main.className = 'cvz-jc-main';
+      var mainVal = document.createElement('span');
+      mainVal.className = 'cvz-jc-value' + (tot.score == null ? ' cvz-journey-nodata' : '');
+      mainVal.textContent = tot.score == null ? 'k. A.' : Math.round(tot.score) + ' %';
+      main.appendChild(mainVal);
+      if (jc && tot.trend) {
+        var mainBadge = renderJourneyTrendBadge(tot, 'own', cfg);
+        if (mainBadge) main.appendChild(mainBadge);
+      }
+      card.appendChild(main);
+      var mainMeta = document.createElement('p');
+      mainMeta.className = 'cvz-jc-meta';
+      mainMeta.textContent = tot.total > 0
+        ? 'in ' + tot.cited + ' von ' + tot.total + ' KI-Antworten verlinkt'
+        : 'noch keine Antworten im Zeitraum';
+      card.appendChild(mainMeta);
+      var chLine = document.createElement('p');
+      chLine.className = 'cvz-jc-channels';
+      // Bei nur einem gewählten Kanal wäre die Zeile eine Wiederholung der großen Zahl.
+      if (visibleChannels().length > 1) card.appendChild(chLine);
+
       visibleChannels().forEach(function (channel) {
         var ch = scores[channel] || { score: null, cited: 0, total: 0 };
         var hasData = (ch.total || 0) > 0 && ch.score != null;
         var pct = hasData ? Math.round(ch.score) : 0;
 
-        var row = document.createElement('div');
-        row.className = 'cvz-journey-channel-row';
+        var row = document.createElement('span');
+        row.className = 'cvz-jc-channel';
 
         var lbl = document.createElement('span');
         lbl.className = 'cvz-journey-channel-label';
         lbl.textContent = CHANNEL_LABELS[channel] || channel;
         row.appendChild(lbl);
-
-        var barWrap = document.createElement('div');
-        barWrap.className = 'cvz-journey-bar-wrap';
-        var bar = document.createElement('div');
-        bar.className = 'cvz-journey-bar-fill';
-        bar.style.width = pct + '%';
-        bar.style.backgroundColor = color;
-        barWrap.appendChild(bar);
-        row.appendChild(barWrap);
 
         var num = document.createElement('span');
         num.className = 'cvz-journey-channel-num' + (hasData ? '' : ' cvz-journey-nodata');
@@ -16559,10 +16680,7 @@
         }
         row.appendChild(num);
 
-        if (jc) {
-          row.appendChild(renderJourneyTrendBadge(ch, 'own', cfg) || _journeyBadgeSpacer());
-        }
-        card.appendChild(row);
+        chLine.appendChild(row);
       });
 
       // NEU (06.11.2026): Liefert ein Kanal in dieser Phase selten Quellen (Gemini antwortet auf
@@ -16580,26 +16698,48 @@
         card.appendChild(covNote);
       });
 
+      // NEU (14.11.2026): Google in einer Zeile, eure Seiten dieser Phase sichtbar, Rest aufklappbar.
+      var gSum = data.google_by_phase && data.google_by_phase[phase];
+      if (gSum && gSum.keywords) {
+        var gLine = document.createElement('p');
+        gLine.className = 'cvz-jc-google';
+        gLine.innerHTML = '<span class="cvz-gp-label">Google</span>' +
+          escapeHtml(gSum.top10 + ' von ' + gSum.keywords + ' Keywords in Top 10' +
+            (gSum.search_volume ? ' · Nachfrage ' + Number(gSum.search_volume).toLocaleString('de-DE') + '/Monat' : ''));
+        card.appendChild(gLine);
+      }
+      var phasePages = renderPhaseOwnPages(state.activeTopicId, phase, cfg.windowDays, tot);
+      if (phasePages) card.appendChild(phasePages);
+
+      var more = document.createElement('details');
+      more.className = 'cvz-jc-more';
+      var moreKey = state.activeTopicId + '|' + phase;
+      if (state.journeyCardMoreOpen[moreKey]) more.open = true;
+      more.addEventListener('toggle', function () { state.journeyCardMoreOpen[moreKey] = more.open; });
+      var moreSum = document.createElement('summary');
+      moreSum.textContent = 'Quellen, Keywords und KI-Übersicht';
+      more.appendChild(moreSum);
+
       // NEU (02.10.2026): AI Overview als eigene Monatszeile (nur wenn das
       // Backend den Block liefert, sonst wäre "noch nicht geprüft" falsch).
       if (data.ai_overview_by_phase) {
-        card.appendChild(_renderAiOverviewLine(data.ai_overview_by_phase[phase]));
+        more.appendChild(_renderAiOverviewLine(data.ai_overview_by_phase[phase]));
       }
 
       var gpBlock = renderGooglePhaseBlock(data, phase, cfg);
-      if (gpBlock) card.appendChild(gpBlock);
+      if (gpBlock) more.appendChild(gpBlock);
 
       // Meistzitierte Quellen
       if (sources.length > 0) {
         var divider = document.createElement('div');
         divider.style.cssText = 'margin:8px 0 6px;border-top:1px solid var(--cvz-border,#e5e7eb);';
-        card.appendChild(divider);
+        more.appendChild(divider);
 
         var srcLabel = document.createElement('p');
         srcLabel.style.cssText = 'display:flex;align-items:center;margin:0 0 4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--cvz-text-muted,#6b7280);';
         srcLabel.appendChild(document.createTextNode('Meistzitierte Quellen'));
         srcLabel.appendChild(makeTip(JOURNEY_SOURCES_TIP));
-        card.appendChild(srcLabel);
+        more.appendChild(srcLabel);
 
         sources.slice(0, 2).forEach(function (src) {
           var srcPct = Math.round(src.citation_rate || 0);
@@ -16632,7 +16772,7 @@
           if (jc) {
             srcRow.appendChild(renderJourneyTrendBadge(src, 'source', cfg, src.domain) || _journeyBadgeSpacer());
           }
-          card.appendChild(srcRow);
+          more.appendChild(srcRow);
 
           var meta = document.createElement('p');
           meta.style.cssText = 'margin:1px 0 3px;font-size:10px;color:var(--cvz-text-muted,#9ca3af);padding-left:4px;display:flex;gap:6px;align-items:center;';
@@ -16646,13 +16786,13 @@
           if (src.content_type) {
             meta.appendChild(document.createTextNode(CONTENT_TYPE_LABELS[src.content_type] || src.content_type));
           }
-          if (meta.childNodes.length) card.appendChild(meta);
+          if (meta.childNodes.length) more.appendChild(meta);
         });
       }
 
       // NEU (13.11.2026): Gefunden, nicht zitiert (ChatGPT) für diese Phase
       var retrievedBlock = renderJourneyRetrievedBlock(state.activeTopicId, phase);
-      if (retrievedBlock) card.appendChild(retrievedBlock);
+      if (retrievedBlock) more.appendChild(retrievedBlock);
 
       // Sichtbarer Hinweis mit Handlung
       var hint = jc ? _journeyCardHint(scores, sources, cfg) : null;
@@ -16672,6 +16812,7 @@
         }
         card.appendChild(hintEl);
       }
+      if (more.childNodes.length > 1) card.appendChild(more);
 
       grid.appendChild(card);
     });
