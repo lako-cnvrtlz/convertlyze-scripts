@@ -214,6 +214,11 @@
     ownPagesErrors: {},
     ownPagesFilter: {},        // { [topicId]: 'alle' | 'neu' | 'aktiv' | 'nicht_mehr' | 'einmalig' }
     ownPagesOpen: {},          // { [topicId + '|' + page]: true } aufgeklappte Zeile
+    ownPagesShowAll: {},       // NEU (14.11.2026): { [topicId]: true } alle Seiten statt der ersten 5
+    journeyCardMoreOpen: {},   // NEU (14.11.2026): { [topicId + '|' + phase]: true } Details einer Phasen-Karte offen
+    ownPagesWindowCache: {},   // NEU (14.11.2026): { [topicId + '|' + Tage]: Antwort } für die Journey (Seiten je Frage)
+    loadingOwnPagesWindow: {},
+    ownPagesRefreshTimer: {},  // NEU (14.11.2026): { [Cache-Schlüssel]: true } solange ein Neuladen geplant ist
     retrievedShowCompetitors: {}, // { [topicId]: true } = Wettbewerber einblenden
     openRetrievedDomains: {},  // { [topicId|domain]: true } = aufgeklappt
     keywordRankHistoryCache: {},
@@ -340,6 +345,9 @@
     });
     delete state.ownPagesCache[topicId];
     delete state.ownPagesErrors[topicId];
+    Object.keys(state.ownPagesWindowCache).forEach(function (k) {
+      if (k.indexOf(topicId + '|') === 0) delete state.ownPagesWindowCache[k];
+    });
 
     // Auch die Domain-Übersicht (Opportunities über alle Themen) ist dann veraltet.
     var topic = getTopicById(topicId);
@@ -375,9 +383,8 @@
     if (state.activeSubTab === 'daten' && state.activeDataView === 'quellen') {
       maybeLoadRetrieved(topicId);
     }
-    if (state.activeSubTab === 'daten' && state.activeDataView === 'seiten') {
-      maybeLoadOwnPages(topicId);
-    }
+    // NEU (14.11.2026): Übersicht braucht eure Seiten (Kennzahl, Bewegungen)
+    if (state.activeSubTab === 'situation') maybeLoadOwnPages(topicId);
   }
 
   // Banner für Themen, deren Report noch nicht geöffnet werden darf.
@@ -602,6 +609,8 @@
     }
     var paramView = new URLSearchParams(window.location.search).get('cvz_view');
     if (paramView && isValidDataView(paramView)) state.activeDataView = paramView;
+    // GEÄNDERT (14.11.2026): "Eure Seiten" steht jetzt in der Übersicht. Alte Links dorthin umleiten.
+    if (paramView === 'seiten') state.activeSubTab = 'situation';
 
     var paramTopicId = new URLSearchParams(window.location.search).get('cvz_topic');
     if (paramTopicId && getTopicById(paramTopicId)) {
@@ -1892,7 +1901,6 @@
     { id: 'prompts', label: 'Prompts' },
     { id: 'fanout', label: 'Fan-out' },
     { id: 'quellen', label: 'Quellen' },
-    { id: 'seiten', label: 'Eure Seiten' },  // NEU (14.11.2026)
     { id: 'gsc', label: 'Search Console' },
   ];
 
@@ -1923,8 +1931,6 @@
                        lead: 'Die Suchanfragen, die ChatGPT stellt, bevor es antwortet. Wer dafür gut rankt, wird eher zitiert.' },
     'daten:quellen': { eyebrow: 'Daten · Quellen', q: 'Welche Seiten findet ChatGPT, und welche nennt es?',
                        lead: 'Bei der Websuche sieht ChatGPT viel mehr Seiten, als es am Ende als Quelle nennt. Hier steht beides nebeneinander, je Domain.' },
-    'daten:seiten':  { eyebrow: 'Daten · Eure Seiten', q: 'Welche eurer Seiten verlinken ChatGPT und Gemini?',
-                       lead: 'Pro Seite: seit wann und wie oft sie verlinkt wird, bei welchen Fragen und welche Textstelle die KI übernimmt.' },
     'daten:gsc':     { eyebrow: 'Daten · Search Console', q: 'Über welche Suchen findet man euch heute?',
                        lead: 'Echte Suchanfragen aus eurer Google Search Console, mit Klicks, Impressionen und Position.' },
     'domain:uebersicht': { eyebrow: 'Domain · Übersicht', q: 'Wie sichtbar ist die Domain über alle Themen?',
@@ -2618,6 +2624,21 @@
       render();
       return;
     }
+    // NEU (14.11.2026): Sprung in einen Daten-Unterbereich (z. B. "Alle Seiten" in der Übersicht)
+    // NEU (14.11.2026): Sprung zu einem Abschnitt derselben Seite
+    var scrollToBtn = event.target.closest('[data-cvz-scroll-to]');
+    if (scrollToBtn) {
+      var scrollTarget = document.getElementById(scrollToBtn.getAttribute('data-cvz-scroll-to'));
+      if (scrollTarget) scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    var gotoDataBtn = event.target.closest('[data-cvz-goto-data-view]');
+    if (gotoDataBtn) {
+      state.activeSubTab = 'daten';
+      setDataView(gotoDataBtn.getAttribute('data-cvz-goto-data-view'));
+      scrollToTabNavIfBelow();
+      return;
+    }
     var tabBtn = event.target.closest('[data-cvz-tab]');
     if (tabBtn) {
       var newTab = normalizeTabId(tabBtn.getAttribute('data-cvz-tab'));
@@ -2629,7 +2650,7 @@
       if (newTab === 'daten' && state.activeDataView === 'quellen' && state.activeView === 'topic-detail') {
         maybeLoadRetrieved(state.activeTopicId);
       }
-      if (newTab === 'daten' && state.activeDataView === 'seiten' && state.activeView === 'topic-detail') {
+      if (newTab === 'situation' && state.activeView === 'topic-detail') {
         maybeLoadOwnPages(state.activeTopicId);
       }
       if (newTab === 'journey' && state.activeView === 'topic-detail') {
@@ -4780,9 +4801,10 @@
 
       var li = document.createElement('li');
       li.style.cssText = 'padding:8px 0;border-top:1px solid var(--cvz-border,#232b36);display:flex;gap:12px;align-items:baseline;';
-      var text = document.createElement('span');
-      text.style.cssText = 'flex:1;';
-      text.textContent = p.prompt_text || '';
+      // GEÄNDERT (14.11.2026): Block statt Zeile, darunter die verlinkten Seiten (renderPromptPagesLine).
+      var text = document.createElement('div');
+      text.style.cssText = 'flex:1;min-width:0;';
+      text.appendChild(document.createTextNode(p.prompt_text || ''));
       // NEU (13.11.2026): Fragen ohne eigene Phase kenntlich machen (zählen wie im Backend als Erforschung).
       if (!promptHasOwnPhase(p)) {
         var noPhase = document.createElement('span');
@@ -4809,8 +4831,20 @@
         status.textContent = 'nicht zitiert (' + ps.total + (ps.total === 1 ? ' Antwort' : ' Antworten') + ')';
       }
       li.appendChild(status);
+      if (!beforeEntry) {
+        var pagesLine = renderPromptPagesLine(topicId, p, ps, winDays);
+        if (pagesLine) text.appendChild(pagesLine);
+      }
       ul.appendChild(li);
     });
+
+    if (ownPagesWindowPending(topicId, winDays)) {
+      var pend = document.createElement('p');
+      pend.className = 'cvz-fanout-warn';
+      pend.style.marginTop = '10px';
+      pend.textContent = 'Die verlinkten Seiten zu älteren Antworten werden gerade nachgerechnet. Die Liste aktualisiert sich gleich von selbst.';
+      panel.appendChild(pend);
+    }
 
     var note = document.createElement('p');
     note.className = 'cvz-chart-caption';
@@ -5804,9 +5838,6 @@
     if (view === 'quellen' && state.activeView === 'topic-detail') {
       maybeLoadRetrieved(state.activeTopicId);
     }
-    if (view === 'seiten' && state.activeView === 'topic-detail') {
-      maybeLoadOwnPages(state.activeTopicId);
-    }
     render();
   }
 
@@ -5936,10 +5967,6 @@
         var rd = state.retrievedCache[retrievedKey(state.activeTopicId)];
         return rd ? rd.domains_total : null;
       })(),
-      seiten: (function () {
-        var op = state.ownPagesCache[state.activeTopicId];
-        return op ? (op.pages_total != null ? op.pages_total : (op.pages || []).length) : null;
-      })(),
       gsc: Array.isArray(gscFiltered) ? gscFiltered.length : null,
     };
     wrap.appendChild(renderDataSubNav(counts));
@@ -5972,9 +5999,6 @@
     } else if (view === 'quellen') {
       promptNotes();
       wrap.appendChild(renderRetrievedView(state.activeTopicId, detail));
-    } else if (view === 'seiten') {
-      promptNotes();
-      wrap.appendChild(renderOwnPagesView(state.activeTopicId));
     } else if (view === 'gsc') {
       monthlyNotes('GSC zuletzt aktualisiert');
       wrap.appendChild(renderGscBlock(gscFiltered, state.activeTopicId, allEntries));
@@ -6179,6 +6203,90 @@
     render();
   }
 
+  // NEU (14.11.2026): eigene Seiten im Zeitraum der Journey (by_prompt: Seiten je Frage).
+  function ownPagesWindowKey(topicId, days) {
+    return topicId + '|' + days;
+  }
+
+  async function maybeLoadOwnPagesWindow(topicId, days) {
+    if (!topicId || !days || CONFIG.useMockData) return;
+    days = Math.max(1, Math.min(730, Math.round(days)));
+    var key = ownPagesWindowKey(topicId, days);
+    if (key in state.ownPagesWindowCache || state.loadingOwnPagesWindow[key]) return;
+    state.loadingOwnPagesWindow[key] = true;
+    try {
+      state.ownPagesWindowCache[key] = await apiFetch('/topics/' + topicId + '/own-pages?days=' + days);
+    } catch (e) {
+      console.error('[CVZ Visibility] Seiten je Frage konnten nicht geladen werden:', e);
+      state.ownPagesWindowCache[key] = null;  // kein Endlos-Nachladen, Journey zeigt dann einfach keine Seiten
+    }
+    state.loadingOwnPagesWindow[key] = false;
+    render();
+  }
+
+  // NEU (14.11.2026): Solange das Backend ältere Antworten nachrechnet (backfill_pending, läuft im
+  // Hintergrund), nach OWN_PAGES_REFRESH_MS einmal neu laden. Höchstens ein geplantes Neuladen je Schlüssel.
+  var OWN_PAGES_REFRESH_MS = 30000;
+  function scheduleOwnPagesRefresh(cacheName, key, reload) {
+    if (state.ownPagesRefreshTimer[cacheName + key]) return;
+    state.ownPagesRefreshTimer[cacheName + key] = true;
+    setTimeout(function () {
+      delete state.ownPagesRefreshTimer[cacheName + key];
+      delete state[cacheName][key];
+      reload();
+    }, OWN_PAGES_REFRESH_MS);
+  }
+
+  // Für die Fragen-Ansicht: true, solange noch ältere Antworten nachgerechnet werden (plant das Neuladen).
+  function ownPagesWindowPending(topicId, winDays) {
+    var days = Math.max(1, Math.min(730, Math.round(winDays || 28)));
+    var key = ownPagesWindowKey(topicId, days);
+    var data = state.ownPagesWindowCache[key];
+    if (!data || !data.backfill_pending) return false;
+    scheduleOwnPagesRefresh('ownPagesWindowCache', key, function () { maybeLoadOwnPagesWindow(topicId, days); });
+    return true;
+  }
+
+  // Unter einer Frage: welche eigenen Seiten verlinkt wurden, sonst die meistverlinkte fremde Domain.
+  function renderPromptPagesLine(topicId, p, ps, winDays) {
+    var days = Math.max(1, Math.min(730, Math.round(winDays || 28)));
+    var key = ownPagesWindowKey(topicId, days);
+    if (!(key in state.ownPagesWindowCache)) { maybeLoadOwnPagesWindow(topicId, days); return null; }
+    var data = state.ownPagesWindowCache[key];
+    var pages = (data && data.by_prompt && data.by_prompt[p.id]) || [];
+    var box = document.createElement('div');
+    box.className = 'cvz-jq-pages';
+    if (pages.length) {
+      pages.forEach(function (pg) {
+        var chs = [];
+        if (pg.channels && pg.channels.chat_gpt) chs.push('ChatGPT ' + pg.channels.chat_gpt);
+        if (pg.channels && pg.channels.gemini) chs.push('Gemini ' + pg.channels.gemini);
+        var row = document.createElement('div');
+        row.className = 'cvz-jq-page';
+        row.innerHTML = '<span aria-hidden="true" class="cvz-jq-page-arrow">\u2192</span>' +
+          '<a class="cvz-own-page-link" href="' + escapeHtml(pg.page) + '" target="_blank" rel="noopener">' + escapeHtml(pg.path) + '</a>' +
+          '<span class="cvz-jq-page-meta">' + escapeHtml(chs.join(' · ')) + '</span>';
+        box.appendChild(row);
+      });
+      return box;
+    }
+    if (ps.total > 0 && ps.cited === 0) {
+      var dash = state.dashboardDataCache[topicId];
+      var row = ((dash && dash.prompt_source_matrix) || []).filter(function (r) { return r.prompt_id === p.id; })[0];
+      var top = null;
+      Object.keys((row && row.domains) || {}).forEach(function (d) {
+        if (!top || row.domains[d] > row.domains[top]) top = d;
+      });
+      var none = document.createElement('p');
+      none.className = 'cvz-jq-page-none';
+      none.textContent = 'Keine eurer Seiten verlinkt.' +
+        (top ? ' Meist verlinkt: ' + top + ' (in ' + row.domains[top] + (row.domains[top] === 1 ? ' Antwort' : ' Antworten') + ').' : '');
+      box.appendChild(none);
+      return box;
+    }
+    return null;
+  }
+
   function ownPageChannelCell(ch) {
     if (!ch) return '<td class="cvz-own-page-ch" style="color:var(--cvz-text-muted,#8b98a5);">–</td>';
     var st = OWN_PAGE_STATUS[ch.status] || OWN_PAGE_STATUS.aktiv;
@@ -6194,22 +6302,38 @@
       '<span style="display:block;font-size:12px;color:var(--cvz-text-muted,#8b98a5);">' + escapeHtml(range) + '</span></td>';
   }
 
+  // GEÄNDERT (14.11.2026): steht jetzt in der Übersicht (vorher Daten > Eure Seiten). Verständlichere
+  // Überschrift, kurze Erklärung, Legende der Status, zunächst OWN_PAGES_COMPACT_ROWS Seiten.
+  var OWN_PAGES_COMPACT_ROWS = 5;
+
   function renderOwnPagesView(topicId, now) {
     var section = document.createElement('div');
     section.className = 'cvz-section cvz-own-pages';
+    section.id = 'cvz-ov-pages';
 
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
-    heading.textContent = 'Eure verlinkten Seiten (ChatGPT und Gemini)';
-    section.appendChild(heading);
+    heading.style.margin = '0';
+    heading.textContent = 'Welche eurer Seiten die KI verlinkt';
+    head.appendChild(heading);
+    head.appendChild(makeTip('Gezählt werden die letzten 180 Tage, damit „seit“ und „nicht mehr“ aussagekräftig sind. ' +
+      '„Seit“ ist der erste Messtag mit Link: Genauer als der Messrhythmus lässt sich nicht sagen, wann ein Modell angefangen hat, die Seite zu nennen.'));
+    section.appendChild(head);
 
     var intro = document.createElement('p');
     intro.className = 'cvz-card-placeholder-text';
-    intro.style.marginBottom = '10px';
-    intro.textContent = 'Welche eurer Seiten die KI-Antworten verlinken, seit wann und wie oft (letzte 180 Tage). ' +
-      '„Seit“ ist der erste Messtag mit Link: Wann das Modell wirklich angefangen hat, die Seite zu nennen, lässt sich nicht genauer sagen als der Messrhythmus. ' +
-      'Bei Gemini steht oft auch die Textstelle dabei, die es zitiert hat. Das zeigt, welche Sätze eurer Seiten als Antwort taugen.';
+    intro.style.marginBottom = '6px';
+    intro.textContent = 'ChatGPT und Gemini nennen in ihren Antworten Quellen mit Link. Hier steht, welche eurer Seiten dabei vorkommen, wie oft und seit wann. ' +
+      'Ein Klick auf eine Seite zeigt die Fragen dazu und die Textstelle, die die KI übernommen hat.';
     section.appendChild(intro);
+
+    var legend = document.createElement('p');
+    legend.className = 'cvz-own-pages-legend';
+    legend.innerHTML = '<strong>aktiv</strong> wird weiter verlinkt · <strong class="cvz-own-pages-legend-new">neu</strong> seit kurzem, an mindestens 2 Tagen · ' +
+      '<strong class="cvz-own-pages-legend-muted">einmalig</strong> nur an einem Tag, oft Zufall · <strong class="cvz-own-pages-legend-lost">nicht mehr</strong> früher verlinkt, seit über 14 Tagen nicht';
+    section.appendChild(legend);
 
     function note(text, cls) {
       var el = document.createElement('p');
@@ -6238,16 +6362,10 @@
     });
     if (parts.length) note('Letzte Messung: ' + parts.join(', ') + '. „Neu“ und „nicht mehr“ beziehen sich auf diesen Tag.', 'cvz-fanout-coverage');
     if (gaps.length) note('Keine neue Messung: ' + gaps.join(', ') + '. Die Angaben „zuletzt“ sind deshalb womöglich veraltet.', 'cvz-fanout-warn');
+    // GEÄNDERT (14.11.2026): Das Backend rechnet den Rest im Hintergrund nach, die Liste lädt sich selbst neu.
     if (data.backfill_pending > 0) {
-      var pend = note('Noch ' + data.backfill_pending + ' ältere Antworten werden nachgerechnet. Die Liste ist bis dahin unvollständig. ', 'cvz-fanout-warn');
-      var more = document.createElement('button');
-      more.type = 'button';
-      more.className = 'cvz-journey-hint-link';
-      more.setAttribute('data-cvz-own-pages-reload', topicId);
-      more.style.cssText = 'background:none;border:none;padding:0;cursor:pointer;';
-      more.textContent = 'Weiter nachrechnen';
-      more.addEventListener('click', function () { maybeLoadOwnPages(topicId, true); });
-      pend.appendChild(more);
+      note('Noch ' + data.backfill_pending + ' ältere Antworten werden im Hintergrund nachgerechnet. Die Liste aktualisiert sich gleich von selbst.', 'cvz-fanout-warn');
+      scheduleOwnPagesRefresh('ownPagesCache', topicId, function () { maybeLoadOwnPages(topicId, true); });
     }
 
     var pages = data.pages || [];
@@ -6270,10 +6388,12 @@
     });
     section.appendChild(chips);
 
-    var shown = pages.filter(function (p) { return ownPageMatchesFilter(p, filter); });
+    var filtered = pages.filter(function (p) { return ownPageMatchesFilter(p, filter); });
+    var showAll = !!state.ownPagesShowAll[topicId];
+    var shown = showAll ? filtered : filtered.slice(0, OWN_PAGES_COMPACT_ROWS);
     var table = document.createElement('table');
     table.className = 'cvz-table cvz-own-pages-table';
-    var html = '<thead><tr><th>Seite</th><th>ChatGPT</th><th>Gemini</th><th style="text-align:right;">Antworten</th></tr></thead><tbody>';
+    var html = '<thead><tr><th>Seite</th><th>ChatGPT</th><th>Gemini</th><th style="text-align:right;">Antworten gesamt</th></tr></thead><tbody>';
     shown.forEach(function (p) {
       var openKey = topicId + '|' + p.page;
       var open = !!state.ownPagesOpen[openKey];
@@ -6319,7 +6439,19 @@
       state.ownPagesOpen[k] = !state.ownPagesOpen[k];
       render();
     });
-    section.appendChild(table);
+    var tableWrap = document.createElement('div');
+    tableWrap.style.cssText = 'overflow-x:auto;';
+    tableWrap.appendChild(table);
+    section.appendChild(tableWrap);
+    if (filtered.length > OWN_PAGES_COMPACT_ROWS) {
+      var toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'cvz-ov-kpi-link';
+      toggle.style.marginTop = '8px';
+      toggle.textContent = showAll ? 'Weniger anzeigen' : 'Alle ' + filtered.length + ' Seiten anzeigen';
+      toggle.addEventListener('click', function () { state.ownPagesShowAll[topicId] = !showAll; render(); });
+      section.appendChild(toggle);
+    }
     return section;
   }
 
@@ -13741,6 +13873,58 @@
       '.cvz-table td { padding: 8px 12px; border-bottom: 1px solid var(--cvz-border); }' +
       '.cvz-table-clickable tbody tr { cursor: pointer; }' +
       '.cvz-table-clickable tbody tr:hover { background: rgba(79, 209, 197, 0.06); }' +
+      '.cvz-ov-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 24px; }' +
+      '.cvz-ov-kpi { background: var(--cvz-navy-raised); border: 1px solid var(--cvz-border); padding: 16px; display: flex; flex-direction: column; gap: 8px; }' +
+      '.cvz-ov-kpi-label { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--cvz-text-muted); }' +
+      '.cvz-ov-kpi-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }' +
+      '.cvz-ov-kpi-value { font-family: "Syne", sans-serif; font-size: 34px; font-weight: 800; line-height: 1; color: var(--cvz-text); }' +
+      '.cvz-ov-kpi-missing { font-size: 18px; color: var(--cvz-amber); }' +
+      '.cvz-ov-kpi-note { margin: 0; font-size: 12px; color: var(--cvz-text-muted); line-height: 1.4; }' +
+      '.cvz-ov-kpi-link { align-self: flex-start; background: none; border: 0; padding: 0; font-family: inherit; font-size: 13px; font-weight: 600; color: var(--cvz-teal); cursor: pointer; text-decoration: none; }' +
+      '.cvz-ov-delta { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; font-weight: 600; color: var(--cvz-text-muted); }' +
+      '.cvz-ov-delta-good { color: var(--cvz-green); } .cvz-ov-delta-bad { color: var(--cvz-red); }' +
+      '.cvz-ov-row { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }' +
+      '.cvz-ov-row > .cvz-section { flex: 1 1 360px; min-width: 0; }' +
+      '.cvz-ov-move-list { list-style: none; margin: 0; padding: 0; }' +
+      '.cvz-ov-move { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-ov-move-icon { display: inline-flex; width: 26px; height: 26px; flex: none; align-items: center; justify-content: center; border: 1px solid currentColor; }' +
+      '.cvz-ov-move-good .cvz-ov-move-icon, .cvz-ov-move-good .cvz-ov-move-kind { color: var(--cvz-green); }' +
+      '.cvz-ov-move-bad .cvz-ov-move-icon, .cvz-ov-move-bad .cvz-ov-move-kind { color: var(--cvz-red); }' +
+      '.cvz-ov-move-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }' +
+      '.cvz-ov-move-kind { font-size: 12px; font-weight: 600; }' +
+      '.cvz-ov-move-text { font-weight: 600; }' +
+      '.cvz-ov-move-meta { font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-main { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 0; }' +
+      '.cvz-jc-value { font-family: "Syne", sans-serif; font-size: 30px; font-weight: 800; line-height: 1; color: var(--cvz-text); }' +
+      '.cvz-jc-meta { margin: 4px 0 0; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-channels { display: flex; flex-wrap: wrap; gap: 12px; margin: 6px 0 0; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-channel { display: inline-flex; gap: 4px; align-items: baseline; }' +
+      '.cvz-jc-channel .cvz-journey-channel-label { font-size: 12px; }' +
+      '.cvz-jc-channel .cvz-journey-channel-num { font-size: 12px; font-weight: 600; color: var(--cvz-text); }' +
+      '.cvz-jc-google { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--cvz-border); font-size: 12px; color: var(--cvz-text); }' +
+      '.cvz-jc-google .cvz-gp-label { margin-right: 6px; }' +
+      '.cvz-jc-pages { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-jc-pages-label { margin: 0 0 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-page { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; font-size: 12px; padding: 2px 0; }' +
+      '.cvz-jc-page .cvz-own-page-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; word-break: normal; }' +
+      '.cvz-jc-page-meta { flex: none; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-pages-none { margin: 0; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-more { margin-top: 10px; border-top: 1px solid var(--cvz-border); padding-top: 8px; }' +
+      '.cvz-jc-more > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--cvz-teal); min-height: 28px; display: flex; align-items: center; }' +
+      '.cvz-own-pages-legend { margin: 0 0 10px; font-size: 12px; color: var(--cvz-text-muted); line-height: 1.6; }' +
+      '.cvz-own-pages-legend strong { color: var(--cvz-text); font-weight: 600; }' +
+      '.cvz-own-pages-legend .cvz-own-pages-legend-new { color: var(--cvz-teal); }' +
+      '.cvz-own-pages-legend .cvz-own-pages-legend-muted { color: var(--cvz-text-muted); }' +
+      '.cvz-own-pages-legend .cvz-own-pages-legend-lost { color: var(--cvz-red); }' +
+      '.cvz-jq-pages { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }' +
+      '.cvz-jq-page { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: 13px; }' +
+      '.cvz-jq-page-arrow { color: var(--cvz-text-muted); }' +
+      '.cvz-jq-page-meta { font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-jq-page-none { margin: 6px 0 0; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-gp-demand { margin: 4px 0 0; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-gp-gsc-missing { margin: 4px 0 0; font-size: 12px; color: var(--cvz-amber); }' +
+      '.cvz-gp-gsc-missing a { color: var(--cvz-teal); }' +
+      '.cvz-sit-tile-google { margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--cvz-border); font-size: 12px; color: var(--cvz-text-muted); }' +
       '.cvz-own-page-link { color: var(--cvz-teal); font-weight: 600; text-decoration: none; word-break: break-all; }' +
       '.cvz-own-page-link:hover { text-decoration: underline; }' +
       '.cvz-gsc-page-url { color: var(--cvz-teal); font-size: 11px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; display: inline-block; vertical-align: middle; }' +
@@ -14834,7 +15018,7 @@
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
     heading.style.margin = '0';
-    heading.textContent = 'KI-Sichtbarkeit nach Kaufphase';
+    heading.textContent = 'Kaufreise auf einen Blick';
     head.appendChild(heading);
     head.appendChild(makeTip(
       'Anteil der Antworten von ' + activeChannelLabel() + ', die eure Domain als Quelle nennen, je Kaufphase' +
@@ -14881,6 +15065,15 @@
         ? t.cited + ' von ' + t.total + ' Antworten'
         : 'noch keine Messung';
       tile.appendChild(meta);
+      // NEU (14.11.2026): Google-Zeile je Phase (dashboard.py: _compute_google_by_phase)
+      var g = dashData.google_by_phase && dashData.google_by_phase[phase];
+      if (g && g.keywords) {
+        var gl = document.createElement('p');
+        gl.className = 'cvz-sit-tile-google';
+        gl.title = 'Aktive Keywords dieser Phase mit belegter Nachfrage. Position laut Google-Prüfung, sonst Search Console.';
+        gl.textContent = 'Google: ' + g.top10 + ' von ' + g.keywords + ' Keywords in Top 10';
+        tile.appendChild(gl);
+      }
       grid.appendChild(tile);
     });
     section.appendChild(grid);
@@ -15339,6 +15532,228 @@
     return section;
   }
 
+  // ── NEU (14.11.2026): Übersicht nach dem Dashboard-Entwurf ──────────────────
+  // Vier Kennzahlen (Zitierrate, Markennennung, verlinkte Seiten, Klicks aus Google), Bewegungen,
+  // die wichtigsten Maßnahmen, Wissens-Check und die Phasen. Alle KI-Zahlen folgen Zeitraum- und
+  // Kanal-Umschalter (dashboard-data). Google-Klicks kommen aus /gsc-history (feste 28 Tage).
+  var OV_GSC_MIN_PREV_CLICKS = 20;   // darunter keine Trendfarbe (zu wenige Klicks)
+  var OV_GSC_MIN_CHANGE_PCT = 15;    // ab dieser Veränderung grün/rot
+
+  // Summe über die vier Phasen, aktueller Zeitraum und Vorperiode (gleich lang).
+  function overviewCitationTotals(dashData) {
+    var cur = { cited: 0, total: 0 }, prev = { cited: 0, total: 0 };
+    PHASE_ORDER.forEach(function (phase) {
+      var t = ownPhaseTotal(dashData, phase);
+      cur.cited += t.cited || 0;
+      cur.total += t.total || 0;
+      prev.cited += t.previous_cited || 0;
+      prev.total += t.previous_total || 0;
+    });
+    var rate = cur.total ? cur.cited / cur.total * 100 : null;
+    var prevRate = prev.total ? prev.cited / prev.total * 100 : null;
+    return { cited: cur.cited, total: cur.total, rate: rate, prevRate: prevRate,
+             deltaPp: rate != null && prevRate != null ? rate - prevRate : null, prevTotal: prev.total, prevCited: prev.cited };
+  }
+
+  // Gleiche Rausch-Schwelle wie dashboard.py (_classify_trend): genug Antworten in beiden Zeiträumen,
+  // mindestens min_delta_pp Punkte Unterschied und ein Zwei-Stichproben-z-Test über min_z.
+  function ovSignificant(c1, n1, c2, n2, jc) {
+    var minAnswers = jc.min_answers || 15, minDelta = jc.min_delta_pp || 3, minZ = jc.min_z || 1.96;
+    if (n1 < minAnswers || n2 < minAnswers) return false;
+    var p1 = c1 / n1, p2 = c2 / n2;
+    if (Math.abs(p1 - p2) * 100 < minDelta) return false;
+    var pool = (c1 + c2) / (n1 + n2);
+    var se = Math.sqrt(pool * (1 - pool) * (1 / n1 + 1 / n2));
+    if (!se) return false;
+    return Math.abs(p1 - p2) / se >= minZ;
+  }
+
+  function ovArrow(up) {
+    return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + (up ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6') + '"></path></svg>';
+  }
+
+  // tone: 'good' | 'bad' | 'neutral'
+  function ovDelta(text, up, tone, tip) {
+    if (!text) return '';
+    var cls = tone === 'good' ? ' cvz-ov-delta-good' : tone === 'bad' ? ' cvz-ov-delta-bad' : '';
+    return '<span class="cvz-ov-delta' + cls + '"' + (tip ? ' title="' + escapeHtml(tip) + '"' : '') + '>' +
+      (up == null ? '' : ovArrow(up)) + escapeHtml(text) + '</span>';
+  }
+
+  function ovCard(label, valueHtml, deltaHtml, note, extraHtml) {
+    var card = document.createElement('div');
+    card.className = 'cvz-ov-kpi';
+    card.innerHTML = '<p class="cvz-ov-kpi-label">' + escapeHtml(label) + '</p>' +
+      '<div class="cvz-ov-kpi-row"><span class="cvz-ov-kpi-value">' + valueHtml + '</span>' + (deltaHtml || '') + '</div>' +
+      '<p class="cvz-ov-kpi-note">' + escapeHtml(note) + '</p>' + (extraHtml || '');
+    return card;
+  }
+
+  function fmtPct(v) {
+    return v == null ? 'k. A.' : Math.round(v) + ' %';
+  }
+
+  function renderOverviewKpis(topicId, detail, dashData) {
+    var jc = dashData.journey_comparison || {};
+    var winDays = dashWindowDays(dashData);
+    var grid = document.createElement('div');
+    grid.className = 'cvz-ov-kpis';
+
+    // 1) Zitierrate
+    var ct = overviewCitationTotals(dashData);
+    var dHtml = '';
+    if (ct.deltaPp != null) {
+      var sig = ovSignificant(ct.cited, ct.total, ct.prevCited, ct.prevTotal, jc);
+      var dp = Math.round(ct.deltaPp);
+      dHtml = ovDelta((dp > 0 ? '+' : dp < 0 ? '−' : '±') + Math.abs(dp) + ' Pkt.', dp === 0 ? null : dp > 0,
+        sig ? (dp > 0 ? 'good' : 'bad') : 'neutral',
+        'Vergleich mit den ' + winDays + ' Tagen davor (' + fmtPct(ct.prevRate) + '). Grün oder rot erst, wenn der Unterschied ' +
+        'größer ist als die normale Schwankung von KI-Antworten, nach derselben Regel wie die Pfeile bei den Phasen.');
+    }
+    grid.appendChild(ovCard('Zitierrate', fmtPct(ct.rate), dHtml,
+      ct.total ? 'In ' + ct.cited + ' von ' + ct.total + ' Antworten mit Link auf eure Domain (' + activeChannelLabel() + ', ' + winDays + ' Tage)'
+               : 'Noch keine Antworten im Zeitraum'));
+
+    // 2) Markennennung (Marke im Antworttext, mit oder ohne Link)
+    var bp = jc.brand_presence && jc.brand_presence.by_channel && jc.brand_presence.by_channel[activeChannel()];
+    if (bp && bp.runs_evaluated) {
+      var own = bp.own || {};
+      var named = (own.both || 0) + (own.named_only || 0);
+      grid.appendChild(ovCard('Markennennung', fmtPct(named / bp.runs_evaluated * 100), '',
+        'In ' + named + ' von ' + bp.runs_evaluated + ' Antworten im Text genannt, mit oder ohne Link'));
+    } else {
+      grid.appendChild(ovCard('Markennennung', 'k. A.', '', 'Noch keine ausgewerteten Antworten im Zeitraum'));
+    }
+
+    // 3) Verlinkte Seiten (in den letzten winDays Tagen)
+    var op = state.ownPagesCache[topicId];
+    if (state.loadingOwnPages[topicId] && !op) {
+      grid.appendChild(ovCard('Verlinkte Seiten', '…', '', 'Wird geladen'));
+    } else if (op && op.pages) {
+      var cutoff = new Date(Date.now() - winDays * 86400000).toISOString().slice(0, 10);
+      var linked = 0, isNew = 0, lost = 0;
+      op.pages.forEach(function (pg) {
+        var chs = pg.channels || {};
+        if (Object.keys(chs).some(function (c) { return chs[c].last_seen >= cutoff; })) linked++;
+        if (Object.keys(chs).some(function (c) { return chs[c].status === 'neu'; })) isNew++;
+        if (Object.keys(chs).some(function (c) { return chs[c].status === 'nicht_mehr'; })) lost++;
+      });
+      var bits = [];
+      if (isNew) bits.push(isNew + ' neu');
+      if (lost) bits.push(lost + ' nicht mehr verlinkt');
+      grid.appendChild(ovCard('Verlinkte Seiten', String(linked), '',
+        'Eure Seiten, die ChatGPT oder Gemini in den letzten ' + winDays + ' Tagen verlinkt haben' + (bits.length ? '. ' + bits.join(', ') : ''),
+        '<button type="button" class="cvz-ov-kpi-link" data-cvz-scroll-to="cvz-ov-pages">Welche Seiten? ↓</button>'));
+    } else {
+      grid.appendChild(ovCard('Verlinkte Seiten', 'k. A.', '', state.ownPagesErrors[topicId] ? 'Konnte nicht geladen werden' : 'Noch keine Daten'));
+    }
+
+    // 4) Klicks aus Google (Search Console)
+    var project = detail.topic ? getProjectById(detail.topic.project_id) : null;
+    if (project && project.gsc_connected === false) {
+      grid.appendChild(ovCard('Klicks aus Google', '<span class="cvz-ov-kpi-missing">Nicht verbunden</span>', '',
+        'Ohne Search Console fehlen Klicks, Impressionen und echte Google-Positionen im Dashboard.',
+        CONFIG.gscSetupUrl ? '<a class="cvz-ov-kpi-link" href="' + escapeHtml(CONFIG.gscSetupUrl) + '" target="_blank" rel="noopener">Search Console verbinden ↗</a>' : ''));
+    } else {
+      var gKey = gscHistoryKey(topicId, null);
+      if (!(gKey in state.gscHistoryCache) && !state.loadingGscHistory[gKey]) maybeLoadGscHistory(topicId, null);
+      var rolling = state.gscHistoryCache[gKey];
+      if (!(gKey in state.gscHistoryCache)) {
+        grid.appendChild(ovCard('Klicks aus Google', '…', '', 'Wird geladen'));
+      } else if (rolling && rolling.current) {
+        var cur = rolling.current, prev = rolling.previous;
+        var gDelta = '';
+        if (prev && prev.clicks > 0) {
+          var pct = Math.round((cur.clicks - prev.clicks) / prev.clicks * 100);
+          var gSig = prev.clicks >= OV_GSC_MIN_PREV_CLICKS && Math.abs(pct) >= OV_GSC_MIN_CHANGE_PCT;
+          gDelta = ovDelta((pct > 0 ? '+' : pct < 0 ? '−' : '±') + Math.abs(pct) + ' %', pct === 0 ? null : pct > 0,
+            gSig ? (pct > 0 ? 'good' : 'bad') : 'neutral', 'Vergleich mit den 28 Tagen davor (' + prev.clicks.toLocaleString('de-DE') + ' Klicks).');
+        }
+        grid.appendChild(ovCard('Klicks aus Google', cur.clicks.toLocaleString('de-DE'), gDelta,
+          'Search Console, Suchanfragen zum Thema, 28 Tage bis ' + ddmm(rolling.last_day) + '. ' +
+          (cur.impressions || 0).toLocaleString('de-DE') + ' Impressionen'));
+      } else {
+        grid.appendChild(ovCard('Klicks aus Google', 'k. A.', '',
+          state.gscHistoryError && state.gscHistoryError[gKey] ? 'Konnte gerade nicht geladen werden' : 'Noch keine Tageswerte aus der Search Console'));
+      }
+    }
+    return grid;
+  }
+
+  var OV_MOVEMENTS_MAX = 6;
+
+  function renderOverviewMovements(topicId, dashData) {
+    var winDays = dashWindowDays(dashData);
+    var items = [];
+    var op = state.ownPagesCache[topicId];
+    var chLabel = { chat_gpt: 'ChatGPT', gemini: 'Gemini' };
+    ((op && op.pages) || []).forEach(function (pg) {
+      Object.keys(pg.channels || {}).forEach(function (c) {
+        var ch = pg.channels[c];
+        if (ch.status === 'neu') {
+          items.push({ up: true, good: true, kind: 'Neu verlinkt', text: pg.path, href: pg.page,
+            meta: (chLabel[c] || c) + ' · seit ' + ddmm(ch.first_seen) + ', an ' + ch.days + ' Messtagen', sort: 1 });
+        } else if (ch.status === 'nicht_mehr') {
+          items.push({ up: false, good: false, kind: 'Nicht mehr verlinkt', text: pg.path, href: pg.page,
+            meta: (chLabel[c] || c) + ' · zuletzt ' + ddmm(ch.last_seen) + ', vorher an ' + ch.days + ' Messtagen', sort: 0 });
+        }
+      });
+    });
+    PHASE_ORDER.forEach(function (phase) {
+      var t = ownPhaseTotal(dashData, phase);
+      if (t.trend !== 'up' && t.trend !== 'down') return;
+      var prev = t.previous_total ? Math.round(t.previous_cited / t.previous_total * 100) : null;
+      items.push({ up: t.trend === 'up', good: t.trend === 'up', kind: 'Phase ' + (PHASE_LABELS[phase] || phase),
+        text: (prev != null ? prev + ' % → ' : '') + fmtPct(t.score),
+        meta: activeChannelLabel() + ' · ' + winDays + ' Tage im Vergleich zu den ' + winDays + ' Tagen davor', sort: 2 });
+    });
+    items.sort(function (a, b) { return a.sort - b.sort; });
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section cvz-ov-moves';
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
+    var h = document.createElement('p');
+    h.className = 'cvz-section-label';
+    h.style.margin = '0';
+    h.textContent = 'Bewegungen';
+    head.appendChild(h);
+    head.appendChild(makeTip('Seiten, die neu oder nicht mehr verlinkt werden (an mindestens 2 Messtagen), und Phasen, deren Zitierrate sich ' +
+      'stärker verändert hat als die normale Schwankung. Kleine Ausschläge stehen hier bewusst nicht.'));
+    section.appendChild(head);
+
+    if (!items.length) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = state.loadingOwnPages[topicId] && !op
+        ? 'Wird geladen …'
+        : 'Keine nennenswerten Veränderungen in den letzten ' + winDays + ' Tagen.';
+      section.appendChild(none);
+      return section;
+    }
+    var ul = document.createElement('ul');
+    ul.className = 'cvz-ov-move-list';
+    items.slice(0, OV_MOVEMENTS_MAX).forEach(function (it) {
+      var li = document.createElement('li');
+      li.className = 'cvz-ov-move ' + (it.good ? 'cvz-ov-move-good' : 'cvz-ov-move-bad');
+      li.innerHTML = '<span class="cvz-ov-move-icon">' + ovArrow(it.up) + '</span>' +
+        '<span class="cvz-ov-move-body"><span class="cvz-ov-move-kind">' + escapeHtml(it.kind) + '</span>' +
+        (it.href ? '<a class="cvz-own-page-link" href="' + escapeHtml(it.href) + '" target="_blank" rel="noopener">' + escapeHtml(it.text) + '</a>'
+                 : '<span class="cvz-ov-move-text">' + escapeHtml(it.text) + '</span>') +
+        '<span class="cvz-ov-move-meta">' + escapeHtml(it.meta) + '</span></span>';
+      ul.appendChild(li);
+    });
+    section.appendChild(ul);
+    if (items.length > OV_MOVEMENTS_MAX) {
+      var more = document.createElement('p');
+      more.className = 'cvz-card-placeholder-text';
+      more.textContent = 'und ' + (items.length - OV_MOVEMENTS_MAX) + ' weitere';
+      section.appendChild(more);
+    }
+    return section;
+  }
+
   function renderSituationTab(topicId, detail) {
     var wrap = document.createElement('div');
 
@@ -15388,8 +15803,18 @@
     //   Wettbewerbs-Chart, Quellen ("Wer wird stattdessen zitiert?") → Tab Wettbewerb
     //   KI-Wissens-Check vollständig (eingeklappt)                    → Tab Situation
     //   Sichtbarkeit je Rolle, Content-Typen pro Phase → Tab Journey
+    // GEÄNDERT (14.11.2026): Kennzahlen oben, darunter Bewegungen neben den wichtigsten Maßnahmen.
     if (dashData && !dashError && !state.isLoadingDashboard) {
-      wrap.appendChild(renderSituationPhaseTiles(dashData));
+      wrap.appendChild(renderOverviewKpis(topicId, detail, dashData));
+      var ovRow = document.createElement('div');
+      ovRow.className = 'cvz-ov-row';
+      ovRow.appendChild(renderOverviewMovements(topicId, dashData));
+      ovRow.appendChild(renderTopActionsTeaser(detail));
+      wrap.appendChild(ovRow);
+      // NEU (14.11.2026): eure verlinkten Seiten (vorher Daten > Eure Seiten)
+      wrap.appendChild(renderOwnPagesView(topicId));
+    } else {
+      wrap.appendChild(renderTopActionsTeaser(detail));
     }
 
     // GEÄNDERT (06.11.2026): KI-Wissens-Check: Einzeiler als Kopfzeile,
@@ -15703,9 +16128,10 @@
     // VERSCHOBEN (16.10.2026): Der vollständige KI-Wissens-Check steht im Tab
     // Wettbewerb (renderWettbewerbTab), hier nur der Einzeiler oben.
 
-    // NEU (02.10.2026): Statt eigener Empfehlungslisten ein kurzer Verweis
-    // auf die wichtigsten offenen Maßnahmen im Aktionsplan.
-    wrap.appendChild(renderTopActionsTeaser(detail));
+    // GEÄNDERT (14.11.2026): Phasen am Ende, kompakt, mit Google-Zeile. Die Maßnahmen stehen oben.
+    if (dashData && !dashError && !state.isLoadingDashboard) {
+      wrap.appendChild(renderSituationPhaseTiles(dashData));
+    }
 
     return wrap;
   }
@@ -15914,6 +16340,35 @@
     line.appendChild(document.createTextNode(parts.join(' · ')));
     wrap.appendChild(line);
 
+    // NEU (14.11.2026): Suchnachfrage und Klicks der Phase. Ohne Search Console steht das hier.
+    var gpDetail = state.topicDetailCache[state.activeTopicId];
+    var gpProject = gpDetail && gpDetail.topic ? getProjectById(gpDetail.topic.project_id) : null;
+    var gscMissing = !!(gpProject && gpProject.gsc_connected === false);
+    var demandParts = [];
+    if (g.search_volume) demandParts.push('Nachfrage ' + Number(g.search_volume).toLocaleString('de-DE') + ' Suchen/Monat');
+    if (!gscMissing && g.clicks != null) demandParts.push(Number(g.clicks).toLocaleString('de-DE') + ' Klicks (Search Console)');
+    if (demandParts.length) {
+      var demand = document.createElement('p');
+      demand.className = 'cvz-gp-demand';
+      demand.title = 'Nachfrage: Summe des monatlichen Suchvolumens der Keywords dieser Phase. Klicks: Search Console, letzter Abruf (rund 90 Tage).';
+      demand.textContent = demandParts.join(' · ');
+      wrap.appendChild(demand);
+    }
+    if (gscMissing) {
+      var miss = document.createElement('p');
+      miss.className = 'cvz-gp-gsc-missing';
+      miss.textContent = 'Search Console nicht verbunden: keine Klicks, Positionen nur aus der Google-Prüfung. ';
+      if (CONFIG.gscSetupUrl) {
+        var conn = document.createElement('a');
+        conn.href = CONFIG.gscSetupUrl;
+        conn.target = '_blank';
+        conn.rel = 'noopener';
+        conn.textContent = 'Verbinden \u2197';
+        miss.appendChild(conn);
+      }
+      wrap.appendChild(miss);
+    }
+
     // Hinweis nur im eindeutigen Fall, mit genug KI-Antworten.
     // Wer ihn nicht will: diesen ganzen if-Block löschen.
     var ai = ownPhaseTotal(data, phase);
@@ -16047,6 +16502,62 @@
     return wrap;
   }
 
+  // NEU (14.11.2026): Eure Seiten in einer Phase: by_prompt (own-pages im Zeitraum der Karten) über die
+  // Fragen dieser Phase zusammengezählt. Höchstens PHASE_PAGES_MAX Seiten, Rest als Zahl.
+  var PHASE_PAGES_MAX = 3;
+
+  function phaseOwnPages(topicId, phase, days) {
+    days = Math.max(1, Math.min(730, Math.round(days || 28)));
+    var key = ownPagesWindowKey(topicId, days);
+    if (!(key in state.ownPagesWindowCache)) { maybeLoadOwnPagesWindow(topicId, days); return null; }
+    var data = state.ownPagesWindowCache[key];
+    var detail = state.topicDetailCache[topicId];
+    if (!data || !data.by_prompt || !detail) return [];
+    var agg = {};
+    (detail.prompts || []).forEach(function (p) {
+      if (resolvePromptPhase(p) !== phase) return;
+      (data.by_prompt[p.id] || []).forEach(function (pg) {
+        var a = agg[pg.page] || (agg[pg.page] = { page: pg.page, path: pg.path, answers: 0, prompts: 0 });
+        a.answers += pg.answers || 0;
+        a.prompts += 1;
+      });
+    });
+    return Object.keys(agg).map(function (k) { return agg[k]; })
+      .sort(function (a, b) { return (b.answers - a.answers) || a.path.localeCompare(b.path); });
+  }
+
+  function renderPhaseOwnPages(topicId, phase, days, tot) {
+    var list = phaseOwnPages(topicId, phase, days);
+    if (list === null) return null;
+    var box = document.createElement('div');
+    box.className = 'cvz-jc-pages';
+    var label = document.createElement('p');
+    label.className = 'cvz-jc-pages-label';
+    label.textContent = 'Eure Seiten in dieser Phase';
+    box.appendChild(label);
+    if (!list.length) {
+      var none = document.createElement('p');
+      none.className = 'cvz-jc-pages-none';
+      none.textContent = tot && tot.total > 0 ? 'Keine eurer Seiten verlinkt.' : 'Noch keine Antworten im Zeitraum.';
+      box.appendChild(none);
+      return box;
+    }
+    list.slice(0, PHASE_PAGES_MAX).forEach(function (pg) {
+      var row = document.createElement('div');
+      row.className = 'cvz-jc-page';
+      row.innerHTML = '<a class="cvz-own-page-link" href="' + escapeHtml(pg.page) + '" target="_blank" rel="noopener" title="' + escapeHtml(pg.path) + '">' +
+        escapeHtml(pg.path) + '</a><span class="cvz-jc-page-meta">' + pg.answers + (pg.answers === 1 ? ' Antwort' : ' Antworten') + '</span>';
+      box.appendChild(row);
+    });
+    if (list.length > PHASE_PAGES_MAX) {
+      var rest = document.createElement('p');
+      rest.className = 'cvz-jc-pages-none';
+      rest.textContent = 'und ' + (list.length - PHASE_PAGES_MAX) + ' weitere';
+      box.appendChild(rest);
+    }
+    return box;
+  }
+
   function renderJourneyPhaseSection(data, detail) {
     var jc = data.journey_comparison || null;
     var cfg = {
@@ -16114,27 +16625,43 @@
         card.appendChild(qLink);
       }
 
+      // GEÄNDERT (14.11.2026): eine Zitierrate mit Trend statt je Kanal ein Balken. Die Kanäle stehen
+      // klein darunter. Details (KI-Übersicht, Keywords, Quellen) liegen aufklappbar unten in der Karte.
+      var tot = ownPhaseTotal(data, phase);
+      var main = document.createElement('div');
+      main.className = 'cvz-jc-main';
+      var mainVal = document.createElement('span');
+      mainVal.className = 'cvz-jc-value' + (tot.score == null ? ' cvz-journey-nodata' : '');
+      mainVal.textContent = tot.score == null ? 'k. A.' : Math.round(tot.score) + ' %';
+      main.appendChild(mainVal);
+      if (jc && tot.trend) {
+        var mainBadge = renderJourneyTrendBadge(tot, 'own', cfg);
+        if (mainBadge) main.appendChild(mainBadge);
+      }
+      card.appendChild(main);
+      var mainMeta = document.createElement('p');
+      mainMeta.className = 'cvz-jc-meta';
+      mainMeta.textContent = tot.total > 0
+        ? 'in ' + tot.cited + ' von ' + tot.total + ' KI-Antworten verlinkt'
+        : 'noch keine Antworten im Zeitraum';
+      card.appendChild(mainMeta);
+      var chLine = document.createElement('p');
+      chLine.className = 'cvz-jc-channels';
+      // Bei nur einem gewählten Kanal wäre die Zeile eine Wiederholung der großen Zahl.
+      if (visibleChannels().length > 1) card.appendChild(chLine);
+
       visibleChannels().forEach(function (channel) {
         var ch = scores[channel] || { score: null, cited: 0, total: 0 };
         var hasData = (ch.total || 0) > 0 && ch.score != null;
         var pct = hasData ? Math.round(ch.score) : 0;
 
-        var row = document.createElement('div');
-        row.className = 'cvz-journey-channel-row';
+        var row = document.createElement('span');
+        row.className = 'cvz-jc-channel';
 
         var lbl = document.createElement('span');
         lbl.className = 'cvz-journey-channel-label';
         lbl.textContent = CHANNEL_LABELS[channel] || channel;
         row.appendChild(lbl);
-
-        var barWrap = document.createElement('div');
-        barWrap.className = 'cvz-journey-bar-wrap';
-        var bar = document.createElement('div');
-        bar.className = 'cvz-journey-bar-fill';
-        bar.style.width = pct + '%';
-        bar.style.backgroundColor = color;
-        barWrap.appendChild(bar);
-        row.appendChild(barWrap);
 
         var num = document.createElement('span');
         num.className = 'cvz-journey-channel-num' + (hasData ? '' : ' cvz-journey-nodata');
@@ -16153,10 +16680,7 @@
         }
         row.appendChild(num);
 
-        if (jc) {
-          row.appendChild(renderJourneyTrendBadge(ch, 'own', cfg) || _journeyBadgeSpacer());
-        }
-        card.appendChild(row);
+        chLine.appendChild(row);
       });
 
       // NEU (06.11.2026): Liefert ein Kanal in dieser Phase selten Quellen (Gemini antwortet auf
@@ -16174,26 +16698,48 @@
         card.appendChild(covNote);
       });
 
+      // NEU (14.11.2026): Google in einer Zeile, eure Seiten dieser Phase sichtbar, Rest aufklappbar.
+      var gSum = data.google_by_phase && data.google_by_phase[phase];
+      if (gSum && gSum.keywords) {
+        var gLine = document.createElement('p');
+        gLine.className = 'cvz-jc-google';
+        gLine.innerHTML = '<span class="cvz-gp-label">Google</span>' +
+          escapeHtml(gSum.top10 + ' von ' + gSum.keywords + ' Keywords in Top 10' +
+            (gSum.search_volume ? ' · Nachfrage ' + Number(gSum.search_volume).toLocaleString('de-DE') + '/Monat' : ''));
+        card.appendChild(gLine);
+      }
+      var phasePages = renderPhaseOwnPages(state.activeTopicId, phase, cfg.windowDays, tot);
+      if (phasePages) card.appendChild(phasePages);
+
+      var more = document.createElement('details');
+      more.className = 'cvz-jc-more';
+      var moreKey = state.activeTopicId + '|' + phase;
+      if (state.journeyCardMoreOpen[moreKey]) more.open = true;
+      more.addEventListener('toggle', function () { state.journeyCardMoreOpen[moreKey] = more.open; });
+      var moreSum = document.createElement('summary');
+      moreSum.textContent = 'Quellen, Keywords und KI-Übersicht';
+      more.appendChild(moreSum);
+
       // NEU (02.10.2026): AI Overview als eigene Monatszeile (nur wenn das
       // Backend den Block liefert, sonst wäre "noch nicht geprüft" falsch).
       if (data.ai_overview_by_phase) {
-        card.appendChild(_renderAiOverviewLine(data.ai_overview_by_phase[phase]));
+        more.appendChild(_renderAiOverviewLine(data.ai_overview_by_phase[phase]));
       }
 
       var gpBlock = renderGooglePhaseBlock(data, phase, cfg);
-      if (gpBlock) card.appendChild(gpBlock);
+      if (gpBlock) more.appendChild(gpBlock);
 
       // Meistzitierte Quellen
       if (sources.length > 0) {
         var divider = document.createElement('div');
         divider.style.cssText = 'margin:8px 0 6px;border-top:1px solid var(--cvz-border,#e5e7eb);';
-        card.appendChild(divider);
+        more.appendChild(divider);
 
         var srcLabel = document.createElement('p');
         srcLabel.style.cssText = 'display:flex;align-items:center;margin:0 0 4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--cvz-text-muted,#6b7280);';
         srcLabel.appendChild(document.createTextNode('Meistzitierte Quellen'));
         srcLabel.appendChild(makeTip(JOURNEY_SOURCES_TIP));
-        card.appendChild(srcLabel);
+        more.appendChild(srcLabel);
 
         sources.slice(0, 2).forEach(function (src) {
           var srcPct = Math.round(src.citation_rate || 0);
@@ -16226,7 +16772,7 @@
           if (jc) {
             srcRow.appendChild(renderJourneyTrendBadge(src, 'source', cfg, src.domain) || _journeyBadgeSpacer());
           }
-          card.appendChild(srcRow);
+          more.appendChild(srcRow);
 
           var meta = document.createElement('p');
           meta.style.cssText = 'margin:1px 0 3px;font-size:10px;color:var(--cvz-text-muted,#9ca3af);padding-left:4px;display:flex;gap:6px;align-items:center;';
@@ -16240,13 +16786,13 @@
           if (src.content_type) {
             meta.appendChild(document.createTextNode(CONTENT_TYPE_LABELS[src.content_type] || src.content_type));
           }
-          if (meta.childNodes.length) card.appendChild(meta);
+          if (meta.childNodes.length) more.appendChild(meta);
         });
       }
 
       // NEU (13.11.2026): Gefunden, nicht zitiert (ChatGPT) für diese Phase
       var retrievedBlock = renderJourneyRetrievedBlock(state.activeTopicId, phase);
-      if (retrievedBlock) card.appendChild(retrievedBlock);
+      if (retrievedBlock) more.appendChild(retrievedBlock);
 
       // Sichtbarer Hinweis mit Handlung
       var hint = jc ? _journeyCardHint(scores, sources, cfg) : null;
@@ -16266,6 +16812,7 @@
         }
         card.appendChild(hintEl);
       }
+      if (more.childNodes.length > 1) card.appendChild(more);
 
       grid.appendChild(card);
     });
