@@ -378,6 +378,8 @@
     if (state.activeSubTab === 'daten' && state.activeDataView === 'seiten') {
       maybeLoadOwnPages(topicId);
     }
+    // NEU (14.11.2026): Übersicht braucht eure Seiten (Kennzahl, Bewegungen)
+    if (state.activeSubTab === 'situation') maybeLoadOwnPages(topicId);
   }
 
   // Banner für Themen, deren Report noch nicht geöffnet werden darf.
@@ -2618,6 +2620,14 @@
       render();
       return;
     }
+    // NEU (14.11.2026): Sprung in einen Daten-Unterbereich (z. B. "Alle Seiten" in der Übersicht)
+    var gotoDataBtn = event.target.closest('[data-cvz-goto-data-view]');
+    if (gotoDataBtn) {
+      state.activeSubTab = 'daten';
+      setDataView(gotoDataBtn.getAttribute('data-cvz-goto-data-view'));
+      scrollToTabNavIfBelow();
+      return;
+    }
     var tabBtn = event.target.closest('[data-cvz-tab]');
     if (tabBtn) {
       var newTab = normalizeTabId(tabBtn.getAttribute('data-cvz-tab'));
@@ -2629,7 +2639,7 @@
       if (newTab === 'daten' && state.activeDataView === 'quellen' && state.activeView === 'topic-detail') {
         maybeLoadRetrieved(state.activeTopicId);
       }
-      if (newTab === 'daten' && state.activeDataView === 'seiten' && state.activeView === 'topic-detail') {
+      if ((newTab === 'situation' || (newTab === 'daten' && state.activeDataView === 'seiten')) && state.activeView === 'topic-detail') {
         maybeLoadOwnPages(state.activeTopicId);
       }
       if (newTab === 'journey' && state.activeView === 'topic-detail') {
@@ -13741,6 +13751,28 @@
       '.cvz-table td { padding: 8px 12px; border-bottom: 1px solid var(--cvz-border); }' +
       '.cvz-table-clickable tbody tr { cursor: pointer; }' +
       '.cvz-table-clickable tbody tr:hover { background: rgba(79, 209, 197, 0.06); }' +
+      '.cvz-ov-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 24px; }' +
+      '.cvz-ov-kpi { background: var(--cvz-navy-raised); border: 1px solid var(--cvz-border); padding: 16px; display: flex; flex-direction: column; gap: 8px; }' +
+      '.cvz-ov-kpi-label { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--cvz-text-muted); }' +
+      '.cvz-ov-kpi-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }' +
+      '.cvz-ov-kpi-value { font-family: "Syne", sans-serif; font-size: 34px; font-weight: 800; line-height: 1; color: var(--cvz-text); }' +
+      '.cvz-ov-kpi-missing { font-size: 18px; color: var(--cvz-amber); }' +
+      '.cvz-ov-kpi-note { margin: 0; font-size: 12px; color: var(--cvz-text-muted); line-height: 1.4; }' +
+      '.cvz-ov-kpi-link { align-self: flex-start; background: none; border: 0; padding: 0; font-family: inherit; font-size: 13px; font-weight: 600; color: var(--cvz-teal); cursor: pointer; text-decoration: none; }' +
+      '.cvz-ov-delta { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; font-weight: 600; color: var(--cvz-text-muted); }' +
+      '.cvz-ov-delta-good { color: var(--cvz-green); } .cvz-ov-delta-bad { color: var(--cvz-red); }' +
+      '.cvz-ov-row { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }' +
+      '.cvz-ov-row > .cvz-section { flex: 1 1 360px; min-width: 0; }' +
+      '.cvz-ov-move-list { list-style: none; margin: 0; padding: 0; }' +
+      '.cvz-ov-move { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-ov-move-icon { display: inline-flex; width: 26px; height: 26px; flex: none; align-items: center; justify-content: center; border: 1px solid currentColor; }' +
+      '.cvz-ov-move-good .cvz-ov-move-icon, .cvz-ov-move-good .cvz-ov-move-kind { color: var(--cvz-green); }' +
+      '.cvz-ov-move-bad .cvz-ov-move-icon, .cvz-ov-move-bad .cvz-ov-move-kind { color: var(--cvz-red); }' +
+      '.cvz-ov-move-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }' +
+      '.cvz-ov-move-kind { font-size: 12px; font-weight: 600; }' +
+      '.cvz-ov-move-text { font-weight: 600; }' +
+      '.cvz-ov-move-meta { font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-sit-tile-google { margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--cvz-border); font-size: 12px; color: var(--cvz-text-muted); }' +
       '.cvz-own-page-link { color: var(--cvz-teal); font-weight: 600; text-decoration: none; word-break: break-all; }' +
       '.cvz-own-page-link:hover { text-decoration: underline; }' +
       '.cvz-gsc-page-url { color: var(--cvz-teal); font-size: 11px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; display: inline-block; vertical-align: middle; }' +
@@ -14834,7 +14866,7 @@
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
     heading.style.margin = '0';
-    heading.textContent = 'KI-Sichtbarkeit nach Kaufphase';
+    heading.textContent = 'Kaufreise auf einen Blick';
     head.appendChild(heading);
     head.appendChild(makeTip(
       'Anteil der Antworten von ' + activeChannelLabel() + ', die eure Domain als Quelle nennen, je Kaufphase' +
@@ -14881,6 +14913,15 @@
         ? t.cited + ' von ' + t.total + ' Antworten'
         : 'noch keine Messung';
       tile.appendChild(meta);
+      // NEU (14.11.2026): Google-Zeile je Phase (dashboard.py: _compute_google_by_phase)
+      var g = dashData.google_by_phase && dashData.google_by_phase[phase];
+      if (g && g.keywords) {
+        var gl = document.createElement('p');
+        gl.className = 'cvz-sit-tile-google';
+        gl.title = 'Aktive Keywords dieser Phase mit belegter Nachfrage. Position laut Google-Prüfung, sonst Search Console.';
+        gl.textContent = 'Google: ' + g.top10 + ' von ' + g.keywords + ' Keywords in Top 10';
+        tile.appendChild(gl);
+      }
       grid.appendChild(tile);
     });
     section.appendChild(grid);
@@ -15339,6 +15380,228 @@
     return section;
   }
 
+  // ── NEU (14.11.2026): Übersicht nach dem Dashboard-Entwurf ──────────────────
+  // Vier Kennzahlen (Zitierrate, Markennennung, verlinkte Seiten, Klicks aus Google), Bewegungen,
+  // die wichtigsten Maßnahmen, Wissens-Check und die Phasen. Alle KI-Zahlen folgen Zeitraum- und
+  // Kanal-Umschalter (dashboard-data). Google-Klicks kommen aus /gsc-history (feste 28 Tage).
+  var OV_GSC_MIN_PREV_CLICKS = 20;   // darunter keine Trendfarbe (zu wenige Klicks)
+  var OV_GSC_MIN_CHANGE_PCT = 15;    // ab dieser Veränderung grün/rot
+
+  // Summe über die vier Phasen, aktueller Zeitraum und Vorperiode (gleich lang).
+  function overviewCitationTotals(dashData) {
+    var cur = { cited: 0, total: 0 }, prev = { cited: 0, total: 0 };
+    PHASE_ORDER.forEach(function (phase) {
+      var t = ownPhaseTotal(dashData, phase);
+      cur.cited += t.cited || 0;
+      cur.total += t.total || 0;
+      prev.cited += t.previous_cited || 0;
+      prev.total += t.previous_total || 0;
+    });
+    var rate = cur.total ? cur.cited / cur.total * 100 : null;
+    var prevRate = prev.total ? prev.cited / prev.total * 100 : null;
+    return { cited: cur.cited, total: cur.total, rate: rate, prevRate: prevRate,
+             deltaPp: rate != null && prevRate != null ? rate - prevRate : null, prevTotal: prev.total, prevCited: prev.cited };
+  }
+
+  // Gleiche Rausch-Schwelle wie dashboard.py (_classify_trend): genug Antworten in beiden Zeiträumen,
+  // mindestens min_delta_pp Punkte Unterschied und ein Zwei-Stichproben-z-Test über min_z.
+  function ovSignificant(c1, n1, c2, n2, jc) {
+    var minAnswers = jc.min_answers || 15, minDelta = jc.min_delta_pp || 3, minZ = jc.min_z || 1.96;
+    if (n1 < minAnswers || n2 < minAnswers) return false;
+    var p1 = c1 / n1, p2 = c2 / n2;
+    if (Math.abs(p1 - p2) * 100 < minDelta) return false;
+    var pool = (c1 + c2) / (n1 + n2);
+    var se = Math.sqrt(pool * (1 - pool) * (1 / n1 + 1 / n2));
+    if (!se) return false;
+    return Math.abs(p1 - p2) / se >= minZ;
+  }
+
+  function ovArrow(up) {
+    return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + (up ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6') + '"></path></svg>';
+  }
+
+  // tone: 'good' | 'bad' | 'neutral'
+  function ovDelta(text, up, tone, tip) {
+    if (!text) return '';
+    var cls = tone === 'good' ? ' cvz-ov-delta-good' : tone === 'bad' ? ' cvz-ov-delta-bad' : '';
+    return '<span class="cvz-ov-delta' + cls + '"' + (tip ? ' title="' + escapeHtml(tip) + '"' : '') + '>' +
+      (up == null ? '' : ovArrow(up)) + escapeHtml(text) + '</span>';
+  }
+
+  function ovCard(label, valueHtml, deltaHtml, note, extraHtml) {
+    var card = document.createElement('div');
+    card.className = 'cvz-ov-kpi';
+    card.innerHTML = '<p class="cvz-ov-kpi-label">' + escapeHtml(label) + '</p>' +
+      '<div class="cvz-ov-kpi-row"><span class="cvz-ov-kpi-value">' + valueHtml + '</span>' + (deltaHtml || '') + '</div>' +
+      '<p class="cvz-ov-kpi-note">' + escapeHtml(note) + '</p>' + (extraHtml || '');
+    return card;
+  }
+
+  function fmtPct(v) {
+    return v == null ? 'k. A.' : Math.round(v) + ' %';
+  }
+
+  function renderOverviewKpis(topicId, detail, dashData) {
+    var jc = dashData.journey_comparison || {};
+    var winDays = dashWindowDays(dashData);
+    var grid = document.createElement('div');
+    grid.className = 'cvz-ov-kpis';
+
+    // 1) Zitierrate
+    var ct = overviewCitationTotals(dashData);
+    var dHtml = '';
+    if (ct.deltaPp != null) {
+      var sig = ovSignificant(ct.cited, ct.total, ct.prevCited, ct.prevTotal, jc);
+      var dp = Math.round(ct.deltaPp);
+      dHtml = ovDelta((dp > 0 ? '+' : dp < 0 ? '−' : '±') + Math.abs(dp) + ' Pkt.', dp === 0 ? null : dp > 0,
+        sig ? (dp > 0 ? 'good' : 'bad') : 'neutral',
+        'Vergleich mit den ' + winDays + ' Tagen davor (' + fmtPct(ct.prevRate) + '). Grün oder rot erst, wenn der Unterschied ' +
+        'größer ist als die normale Schwankung von KI-Antworten, nach derselben Regel wie die Pfeile bei den Phasen.');
+    }
+    grid.appendChild(ovCard('Zitierrate', fmtPct(ct.rate), dHtml,
+      ct.total ? 'In ' + ct.cited + ' von ' + ct.total + ' Antworten mit Link auf eure Domain (' + activeChannelLabel() + ', ' + winDays + ' Tage)'
+               : 'Noch keine Antworten im Zeitraum'));
+
+    // 2) Markennennung (Marke im Antworttext, mit oder ohne Link)
+    var bp = jc.brand_presence && jc.brand_presence.by_channel && jc.brand_presence.by_channel[activeChannel()];
+    if (bp && bp.runs_evaluated) {
+      var own = bp.own || {};
+      var named = (own.both || 0) + (own.named_only || 0);
+      grid.appendChild(ovCard('Markennennung', fmtPct(named / bp.runs_evaluated * 100), '',
+        'In ' + named + ' von ' + bp.runs_evaluated + ' Antworten im Text genannt, mit oder ohne Link'));
+    } else {
+      grid.appendChild(ovCard('Markennennung', 'k. A.', '', 'Noch keine ausgewerteten Antworten im Zeitraum'));
+    }
+
+    // 3) Verlinkte Seiten (in den letzten winDays Tagen)
+    var op = state.ownPagesCache[topicId];
+    if (state.loadingOwnPages[topicId] && !op) {
+      grid.appendChild(ovCard('Verlinkte Seiten', '…', '', 'Wird geladen'));
+    } else if (op && op.pages) {
+      var cutoff = new Date(Date.now() - winDays * 86400000).toISOString().slice(0, 10);
+      var linked = 0, isNew = 0, lost = 0;
+      op.pages.forEach(function (pg) {
+        var chs = pg.channels || {};
+        if (Object.keys(chs).some(function (c) { return chs[c].last_seen >= cutoff; })) linked++;
+        if (Object.keys(chs).some(function (c) { return chs[c].status === 'neu'; })) isNew++;
+        if (Object.keys(chs).some(function (c) { return chs[c].status === 'nicht_mehr'; })) lost++;
+      });
+      var bits = [];
+      if (isNew) bits.push(isNew + ' neu');
+      if (lost) bits.push(lost + ' nicht mehr verlinkt');
+      grid.appendChild(ovCard('Verlinkte Seiten', String(linked), '',
+        'Eure Seiten, die ChatGPT oder Gemini in den letzten ' + winDays + ' Tagen verlinkt haben' + (bits.length ? '. ' + bits.join(', ') : ''),
+        '<button type="button" class="cvz-ov-kpi-link" data-cvz-goto-data-view="seiten">Alle Seiten →</button>'));
+    } else {
+      grid.appendChild(ovCard('Verlinkte Seiten', 'k. A.', '', state.ownPagesErrors[topicId] ? 'Konnte nicht geladen werden' : 'Noch keine Daten'));
+    }
+
+    // 4) Klicks aus Google (Search Console)
+    var project = detail.topic ? getProjectById(detail.topic.project_id) : null;
+    if (project && project.gsc_connected === false) {
+      grid.appendChild(ovCard('Klicks aus Google', '<span class="cvz-ov-kpi-missing">Nicht verbunden</span>', '',
+        'Ohne Search Console fehlen Klicks, Impressionen und echte Google-Positionen im Dashboard.',
+        CONFIG.gscSetupUrl ? '<a class="cvz-ov-kpi-link" href="' + escapeHtml(CONFIG.gscSetupUrl) + '" target="_blank" rel="noopener">Search Console verbinden ↗</a>' : ''));
+    } else {
+      var gKey = gscHistoryKey(topicId, null);
+      if (!(gKey in state.gscHistoryCache) && !state.loadingGscHistory[gKey]) maybeLoadGscHistory(topicId, null);
+      var rolling = state.gscHistoryCache[gKey];
+      if (!(gKey in state.gscHistoryCache)) {
+        grid.appendChild(ovCard('Klicks aus Google', '…', '', 'Wird geladen'));
+      } else if (rolling && rolling.current) {
+        var cur = rolling.current, prev = rolling.previous;
+        var gDelta = '';
+        if (prev && prev.clicks > 0) {
+          var pct = Math.round((cur.clicks - prev.clicks) / prev.clicks * 100);
+          var gSig = prev.clicks >= OV_GSC_MIN_PREV_CLICKS && Math.abs(pct) >= OV_GSC_MIN_CHANGE_PCT;
+          gDelta = ovDelta((pct > 0 ? '+' : pct < 0 ? '−' : '±') + Math.abs(pct) + ' %', pct === 0 ? null : pct > 0,
+            gSig ? (pct > 0 ? 'good' : 'bad') : 'neutral', 'Vergleich mit den 28 Tagen davor (' + prev.clicks.toLocaleString('de-DE') + ' Klicks).');
+        }
+        grid.appendChild(ovCard('Klicks aus Google', cur.clicks.toLocaleString('de-DE'), gDelta,
+          'Search Console, Suchanfragen zum Thema, 28 Tage bis ' + ddmm(rolling.last_day) + '. ' +
+          (cur.impressions || 0).toLocaleString('de-DE') + ' Impressionen'));
+      } else {
+        grid.appendChild(ovCard('Klicks aus Google', 'k. A.', '',
+          state.gscHistoryError && state.gscHistoryError[gKey] ? 'Konnte gerade nicht geladen werden' : 'Noch keine Tageswerte aus der Search Console'));
+      }
+    }
+    return grid;
+  }
+
+  var OV_MOVEMENTS_MAX = 6;
+
+  function renderOverviewMovements(topicId, dashData) {
+    var winDays = dashWindowDays(dashData);
+    var items = [];
+    var op = state.ownPagesCache[topicId];
+    var chLabel = { chat_gpt: 'ChatGPT', gemini: 'Gemini' };
+    ((op && op.pages) || []).forEach(function (pg) {
+      Object.keys(pg.channels || {}).forEach(function (c) {
+        var ch = pg.channels[c];
+        if (ch.status === 'neu') {
+          items.push({ up: true, good: true, kind: 'Neu verlinkt', text: pg.path, href: pg.page,
+            meta: (chLabel[c] || c) + ' · seit ' + ddmm(ch.first_seen) + ', an ' + ch.days + ' Messtagen', sort: 1 });
+        } else if (ch.status === 'nicht_mehr') {
+          items.push({ up: false, good: false, kind: 'Nicht mehr verlinkt', text: pg.path, href: pg.page,
+            meta: (chLabel[c] || c) + ' · zuletzt ' + ddmm(ch.last_seen) + ', vorher an ' + ch.days + ' Messtagen', sort: 0 });
+        }
+      });
+    });
+    PHASE_ORDER.forEach(function (phase) {
+      var t = ownPhaseTotal(dashData, phase);
+      if (t.trend !== 'up' && t.trend !== 'down') return;
+      var prev = t.previous_total ? Math.round(t.previous_cited / t.previous_total * 100) : null;
+      items.push({ up: t.trend === 'up', good: t.trend === 'up', kind: 'Phase ' + (PHASE_LABELS[phase] || phase),
+        text: (prev != null ? prev + ' % → ' : '') + fmtPct(t.score),
+        meta: activeChannelLabel() + ' · ' + winDays + ' Tage im Vergleich zu den ' + winDays + ' Tagen davor', sort: 2 });
+    });
+    items.sort(function (a, b) { return a.sort - b.sort; });
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section cvz-ov-moves';
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
+    var h = document.createElement('p');
+    h.className = 'cvz-section-label';
+    h.style.margin = '0';
+    h.textContent = 'Bewegungen';
+    head.appendChild(h);
+    head.appendChild(makeTip('Seiten, die neu oder nicht mehr verlinkt werden (an mindestens 2 Messtagen), und Phasen, deren Zitierrate sich ' +
+      'stärker verändert hat als die normale Schwankung. Kleine Ausschläge stehen hier bewusst nicht.'));
+    section.appendChild(head);
+
+    if (!items.length) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = state.loadingOwnPages[topicId] && !op
+        ? 'Wird geladen …'
+        : 'Keine nennenswerten Veränderungen in den letzten ' + winDays + ' Tagen.';
+      section.appendChild(none);
+      return section;
+    }
+    var ul = document.createElement('ul');
+    ul.className = 'cvz-ov-move-list';
+    items.slice(0, OV_MOVEMENTS_MAX).forEach(function (it) {
+      var li = document.createElement('li');
+      li.className = 'cvz-ov-move ' + (it.good ? 'cvz-ov-move-good' : 'cvz-ov-move-bad');
+      li.innerHTML = '<span class="cvz-ov-move-icon">' + ovArrow(it.up) + '</span>' +
+        '<span class="cvz-ov-move-body"><span class="cvz-ov-move-kind">' + escapeHtml(it.kind) + '</span>' +
+        (it.href ? '<a class="cvz-own-page-link" href="' + escapeHtml(it.href) + '" target="_blank" rel="noopener">' + escapeHtml(it.text) + '</a>'
+                 : '<span class="cvz-ov-move-text">' + escapeHtml(it.text) + '</span>') +
+        '<span class="cvz-ov-move-meta">' + escapeHtml(it.meta) + '</span></span>';
+      ul.appendChild(li);
+    });
+    section.appendChild(ul);
+    if (items.length > OV_MOVEMENTS_MAX) {
+      var more = document.createElement('p');
+      more.className = 'cvz-card-placeholder-text';
+      more.textContent = 'und ' + (items.length - OV_MOVEMENTS_MAX) + ' weitere';
+      section.appendChild(more);
+    }
+    return section;
+  }
+
   function renderSituationTab(topicId, detail) {
     var wrap = document.createElement('div');
 
@@ -15388,8 +15651,16 @@
     //   Wettbewerbs-Chart, Quellen ("Wer wird stattdessen zitiert?") → Tab Wettbewerb
     //   KI-Wissens-Check vollständig (eingeklappt)                    → Tab Situation
     //   Sichtbarkeit je Rolle, Content-Typen pro Phase → Tab Journey
+    // GEÄNDERT (14.11.2026): Kennzahlen oben, darunter Bewegungen neben den wichtigsten Maßnahmen.
     if (dashData && !dashError && !state.isLoadingDashboard) {
-      wrap.appendChild(renderSituationPhaseTiles(dashData));
+      wrap.appendChild(renderOverviewKpis(topicId, detail, dashData));
+      var ovRow = document.createElement('div');
+      ovRow.className = 'cvz-ov-row';
+      ovRow.appendChild(renderOverviewMovements(topicId, dashData));
+      ovRow.appendChild(renderTopActionsTeaser(detail));
+      wrap.appendChild(ovRow);
+    } else {
+      wrap.appendChild(renderTopActionsTeaser(detail));
     }
 
     // GEÄNDERT (06.11.2026): KI-Wissens-Check: Einzeiler als Kopfzeile,
@@ -15703,9 +15974,10 @@
     // VERSCHOBEN (16.10.2026): Der vollständige KI-Wissens-Check steht im Tab
     // Wettbewerb (renderWettbewerbTab), hier nur der Einzeiler oben.
 
-    // NEU (02.10.2026): Statt eigener Empfehlungslisten ein kurzer Verweis
-    // auf die wichtigsten offenen Maßnahmen im Aktionsplan.
-    wrap.appendChild(renderTopActionsTeaser(detail));
+    // GEÄNDERT (14.11.2026): Phasen am Ende, kompakt, mit Google-Zeile. Die Maßnahmen stehen oben.
+    if (dashData && !dashError && !state.isLoadingDashboard) {
+      wrap.appendChild(renderSituationPhaseTiles(dashData));
+    }
 
     return wrap;
   }
