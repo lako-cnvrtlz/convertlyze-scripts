@@ -208,6 +208,12 @@
     retrievedShowSingles: {},  // { [topicId]: true } = auch Domains mit nur einem Treffer
     retrievedKindFilter: {},   // NEU (13.11.2026): { [topicId]: 'alle' | Art aus domain_kinds.py (presseportal, ...) }
     savingDomainKind: {},      // NEU (13.11.2026): { [domain]: true } während die Korrektur gespeichert wird
+    // NEU (14.11.2026): "Eure verlinkten Seiten" (GET /topics/{id}/own-pages)
+    ownPagesCache: {},         // { [topicId]: Antwort }
+    loadingOwnPages: {},
+    ownPagesErrors: {},
+    ownPagesFilter: {},        // { [topicId]: 'alle' | 'neu' | 'aktiv' | 'nicht_mehr' | 'einmalig' }
+    ownPagesOpen: {},          // { [topicId + '|' + page]: true } aufgeklappte Zeile
     retrievedShowCompetitors: {}, // { [topicId]: true } = Wettbewerber einblenden
     openRetrievedDomains: {},  // { [topicId|domain]: true } = aufgeklappt
     keywordRankHistoryCache: {},
@@ -332,6 +338,8 @@
     Object.keys(state.retrievedCache).concat(Object.keys(state.retrievedErrors)).forEach(function (k) {
       if (k.indexOf(topicId + '|') === 0) { delete state.retrievedCache[k]; delete state.retrievedErrors[k]; }
     });
+    delete state.ownPagesCache[topicId];
+    delete state.ownPagesErrors[topicId];
 
     // Auch die Domain-Übersicht (Opportunities über alle Themen) ist dann veraltet.
     var topic = getTopicById(topicId);
@@ -366,6 +374,7 @@
     }
     if (state.activeSubTab === 'daten' && state.activeDataView === 'quellen') {
       maybeLoadRetrieved(topicId);
+      maybeLoadOwnPages(topicId);
     }
     // NEU (02.10.2026): Änderungen und Events werden jetzt im Aktionsplan eingetragen.
     if (state.activeSubTab === 'aktionsplan') {
@@ -2611,6 +2620,7 @@
       }
       if (newTab === 'daten' && state.activeDataView === 'quellen' && state.activeView === 'topic-detail') {
         maybeLoadRetrieved(state.activeTopicId);
+        maybeLoadOwnPages(state.activeTopicId);
       }
       if (newTab === 'journey' && state.activeView === 'topic-detail') {
         maybeLoadRetrieved(state.activeTopicId);
@@ -5786,6 +5796,7 @@
     }
     if (view === 'quellen' && state.activeView === 'topic-detail') {
       maybeLoadRetrieved(state.activeTopicId);
+      maybeLoadOwnPages(state.activeTopicId);
     }
     render();
   }
@@ -5947,6 +5958,7 @@
       wrap.appendChild(renderFanOutView(state.activeTopicId, detail));
     } else if (view === 'quellen') {
       promptNotes();
+      wrap.appendChild(renderOwnPagesView(state.activeTopicId));
       wrap.appendChild(renderRetrievedView(state.activeTopicId, detail));
     } else if (view === 'gsc') {
       monthlyNotes('GSC zuletzt aktualisiert');
@@ -6097,6 +6109,200 @@
     }
     state.loadingRetrieved[key] = false;
     render();
+  }
+
+  // ── NEU (14.11.2026): Eure verlinkten Seiten ─────────────────────────────────
+  // Daten: GET /topics/{id}/own-pages (own_pages.py im Backend). Pro eigener Seite: seit wann und zuletzt
+  // von ChatGPT bzw. Gemini verlinkt, Messtage, Antworten, Fragen und (Gemini) die zitierte Textstelle.
+  // "Seit" = erster Messtag mit Link, genauer als der Messrhythmus geht es nicht.
+  var OWN_PAGE_STATUS = {
+    neu: { label: 'neu', color: 'var(--cvz-teal,#4fd1c5)', tip: 'Erster Link in den letzten 14 Tagen vor der letzten Messung, an mindestens 2 Messtagen.' },
+    aktiv: { label: 'aktiv', color: 'var(--cvz-text,#e6edf3)', tip: 'Wird weiterhin verlinkt.' },
+    einmalig: { label: 'einmalig', color: 'var(--cvz-text-muted,#8b98a5)', tip: 'Nur an einem Messtag verlinkt. Das ist oft Zufall.' },
+    nicht_mehr: { label: 'nicht mehr', color: 'var(--cvz-red,#de5b50)', tip: 'Seit mehr als 14 Tagen vor der letzten Messung kein Link mehr.' },
+  };
+  var OWN_PAGE_FILTERS = [['alle', 'Alle'], ['neu', 'Neu'], ['aktiv', 'Aktiv'], ['nicht_mehr', 'Nicht mehr verlinkt'], ['einmalig', 'Einmalig']];
+  var OWN_PAGE_CHANNELS = [['chat_gpt', 'ChatGPT'], ['gemini', 'Gemini']];
+  // Ab so vielen Tagen ohne Messung (bezogen auf heute) erscheint ein Hinweis.
+  var OWN_PAGES_MEASURE_GAP_DAYS = 8;
+
+  function ddmm(iso) {
+    if (!iso) return '';
+    var p = String(iso).slice(0, 10).split('-');
+    return p.length === 3 ? p[2] + '.' + p[1] + '.' : String(iso);
+  }
+
+  function daysSince(iso, now) {
+    if (!iso) return null;
+    var d = new Date(String(iso).slice(0, 10) + 'T12:00:00Z');
+    if (isNaN(d.getTime())) return null;
+    return Math.floor(((now || new Date()).getTime() - d.getTime()) / 86400000);
+  }
+
+  function ownPageMatchesFilter(page, filter) {
+    if (!filter || filter === 'alle') return true;
+    return Object.keys(page.channels || {}).some(function (c) { return page.channels[c].status === filter; });
+  }
+
+  async function maybeLoadOwnPages(topicId, force) {
+    if (!topicId) return;
+    if (!force && (state.ownPagesCache[topicId] || state.loadingOwnPages[topicId] || state.ownPagesErrors[topicId])) return;
+    if (CONFIG.useMockData) {
+      state.ownPagesCache[topicId] = { pages: [], pages_total: 0, status_counts: {}, latest_by_channel: {}, backfill_pending: 0 };
+      return;
+    }
+    state.loadingOwnPages[topicId] = true;
+    delete state.ownPagesErrors[topicId];
+    render();
+    try {
+      state.ownPagesCache[topicId] = await apiFetch('/topics/' + topicId + '/own-pages?days=180');
+    } catch (e) {
+      console.error('[CVZ Visibility] Verlinkte Seiten konnten nicht geladen werden:', e);
+      state.ownPagesErrors[topicId] = e.message || 'Unbekannter Fehler';
+    }
+    state.loadingOwnPages[topicId] = false;
+    render();
+  }
+
+  function ownPageChannelCell(ch) {
+    if (!ch) return '<td class="cvz-own-page-ch" style="color:var(--cvz-text-muted,#8b98a5);">–</td>';
+    var st = OWN_PAGE_STATUS[ch.status] || OWN_PAGE_STATUS.aktiv;
+    var range = ch.first_seen === ch.last_seen ? 'am ' + ddmm(ch.first_seen) : 'seit ' + ddmm(ch.first_seen) + ', zuletzt ' + ddmm(ch.last_seen);
+    var tip = st.tip + ' Erster Messtag mit Link: ' + ddmm(ch.first_seen) + ', letzter: ' + ddmm(ch.last_seen) + '. ' +
+      ch.days + (ch.days === 1 ? ' Messtag, ' : ' Messtage, ') + ch.answers + (ch.answers === 1 ? ' Antwort.' : ' Antworten.');
+    return '<td class="cvz-own-page-ch" title="' + escapeHtml(tip) + '">' +
+      '<span class="cvz-own-page-status" style="font-size:11px;font-weight:600;color:' + st.color + ';">' + escapeHtml(st.label) + '</span>' +
+      '<span style="display:block;font-size:12px;">' + escapeHtml(range) + '</span>' +
+      '<span style="display:block;font-size:11px;color:var(--cvz-text-muted,#8b98a5);">' + ch.days + (ch.days === 1 ? ' Messtag' : ' Messtage') + '</span></td>';
+  }
+
+  function renderOwnPagesView(topicId, now) {
+    var section = document.createElement('div');
+    section.className = 'cvz-section cvz-own-pages';
+
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Eure verlinkten Seiten (ChatGPT und Gemini)';
+    section.appendChild(heading);
+
+    var intro = document.createElement('p');
+    intro.className = 'cvz-card-placeholder-text';
+    intro.style.marginBottom = '10px';
+    intro.textContent = 'Welche eurer Seiten die KI-Antworten verlinken, seit wann und wie oft (letzte 180 Tage). ' +
+      '„Seit“ ist der erste Messtag mit Link: Wann das Modell wirklich angefangen hat, die Seite zu nennen, lässt sich nicht genauer sagen als der Messrhythmus. ' +
+      'Bei Gemini steht oft auch die Textstelle dabei, die es zitiert hat. Das zeigt, welche Sätze eurer Seiten als Antwort taugen.';
+    section.appendChild(intro);
+
+    function note(text, cls) {
+      var el = document.createElement('p');
+      el.className = cls || 'cvz-card-placeholder-text';
+      el.textContent = text;
+      section.appendChild(el);
+      return el;
+    }
+
+    if (state.loadingOwnPages[topicId]) {
+      section.appendChild(createLoadingText('Verlinkte Seiten werden geladen … Beim ersten Aufruf werden ältere Antworten nachgerechnet, das dauert etwas.'));
+      return section;
+    }
+    if (state.ownPagesErrors[topicId]) { note('Verlinkte Seiten konnten nicht geladen werden: ' + state.ownPagesErrors[topicId]); return section; }
+    var data = state.ownPagesCache[topicId];
+    if (!data) { note('Noch keine Daten geladen.'); return section; }
+
+    // Letzte Messung je Kanal, mit Hinweis bei längerer Pause
+    var latest = data.latest_by_channel || {};
+    var parts = [], gaps = [];
+    OWN_PAGE_CHANNELS.forEach(function (c) {
+      if (!latest[c[0]]) return;
+      parts.push(c[1] + ' ' + ddmm(latest[c[0]]));
+      var gap = daysSince(latest[c[0]], now);
+      if (gap != null && gap >= OWN_PAGES_MEASURE_GAP_DAYS) gaps.push(c[1] + ' seit ' + gap + ' Tagen');
+    });
+    if (parts.length) note('Letzte Messung: ' + parts.join(', ') + '. „Neu“ und „nicht mehr“ beziehen sich auf diesen Tag.', 'cvz-fanout-coverage');
+    if (gaps.length) note('Keine neue Messung: ' + gaps.join(', ') + '. Die Angaben „zuletzt“ sind deshalb womöglich veraltet.', 'cvz-fanout-warn');
+    if (data.backfill_pending > 0) {
+      var pend = note('Noch ' + data.backfill_pending + ' ältere Antworten werden nachgerechnet. Die Liste ist bis dahin unvollständig. ', 'cvz-fanout-warn');
+      var more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'cvz-journey-hint-link';
+      more.setAttribute('data-cvz-own-pages-reload', topicId);
+      more.style.cssText = 'background:none;border:none;padding:0;cursor:pointer;';
+      more.textContent = 'Weiter nachrechnen';
+      more.addEventListener('click', function () { maybeLoadOwnPages(topicId, true); });
+      pend.appendChild(more);
+    }
+
+    var pages = data.pages || [];
+    if (!pages.length) { note('In den letzten 180 Tagen hat weder ChatGPT noch Gemini eine eurer Seiten verlinkt.'); return section; }
+
+    // Filter nach Status (eine Seite zählt, wenn mindestens ein Kanal den Status hat)
+    var filter = state.ownPagesFilter[topicId] || 'alle';
+    var chips = document.createElement('div');
+    chips.className = 'cvz-weeks-preset-picker cvz-own-pages-filter';
+    OWN_PAGE_FILTERS.forEach(function (f) {
+      var n = f[0] === 'alle' ? pages.length : pages.filter(function (p) { return ownPageMatchesFilter(p, f[0]); }).length;
+      if (n === 0 && f[0] !== filter) return;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cvz-weeks-preset-btn' + (filter === f[0] ? ' cvz-weeks-preset-btn-active' : '');
+      btn.setAttribute('data-cvz-own-filter', f[0]);
+      btn.textContent = f[1] + ' (' + n + ')';
+      btn.addEventListener('click', function () { state.ownPagesFilter[topicId] = f[0]; render(); });
+      chips.appendChild(btn);
+    });
+    section.appendChild(chips);
+
+    var shown = pages.filter(function (p) { return ownPageMatchesFilter(p, filter); });
+    var table = document.createElement('table');
+    table.className = 'cvz-table cvz-own-pages-table';
+    var html = '<thead><tr><th>Seite</th><th>ChatGPT</th><th>Gemini</th><th style="text-align:right;">Antworten</th></tr></thead><tbody>';
+    shown.forEach(function (p) {
+      var openKey = topicId + '|' + p.page;
+      var open = !!state.ownPagesOpen[openKey];
+      var extra = [];
+      if (p.prompts_total) extra.push(p.prompts_total + (p.prompts_total === 1 ? ' Frage' : ' Fragen'));
+      if (p.passages && p.passages.length) extra.push(p.passages.length + (p.passages.length === 1 ? ' Textstelle' : ' Textstellen'));
+      html += '<tr class="cvz-own-page-row" data-cvz-own-page="' + escapeHtml(p.page) + '" style="cursor:pointer;">' +
+        '<td><a href="' + escapeHtml(p.page) + '" target="_blank" rel="noopener" style="word-break:break-all;">' + escapeHtml(p.path) + '</a>' +
+        (extra.length ? '<span style="display:block;font-size:11px;color:var(--cvz-text-muted,#8b98a5);text-decoration:underline dotted;">' +
+          (open ? '▾ ' : '▸ ') + escapeHtml(extra.join(' · ')) + '</span>' : '') + '</td>' +
+        ownPageChannelCell((p.channels || {}).chat_gpt) + ownPageChannelCell((p.channels || {}).gemini) +
+        '<td style="text-align:right;font-weight:600;">' + p.answers + '</td></tr>';
+      if (open) {
+        var inner = '';
+        if (p.passages && p.passages.length) {
+          inner += '<p style="margin:0 0 4px;font-weight:600;">Zitierte Textstellen</p><ul style="margin:0 0 8px;padding-left:18px;">';
+          p.passages.forEach(function (ps) {
+            inner += '<li class="cvz-own-page-passage">„' + escapeHtml(ps.text) + '“ <span style="color:var(--cvz-text-muted,#8b98a5);font-size:11px;">' +
+              ps.count + '×, zuletzt ' + escapeHtml(ddmm(ps.last_seen)) + '</span></li>';
+          });
+          inner += '</ul>';
+        }
+        if (p.prompts && p.prompts.length) {
+          inner += '<p style="margin:0 0 4px;font-weight:600;">Bei diesen Fragen verlinkt</p><ul style="margin:0;padding-left:18px;">';
+          p.prompts.forEach(function (pr) {
+            var chs = (pr.channels || []).map(function (c) { return c === 'chat_gpt' ? 'ChatGPT' : c === 'gemini' ? 'Gemini' : c; }).join(', ');
+            inner += '<li class="cvz-own-page-prompt">' + escapeHtml(pr.prompt_text || '(Frage ohne Text)') +
+              ' <span style="color:var(--cvz-text-muted,#8b98a5);font-size:11px;">' + pr.answers + (pr.answers === 1 ? ' Antwort' : ' Antworten') + ', ' + escapeHtml(chs) + '</span></li>';
+          });
+          if (p.prompts_total > p.prompts.length) inner += '<li style="color:var(--cvz-text-muted,#8b98a5);">und ' + (p.prompts_total - p.prompts.length) + ' weitere</li>';
+          inner += '</ul>';
+        }
+        html += '<tr class="cvz-own-page-detail"><td colspan="4" style="background:var(--cvz-surface-2,rgba(255,255,255,.03));">' + inner + '</td></tr>';
+      }
+    });
+    html += '</tbody>';
+    table.innerHTML = html;
+    table.addEventListener('click', function (ev) {
+      if (ev.target.closest('a')) return;
+      var row = ev.target.closest('[data-cvz-own-page]');
+      if (!row) return;
+      var k = topicId + '|' + row.getAttribute('data-cvz-own-page');
+      state.ownPagesOpen[k] = !state.ownPagesOpen[k];
+      render();
+    });
+    section.appendChild(table);
+    return section;
   }
 
   function renderRetrievedView(topicId, detail) {
