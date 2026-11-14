@@ -215,6 +215,7 @@
     ownPagesFilter: {},        // { [topicId]: 'alle' | 'neu' | 'aktiv' | 'nicht_mehr' | 'einmalig' }
     ownPagesOpen: {},          // { [topicId + '|' + page]: true } aufgeklappte Zeile
     ownPagesShowAll: {},       // NEU (14.11.2026): { [topicId]: true } alle Seiten statt der ersten 5
+    apTableShowAll: {},        // NEU (14.11.2026): { [topicId|item]: true } alle Zeilen der Maßnahmen-Tabelle
     journeyCardMoreOpen: {},   // NEU (14.11.2026): { [topicId + '|' + phase]: true } Details einer Phasen-Karte offen
     ownPagesWindowCache: {},   // NEU (14.11.2026): { [topicId + '|' + Tage]: Antwort } für die Journey (Seiten je Frage)
     loadingOwnPagesWindow: {},
@@ -13912,6 +13913,11 @@
       '.cvz-jc-more { margin-top: 10px; border-top: 1px solid var(--cvz-border); padding-top: 8px; }' +
       '.cvz-jc-more > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--cvz-teal); min-height: 28px; display: flex; align-items: center; }' +
       '.cvz-own-pages-legend { margin: 0 0 10px; font-size: 12px; color: var(--cvz-text-muted); line-height: 1.6; }' +
+      '.cvz-ap-table-intro { margin: 0 0 6px; font-size: 12px; color: var(--cvz-text-muted); line-height: 1.5; }' +
+      '.cvz-ap-table-foot { margin: 6px 0 0; font-size: 11px; color: var(--cvz-text-muted); line-height: 1.5; }' +
+      '.cvz-ap-cell-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }' +
+      '.cvz-ap-table-more { margin-top: 6px; padding: 0; background: none; border: none; cursor: pointer; font: inherit; font-size: 12px; color: var(--cvz-teal); }' +
+      '.cvz-ap-table-more:hover { text-decoration: underline; }' +
       '.cvz-own-pages-legend strong { color: var(--cvz-text); font-weight: 600; }' +
       '.cvz-own-pages-legend .cvz-own-pages-legend-new { color: var(--cvz-teal); }' +
       '.cvz-own-pages-legend .cvz-own-pages-legend-muted { color: var(--cvz-text-muted); }' +
@@ -17467,9 +17473,17 @@
       return t.length >= 15 && text.indexOf(t) !== -1;
     });
   }
+  // NEU (14.11.2026): Positionsband der Google-Maßnahmen, wie im Backend (action_plan.py: GSC_POSITION_MIN/MAX).
+  var AP_GSC_POSITION_MIN = 6;
+  var AP_GSC_POSITION_MAX = 30;
+  // NEU (14.11.2026): so viele Zeilen sind sichtbar, der Rest auf Klick.
+  var AP_TABLE_COMPACT_ROWS = 5;
+
   function _buildSupportingDataTable(catKey, phase, detail, item) {
     var rows = [];
     var headers = [];
+    var intro = '';
+    var footnote = '';
 
     if (catKey === 'ki_sichtbarkeit') {
       var prompts = (detail.prompts || []).filter(function (p) {
@@ -17491,9 +17505,29 @@
       var kws = (detail.search_queries || []).filter(function (q) {
         return (phase === 'alle_phasen' || q.messymiddle_phase === phase)
           && q.gsc_position != null;
-      }).sort(function (a, b) { return (a.gsc_position || 999) - (b.gsc_position || 999); });
+      });
       kws = _pickGscRowsForItem(kws, item);
+      // GEÄNDERT (14.11.2026): Zeigen die Keywords auf dieselbe Seite wie der Beleg, kamen ALLE Anfragen
+      // dieser Seite in die Tabelle (über 200, viele schon auf Position 1). Jetzt nur das Positionsband,
+      // das auch der Aktionsplan auswertet (action_plan.py: GSC_POSITION_MIN/MAX), nach Impressionen sortiert.
+      var inBand = kws.filter(function (q) {
+        var pos = Number(q.gsc_position);
+        return pos >= AP_GSC_POSITION_MIN && pos <= AP_GSC_POSITION_MAX;
+      }).sort(function (a, b) {
+        return (Number(b.gsc_impressions) || 0) - (Number(a.gsc_impressions) || 0) ||
+          (Number(a.gsc_position) || 999) - (Number(b.gsc_position) || 999);
+      });
+      var outOfBand = kws.length - inBand.length;
+      kws = inBand;
       if (kws.length === 0) return null;
+      var impSum = kws.reduce(function (n, q) { return n + (Number(q.gsc_impressions) || 0); }, 0);
+      intro = kws.length + (kws.length === 1 ? ' Suchanfrage' : ' Suchanfragen') + ' auf Position ' +
+        AP_GSC_POSITION_MIN + ' bis ' + AP_GSC_POSITION_MAX + ', zusammen ' + impSum.toLocaleString('de-DE') +
+        ' Impressionen. Sortiert nach Impressionen.';
+      if (outOfBand > 0) {
+        footnote = 'Ausgeblendet: ' + outOfBand + (outOfBand === 1 ? ' weitere Anfrage' : ' weitere Anfragen') +
+          ' dieser Seite auf Position 1 bis ' + (AP_GSC_POSITION_MIN - 1) + ' oder hinter ' + AP_GSC_POSITION_MAX + '.';
+      }
       headers = ['Keyword', 'Position', 'Impressionen'];
       rows = kws.map(function (q) {
         return [
@@ -17536,6 +17570,14 @@
     lbl.style.cssText = 'margin:0 0 6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--cvz-text-muted,#8b98a5);';
     lbl.textContent = 'Zugrunde liegende Daten';
     wrapper.appendChild(lbl);
+    if (intro) {
+      var introEl = document.createElement('p');
+      introEl.className = 'cvz-ap-table-intro';
+      introEl.textContent = intro;
+      wrapper.appendChild(introEl);
+    }
+    var tableKey = (state.activeTopicId || '') + '|' + ((item && (item.item_key || item.title)) || catKey);
+    var showAll = !!state.apTableShowAll[tableKey];
 
     var tbl = document.createElement('table');
     tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;';
@@ -17559,11 +17601,25 @@
     rows.forEach(function (row, ri) {
       var tr = document.createElement('tr');
       tr.style.cssText = (ri % 2 === 0 ? 'background:transparent;' : 'background:rgba(255,255,255,.03);');
+      if (ri >= AP_TABLE_COMPACT_ROWS) {
+        tr.className = 'cvz-ap-row-extra';
+        if (!showAll) tr.style.display = 'none';
+      }
       row.forEach(function (cell, ci) {
         var td = document.createElement('td');
         var base = 'padding:5px 8px;color:var(--cvz-text-muted,#8b98a5);vertical-align:top;';
         if (ci === 0) {
+          // GEÄNDERT (14.11.2026): lange Fragen höchstens zwei Zeilen, ganzer Text im Tooltip.
           td.style.cssText = base + 'text-align:left;word-break:break-word;max-width:220px;';
+          if (!textTable) {
+            var clamp = document.createElement('span');
+            clamp.className = 'cvz-ap-cell-clamp';
+            clamp.title = cell;
+            clamp.textContent = cell;
+            td.appendChild(clamp);
+            tr.appendChild(td);
+            return;
+          }
         } else if (textTable) {
           td.style.cssText = base + 'text-align:left;word-break:break-word;min-width:140px;';
         } else {
@@ -17580,6 +17636,32 @@
     scrollWrap.style.cssText = 'overflow-x:auto;min-width:0;max-width:100%;border:1px solid var(--cvz-border,#232b36);border-radius:0;';
     scrollWrap.appendChild(tbl);
     wrapper.appendChild(scrollWrap);
+
+    // NEU (14.11.2026): erst AP_TABLE_COMPACT_ROWS Zeilen, der Rest auf Klick (ohne neues Zeichnen der Seite).
+    if (rows.length > AP_TABLE_COMPACT_ROWS) {
+      var more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'cvz-ap-table-more';
+      var label = function (open) {
+        return open ? 'Weniger anzeigen' : 'Alle ' + rows.length + ' anzeigen';
+      };
+      more.textContent = label(showAll);
+      more.addEventListener('click', function () {
+        var open = !state.apTableShowAll[tableKey];
+        if (open) state.apTableShowAll[tableKey] = true; else delete state.apTableShowAll[tableKey];
+        Array.prototype.forEach.call(tbody.querySelectorAll('.cvz-ap-row-extra'), function (tr) {
+          tr.style.display = open ? '' : 'none';
+        });
+        more.textContent = label(open);
+      });
+      wrapper.appendChild(more);
+    }
+    if (footnote) {
+      var footEl = document.createElement('p');
+      footEl.className = 'cvz-ap-table-foot';
+      footEl.textContent = footnote;
+      wrapper.appendChild(footEl);
+    }
     return wrapper;
   }
 
@@ -17945,14 +18027,20 @@
                 pgUrlRow.appendChild(pgUrlVal);
                 evDiv.appendChild(pgUrlRow);
               }
-              if (ev.serp_top3 && ev.serp_top3.length > 0) {
+              // GEÄNDERT (14.11.2026): ältere Pläne enthalten "google.com" (Google-Weiterleitung, siehe Backend
+              // domain_utils.serp_item_domain). Diese Einträge sind keine echten Treffer und fallen raus.
+              var serpTop = (ev.serp_top3 || []).filter(function (dom) {
+                var d = String(dom || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+                return d && !/^google\.[a-z.]+$/.test(d);
+              });
+              if (serpTop.length > 0) {
                 var serpRowLbl = document.createElement('p');
                 serpRowLbl.style.cssText = 'margin:0 0 5px;font-size:11px;font-weight:600;color:var(--cvz-text-muted,#8b98a5);';
                 serpRowLbl.textContent = 'Top-Ergebnisse auf der SERP:';
                 evDiv.appendChild(serpRowLbl);
                 var serpChips = document.createElement('div');
                 serpChips.style.cssText = 'display:flex;flex-wrap:wrap;gap:5px;';
-                ev.serp_top3.forEach(function (dom) {
+                serpTop.forEach(function (dom) {
                   var chip = document.createElement('span');
                   chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;background:var(--cvz-navy,#0d1117);border:1px solid var(--cvz-border,#232b36);border-radius:0;color:var(--cvz-text-muted,#8b98a5);';
                   chip.innerHTML = '<img src="https://www.google.com/s2/favicons?sz=12&domain=' + encodeURIComponent(dom) + '" style="width:12px;height:12px;flex-shrink:0;" onerror="this.style.display=\'none\'">' + escapeHtml(dom);
