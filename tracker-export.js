@@ -109,6 +109,8 @@
     var ap = detail.action_plan || {};
     var items = Array.isArray(ap.items) ? ap.items : [];
     var done = Array.isArray(ap.completed_item_indices) ? ap.completed_item_indices : [];
+    // NEU (15.11.2026): verworfene Maßnahmen (setzt der Maßnahmenplan im Frontend) nicht exportieren
+    var discarded = Array.isArray(ap.discarded_item_indices) ? ap.discarded_item_indices : [];
 
     var counts = { high: 0, normal: 0, low: 0, outreach: 0 };
     var tasks = [];
@@ -120,6 +122,7 @@
     items.forEach(function (item, idx) {
       if (!item || !str(item.title)) return;
       if (done.indexOf(idx) !== -1) { completedSkipped++; return; }
+      if (discarded.indexOf(idx) !== -1) return;
       var ph = PHASE_LABEL[item.phase] ? item.phase : 'alle_phasen';
       (byPhase[ph] = byPhase[ph] || []).push(item);
     });
