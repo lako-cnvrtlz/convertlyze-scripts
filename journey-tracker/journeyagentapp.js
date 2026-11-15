@@ -17403,8 +17403,17 @@
 
     var foot = document.createElement('p');
     foot.className = 'cvz-bp-foot';
-    var notes = ['Zahl rechts: in wie vielen Antworten die Seite verlinkt wurde. ' +
-      'Verlinkt eine Antwort mehrere Seiten desselben Wettbewerbers, zählt nur die erste.'];
+    var notes = ['Zahl rechts: in wie vielen Antworten die Seite verlinkt wurde.'];
+    // GEÄNDERT (15.11.2026): Seit ai_runs.cited_urls zählen alle verlinkten Seiten einer Antwort.
+    // Ältere Antworten werden nachgerechnet, bis dahin nur die erste Seite je Wettbewerber.
+    if (cp.runs_all_urls === undefined) {
+      notes.push('Verlinkt eine Antwort mehrere Seiten desselben Wettbewerbers, zählt nur die erste.');
+    } else {
+      var fullRuns = ((cp.runs_all_urls || {})[ch] || {})[phase] || 0;
+      if (fullRuns < runsTotal) {
+        notes.push('Für ' + (runsTotal - fullRuns) + ' von ' + runsTotal + ' Antworten zählt bisher nur die erste verlinkte Seite je Wettbewerber, sie werden gerade nachgerechnet.');
+      }
+    }
     if (phase === 'total') notes.push('Fragen ohne Phase zählen nur unter „Alle Phasen“.');
     notes.push('Neu hinzugefügte Wettbewerber erscheinen auch für ältere Antworten, sobald sie beobachtet werden.');
     foot.textContent = notes.join(' ');
