@@ -139,6 +139,8 @@
     openGooglePhases: {},   // NEU (08.11.2026): aufgeklappte Keyword-Listen je Thema und Phase
     rcPhaseByTopic: {},     // NEU (08.11.2026): gewählte Phase im Wettbewerber-Liniendiagramm
     rcInit: {},             // NEU (08.11.2026): Standardauswahl der Linien wurde schon gesetzt
+    cpPhaseByTopic: {},     // NEU (14.11.2026): gewählte Phase bei "Welche Seiten der Wettbewerber werden verlinkt?"
+    cpOpen: {},             // NEU (14.11.2026): aufgeklappte Seitenlisten je Thema und Wettbewerber
     // NEU (21.10.2026): Verlauf-Tab, gewählte Phase ('total' = alle Phasen) und
     // ob die Wochentabelle aufgeklappt ist.
     rollingPhaseByTopic: {},
@@ -2759,6 +2761,14 @@
     if (rollingPhaseBtn) {
       state.rollingPhaseByTopic[rollingPhaseBtn.getAttribute('data-cvz-rolling-topic')] =
         rollingPhaseBtn.getAttribute('data-cvz-rolling-phase');
+      render();
+      return;
+    }
+
+    // NEU (14.11.2026): Phase bei den verlinkten Seiten der Wettbewerber.
+    var cpPhaseBtn = event.target.closest('[data-cvz-cp-phase]');
+    if (cpPhaseBtn) {
+      state.cpPhaseByTopic[cpPhaseBtn.getAttribute('data-cvz-cp-topic')] = cpPhaseBtn.getAttribute('data-cvz-cp-phase');
       render();
       return;
     }
@@ -14324,6 +14334,15 @@
       '.cvz-bp-split { display: block; font-size: 11px; }' +
       '.cvz-bp-msg { margin: 8px 0 14px; font-size: 13px; line-height: 1.5; color: var(--cvz-text); }' +
       '.cvz-bp-foot { margin: 12px 0 0; font-size: 11px; line-height: 1.5; color: var(--cvz-text-muted); }' +
+      // NEU (14.11.2026): verlinkte Seiten der Wettbewerber
+      '.cvz-cp-comp { padding: 10px 0; border-bottom: 1px solid var(--cvz-border); }' +
+      '.cvz-cp-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 4px; }' +
+      '.cvz-cp-meta { flex: none; font-size: 12px; color: var(--cvz-text-muted); white-space: nowrap; }' +
+      '.cvz-cp-meta b { color: var(--cvz-text); font-size: 14px; }' +
+      '.cvz-cp-page { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; font-size: 13px; padding: 2px 0 2px 26px; }' +
+      '.cvz-cp-page .cvz-own-page-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; word-break: normal; }' +
+      '.cvz-cp-page-n { flex: none; font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-cp-more > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--cvz-teal); min-height: 28px; display: flex; align-items: center; padding-left: 26px; }' +
       '@media (max-width: 640px) { .cvz-bp-row { grid-template-columns: 1fr auto; } .cvz-bp-row .cvz-bp-bar { grid-column: 1 / -1; grid-row: 2; } }' +
       '.cvz-journey-cov-note { margin: 6px 0 0; font-size: 11px; line-height: 1.4; color: var(--cvz-text-muted); }' +
       '@media (max-width: 640px) { .cvz-vf-row { grid-template-columns: 1fr auto; } .cvz-vf-row .cvz-vf-bar { grid-column: 1 / -1; grid-row: 2; } .cvz-vf-row .cvz-vf-engines { display: none; } }' +
@@ -16980,6 +16999,11 @@
     var bPresence = renderBrandPresence(_jc, detail);
     if (bPresence) wrap.appendChild(bPresence);
 
+    // NEU (14.11.2026): welche Seiten der Wettbewerber verlinkt werden, nach Phase filterbar
+    // (dashboard.py: competitor_pages).
+    var cPages = renderCompetitorPages(topicId, _jc);
+    if (cPages) wrap.appendChild(cPages);
+
     // NEU (08.11.2026): Liniendiagramm über die Zeit, eure Domain und Wettbewerber, nach Phase filterbar.
     var cRollingSection = renderCompetitorRolling(topicId, data, detail);
     if (cRollingSection) wrap.appendChild(cRollingSection);
@@ -17266,6 +17290,123 @@
     if (evaluated < d.runs_total) {
       notes.push('Ausgewertet: ' + evaluated + ' von ' + d.runs_total + ' Antworten.');
     }
+    foot.textContent = notes.join(' ');
+    section.appendChild(foot);
+    return section;
+  }
+
+  // NEU (14.11.2026): "Welche Seiten der Wettbewerber werden verlinkt?" Je beobachtetem Wettbewerber die
+  // verlinkten URLs mit Anzahl der Antworten, im selben Zeitraum wie "Verlinkt oder genannt?". Folgt dem
+  // Kanal-Umschalter, Phase über eigene Chips. Gefiltert wird im Browser, die Daten kommen komplett mit
+  // (journey_comparison.competitor_pages, dashboard.py: _compute_competitor_pages).
+  var CP_PAGES_VISIBLE = 5;
+
+  function renderCompetitorPages(topicId, jc) {
+    var cp = jc && jc.competitor_pages;
+    if (!cp || !cp.competitors_tracked) return null;
+    var ch = activeChannel();
+    var phase = state.cpPhaseByTopic[topicId] || 'total';
+    var runsTotal = ((cp.runs || {})[ch] || {})[phase] || 0;
+    function cnt(counts) { return ((counts || {})[ch] || {})[phase] || 0; }
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section cvz-cp';
+    section.style.marginTop = '28px';
+
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Welche Seiten der Wettbewerber werden verlinkt?';
+    head.appendChild(heading);
+    head.appendChild(makeTip(
+      'Gezählt wird je Antwort der letzten ' + cp.window_days + ' Tage: In wie vielen Antworten hat die KI die Seite als Quelle verlinkt. ' +
+      'Über die Phase seht ihr, mit welchen Inhalten eure Wettbewerber in einer Kaufphase sichtbar sind. ' +
+      'Das zeigt, welche Seitentypen und Themen bei euch noch fehlen könnten.'
+    ));
+    section.appendChild(head);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '8px';
+    sub.textContent = 'Beobachtete Wettbewerber, letzte ' + cp.window_days + ' Tage (' + activeChannelLabel() + ').';
+    section.appendChild(sub);
+
+    var chips = document.createElement('div');
+    chips.className = 'cvz-persona-filter';
+    chips.style.margin = '8px 0 12px';
+    [['total', 'Alle Phasen']].concat(PHASE_ORDER.map(function (ph) { return [ph, PHASE_LABELS[ph]]; })).forEach(function (pair) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cvz-persona-chip' + (phase === pair[0] ? ' cvz-persona-chip-active' : '');
+      if (pair[0] !== 'total') b.style.borderLeftColor = PHASE_COLORS[pair[0]] || '';
+      b.setAttribute('data-cvz-cp-phase', pair[0]);
+      b.setAttribute('data-cvz-cp-topic', topicId);
+      b.setAttribute('aria-pressed', phase === pair[0] ? 'true' : 'false');
+      b.textContent = pair[1];
+      chips.appendChild(b);
+    });
+    section.appendChild(chips);
+
+    var rows = (cp.competitors || []).map(function (c) {
+      var pages = (c.pages || []).map(function (pg) { return { page: pg.page, path: pg.path, n: cnt(pg.counts) }; })
+        .filter(function (pg) { return pg.n > 0; })
+        .sort(function (a, b) { return (b.n - a.n) || a.path.localeCompare(b.path); });
+      return { domain: c.domain, n: cnt(c.counts), pages: pages };
+    }).filter(function (c) { return c.n > 0; })
+      .sort(function (a, b) { return (b.n - a.n) || a.domain.localeCompare(b.domain); });
+
+    if (!runsTotal || !rows.length) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = !runsTotal
+        ? 'Für diese Auswahl liegen noch keine Antworten vor.'
+        : (phase === 'total'
+          ? 'In ' + runsTotal + ' Antworten hat keine KI eine Seite eurer beobachteten Wettbewerber verlinkt.'
+          : 'In der Phase ' + PHASE_LABELS[phase] + ' (' + runsTotal + ' Antworten) hat keine KI eine Seite eurer beobachteten Wettbewerber verlinkt.');
+      section.appendChild(none);
+      return section;
+    }
+
+    function fav(dom) {
+      return '<img src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(dom) +
+        '" width="18" height="18" alt="" onerror="this.style.visibility=\'hidden\'">';
+    }
+    function pageRow(pg) {
+      return '<div class="cvz-cp-page"><a class="cvz-own-page-link" href="' + escapeHtml(pg.page) + '" target="_blank" rel="noopener" title="' +
+        escapeHtml(pg.page) + '">' + escapeHtml(pg.path) + '</a><span class="cvz-cp-page-n">' + pg.n + '</span></div>';
+    }
+
+    rows.forEach(function (c) {
+      var box = document.createElement('div');
+      box.className = 'cvz-cp-comp';
+      var pageWord = c.pages.length === 1 ? 'Seite' : 'Seiten';
+      box.innerHTML =
+        '<div class="cvz-cp-head"><span class="cvz-bp-name" title="Beobachteter Wettbewerber">' + fav(c.domain) +
+          '<span style="color:#e0a458;">' + escapeHtml(c.domain) + '</span></span>' +
+        '<span class="cvz-cp-meta"><b>' + c.n + '</b>/' + runsTotal + ' Antworten · ' + c.pages.length + ' ' + pageWord + '</span></div>' +
+        c.pages.slice(0, CP_PAGES_VISIBLE).map(pageRow).join('');
+      if (c.pages.length > CP_PAGES_VISIBLE) {
+        var openKey = topicId + '|' + c.domain;
+        var det = document.createElement('details');
+        det.className = 'cvz-cp-more';
+        if (state.cpOpen[openKey]) det.open = true;
+        det.innerHTML = '<summary>' + (c.pages.length - CP_PAGES_VISIBLE) + ' weitere ' +
+          (c.pages.length - CP_PAGES_VISIBLE === 1 ? 'Seite' : 'Seiten') + '</summary>' +
+          c.pages.slice(CP_PAGES_VISIBLE).map(pageRow).join('');
+        det.addEventListener('toggle', function () { state.cpOpen[openKey] = det.open; });
+        box.appendChild(det);
+      }
+      section.appendChild(box);
+    });
+
+    var foot = document.createElement('p');
+    foot.className = 'cvz-bp-foot';
+    var notes = ['Zahl rechts: in wie vielen Antworten die Seite verlinkt wurde. ' +
+      'Verlinkt eine Antwort mehrere Seiten desselben Wettbewerbers, zählt nur die erste.'];
+    if (phase === 'total') notes.push('Fragen ohne Phase zählen nur unter „Alle Phasen“.');
+    notes.push('Neu hinzugefügte Wettbewerber erscheinen auch für ältere Antworten, sobald sie beobachtet werden.');
     foot.textContent = notes.join(' ');
     section.appendChild(foot);
     return section;
