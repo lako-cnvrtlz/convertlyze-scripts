@@ -266,9 +266,18 @@
     dashboardDataCache: {},
     isLoadingDashboard: false,
     isSubmittingContentChange: false,
-    contentChangeDraft: { changed_at: '', change_type: 'neue_seite', description: '', url: '' },
+    contentChangeDraft: { changed_at: '', change_type: 'neue_seite', description: '', url: '', status: 'erledigt' },
     contentChangesCache: {},
     isLoadingContentChanges: false,
+    // NEU (15.11.2026): Stati und Kommentare der Maßnahmen (GET /topics/{id}/action-items/activity)
+    actionActivityCache: {},
+    loadingActionActivity: {},
+    actionCommentOpen: {},
+    actionCommentDrafts: {},
+    actionStatusPending: {},
+    actionSaving: {},
+    ownMeasuresDoneOpen: false,
+    discardedOpen: false,
     journeyActivePhase: null,
     // NEU (17.09.2026): Phase-Filter fuer Content-Luecken und Quellen-Analyse
     gapPhaseFilter: null,
@@ -388,6 +397,8 @@
     }
     // NEU (14.11.2026): Übersicht braucht eure Seiten (Kennzahl, Bewegungen)
     if (state.activeSubTab === 'situation') maybeLoadOwnPages(topicId);
+    // NEU (15.11.2026): Stati und Kommentare im Maßnahmenplan
+    if (state.activeSubTab === 'massnahmen') maybeLoadActionActivity(topicId);
   }
 
   // Banner für Themen, deren Report noch nicht geöffnet werden darf.
@@ -1120,6 +1131,9 @@
             url: d.url ? d.url.trim() : null,
             linked_search_query_ids: state.changelogDraftLinkedIds.keywords.slice(),
             linked_prompt_ids: state.changelogDraftLinkedIds.prompts.slice(),
+            // NEU (15.11.2026): Status der eigenen Maßnahme. Nur bei Abweichung schicken, damit ein
+            // Backend ohne Stati-SQL weiter funktioniert.
+            status: d.status && d.status !== 'erledigt' ? d.status : undefined,
           },
         });
         var existing = state.contentChangesCache[topicId] || [];
@@ -1139,7 +1153,7 @@
         state.changelogLinkSectionOpen = { keywords: false, prompts: false };
         state.contentChangesCache[topicId] = [mockChange].concat(state.contentChangesCache[topicId] || []);
       }
-      state.contentChangeDraft = { changed_at: '', change_type: 'neue_seite', description: '', url: '' };
+      state.contentChangeDraft = { changed_at: '', change_type: 'neue_seite', description: '', url: '', status: 'erledigt' };
       state.changelogDraftLinkedIds = { keywords: [], prompts: [] };
       state.changelogLinkSectionOpen = { keywords: false, prompts: false };
     } catch (e) {
@@ -5950,7 +5964,7 @@
     if (stepNotice) wrap.appendChild(stepNotice);
 
     // Content-Änderungen (mit verlinkten Keywords/Prompts) als Marker aufbereiten
-    var ccMarkers = (state.contentChangesCache[state.activeTopicId] || []).map(function (ch) {
+    var ccMarkers = doneContentChanges(state.activeTopicId).map(function (ch) {
       return {
         linked_search_query_ids: ch.linked_search_query_ids || [],
         linked_prompt_ids: ch.linked_prompt_ids || [],
@@ -12598,14 +12612,15 @@
     heading.className = 'cvz-section-label';
     // GEÄNDERT (02.10.2026): steht jetzt im Aktionsplan-Tab (zentrale Stelle
     // für alles, was ihr tut). Erledigte Plan-Maßnahmen landen automatisch hier.
-    heading.textContent = 'Umgesetzte Maßnahmen und Ereignisse';
+    // GEÄNDERT (15.11.2026): eigene Maßnahmen können auch geplant oder in Arbeit sein
+    heading.textContent = 'Eigene Maßnahmen und Ereignisse';
     section.appendChild(heading);
 
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '12px';
-    sub.textContent = 'Tragt ein, was ihr umgesetzt habt oder was passiert ist, auch Maßnahmen außerhalb des Plans (z. B. Relaunch, Kampagne, Pressebericht). ' +
-      'Als erledigt markierte Maßnahmen aus dem Plan erscheinen hier automatisch. Oben in diesem Tab seht ihr, wie sich die Sichtbarkeit danach entwickelt hat.';
+    sub.textContent = 'Tragt ein, was ihr umgesetzt habt, vorhabt oder was passiert ist, auch Maßnahmen außerhalb des Plans (z. B. Relaunch, Kampagne, Pressebericht). ' +
+      'Nur erledigte Einträge zählen in der Wirkungsmessung, mit dem Datum der Umsetzung.';
     section.appendChild(sub);
 
     // Form
@@ -12639,6 +12654,22 @@
       state.contentChangeDraft.change_type = typeSelect.value;
     });
     formRow.appendChild(typeSelect);
+
+    // NEU (15.11.2026): Status beim Eintragen (Verworfen ergibt hier keinen Sinn)
+    var statusSelect = document.createElement('select');
+    statusSelect.className = 'cvz-picker-select';
+    statusSelect.setAttribute('aria-label', 'Status');
+    ['erledigt', 'in_arbeit', 'offen', 'zurueckgestellt'].forEach(function (st) {
+      var opt = document.createElement('option');
+      opt.value = st;
+      opt.textContent = ACTION_STATUS_LABELS[st];
+      if (st === (d.status || 'erledigt')) opt.selected = true;
+      statusSelect.appendChild(opt);
+    });
+    statusSelect.addEventListener('change', function () {
+      state.contentChangeDraft.status = statusSelect.value;
+    });
+    formRow.appendChild(statusSelect);
 
     var descInput = document.createElement('input');
     descInput.type = 'text';
@@ -12692,7 +12723,7 @@
       var hintEl = document.createElement('p');
       hintEl.className = 'cvz-card-placeholder-text';
       hintEl.style.marginTop = '12px';
-      hintEl.textContent = 'Eingetragene Änderungen erscheinen unten in der Änderungs-Chronik.';
+      hintEl.textContent = 'Erledigte Einträge erscheinen zusätzlich in der Änderungs-Chronik und als Markierung im Verlauf.';
       section.appendChild(hintEl);
     }
 
@@ -14356,6 +14387,34 @@
       '.cvz-done-verdict { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border: 1px solid; margin-top: 8px; }' +
       '.cvz-done-evidence { margin: 6px 0 0; font-size: 12px; line-height: 1.5; color: var(--cvz-text-muted); }' +
       '.cvz-done-undo { font-family: inherit; font-size: 11px; padding: 3px 9px; background: transparent; border: 1px solid var(--cvz-border); color: var(--cvz-text-muted); cursor: pointer; white-space: nowrap; }' +
+      // NEU (15.11.2026): Status und Kommentare der Maßnahmen
+      '.cvz-ast { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }' +
+      '.cvz-ast select { font-family: inherit; font-size: 11px; font-weight: 600; padding: 3px 6px; min-height: 28px; background: var(--cvz-navy, #0d1117); color: var(--cvz-text); border: 1px solid var(--cvz-border); border-radius: 0; cursor: pointer; }' +
+      '.cvz-ast select[data-status="in_arbeit"] { border-color: #5aacd2; color: #5aacd2; }' +
+      '.cvz-ast select[data-status="zurueckgestellt"] { border-color: #c98e2a; color: #c98e2a; }' +
+      '.cvz-ast select[data-status="verworfen"] { border-color: #8b98a5; color: #8b98a5; }' +
+      '.cvz-ast select[data-status="erledigt"] { border-color: rgba(78,198,138,.6); color: #4ec68a; }' +
+      '.cvz-ast-confirm { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; width: 100%; margin-top: 6px; }' +
+      '.cvz-ast-confirm input { font-family: inherit; font-size: 12px; padding: 5px 8px; min-height: 30px; background: var(--cvz-navy, #0d1117); color: var(--cvz-text); border: 1px solid var(--cvz-border); border-radius: 0; flex: 1 1 200px; min-width: 0; }' +
+      '.cvz-ast-confirm input[type="date"] { flex: 0 0 auto; }' +
+      '.cvz-ast-btn { font-family: inherit; font-size: 12px; font-weight: 600; padding: 5px 10px; min-height: 30px; background: transparent; color: var(--cvz-teal); border: 1px solid var(--cvz-teal); border-radius: 0; cursor: pointer; }' +
+      '.cvz-ast-btn.is-quiet { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
+      '.cvz-ast-reason { margin: 0; font-size: 12px; line-height: 1.5; color: var(--cvz-text-muted); }' +
+      '.cvz-ac { border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-ac-toggle { font-family: inherit; font-size: 12px; font-weight: 600; color: var(--cvz-teal); background: none; border: 0; padding: 10px 16px; min-height: 36px; cursor: pointer; text-align: left; width: 100%; }' +
+      '.cvz-ac-body { padding: 0 16px 14px; display: flex; flex-direction: column; gap: 8px; }' +
+      '.cvz-ac-entry { font-size: 13px; line-height: 1.5; }' +
+      '.cvz-ac-entry.is-status { font-size: 12px; color: var(--cvz-text-muted); font-style: italic; }' +
+      '.cvz-ac-meta { font-size: 11px; color: var(--cvz-text-muted); margin-right: 6px; }' +
+      '.cvz-ac-text { white-space: pre-wrap; word-break: break-word; }' +
+      '.cvz-ac-del { font-family: inherit; font-size: 11px; color: var(--cvz-text-muted); background: none; border: 0; padding: 0 0 0 6px; cursor: pointer; text-decoration: underline; }' +
+      '.cvz-ac-form { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }' +
+      '.cvz-ac-form textarea { font-family: inherit; font-size: 13px; padding: 7px 9px; min-height: 38px; flex: 1 1 240px; min-width: 0; resize: vertical; background: var(--cvz-navy, #0d1117); color: var(--cvz-text); border: 1px solid var(--cvz-border); border-radius: 0; }' +
+      '.cvz-am-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 6px; border: 1px solid var(--cvz-border); color: var(--cvz-text-muted); }' +
+      '.cvz-own-measure { padding: 0; overflow: hidden; }' +
+      '.cvz-own-measure-head { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; padding: 12px 16px; }' +
+      '.cvz-own-measure-title { margin: 0; font-weight: 600; line-height: 1.4; word-break: break-word; }' +
+      '.cvz-own-measure-meta { margin: 3px 0 0; font-size: 12px; color: var(--cvz-text-muted); }' +
       // NEU (21.10.2026): Abschnittskopf mit Button, Hinzufügen-Formular
       '.cvz-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }' +
       '.cvz-section-head .cvz-section-label { margin: 0; }' +
@@ -17583,7 +17642,7 @@
     } else {
       var complete = points.map(function (pt) { return !!pt.complete; });
       var xLabels = points.map(function (pt) { return (formatShortDate(pt.end) || pt.end).slice(0, 6); });
-      var markers = buildRollingMarkers(state.contentChangesCache[topicId] || [], points);
+      var markers = buildRollingMarkers(doneContentChanges(topicId), points);
       var card = document.createElement('div');
       card.className = 'cvz-card';
       card.innerHTML = buildRollingSvg(lines, xLabels, complete, { maxY: niceChartMax(maxVal), markers: markers, windowDays: cr.window_days });
@@ -17907,6 +17966,380 @@
   // NEU (16.09.2026): Aktionsplan-Tab liest jetzt detail.action_plan statt
   // detail.opportunities + detail.content_ideas. Claude generiert die Items
   // phasengerecht mit typisierten Evidence-Bloecken.
+  // =========================================================================
+  // NEU (15.11.2026): Stati und Kommentare für Maßnahmen (Maßnahmenplan und eigene Einträge).
+  // Backend: action_item_status.py, POST /topics/{id}/action-items/status, .../comments,
+  // GET /topics/{id}/action-items/activity. item_ref: "plan:<item_key>" oder "change:<id>".
+  // =========================================================================
+
+  var ACTION_STATUSES = ['offen', 'in_arbeit', 'zurueckgestellt', 'verworfen', 'erledigt'];
+  var ACTION_STATUS_LABELS = {
+    offen: 'Offen', in_arbeit: 'In Arbeit', zurueckgestellt: 'Zurückgestellt', verworfen: 'Verworfen', erledigt: 'Erledigt',
+  };
+
+  // Nur erledigte eigene Einträge sind umgesetzt: Markierungen im Verlauf, Änderungs-Chronik.
+  function isDoneContentChange(ch) {
+    return !ch || !ch.status || ch.status === 'erledigt';
+  }
+  function doneContentChanges(topicId) {
+    return (state.contentChangesCache[topicId] || []).filter(isDoneContentChange);
+  }
+
+  async function maybeLoadActionActivity(topicId) {
+    if (!topicId || CONFIG.useMockData) return;
+    if (state.actionActivityCache[topicId] || state.loadingActionActivity[topicId]) return;
+    state.loadingActionActivity[topicId] = true;
+    try {
+      state.actionActivityCache[topicId] = await apiFetch('/topics/' + topicId + '/action-items/activity');
+    } catch (e) {
+      console.warn('[CVZ Visibility] Stati/Kommentare der Maßnahmen nicht ladbar:', e);
+      // Älteres Backend oder Fehler: Maßnahmenplan wie bisher (nur offen/erledigt, keine Kommentare)
+      state.actionActivityCache[topicId] = { available: false, states: {}, comments: {} };
+    }
+    delete state.loadingActionActivity[topicId];
+    render();
+  }
+
+  function actionActivity(topicId) {
+    return state.actionActivityCache[topicId] || { available: false, states: {}, comments: {} };
+  }
+
+  function planItemRef(item, origIdx) {
+    return 'plan:' + (item.item_key || ('idx:' + origIdx));
+  }
+
+  // Erledigt kommt weiter aus completed_item_indices. Ein gespeichertes "erledigt" ohne Markierung
+  // (z. B. Markierung anderweitig aufgehoben) gilt als offen.
+  function planItemStatus(item, origIdx, completedIndices, activity) {
+    if (completedIndices.indexOf(origIdx) !== -1) return 'erledigt';
+    var st = (activity.states || {})[planItemRef(item, origIdx)];
+    if (st && st.status && st.status !== 'erledigt') return st.status;
+    return 'offen';
+  }
+
+  // body: { item_ref, status, reason?, item_index?, item_title?, item_phase?, done_at? }
+  async function setActionStatus(topicId, body) {
+    if (state.actionSaving[body.item_ref]) return;
+    state.actionSaving[body.item_ref] = true;
+    render();
+    try {
+      var resp = await apiFetch('/topics/' + topicId + '/action-items/status', { method: 'POST', body: body });
+      var act = state.actionActivityCache[topicId];
+      if (act && resp.state && body.item_ref.indexOf('plan:') === 0) {
+        act.states = act.states || {};
+        act.states[body.item_ref] = resp.state;
+      }
+      if (act && resp.comment) {
+        act.comments = act.comments || {};
+        (act.comments[body.item_ref] = act.comments[body.item_ref] || []).push(resp.comment);
+      }
+      // Erledigt-Toggle der Plan-Maßnahme: Caches wie in bindActionPlanToggle nachziehen
+      var tg = resp.toggle;
+      if (tg) {
+        var cached = state.topicDetailCache[topicId];
+        if (cached && cached.action_plan) cached.action_plan.completed_item_indices = tg.completed_item_indices || [];
+        if (tg.content_change && state.contentChangesCache[topicId]) state.contentChangesCache[topicId].push(tg.content_change);
+        if (tg.removed_content_change_ids && tg.removed_content_change_ids.length && state.contentChangesCache[topicId]) {
+          state.contentChangesCache[topicId] = state.contentChangesCache[topicId].filter(function (ch) {
+            return tg.removed_content_change_ids.indexOf(ch.id) === -1;
+          });
+        }
+      }
+      if (resp.change && state.contentChangesCache[topicId]) {
+        state.contentChangesCache[topicId] = state.contentChangesCache[topicId].map(function (ch) {
+          return ch.id === resp.change.id ? Object.assign({}, ch, resp.change) : ch;
+        });
+      }
+      delete state.actionStatusPending[body.item_ref];
+      // Wirkung und Verlauf hängen am Erledigt-Status
+      if (tg || resp.change) delete state.dashboardDataCache[topicId];
+    } catch (e) {
+      console.error('[CVZ Visibility] Status konnte nicht gespeichert werden:', e);
+      await showCvzAlert('Der Status konnte nicht gespeichert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    delete state.actionSaving[body.item_ref];
+    render();
+  }
+
+  // opts: { ref, status, kind: 'plan'|'change', available, plan: {index, title, phase} }
+  // Verworfen braucht einen Grund, Erledigt bei eigenen Einträgen ein Umsetzungsdatum (Standard heute):
+  // beides wird erst nach "Speichern" geschickt.
+  function renderActionStatusControl(topicId, opts) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-ast';
+    var pending = state.actionStatusPending[opts.ref];
+    var shown = pending ? pending.status : opts.status;
+    var choices = opts.available ? ACTION_STATUSES : ['offen', 'erledigt'];
+    if (choices.indexOf(opts.status) === -1) choices = choices.concat([opts.status]);
+
+    var sel = document.createElement('select');
+    sel.setAttribute('aria-label', 'Status der Maßnahme');
+    sel.setAttribute('data-status', shown);
+    sel.disabled = !!state.actionSaving[opts.ref];
+    choices.forEach(function (st) {
+      var o = document.createElement('option');
+      o.value = st;
+      o.textContent = ACTION_STATUS_LABELS[st] || st;
+      if (st === shown) o.selected = true;
+      sel.appendChild(o);
+    });
+    wrap.appendChild(sel);
+
+    function send(status, extra) {
+      var body = Object.assign({ item_ref: opts.ref, status: status }, extra || {});
+      if (opts.kind === 'plan' && opts.plan) {
+        body.item_index = opts.plan.index;
+        body.item_title = opts.plan.title || null;
+        body.item_phase = opts.plan.phase || 'alle_phasen';
+      }
+      setActionStatus(topicId, body);
+    }
+
+    sel.addEventListener('change', function (e) {
+      e.stopPropagation();
+      var st = sel.value;
+      var needsReason = st === 'verworfen';
+      var needsDate = st === 'erledigt' && opts.kind === 'change' && opts.status !== 'erledigt';
+      if (needsReason || needsDate) {
+        state.actionStatusPending[opts.ref] = { status: st, reason: '', done_at: new Date().toISOString().slice(0, 10) };
+        render();
+        return;
+      }
+      delete state.actionStatusPending[opts.ref];
+      if (st !== opts.status) send(st);
+    });
+
+    if (state.actionSaving[opts.ref]) {
+      var sp = document.createElement('span');
+      sp.className = 'cvz-spinner';
+      wrap.appendChild(sp);
+    }
+
+    if (pending) {
+      var box = document.createElement('div');
+      box.className = 'cvz-ast-confirm';
+      var input = document.createElement('input');
+      if (pending.status === 'verworfen') {
+        input.type = 'text';
+        input.maxLength = 500;
+        input.placeholder = 'Warum verworfen? (Pflicht, z. B. passt nicht zum Angebot)';
+        input.value = pending.reason || '';
+        input.addEventListener('input', function () { pending.reason = input.value; });
+      } else {
+        input.type = 'date';
+        input.value = pending.done_at;
+        input.setAttribute('aria-label', 'Umgesetzt am');
+        input.addEventListener('input', function () { pending.done_at = input.value; });
+        var lbl = document.createElement('span');
+        lbl.className = 'cvz-ast-reason';
+        lbl.textContent = 'Umgesetzt am';
+        box.appendChild(lbl);
+      }
+      box.appendChild(input);
+      var ok = document.createElement('button');
+      ok.type = 'button';
+      ok.className = 'cvz-ast-btn';
+      ok.textContent = 'Speichern';
+      ok.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (pending.status === 'verworfen') {
+          if (!(pending.reason || '').trim()) { input.focus(); return; }
+          send('verworfen', { reason: pending.reason.trim() });
+        } else {
+          send('erledigt', { done_at: pending.done_at || null });
+        }
+      });
+      var cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'cvz-ast-btn is-quiet';
+      cancel.textContent = 'Abbrechen';
+      cancel.addEventListener('click', function (e) {
+        e.stopPropagation();
+        delete state.actionStatusPending[opts.ref];
+        render();
+      });
+      box.appendChild(ok);
+      box.appendChild(cancel);
+      wrap.appendChild(box);
+    }
+    return wrap;
+  }
+
+  async function submitActionComment(topicId, ref) {
+    var text = (state.actionCommentDrafts[ref] || '').trim();
+    if (!text || state.actionSaving['c|' + ref]) return;
+    state.actionSaving['c|' + ref] = true;
+    render();
+    try {
+      var resp = await apiFetch('/topics/' + topicId + '/action-items/comments', { method: 'POST', body: { item_ref: ref, body: text } });
+      var act = state.actionActivityCache[topicId];
+      if (act && resp.comment) {
+        act.comments = act.comments || {};
+        (act.comments[ref] = act.comments[ref] || []).push(resp.comment);
+      }
+      state.actionCommentDrafts[ref] = '';
+    } catch (e) {
+      console.error('[CVZ Visibility] Kommentar konnte nicht gespeichert werden:', e);
+      await showCvzAlert('Der Kommentar konnte nicht gespeichert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    delete state.actionSaving['c|' + ref];
+    render();
+  }
+
+  async function deleteActionComment(topicId, ref, commentId) {
+    var ok = await showCvzConfirm('Kommentar löschen?');
+    if (!ok) return;
+    try {
+      await apiFetch('/topics/' + topicId + '/action-items/comments/' + encodeURIComponent(commentId), { method: 'DELETE' });
+      var act = state.actionActivityCache[topicId];
+      if (act && act.comments && act.comments[ref]) {
+        act.comments[ref] = act.comments[ref].filter(function (c) { return c.id !== commentId; });
+      }
+    } catch (e) {
+      await showCvzAlert('Der Kommentar konnte nicht gelöscht werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+    render();
+  }
+
+  // Kommentar-Verlauf (Kommentare und Statuswechsel) unter einer Maßnahme, aufklappbar.
+  function renderActionComments(topicId, ref) {
+    var act = actionActivity(topicId);
+    if (!act.available) return null;
+    var list = (act.comments || {})[ref] || [];
+    var nComments = list.filter(function (c) { return c.kind !== 'status'; }).length;
+    var open = !!state.actionCommentOpen[ref];
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-ac';
+    var tog = document.createElement('button');
+    tog.type = 'button';
+    tog.className = 'cvz-ac-toggle';
+    tog.setAttribute('aria-expanded', open ? 'true' : 'false');
+    tog.textContent = (open ? '▾ ' : '▸ ') + (nComments ? 'Kommentare (' + nComments + ')' : 'Kommentieren') +
+      (list.length > nComments ? ' · Verlauf' : '');
+    tog.addEventListener('click', function (e) {
+      e.stopPropagation();
+      state.actionCommentOpen[ref] = !open;
+      render();
+    });
+    wrap.appendChild(tog);
+    if (!open) return wrap;
+
+    var body = document.createElement('div');
+    body.className = 'cvz-ac-body';
+    list.forEach(function (c) {
+      var row = document.createElement('div');
+      row.className = 'cvz-ac-entry' + (c.kind === 'status' ? ' is-status' : '');
+      var meta = document.createElement('span');
+      meta.className = 'cvz-ac-meta';
+      meta.textContent = [c.author_name || 'Unbekannt', formatShortDate(c.created_at)].filter(Boolean).join(', ') + ':';
+      var txt = document.createElement('span');
+      txt.className = 'cvz-ac-text';
+      txt.textContent = c.body || '';
+      row.appendChild(meta);
+      row.appendChild(txt);
+      if (c.kind !== 'status' && act.me && c.author_member_id === act.me) {
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'cvz-ac-del';
+        del.textContent = 'löschen';
+        del.addEventListener('click', function (e) { e.stopPropagation(); deleteActionComment(topicId, ref, c.id); });
+        row.appendChild(del);
+      }
+      body.appendChild(row);
+    });
+    var form = document.createElement('div');
+    form.className = 'cvz-ac-form';
+    var ta = document.createElement('textarea');
+    ta.rows = 2;
+    ta.maxLength = 2000;
+    ta.placeholder = 'Kommentar, z. B. Stand, Absprache oder offene Frage';
+    ta.value = state.actionCommentDrafts[ref] || '';
+    ta.addEventListener('input', function () { state.actionCommentDrafts[ref] = ta.value; });
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cvz-ast-btn';
+    btn.disabled = !!state.actionSaving['c|' + ref];
+    btn.textContent = state.actionSaving['c|' + ref] ? 'Speichert…' : 'Kommentieren';
+    btn.addEventListener('click', function (e) { e.stopPropagation(); submitActionComment(topicId, ref); });
+    form.appendChild(ta);
+    form.appendChild(btn);
+    body.appendChild(form);
+    wrap.appendChild(body);
+    return wrap;
+  }
+
+  // Selbst eingetragene Maßnahmen (content_changes ohne Plan-Spiegel) mit Status und Kommentaren.
+  // Laufende oben als Karten, erledigte und verworfene aufklappbar darunter.
+  function renderOwnMeasures(topicId) {
+    var all = (state.contentChangesCache[topicId] || []).filter(function (ch) { return ch.change_type !== 'aktionsplan'; });
+    if (!all.length) return null;
+    var act = actionActivity(topicId);
+    var statusAvailable = act.available && all.some(function (ch) { return 'status' in ch; });
+    var running = all.filter(function (ch) { return ch.status && ['offen', 'in_arbeit', 'zurueckgestellt'].indexOf(ch.status) !== -1; });
+    var closed = all.filter(function (ch) { return running.indexOf(ch) === -1; })
+      .sort(function (a, b) { return String(b.changed_at || '').localeCompare(String(a.changed_at || '')); });
+
+    var section = document.createElement('div');
+    section.style.cssText = 'margin-top:20px;display:flex;flex-direction:column;gap:10px;';
+    var head = document.createElement('p');
+    head.className = 'cvz-section-label';
+    head.style.margin = '0';
+    head.textContent = 'Eigene Maßnahmen (' + all.length + ')';
+    section.appendChild(head);
+
+    function card(ch) {
+      var ref = 'change:' + ch.id;
+      var st = ch.status || 'erledigt';
+      var c = document.createElement('div');
+      c.className = 'cvz-card cvz-own-measure';
+      var h = document.createElement('div');
+      h.className = 'cvz-own-measure-head';
+      var left = document.createElement('div');
+      left.style.cssText = 'min-width:0;flex:1 1 240px;';
+      var t = document.createElement('p');
+      t.className = 'cvz-own-measure-title';
+      t.textContent = ch.description || 'Maßnahme';
+      left.appendChild(t);
+      var meta = document.createElement('p');
+      meta.className = 'cvz-own-measure-meta';
+      meta.textContent = [CONTENT_CHANGE_TYPE_LABELS[ch.change_type] || ch.change_type,
+        (st === 'erledigt' ? 'umgesetzt am ' : 'eingetragen für ') + (formatShortDate(ch.changed_at) || ch.changed_at || '')].join(' · ');
+      left.appendChild(meta);
+      if (st === 'verworfen' && ch.status_reason) {
+        var rs = document.createElement('p');
+        rs.className = 'cvz-ast-reason';
+        rs.textContent = 'Grund: ' + ch.status_reason;
+        left.appendChild(rs);
+      }
+      h.appendChild(left);
+      if (statusAvailable) {
+        h.appendChild(renderActionStatusControl(topicId, { ref: ref, status: st, kind: 'change', available: true }));
+      }
+      c.appendChild(h);
+      var cm = renderActionComments(topicId, ref);
+      if (cm) c.appendChild(cm);
+      return c;
+    }
+
+    running.forEach(function (ch) { section.appendChild(card(ch)); });
+    if (closed.length) {
+      var det = document.createElement('details');
+      det.open = !!state.ownMeasuresDoneOpen;
+      det.addEventListener('toggle', function () { state.ownMeasuresDoneOpen = det.open; });
+      var sum = document.createElement('summary');
+      sum.className = 'cvz-ac-toggle';
+      sum.style.padding = '6px 0';
+      sum.textContent = 'Erledigt und verworfen (' + closed.length + ')';
+      det.appendChild(sum);
+      var inner = document.createElement('div');
+      inner.style.cssText = 'display:flex;flex-direction:column;gap:10px;margin-top:8px;';
+      closed.forEach(function (ch) { inner.appendChild(card(ch)); });
+      det.appendChild(inner);
+      section.appendChild(det);
+    }
+    return section;
+  }
+
   function renderAktionsplanTab(detail) {
     var wrap = document.createElement('div');
     // NEU (06.11.2026): Inhalt darf die Seite nie breiter als den Bildschirm machen.
@@ -17916,6 +18349,14 @@
     // fehlgeschlagen ist oder noch fehlt.
     var apStepNotice = renderStepNotice(detail, ['action_plan']);
     if (apStepNotice) wrap.appendChild(apStepNotice);
+    // NEU (15.11.2026): Stati der Maßnahmen. Verworfene gehen nicht in den Aufgaben-Export.
+    var apActivity = actionActivity(state.activeTopicId);
+    if (detail.action_plan && Array.isArray(detail.action_plan.items)) {
+      var apDone0 = detail.action_plan.completed_item_indices || [];
+      detail.action_plan.discarded_item_indices = detail.action_plan.items.map(function (it, i) {
+        return it && planItemStatus(it, i, apDone0, apActivity) === 'verworfen' ? i : -1;
+      }).filter(function (i) { return i !== -1; });
+    }
     // Aufgaben-Export (ClickUp, Asana, Jira) für den Aktionsplan
     var xpBtn = window.CVZTrackerExport ? window.CVZTrackerExport.createButton(detail) : null;
     if (xpBtn) wrap.appendChild(xpBtn);
@@ -18035,8 +18476,16 @@
         introEl.style.cssText = 'margin-bottom:20px;font-size:12px;';
         var genDate = new Date(ap.generated_at);
         introEl.textContent = 'Zuletzt generiert: ' + genDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ', ' + genDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr. ' + (function () {
-          var openN = items.length - completedIndices.filter(function (i) { return i < items.length; }).length;
-          return openN + (openN === 1 ? ' offene Maßnahme' : ' offene Maßnahmen') + ', priorisiert nach Phase und Impact. ';
+          // GEÄNDERT (15.11.2026): mit Stati
+          var n = { offen: 0, in_arbeit: 0, zurueckgestellt: 0 };
+          items.forEach(function (it, i) {
+            var st = planItemStatus(it, i, completedIndices, apActivity);
+            if (st in n) n[st]++;
+          });
+          var bits = [n.offen + (n.offen === 1 ? ' offene Maßnahme' : ' offene Maßnahmen')];
+          if (n.in_arbeit) bits.push(n.in_arbeit + ' in Arbeit');
+          if (n.zurueckgestellt) bits.push(n.zurueckgestellt + ' zurückgestellt');
+          return bits.join(', ') + ', priorisiert nach Phase und Impact. ';
         })();
         // NEU (02.10.2026): Sprung zum Eintragen eigener Maßnahmen und Ereignisse.
         var jumpBtn = document.createElement('button');
@@ -18060,11 +18509,16 @@
       // offenen, sondern im eigenen Abschnitt darunter (renderDoneActionItems).
       var doneItems = itemsWithIdx.filter(function (it) { return completedIndices.indexOf(it._origIdx) !== -1; });
       itemsWithIdx = itemsWithIdx.filter(function (it) { return completedIndices.indexOf(it._origIdx) === -1; });
+      // NEU (15.11.2026): Status je Maßnahme. Verworfene stehen in einem eigenen Abschnitt darunter.
+      itemsWithIdx.forEach(function (it) { it._status = planItemStatus(it, it._origIdx, completedIndices, apActivity); });
+      var discardedItems = itemsWithIdx.filter(function (it) { return it._status === 'verworfen'; });
+      itemsWithIdx = itemsWithIdx.filter(function (it) { return it._status !== 'verworfen'; });
       if (itemsWithIdx.length === 0) {
         var allDone = document.createElement('div');
         allDone.className = 'cvz-card';
-        allDone.innerHTML = '<p class="cvz-card-placeholder-text" style="margin:0;">Alle ' + items.length +
-          ' Maßnahmen sind erledigt. Der nächste Aktionsplan entsteht mit dem nächsten Monatslauf, auf Basis der neuen Messwerte.</p>';
+        allDone.innerHTML = '<p class="cvz-card-placeholder-text" style="margin:0;">' +
+          (discardedItems.length ? 'Alle Maßnahmen sind erledigt oder verworfen.' : 'Alle ' + items.length + ' Maßnahmen sind erledigt.') +
+          ' Der nächste Aktionsplan entsteht mit dem nächsten Monatslauf, auf Basis der neuen Messwerte.</p>';
         wrap.appendChild(allDone);
       }
       var groups = {};
@@ -18076,7 +18530,11 @@
 
       PHASE_ORDER.forEach(function (ph) {
         if (!groups[ph] || groups[ph].length === 0) return;
-        var phItems = groups[ph].slice().sort(function (a, b) { return (a.priority || 99) - (b.priority || 99); });
+        // GEÄNDERT (15.11.2026): zurückgestellte Maßnahmen ans Ende der Phase
+        var phItems = groups[ph].slice().sort(function (a, b) {
+          var za = a._status === 'zurueckgestellt' ? 1 : 0, zb = b._status === 'zurueckgestellt' ? 1 : 0;
+          return za - zb || (a.priority || 99) - (b.priority || 99);
+        });
         var phColor = PHASE_COLOR_MAP[ph] || '#6b7280';
 
         var phSection = document.createElement('div');
@@ -18104,7 +18562,8 @@
 
           var card = document.createElement('div');
           card.className = 'cvz-card';
-          card.style.cssText = 'padding:0;overflow:hidden;min-width:0;max-width:100%;' + (isCompleted ? 'opacity:0.45;' : '');
+          card.style.cssText = 'padding:0;overflow:hidden;min-width:0;max-width:100%;' + (isCompleted ? 'opacity:0.45;' : '') +
+            (item._status === 'zurueckgestellt' ? 'opacity:0.7;' : '');
 
           var impactLvl = (item.impact || 'mittel').toLowerCase();
           var impColor  = IMPACT_COLOR_MAP[impactLvl] || '#d97706';
@@ -18137,20 +18596,21 @@
           spacer.style.cssText = 'flex:1;';
           hdr.appendChild(spacer);
 
-          var doneBtn = document.createElement('button');
-          doneBtn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:0;cursor:pointer;transition:all .15s;border:1px solid;flex-shrink:0;' +
-            (isCompleted
-              ? 'background:rgba(78,198,138,.12);border-color:rgba(78,198,138,.45);color:#4ec68a;'
-              : 'background:transparent;border-color:var(--cvz-border,#232b36);color:var(--cvz-text-muted,#8b98a5);');
-          doneBtn.innerHTML = isCompleted
-            ? '<span style="font-size:13px;">✓</span> Erledigt'
-            : '<span style="font-size:11px;">○</span> Als erledigt markieren';
-          doneBtn.title = isCompleted ? 'Erledigt-Markierung aufheben' : 'Item als erledigt markieren';
-
-          // Closure: Klick-Handler mit aktuellem Kontext
-          bindActionPlanToggle(doneBtn, state.activeTopicId, origIdx, item.title, item.phase, isCompleted, item.item_key);
-
-          hdr.appendChild(doneBtn);
+          // GEÄNDERT (15.11.2026): Status-Auswahl statt "Als erledigt markieren"
+          if (item.carried_over) {
+            var coBadge = document.createElement('span');
+            coBadge.className = 'cvz-am-badge';
+            coBadge.textContent = 'Aus dem letzten Plan';
+            coBadge.title = 'Diese Maßnahme war in Arbeit oder zurückgestellt und bleibt deshalb im neuen Plan.';
+            hdr.appendChild(coBadge);
+          }
+          hdr.appendChild(renderActionStatusControl(state.activeTopicId, {
+            ref: planItemRef(item, origIdx),
+            status: item._status || (isCompleted ? 'erledigt' : 'offen'),
+            kind: 'plan',
+            available: !!apActivity.available,
+            plan: { index: origIdx, title: item.title, phase: item.phase },
+          }));
           card.appendChild(hdr);
 
           // ---- Body ----
@@ -18315,6 +18775,9 @@
           }
 
           card.appendChild(body);
+          // NEU (15.11.2026): Kommentar-Verlauf
+          var apComments = renderActionComments(state.activeTopicId, planItemRef(item, origIdx));
+          if (apComments) card.appendChild(apComments);
           phList.appendChild(card);
         });
 
@@ -18322,6 +18785,7 @@
         wrap.appendChild(phSection);
       });
 
+      if (discardedItems.length) wrap.appendChild(renderDiscardedActionItems(discardedItems));
       if (doneItems.length) wrap.appendChild(renderDoneActionItems(doneItems, detail));
     }
 
@@ -18440,11 +18904,66 @@
       undo.className = 'cvz-done-undo';
       undo.textContent = 'Wieder öffnen';
       undo.title = 'Erledigt-Markierung aufheben';
-      bindActionPlanToggle(undo, state.activeTopicId, item._origIdx, item.title, item.phase, true, item.item_key);
+      // GEÄNDERT (15.11.2026): über den Status-Endpunkt, damit der Verlauf den Wechsel zeigt
+      if (actionActivity(state.activeTopicId).available) {
+        undo.addEventListener('click', function (e) {
+          e.stopPropagation();
+          setActionStatus(state.activeTopicId, {
+            item_ref: planItemRef(item, item._origIdx), status: 'offen',
+            item_index: item._origIdx, item_title: item.title || null, item_phase: item.phase || 'alle_phasen',
+          });
+        });
+      } else {
+        bindActionPlanToggle(undo, state.activeTopicId, item._origIdx, item.title, item.phase, true, item.item_key);
+      }
       row.appendChild(undo);
       section.appendChild(row);
+      var doneComments = renderActionComments(state.activeTopicId, planItemRef(item, item._origIdx));
+      if (doneComments) section.appendChild(doneComments);
     });
     return section;
+  }
+
+  // NEU (15.11.2026): verworfene Plan-Maßnahmen mit Grund, aufklappbar. Der nächste Monatsplan
+  // schlägt sie nicht erneut vor (Backend action_plan.generate_action_plan).
+  function renderDiscardedActionItems(items) {
+    var topicId = state.activeTopicId;
+    var states = actionActivity(topicId).states || {};
+    var det = document.createElement('details');
+    det.className = 'cvz-done-section';
+    det.open = !!state.discardedOpen;
+    det.addEventListener('toggle', function () { state.discardedOpen = det.open; });
+    var sum = document.createElement('summary');
+    sum.className = 'cvz-ac-toggle';
+    sum.style.padding = '0';
+    sum.textContent = 'Verworfen (' + items.length + '), wird im nächsten Plan nicht erneut vorgeschlagen';
+    det.appendChild(sum);
+    items.forEach(function (item) {
+      var ref = planItemRef(item, item._origIdx);
+      var row = document.createElement('div');
+      row.className = 'cvz-done-item';
+      row.style.gridTemplateColumns = 'minmax(0, 1fr) auto';
+      var left = document.createElement('div');
+      var t = document.createElement('p');
+      t.className = 'cvz-done-title';
+      t.textContent = item.title || 'Maßnahme';
+      left.appendChild(t);
+      var st = states[ref] || {};
+      var meta = document.createElement('p');
+      meta.className = 'cvz-done-meta';
+      meta.textContent = 'Grund: ' + (st.reason || 'nicht angegeben') +
+        (st.updated_by_name ? ' (' + st.updated_by_name + (st.updated_at ? ', ' + formatShortDate(st.updated_at) : '') + ')' : '');
+      left.appendChild(meta);
+      row.appendChild(left);
+      row.appendChild(renderActionStatusControl(topicId, {
+        ref: ref, status: 'verworfen', kind: 'plan', available: true,
+        plan: { index: item._origIdx, title: item.title, phase: item.phase },
+      }));
+      det.appendChild(row);
+      var cm = renderActionComments(topicId, ref);
+      if (cm) det.appendChild(cm);
+    });
+    return det;
   }
 
   function _renderAktionsplanChangesBlock(detail) {
@@ -18452,6 +18971,9 @@
     block.id = 'cvz-aktionsplan-changes';
     block.style.cssText = 'margin-top:32px;padding-top:20px;border-top:1px solid var(--cvz-border,#232b36);';
     block.appendChild(renderContentChangesSection(state.activeTopicId, detail.search_queries, detail.prompts));
+    // NEU (15.11.2026): eingetragene Maßnahmen mit Status und Kommentaren
+    var own = renderOwnMeasures(state.activeTopicId);
+    if (own) block.appendChild(own);
     return block;
   }
 
@@ -18697,7 +19219,7 @@
       all[ph].concat(withUrl[ph]).forEach(function (v) { if (v != null && v > maxVal) maxVal = v; });
     });
     var maxY = niceChartMax(maxVal);
-    var markers = buildWeekMarkers(state.contentChangesCache[topicId] || [], weeks, offset);
+    var markers = buildWeekMarkers(doneContentChanges(topicId), weeks, offset);
 
     var grid = document.createElement('div');
     grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:8px;';
@@ -18891,7 +19413,7 @@
     // Marker im Trend-Chart sichtbar, sollen aber nicht zusätzlich in der
     // Änderungs-Chronik auftauchen.
     var combined = [];
-    (state.contentChangesCache[topicId] || []).forEach(function (ch) {
+    doneContentChanges(topicId).forEach(function (ch) {
       if (ch.change_type === 'aktionsplan') return;
       combined.push({
         date: ch.changed_at,
@@ -19202,7 +19724,7 @@
     var points = rolling.points || [];
     var series = rolling.series || [];
     var xLabels = points.map(function (pt) { return (formatShortDate(pt.end) || pt.end).slice(0, 6); });
-    var markers = topicId ? buildRollingMarkers(state.contentChangesCache[topicId] || [], points) : [];
+    var markers = topicId ? buildRollingMarkers(doneContentChanges(topicId), points) : [];
     var cur = rolling.current || {}, prev = rolling.previous;
 
     var tiles = document.createElement('div');
@@ -19554,7 +20076,7 @@
         (ln.band || []).forEach(function (b) { if (b && b.high > maxVal) maxVal = b.high; });
       });
       var maxY = niceChartMax(maxVal);
-      var markers = buildRollingMarkers(state.contentChangesCache[topicId] || [], points);
+      var markers = buildRollingMarkers(doneContentChanges(topicId), points);
 
       var card = document.createElement('div');
       card.className = 'cvz-card';
