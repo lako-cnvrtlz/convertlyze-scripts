@@ -909,7 +909,7 @@
 
   var ROLE_LABELS = {
     coverage: 'Trust/Themenabdeckung',
-    citation: 'Rank- & Zitier-Ziel',
+    citation: 'Rank- & Verlinkungs-Ziel',
     existing: 'bereits vorhanden',
   };
 
@@ -1462,7 +1462,7 @@
     var trackerSelect = null;
     if (state.trackerTopics.length === 0) {
       form.appendChild(el('div', { class: 'cvz-cs-label' }, [
-        el('span', { class: 'cvz-cs-label-text' }, ['Daten aus dem Customer Journey Tracker einbeziehen?', tip('Die Strategie berücksichtigt dann deine gemessene KI-Sichtbarkeit je Journey-Phase, zitierte Quellen und die Wirkung bereits umgesetzter Maßnahmen.')]),
+        el('span', { class: 'cvz-cs-label-text' }, ['Daten aus dem Customer Journey Tracker einbeziehen?', tip('Die Strategie berücksichtigt dann deine gemessene KI-Sichtbarkeit je Journey-Phase, verlinkte Quellen und die Wirkung bereits umgesetzter Maßnahmen.')]),
         el('p', { class: 'cvz-cs-hint cvz-cs-tracker-empty' }, [state.trackerTopicsError
           ? 'Deine Tracker-Themen konnten gerade nicht geladen werden (' + state.trackerTopicsError + '). Lade die Seite neu, um sie auszuwählen. Ohne Auswahl läuft die Strategie mit einer frischen Messung.'
           : 'Für dein Konto gibt es noch kein Thema im Customer Journey Tracker. Legst du dort ein passendes Thema an, kannst du es hier auswählen, und seine Messdaten fließen in die Strategie ein.']),
@@ -1477,7 +1477,7 @@
       if (prefill.trackerTopicId) trackerSelect.value = prefill.trackerTopicId;
       form.appendChild(
         el('label', { class: 'cvz-cs-label' }, [
-          el('span', { class: 'cvz-cs-label-text' }, ['Daten aus dem Customer Journey Tracker einbeziehen?', tip('Die Strategie berücksichtigt dann deine gemessene KI-Sichtbarkeit je Journey-Phase, zitierte Quellen und die Wirkung bereits umgesetzter Maßnahmen. Wähle ein Tracker-Thema, das zum Strategie-Thema passt.')]),
+          el('span', { class: 'cvz-cs-label-text' }, ['Daten aus dem Customer Journey Tracker einbeziehen?', tip('Die Strategie berücksichtigt dann deine gemessene KI-Sichtbarkeit je Journey-Phase, verlinkte Quellen und die Wirkung bereits umgesetzter Maßnahmen. Wähle ein Tracker-Thema, das zum Strategie-Thema passt.')]),
           trackerSelect,
         ])
       );
@@ -2417,7 +2417,7 @@
     { at: 30, text: 'Suchvolumen und die häufigsten Nutzerfragen zum Thema werden ausgewertet' },
     { at: 60, text: 'Ist-Zustand wird geprüft: wer rankt heute schon wofür' },
     { at: 100, text: 'Wettbewerber-Seiten werden auseinandergenommen (Länge, Tabellen, FAQ-Blöcke)' },
-    { at: 150, text: 'Google AI Overview und Zitations-Chancen werden gecheckt' },
+    { at: 150, text: 'Google AI Overview und Verlinkungs-Chancen werden gecheckt' },
     { at: 220, text: 'Prompt-Tests laufen gegen ein KI-Modell, das braucht ein paar Sekunden pro Anfrage' },
     { at: 300, text: 'Content-Cluster wird gebaut: Conversion-Seite plus unterstützende Seiten' },
     { at: 380, text: 'Themen werden auf die Journey-Phasen Erforschung, Bewertung, Vergleich und Entscheidung verteilt' },
@@ -3014,7 +3014,7 @@
     if (m.basis) description.push('Beleg: ' + m.basis);
     if (m.hypothesis) description.push('Vermutung: ' + m.hypothesis);
     if (m.content_points && m.content_points.length) description.push('Das sollte der Inhalt beantworten:\n' + m.content_points.map(function (b) { return '- ' + b; }).join('\n'));
-    if (m.cited_examples && m.cited_examples.length) description.push('Dort heute zitiert:\n' + m.cited_examples.map(function (e) { return '- ' + (e.title ? e.title + ' (' + e.url + ')' : e.url); }).join('\n'));
+    if (m.cited_examples && m.cited_examples.length) description.push('Dort heute verlinkt:\n' + m.cited_examples.map(function (e) { return '- ' + (e.title ? e.title + ' (' + e.url + ')' : e.url); }).join('\n'));
     if (targets) description.push('Verweist auf: ' + targets + (m.link_target && m.link_target.embed ? ' (dort auch einbinden)' : ''));
     if (n.note) description.push('Notiz: ' + n.note);
     return {
@@ -4504,7 +4504,7 @@
   function goalVisibilityText(v) {
     if (!v || v.total === 0) return 'nicht gemessen';
     if (v.measured === 0) return 'zu wenig Daten';
-    return v.stabil + ' von ' + v.measured + ' Fragen stabil zitiert' + (v.luecke > 0 ? ', ' + v.luecke + ' nie' : '');
+    return v.stabil + ' von ' + v.measured + ' Fragen stabil verlinkt' + (v.luecke > 0 ? ', ' + v.luecke + ' nie' : '');
   }
 
   // Sprung zu "Bewusst nicht im Plan" im Content-Plan (Listenansicht, aufgeklappt).
@@ -4587,7 +4587,7 @@
       wrap.appendChild(el('div', { class: 'cvz-cs-goal-block' }, [
         el('p', { class: 'cvz-cs-brief-label' }, ['Woran ihr Fortschritt erkennt']),
         ol,
-        el('p', { class: 'cvz-cs-hint' }, ['Bewusst ohne Zielwerte in Prozent: Eine einzelne Messung ist keine belastbare Ausgangsbasis, und Vorhersagen für Rankings oder KI-Zitate wären geraten. Den Verlauf zeigt der Customer Journey Tracker.']),
+        el('p', { class: 'cvz-cs-hint' }, ['Bewusst ohne Zielwerte in Prozent: Eine einzelne Messung ist keine belastbare Ausgangsbasis, und Vorhersagen für Rankings oder KI-Verlinkungen wären geraten. Den Verlauf zeigt der Customer Journey Tracker.']),
       ]));
       // 5. NEU: Prüftermin
       var due = goalReviewDate(session && session.created_at).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -5683,7 +5683,7 @@
         card.appendChild(el('div', { class: 'cvz-cs-vbar' }, [
           el('span', { class: 'cvz-cs-vbar-label' }, [PROVIDER_NAME_MAP[b.provider] || b.provider || 'Gesamt']),
           el('span', { class: 'cvz-cs-vbar-track' }, [fill]),
-          el('span', {}, ['zitiert in ' + b.cited + ' von ' + b.runs]),
+          el('span', {}, ['verlinkt in ' + b.cited + ' von ' + b.runs]),
         ]));
       });
       card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Erwähnt (ohne Quellenlink) in ' + p.mentioned + ' von ' + p.runs + ' Antworten.']));
@@ -5696,9 +5696,9 @@
     var doms = p.top_cited_domains || [];
     if (doms.length > 0) {
       var fmt = function (d) { return d.domain + ' (' + d.share + ' %)'; };
-      card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Stattdessen zitiert: ' + doms.slice(0, 3).map(fmt).join(', ')]));
+      card.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Stattdessen verlinkt: ' + doms.slice(0, 3).map(fmt).join(', ')]));
       if (doms.length > 3) {
-        card.appendChild(el('details', { class: 'cvz-cs-expand' }, [el('summary', {}, ['Aufklappen: weitere zitierte Quellen']), el('p', { class: 'cvz-cs-hint' }, [doms.slice(3).map(fmt).join(', ')])]));
+        card.appendChild(el('details', { class: 'cvz-cs-expand' }, [el('summary', {}, ['Aufklappen: weitere verlinkte Quellen']), el('p', { class: 'cvz-cs-hint' }, [doms.slice(3).map(fmt).join(', ')])]));
       }
     }
     if (p.fan_out_queries && p.fan_out_queries.length > 0) {
@@ -5721,13 +5721,13 @@
     if (fresh) {
       items.push('Gemessen am ' + (fresh.measured_at ? new Date(fresh.measured_at).toLocaleString('de-DE') : '') + ' bei ChatGPT und Gemini (Deutsch, Standort Deutschland), je Frage bis zu ' + fresh.runs_per_prompt + ' Läufe pro Anbieter.');
       items.push(fresh.completed_calls + ' von ' + fresh.planned_calls + ' geplanten Abfragen lieferten eine Antwort (' + fresh.failed_calls + ' fehlgeschlagen, ' + fresh.skipped_calls + ' wegen des Zeitbudgets übersprungen).');
-      items.push('"Zitiert" heißt: Deine Domain steht als Quelle in der Antwort (Subdomains zählen nicht). "Erwähnt" heißt: Der Domain-Name steht im Text.');
-      items.push('Das Urteil "stabil" bedeutet, dass die Domain in mindestens zwei Dritteln der Antworten zitiert wurde. "Lücke" heißt nie zitiert, "wackelig" dazwischen. Die Schwelle ist eine Festlegung, kein Branchenstandard.');
+      items.push('"Verlinkt" heißt: Deine Domain steht als Quelle in der Antwort (Subdomains zählen nicht). "Erwähnt" heißt: Der Domain-Name steht im Text.');
+      items.push('Das Urteil "stabil" bedeutet, dass die Domain in mindestens zwei Dritteln der Antworten verlinkt wurde. "Lücke" heißt nie verlinkt, "wackelig" dazwischen. Die Schwelle ist eine Festlegung, kein Branchenstandard.');
     } else if (snap) {
       items.push('Aus dem Customer Journey Tracker, ' + snap.runs_in_window + ' Abfragen in den letzten ' + snap.window_days + ' Tagen.');
     }
     items.push('Teilfragen (Fan-out) gibt es nur von ChatGPT, nicht von Gemini.');
-    items.push('Ergebnisse von KI-Assistenten schwanken von Antwort zu Antwort. Eine Einzelmessung zeigt eine Richtung, keine Garantie, und sie sagt nicht, WARUM eine Domain (nicht) zitiert wird.');
+    items.push('Ergebnisse von KI-Assistenten schwanken von Antwort zu Antwort. Eine Einzelmessung zeigt eine Richtung, keine Garantie, und sie sagt nicht, WARUM eine Domain (nicht) verlinkt wird.');
     items.push('Zahlen und Belege stammen aus der Messung. Empfehlungen und Hypothesen sind Einschätzungen der KI.');
     var list = el('ul', { class: 'cvz-cs-brief-list' });
     items.forEach(function (t) { list.appendChild(el('li', {}, [t])); });
@@ -5766,7 +5766,7 @@
 
   function renderOffsiteSources(sources) {
     var wrap = el('div', {});
-    wrap.appendChild(el('h5', {}, ['Wer wird stattdessen zitiert?']));
+    wrap.appendChild(el('h5', {}, ['Wer wird stattdessen verlinkt?']));
     wrap.appendChild(el('p', { class: 'cvz-cs-hint' }, [
       'Einschätzung der KI aus Domain-Name und einer Beispiel-Quelle aus der Messung, nicht von uns geprüft. Bei Wettbewerbern und Nachschlagewerken planen wir keine Platzierung.',
     ]));
@@ -5797,7 +5797,7 @@
         el('strong', {}, [it.name + (it.name !== it.domain ? ' (' + it.domain + ')' : '')]), ' ',
         el('span', { class: 'cvz-cs-badge' }, [it.kind_label]),
         it.basis === 'backlinks' ? ' ' : '', it.basis === 'backlinks' ? el('span', { class: 'cvz-cs-badge' }, ['aus Link-Lücken']) : '',
-        it.cited_prompts ? ' ' : '', it.cited_prompts ? el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--ok' }, ['in KI-Antworten zitiert']) : '', // NEU
+        it.cited_prompts ? ' ' : '', it.cited_prompts ? el('span', { class: 'cvz-cs-badge cvz-cs-funnel-status--ok' }, ['in KI-Antworten verlinkt']) : '', // NEU
         it.country ? ' ' : '', it.country ? el('span', { class: 'cvz-cs-badge' }, [it.country === 'at' ? 'Österreich' : 'Schweiz']) : '', // NEU
       ]);
       var card = el('div', { class: 'cvz-cs-goal-block' }, [head]);
@@ -5817,7 +5817,7 @@
     var box = el('div', { class: 'cvz-cs-geo' });
     box.appendChild(el('h5', {}, ['Off-Site: wo KI-Assistenten stattdessen hinschauen']));
     box.appendChild(el('p', { class: 'cvz-cs-hint' }, [
-      'Bei diesen Fragen wird statt deiner Domain immer wieder dieselbe fremde Quelle zitiert. Eine Platzierung dort kann mehr bringen als eine weitere eigene Seite. Ob das klappt, ist eine Vermutung.',
+      'Bei diesen Fragen wird statt deiner Domain immer wieder dieselbe fremde Quelle verlinkt. Eine Platzierung dort kann mehr bringen als eine weitere eigene Seite. Ob das klappt, ist eine Vermutung.',
     ]));
     if (hasS) box.appendChild(renderOffsiteSources(sources));
     if (hasM) box.appendChild(el('h5', {}, ['Vorgeschlagene Maßnahmen']));
@@ -5853,10 +5853,10 @@
         m.cited_examples.forEach(function (e) {
           var href = safeHttpUrl(e.url);
           var text = e.title || e.url;
-          var count = e.runs ? ' (in ' + e.runs + (e.runs === 1 ? ' Antwort' : ' Antworten') + ' zitiert)' : '';
+          var count = e.runs ? ' (in ' + e.runs + (e.runs === 1 ? ' Antwort' : ' Antworten') + ' verlinkt)' : '';
           ex.appendChild(el('li', {}, [href ? el('a', { href: href, target: '_blank', rel: 'noopener noreferrer nofollow' }, [text]) : text, count]));
         });
-        card.appendChild(el('details', { class: 'cvz-cs-expand' }, [el('summary', {}, ['Aufklappen: dort heute zitiert (' + m.cited_examples.length + ')']), ex]));
+        card.appendChild(el('details', { class: 'cvz-cs-expand' }, [el('summary', {}, ['Aufklappen: dort heute verlinkt (' + m.cited_examples.length + ')']), ex]));
       }
       if (m.prompts && m.prompts.length > 0) {
         var l = el('ul', { class: 'cvz-cs-brief-list' });
@@ -5900,9 +5900,9 @@
       aioBox.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Kein AI Overview für dieses Thema vorhanden.']));
     } else if (!aio.references || aio.references.length === 0) {
       aioBox.appendChild(el('h5', {}, [aioTitle]));
-      aioBox.appendChild(el('p', { class: 'cvz-cs-gsc-hint' }, ['AI Overview vorhanden, aber ohne zitierte Quellen-Links - Hinweis auf Commodity-Charakter dieses Themas.']));
+      aioBox.appendChild(el('p', { class: 'cvz-cs-gsc-hint' }, ['AI Overview vorhanden, aber ohne Quellen-Links - Hinweis auf Commodity-Charakter dieses Themas.']));
     } else {
-      aioBox.appendChild(el('h5', {}, [aioTitle + ': diese Quellen werden zitiert' + (aio.own_domain_cited ? ' (eure Domain ist dabei)' : ' (eure Domain fehlt noch)')]));
+      aioBox.appendChild(el('h5', {}, [aioTitle + ': diese Quellen werden verlinkt' + (aio.own_domain_cited ? ' (eure Domain ist dabei)' : ' (eure Domain fehlt noch)')]));
       var aioList = el('ul', {});
       aio.references.forEach(function (r) {
         aioList.appendChild(el('li', {}, [el('a', { href: r.url, target: '_blank', rel: 'noopener' }, [r.domain]), r.title ? ' – "' + r.title + '"' : '']));
@@ -5972,7 +5972,7 @@
     }
     if (geo.top_portals && geo.top_portals.length > 0) {
       var table = el('table', { class: 'cvz-cs-table cvz-cs-table-cards cvz-cs-portal-table' });
-      table.appendChild(el('thead', {}, [el('tr', {}, [el('th', {}, ['Domain']), el('th', {}, [basis ? 'Als Quelle zitiert' : 'Erwähnungen']), el('th', {}, ['Suchanfragen hinter diesen Antworten']), el('th', {}, ['Einordnung'])])]));
+      table.appendChild(el('thead', {}, [el('tr', {}, [el('th', {}, ['Domain']), el('th', {}, [basis ? 'Als Quelle verlinkt' : 'Erwähnungen']), el('th', {}, ['Suchanfragen hinter diesen Antworten']), el('th', {}, ['Einordnung'])])]));
       var tbody = el('tbody');
       geo.top_portals.forEach(function (p) {
         var general = geoIsGeneralPlatform(p);
@@ -5981,18 +5981,18 @@
         if (p.note) kind.push((kind.length ? ' ' : '') + p.note);
         tbody.appendChild(el('tr', { class: general ? 'cvz-cs-portal-general' : '' }, [
           el('td', { 'data-label': 'Domain' }, [p.domain]),
-          el('td', { 'data-label': basis ? 'Als Quelle zitiert' : 'Erwähnungen' }, [basis ? 'in ' + p.mention_count + ' von ' + basis.answers + ' Antworten' : String(p.mention_count) + '×']),
+          el('td', { 'data-label': basis ? 'Als Quelle verlinkt' : 'Erwähnungen' }, [basis ? 'in ' + p.mention_count + ' von ' + basis.answers + ' Antworten' : String(p.mention_count) + '×']),
           el('td', { 'data-label': 'Suchanfragen hinter diesen Antworten' }, [typeof p.ai_search_volume === 'number' ? 'ca. ' + p.ai_search_volume.toLocaleString('de-DE') + ' pro Monat' : 'nicht ermittelt']),
           el('td', { 'data-label': 'Einordnung' }, kind.length ? kind : ['']),
         ]));
       });
       table.appendChild(tbody);
       box.appendChild(el('div', { class: 'cvz-cs-table-wrap' }, [table]));
-      if (geo.top_portals.some(geoIsGeneralPlatform)) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Allgemeine Plattformen wie YouTube oder Wikipedia werden zu fast jedem Thema zitiert. Sie sind keine Themen-Wettbewerber, zeigen aber, welches Format gefragt ist (zum Beispiel Video).']));
+      if (geo.top_portals.some(geoIsGeneralPlatform)) box.appendChild(el('p', { class: 'cvz-cs-hint' }, ['Allgemeine Plattformen wie YouTube oder Wikipedia werden zu fast jedem Thema verlinkt. Sie sind keine Themen-Wettbewerber, zeigen aber, welches Format gefragt ist (zum Beispiel Video).']));
     } else {
       box.appendChild(el('p', { class: 'cvz-cs-hint' }, [basis && basis.answers === 0
         ? 'Keine KI-Antworten von Google gefunden, bei denen ' + (q ? geoQuoted(q) : 'der Begriff') + ' in der Frage steht. Das Thema ist für diese Auswertung zu klein oder zu neu. Daraus folgt nichts über eure Chancen.'
-        : 'Keine zitierten Domains gefunden oder Daten nicht verfügbar.']));
+        : 'Keine verlinkten Domains gefunden oder Daten nicht verfügbar.']));
     }
     return box;
   }
@@ -6000,12 +6000,12 @@
     if (!geo || !geo.prompt_tests || geo.prompt_tests.length === 0) return null;
     var ptList = el('ul', {});
     geo.prompt_tests.forEach(function (r) {
-      var citedText = r.cited_domains && r.cited_domains.length > 0 ? r.cited_domains.join(', ') : 'keine zitierten Domains gefunden';
+      var citedText = r.cited_domains && r.cited_domains.length > 0 ? r.cited_domains.join(', ') : 'keine verlinkten Domains gefunden';
       var providerLabel = r.llm_type ? GEO_LLM_TYPE_LABELS[r.llm_type] || r.llm_type : null;
       var modelText = r.model_name ? ' [' + (providerLabel ? providerLabel + ', Modell: ' : 'Modell: ') + r.model_name + ']' : providerLabel ? ' [' + providerLabel + ']' : '';
-      ptList.appendChild(el('li', {}, ['"' + r.prompt + '"' + modelText + ': eigene Domain zitiert: ' + (r.own_domain_cited ? 'ja' : 'nein') + ' · zitierte Domains: ' + citedText]));
+      ptList.appendChild(el('li', {}, ['"' + r.prompt + '"' + modelText + ': eigene Domain verlinkt: ' + (r.own_domain_cited ? 'ja' : 'nein') + ' · verlinkte Domains: ' + citedText]));
     });
-    return el('div', {}, [el('h5', {}, ['Eure Testfragen: wer in der Antwort zitiert wird']), el('p', { class: 'cvz-cs-hint' }, ['Jede Zeile ist eine Frage, die wir der KI gestellt haben, mit den Domains, die die Antwort als Quelle nennt.']), ptList]);
+    return el('div', {}, [el('h5', {}, ['Eure Testfragen: wer in der Antwort verlinkt wird']), el('p', { class: 'cvz-cs-hint' }, ['Jede Zeile ist eine Frage, die wir der KI gestellt haben, mit den Domains, die die Antwort als Quelle nennt.']), ptList]);
   }
 
   // Ein Block mit Kennzeichnung der Quelle (Google oder KI-Antworten), damit eine Momentaufnahme aus ChatGPT nicht wie ein Ranking gelesen wird.
@@ -6032,9 +6032,9 @@
     out.push(el('h4', { class: 'cvz-cs-vis-q' }, ['2. Wer wird stattdessen gezeigt?']));
     var q2 = geoSerpQuery(geo, result); // NEU: Keyword in den Überschriften statt versteckt in einer Zeile
     out.push(visBlock('google', q2 ? 'Google-Suche nach ' + geoQuoted(q2) : 'Suchergebnisse und AI Overview', [geoQueryLine(geo, result), geoAioBlock(geo, q2), geoSerpBlock(geo, q2), geoCompetitorBlock(geo)]));
-    out.push(visBlock('ki', q2 ? 'Googles KI-Antworten rund um ' + geoQuoted(q2) + ' und eure Testfragen' : 'Quellen, die KI-Assistenten zitieren', [geoPortalsBlock(geo, result), geoPromptTestsBlock(geo)]));
+    out.push(visBlock('ki', q2 ? 'Googles KI-Antworten rund um ' + geoQuoted(q2) + ' und eure Testfragen' : 'Quellen, die KI-Assistenten verlinken', [geoPortalsBlock(geo, result), geoPromptTestsBlock(geo)]));
     out.push(el('h4', { class: 'cvz-cs-vis-q' }, ['3. Was ihr tut']));
-    out.push(visBlock('beides', 'Auf euren Seiten: Formate mit Chancen, zitiert zu werden', [
+    out.push(visBlock('beides', 'Auf euren Seiten: Formate mit Chancen, verlinkt zu werden', [
       geo && geo.citation_strategy_note ? renderProse(geo.citation_strategy_note, 'cvz-cs-citation-note') : null,
       el('p', { class: 'cvz-cs-hint' }, ['Welche Seiten das umsetzen, steht im Content-Plan.']),
     ]));

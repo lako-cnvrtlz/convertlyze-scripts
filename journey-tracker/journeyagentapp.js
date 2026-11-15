@@ -440,7 +440,7 @@
     var text = status === 'collecting'
       ? 'Schritt 1 von 2: Daten werden gesammelt (KI-Antworten, Keywords, Google-Rankings). ' +
         'Das kann mehrere Minuten dauern. Der Report \u00f6ffnet sich automatisch, sobald die komplette Analyse fertig ist.'
-      : 'Schritt 2 von 2: Wettbewerber, Content-L\u00fccken, Aktionsplan und Zusammenfassung werden erstellt. ' +
+      : 'Schritt 2 von 2: Wettbewerber, Content-L\u00fccken, Maßnahmenplan und Zusammenfassung werden erstellt. ' +
         'Der Report \u00f6ffnet sich automatisch, sobald alles fertig ist.';
 
     banner.innerHTML =
@@ -1661,7 +1661,7 @@
     // toggle_action_plan_item_endpoint). Bewusst NICHT in
     // CONTENT_CHANGE_TYPE_ORDER, damit es nicht im manuellen
     // "Content-Änderung eintragen"-Formular als Option auftaucht.
-    aktionsplan:  'Aktions-Plan',
+    aktionsplan:  'Maßnahmenplan',
   };
   var CONTENT_CHANGE_TYPE_ORDER = ['neue_seite', 'ueberarbeitung', 'kampagne', 'sonstiges'];
 
@@ -5691,7 +5691,7 @@
         exportBtn.className = 'cvz-archive-btn';
         exportBtn.disabled = isExportingNow;
         exportBtn.textContent = isExportingNow ? 'PDF wird erstellt …' : 'Als PDF exportieren';
-        exportBtn.title = 'Bericht mit Journey Map, Prompts, Wettbewerb und Aktionsplan. ' +
+        exportBtn.title = 'Bericht mit Journey Map, Prompts, Wettbewerb und Maßnahmenplan. ' +
           'Mit Pro oder Enterprise mit eigenem Logo und eigener Farbe (Einstellungen > PDF-Export-Branding).';
         (function (topicId) {
           exportBtn.addEventListener('click', function () {
@@ -15598,7 +15598,7 @@
     heading.textContent = 'Die wichtigsten Maßnahmen';
     head.appendChild(heading);
     head.appendChild(makeTip(
-      'Die drei offenen Maßnahmen mit der höchsten Priorität aus eurem Aktionsplan. ' +
+      'Die drei offenen Maßnahmen mit der höchsten Priorität aus eurem Maßnahmenplan. ' +
       'Dort seht ihr alle Maßnahmen mit Begründung und Daten, könnt sie abhaken und eigene Maßnahmen eintragen.'
     ));
     section.appendChild(head);
@@ -15618,8 +15618,8 @@
       empty.className = 'cvz-card-placeholder-text';
       empty.style.margin = '12px 0 4px';
       empty.textContent = (ap.items && ap.items.length)
-        ? 'Alle Maßnahmen im Aktionsplan sind erledigt. Neue Maßnahmen kommen mit dem nächsten Analyse-Lauf.'
-        : 'Noch kein Aktionsplan vorhanden.';
+        ? 'Alle Maßnahmen im Maßnahmenplan sind erledigt. Neue Maßnahmen kommen mit dem nächsten Analyse-Lauf.'
+        : 'Noch kein Maßnahmenplan vorhanden.';
       card.appendChild(empty);
     }
     var PH = { exploration: 'Erforschung', evaluation: 'Bewertung', comparison: 'Vergleich', decision: 'Entscheidung', alle_phasen: 'Alle Phasen' };
@@ -16281,7 +16281,7 @@
   var JOURNEY_SECTION_TIP =
     'Zeigt, wie oft KI-Antworten eure Domain verlinken, getrennt nach Kaufphase und KI-Kanal. ' +
     'Hohe Werte in Vergleich und Entscheidung sind am wertvollsten, weil Käufer dort ihre Shortlist bilden. ' +
-    'Niedrige Werte zeigen, in welcher Phase Käufer andere Quellen lesen als eure: Dort setzt der Aktionsplan an. ' +
+    'Niedrige Werte zeigen, in welcher Phase Käufer andere Quellen lesen als eure: Dort setzt der Maßnahmenplan an. ' +
     'Google AI Overviews stammen aus der Google-Prüfung der Keywords (monatlich, die wichtigsten Keywords zusätzlich wöchentlich) und werden deshalb als Anzahl statt in Prozent gezeigt.';
 
   var JOURNEY_SOURCES_TIP =
@@ -18404,15 +18404,15 @@
       emptyTxt.className = 'cvz-card-placeholder-text';
       if (ap.generated_at) {
         // Plan existiert, aber ohne Items: mehr Daten nötig
-        emptyTxt.textContent = 'Der Aktionsplan wurde generiert, enthält aber noch keine konkreten Empfehlungen. Es werden mehr Daten benötigt (mindestens einige ausgewertete Prompts und GSC-Daten). Empfehlungen erscheinen nach dem nächsten Analyse-Lauf mit ausreichend Datenlage.';
+        emptyTxt.textContent = 'Der Maßnahmenplan wurde generiert, enthält aber noch keine konkreten Empfehlungen. Es werden mehr Daten benötigt (mindestens einige ausgewertete Prompts und GSC-Daten). Empfehlungen erscheinen nach dem nächsten Analyse-Lauf mit ausreichend Datenlage.';
       } else {
         // Noch gar kein Plan: Generierung anbieten
-        emptyTxt.textContent = 'Für dieses Topic wurde noch kein Aktionsplan generiert.';
+        emptyTxt.textContent = 'Für dieses Topic wurde noch kein Maßnahmenplan generiert.';
         // Manueller Trigger-Button: ruft POST /topics/{id}/generate-action-plan auf.
         // Der Endpunkt startet die KI-Generierung im Hintergrund (202) und dauert etwa 30 bis 60 s.
         var genBtn = document.createElement('button');
         genBtn.style.cssText = 'display:inline-block;margin-top:16px;padding:10px 22px;background:var(--cvz-accent,#5aacd2);color:#fff;border:none;border-radius:0;font-size:14px;cursor:pointer;';
-        genBtn.textContent = 'Aktionsplan jetzt generieren';
+        genBtn.textContent = 'Maßnahmenplan jetzt generieren';
         (function(btn, statusEl, topicId) {
           btn.addEventListener('click', function() {
             btn.disabled = true;
@@ -18453,7 +18453,7 @@
               .catch(function(err) {
                 btn.disabled = false;
                 btn.style.opacity = '1';
-                btn.textContent = 'Aktionsplan jetzt generieren';
+                btn.textContent = 'Maßnahmenplan jetzt generieren';
                 statusEl.textContent = 'Fehler beim Starten der Generierung. Bitte erneut versuchen.';
                 console.error('[CVZ] generate-action-plan Fehler:', err);
               });
@@ -18518,7 +18518,7 @@
         allDone.className = 'cvz-card';
         allDone.innerHTML = '<p class="cvz-card-placeholder-text" style="margin:0;">' +
           (discardedItems.length ? 'Alle Maßnahmen sind erledigt oder verworfen.' : 'Alle ' + items.length + ' Maßnahmen sind erledigt.') +
-          ' Der nächste Aktionsplan entsteht mit dem nächsten Monatslauf, auf Basis der neuen Messwerte.</p>';
+          ' Der nächste Maßnahmenplan entsteht mit dem nächsten Monatslauf, auf Basis der neuen Messwerte.</p>';
         wrap.appendChild(allDone);
       }
       var groups = {};
@@ -19379,13 +19379,13 @@
     changesHint.style.cssText = 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;margin-bottom:20px;';
     var changesHintTxt = document.createElement('span');
     changesHintTxt.style.cssText = 'flex:1;min-width:220px;font-size:13px;color:var(--cvz-text-muted,#8b98a5);';
-    changesHintTxt.textContent = 'Umgesetzte Maßnahmen und Ereignisse tragt ihr im Aktionsplan ein. Hier seht ihr, wie sich die Sichtbarkeit danach entwickelt hat.';
+    changesHintTxt.textContent = 'Umgesetzte Maßnahmen und Ereignisse tragt ihr im Maßnahmenplan ein. Hier seht ihr, wie sich die Sichtbarkeit danach entwickelt hat.';
     var changesHintBtn = document.createElement('button');
     changesHintBtn.type = 'button';
     changesHintBtn.className = 'cvz-journey-hint-link';
     changesHintBtn.style.marginTop = '0';
     changesHintBtn.setAttribute('data-cvz-tab', 'massnahmen');
-    changesHintBtn.textContent = 'Zum Aktionsplan →';
+    changesHintBtn.textContent = 'Zum Maßnahmenplan →';
     changesHint.appendChild(changesHintTxt);
     changesHint.appendChild(changesHintBtn);
     // GEÄNDERT (14.11.2026): Im Tab Maßnahmen steht der Plan direkt darüber, der Verweis entfällt.

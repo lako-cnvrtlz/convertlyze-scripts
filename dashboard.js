@@ -1405,7 +1405,7 @@
         title:    'Noch keine Tracker-Topics',
         text:     ctx.isMember
                     ? 'Dein Team hat noch keine Topics im Customer Journey Tracker. Bitte wende dich an den Account-Inhaber.'
-                    : 'Du hast noch keine Topics im Customer Journey Tracker. Buche Topics, um Phase für Phase zu sehen, wo du in KI-Antworten zitiert wirst.',
+                    : 'Du hast noch keine Topics im Customer Journey Tracker. Buche Topics, um Phase für Phase zu sehen, wo du in KI-Antworten verlinkt wirst.',
         ctaLabel: ctx.isMember ? null : 'Topics buchen',
         ctaHref:  CONFIG.TRACKER_PRICING_URL,
       };
