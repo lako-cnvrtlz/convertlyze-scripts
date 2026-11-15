@@ -15736,8 +15736,13 @@
             gSig ? (pct > 0 ? 'good' : 'bad') : 'neutral', 'Vergleich mit den 28 Tagen davor (' + prev.clicks.toLocaleString('de-DE') + ' Klicks).');
         }
         grid.appendChild(ovCard('Klicks aus Google', cur.clicks.toLocaleString('de-DE'), gDelta,
-          'Search Console, Suchanfragen zum Thema, 28 Tage bis ' + ddmm(rolling.last_day) + '. ' +
-          (cur.impressions || 0).toLocaleString('de-DE') + ' Impressionen'));
+          // GEÄNDERT (15.11.2026): mittlere Position dazu (erklärt z. B. viele Impressionen ohne Klick)
+          // und Hinweis auf die Anonymisierung. Google lässt seltene Suchanfragen ganz weg (Klicks UND
+          // Impressionen), die Zahlen der gezeigten Anfragen sind echt. Deshalb kein "0 wegen Anonymisierung".
+          'Search Console, Suchanfragen zum Thema, 28 Tage bis ' + ddmm(rolling.last_day) + ': ' +
+          (cur.impressions || 0).toLocaleString('de-DE') + ' Impressionen' +
+          (cur.position != null ? ', mittlere Position ' + cur.position.toLocaleString('de-DE', { maximumFractionDigits: 1 }) : '') +
+          '. Seltene Suchanfragen weist Google aus Datenschutzgründen nicht einzeln aus, deren Klicks fehlen hier.'));
       } else {
         grid.appendChild(ovCard('Klicks aus Google', 'k. A.', '',
           state.gscHistoryError && state.gscHistoryError[gKey] ? 'Konnte gerade nicht geladen werden' : 'Noch keine Tageswerte aus der Search Console'));
