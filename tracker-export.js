@@ -67,7 +67,7 @@
     } else if (catKey === 'content_luecke') {
       if (ev.example_prompt) lines.push('Beispiel-Frage: "' + ev.example_prompt + '"');
     } else {
-      if (ev.own_citation_rate_pct != null) lines.push('Eure Zitierungsrate: ' + ev.own_citation_rate_pct + ' %');
+      if (ev.own_citation_rate_pct != null) lines.push('Eure Verlinkungsrate: ' + ev.own_citation_rate_pct + ' %');
       if (ev.top_competitor && ev.competitor_citation_rate_pct != null) {
         lines.push(ev.top_competitor + ': ' + ev.competitor_citation_rate_pct + ' %');
       }
@@ -134,7 +134,7 @@
       var parentId = 'ph-' + ph;
       tasks.push({
         id: parentId,
-        title: 'Aktionsplan: ' + PHASE_LABEL[ph] + (topicName ? ' – ' + topicName : ''),
+        title: 'Maßnahmenplan: ' + PHASE_LABEL[ph] + (topicName ? ' – ' + topicName : ''),
         description: 'Maßnahmen für die Phase "' + PHASE_LABEL[ph] + '" aus dem Convertlyze KI-Sichtbarkeits-Tracker.',
         labels: [PHASE_LABEL[ph], 'Convertlyze'],
       });
@@ -226,7 +226,7 @@
       : '';
 
     var menu = X().createExportMenu({
-      label: 'Aktionsplan als Aufgaben',
+      label: 'Maßnahmenplan als Aufgaben',
       triggerClass: 'cvz-archive-btn', // gleiche Optik wie "Als PDF exportieren"
       placement: 'down-left',
       filters: filters,
@@ -234,7 +234,7 @@
       getTasks: function (selectedIds) { return filterTasks(data.tasks, selectedIds); },
       getMeta: function () {
         return {
-          filenameBase: 'convertlyze-aktionsplan-' + X().slug(data.topicName || 'tracker') + '-' + isoToday(),
+          filenameBase: 'convertlyze-massnahmenplan-' + X().slug(data.topicName || 'tracker') + '-' + isoToday(),
           idPrefix: 'TR',
         };
       },
