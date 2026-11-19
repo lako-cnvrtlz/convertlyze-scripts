@@ -23,6 +23,11 @@
     // 7-Tage-Test gesperrt ist (siehe isGscLockedByPlan). Gleicher Anker wie
     // TRACKER_PRICING_URL in dashboard.js. Steht hier null, erscheint kein Button.
     trackerPricingUrl: '/preise#tracker',
+    // NEU (19.11.2026): Fragt im Node-Backend ab, ob die GSC gerade verbunden werden
+    // darf (Feld can_connect, gleiche Regel wie GET /connect, siehe
+    // routes/googleIntegration.ts: canConnectGsc). Steht hier null, gilt die GSC
+    // nie als gesperrt und es erscheint wie bisher "Search Console verbinden".
+    gscStatusUrl: 'https://convertlyze-agent-api-production.up.railway.app/api/integrations/google/status',
     // NEU (30.09.2026): Ziel des Buttons "Content-Strategie erstellen" in der
     // Themen-Tabelle. Das Strategie-Tool liest tracker_topic_id, topic und domain
     // aus der URL und füllt das Formular damit vor. Steht hier null, erscheint
@@ -302,6 +307,8 @@
     // GSC-Warnung sichtbar ist, und wann der GSC-Status zuletzt neu geprüft
     // wurde (siehe refreshGscStatusOnReturn).
     gscWarningVisible: false,
+    // NEU (19.11.2026): true | false | null (unbekannt), siehe loadGscPermission.
+    gscCanConnect: null,
     gscStatusCheckedAt: 0,
   };
 
@@ -601,6 +608,8 @@
       await loadProjects();
       await loadTopics();
       await loadTopicUsage();
+      // Bewusst ohne await: Die GSC-Berechtigung soll das Laden nie verzögern oder blockieren.
+      loadGscPermission();
     } catch (e) {
       console.error('[CVZ Visibility] Daten konnten nicht geladen werden:', e);
       showErrorMessage('Deine Daten konnten nicht geladen werden. Bitte lade die Seite neu.');
@@ -736,6 +745,27 @@
       .map(function (t) { return t.id; });
   }
 
+  // NEU (19.11.2026): Darf das Team die GSC verbinden? Antwort kommt aus dem
+  // Node-Backend, wo auch GET /connect entscheidet. Fehler -> null, dann
+  // verhält sich alles wie vor dieser Änderung.
+  async function loadGscPermission() {
+    if (CONFIG.useMockData || !CONFIG.gscStatusUrl) return;
+    try {
+      var response = await fetch(CONFIG.gscStatusUrl, {
+        headers: { 'Authorization': 'Bearer ' + state.memberToken },
+      });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      var body = await response.json();
+      var next = typeof body.can_connect === 'boolean' ? body.can_connect : null;
+      if (next !== state.gscCanConnect) {
+        state.gscCanConnect = next;
+        render();
+      }
+    } catch (e) {
+      console.error('[CVZ Visibility] GSC-Berechtigung konnte nicht geladen werden:', e);
+    }
+  }
+
   async function loadTopicUsage() {
     if (CONFIG.useMockData) {
       state.topicUsage = { current_count: state.allTopics.length, limit: 5, can_create: state.allTopics.length < 5 };
@@ -743,6 +773,8 @@
     }
     var data = await apiFetch('/account/topic-status');
     state.topicUsage = data;
+    // NEU (19.11.2026): Nach Slot-Kauf o. Ä. kann sich die GSC-Berechtigung ändern.
+    if (state.gscCanConnect === false) loadGscPermission();
   }
 
   // GEÄNDERT: räumt bei jedem Statuswechsel die Zwischenspeicher des Themas auf,
@@ -3880,24 +3912,12 @@
   }
 
   // NEU (19.11.2026): Im reinen 7-Tage-Test lässt sich die GSC nicht verbinden.
-  // Das Backend (routes/googleIntegration.ts, GET /connect) erlaubt das nur mit
-  // bezahlten Tracker-Topics (ai_visibility_topics_limit/_purchased > 0), mit
-  // Content-Strategie-Kontingent oder bei schon bestehender Verbindung.
-  // Vorrang hat ein Feld gsc_allowed aus GET /account/topic-status, falls das
-  // Tracker-Backend es liefert. Fehlt es, leiten wir es aus dem Test-Status ab:
-  // - Test verfügbar/läuft und höchstens 1 Slot (= nur der Gratis-Slot) -> gesperrt
-  // - Test beendet und 0 Slots -> gesperrt
-  // Alles andere (kein Test, gekaufte Slots, unbekannt) -> nicht gesperrt, damit
-  // zahlende Kunden nie fälschlich ausgesperrt werden.
+  // Ob verbunden werden darf, entscheidet allein das Node-Backend (GET /connect);
+  // dessen Antwort holen wir über GET /status (can_connect), siehe
+  // loadGscPermission. Gesperrt nur bei einem klaren false. Unbekannt (null)
+  // heißt nicht gesperrt, damit zahlende Kunden nie fälschlich ausgesperrt werden.
   function isGscLockedByPlan() {
-    var u = state.topicUsage;
-    if (!u) return false;
-    if (typeof u.gsc_allowed === 'boolean') return !u.gsc_allowed;
-    var trialState = u.trial && u.trial.state;
-    var limit = Number(u.limit) || 0;
-    if (trialState === 'available' || trialState === 'running') return limit <= 1;
-    if (trialState === 'expired') return limit === 0;
-    return false;
+    return state.gscCanConnect === false;
   }
 
   // NEU (19.11.2026): gemeinsamer Hinweistext für alle Stellen, an denen sonst
