@@ -19,6 +19,10 @@
     // Einstellungsseite, direkt mit Sprungmarke auf die Section "integrationen".
     // Steht hier null, erscheint kein Button.
     gscSetupUrl: 'https://www.convertlyze.com/member/einstellungen#integrationen',
+    // NEU (19.11.2026): Ziel des Buttons "Tracker-Plan ansehen", wenn die GSC im
+    // 7-Tage-Test gesperrt ist (siehe isGscLockedByPlan). Gleicher Anker wie
+    // TRACKER_PRICING_URL in dashboard.js. Steht hier null, erscheint kein Button.
+    trackerPricingUrl: '/preise#tracker',
     // NEU (30.09.2026): Ziel des Buttons "Content-Strategie erstellen" in der
     // Themen-Tabelle. Das Strategie-Tool liest tracker_topic_id, topic und domain
     // aus der URL und füllt das Formular damit vor. Steht hier null, erscheint
@@ -3875,6 +3879,31 @@
     return project.gsc_connected ? 'connected' : 'missing';
   }
 
+  // NEU (19.11.2026): Im reinen 7-Tage-Test lässt sich die GSC nicht verbinden.
+  // Das Backend (routes/googleIntegration.ts, GET /connect) erlaubt das nur mit
+  // bezahlten Tracker-Topics (ai_visibility_topics_limit/_purchased > 0), mit
+  // Content-Strategie-Kontingent oder bei schon bestehender Verbindung.
+  // Vorrang hat ein Feld gsc_allowed aus GET /account/topic-status, falls das
+  // Tracker-Backend es liefert. Fehlt es, leiten wir es aus dem Test-Status ab:
+  // - Test verfügbar/läuft und höchstens 1 Slot (= nur der Gratis-Slot) -> gesperrt
+  // - Test beendet und 0 Slots -> gesperrt
+  // Alles andere (kein Test, gekaufte Slots, unbekannt) -> nicht gesperrt, damit
+  // zahlende Kunden nie fälschlich ausgesperrt werden.
+  function isGscLockedByPlan() {
+    var u = state.topicUsage;
+    if (!u) return false;
+    if (typeof u.gsc_allowed === 'boolean') return !u.gsc_allowed;
+    var trialState = u.trial && u.trial.state;
+    var limit = Number(u.limit) || 0;
+    if (trialState === 'available' || trialState === 'running') return limit <= 1;
+    if (trialState === 'expired') return limit === 0;
+    return false;
+  }
+
+  // NEU (19.11.2026): gemeinsamer Hinweistext für alle Stellen, an denen sonst
+  // "Search Console verbinden" stünde.
+  var GSC_LOCKED_TEXT = 'Die Search Console l\u00e4sst sich im 7-Tage-Test nicht verbinden, erst mit einem bezahlten Tracker-Plan oder Topic.';
+
   // NEU (28.09.2026): Warnung beim Anlegen eines Themas, wenn für die gewählte
   // Domain die Google Search Console noch nicht verbunden ist. Blockiert das
   // Anlegen nicht: Keywords und Prompts laufen auch ohne GSC.
@@ -3883,6 +3912,33 @@
 
     var project = getProjectById(domainValue);
     var domainLabel = project ? project.domain : 'die neue Domain';
+
+    // NEU (19.11.2026): Im 7-Tage-Test nicht zum Verbinden raten, das geht dort
+    // nicht. Stattdessen sagen, was ohne GSC fehlt und ab wann es geht.
+    if (isGscLockedByPlan()) {
+      var info = document.createElement('div');
+      info.className = 'cvz-card cvz-collecting-banner';
+      info.style.cssText = 'flex:1 1 100%;margin:0;';
+      var infoText = document.createElement('p');
+      infoText.className = 'cvz-collecting-banner-text';
+      infoText.textContent =
+        '\u2139\ufe0f ' + GSC_LOCKED_TEXT + ' ' +
+        'Das Thema l\u00e4uft im Test trotzdem vollst\u00e4ndig: Keywords, Prompts und KI-Antworten werden normal gemessen. ' +
+        'Nur Klicks, Impressionen und echte Google-Positionen aus der Search Console fehlen. ' +
+        'Nach dem Upgrade die Search Console verbinden und im Daten-Tab auf "GSC-Daten jetzt nachziehen" klicken.';
+      info.appendChild(infoText);
+      if (CONFIG.trackerPricingUrl) {
+        var upgrade = document.createElement('a');
+        upgrade.className = 'cvz-retry-btn';
+        upgrade.href = CONFIG.trackerPricingUrl;
+        upgrade.target = '_blank';
+        upgrade.rel = 'noopener';
+        upgrade.style.textDecoration = 'none';
+        upgrade.textContent = 'Tracker-Plan ansehen \u2197';
+        info.appendChild(upgrade);
+      }
+      return info;
+    }
 
     var box = document.createElement('div');
     box.className = 'cvz-card cvz-collecting-banner cvz-soft-error-banner';
@@ -4055,7 +4111,8 @@
       var warning = renderGscCreateWarning(domainSelect.value);
       if (warning) gscWarningSlot.appendChild(warning);
       gscWarningSlot.style.display = warning ? '' : 'none';
-      state.gscWarningVisible = !!warning;
+      // Im 7-Tage-Test kann sich der GSC-Status nicht ändern, also auch nicht neu prüfen.
+      state.gscWarningVisible = !!warning && !isGscLockedByPlan();
     }
     updateGscWarning();
 
@@ -15775,7 +15832,12 @@
 
     // 4) Klicks aus Google (Search Console)
     var project = detail.topic ? getProjectById(detail.topic.project_id) : null;
-    if (project && project.gsc_connected === false) {
+    // GEÄNDERT (19.11.2026): Im 7-Tage-Test Hinweis auf den Plan statt "verbinden".
+    if (project && project.gsc_connected === false && isGscLockedByPlan()) {
+      grid.appendChild(ovCard('Klicks aus Google', '<span class="cvz-ov-kpi-missing">Nicht im Test</span>', '',
+        GSC_LOCKED_TEXT + ' Bis dahin fehlen Klicks, Impressionen und echte Google-Positionen.',
+        CONFIG.trackerPricingUrl ? '<a class="cvz-ov-kpi-link" href="' + escapeHtml(CONFIG.trackerPricingUrl) + '" target="_blank" rel="noopener">Tracker-Plan ansehen ↗</a>' : ''));
+    } else if (project && project.gsc_connected === false) {
       grid.appendChild(ovCard('Klicks aus Google', '<span class="cvz-ov-kpi-missing">Nicht verbunden</span>', '',
         'Ohne Search Console fehlen Klicks, Impressionen und echte Google-Positionen im Dashboard.',
         CONFIG.gscSetupUrl ? '<a class="cvz-ov-kpi-link" href="' + escapeHtml(CONFIG.gscSetupUrl) + '" target="_blank" rel="noopener">Search Console verbinden ↗</a>' : ''));
@@ -16486,8 +16548,21 @@
     if (gscMissing) {
       var miss = document.createElement('p');
       miss.className = 'cvz-gp-gsc-missing';
-      miss.textContent = 'Search Console nicht verbunden: keine Klicks, Positionen nur aus der Google-Prüfung. ';
-      if (CONFIG.gscSetupUrl) {
+      // GEÄNDERT (19.11.2026): Im 7-Tage-Test auf den Plan verweisen statt aufs Verbinden.
+      var gscLocked = isGscLockedByPlan();
+      miss.textContent = gscLocked
+        ? 'Search Console erst mit bezahltem Tracker-Plan oder Topic (nicht im 7-Tage-Test): keine Klicks, Positionen nur aus der Google-Prüfung. '
+        : 'Search Console nicht verbunden: keine Klicks, Positionen nur aus der Google-Prüfung. ';
+      if (gscLocked) {
+        if (CONFIG.trackerPricingUrl) {
+          var planLink = document.createElement('a');
+          planLink.href = CONFIG.trackerPricingUrl;
+          planLink.target = '_blank';
+          planLink.rel = 'noopener';
+          planLink.textContent = 'Tracker-Plan ansehen \u2197';
+          miss.appendChild(planLink);
+        }
+      } else if (CONFIG.gscSetupUrl) {
         var conn = document.createElement('a');
         conn.href = CONFIG.gscSetupUrl;
         conn.target = '_blank';
