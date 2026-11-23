@@ -10441,19 +10441,32 @@
 
     // Kennzahlen
     var ownResult = results.filter(function (r) { return pvBareDomain(r.domain) === ownBare; })[0];
-    var aioOwn = aio && (aio.references || []).some(function (r) { return pvBareDomain(r.domain) === ownBare; });
+    // GEÄNDERT (23.11.2026): Auswertung aus dem Backend (serp.ai_overview_flags), sie erkennt eigene
+    // Quellen auch, wenn Google den Link umleitet und nur Titel/Absender bekannt sind. Rückfall: Domainvergleich.
+    var aioFlags = (serp && serp.ai_overview_flags) || null;
+    var aioOwn = aioFlags ? !!aioFlags.cited
+      : (aio && (aio.references || []).some(function (r) { return pvBareDomain(r.domain) === ownBare; }));
+    var aioOwnByTitle = !!(aioFlags && aioFlags.cited_by_title);
+    // Quellen ohne bestimmbare Website (Google-Weiterleitung): nicht als leere Chips zeigen, sondern zählen
+    var aioRefsKnown = aio ? (aio.references || []).filter(function (r) { return !!pvBareDomain(r.domain); }) : [];
+    var aioRefsUnknown = aio ? (aio.references || []).filter(function (r) { return !pvBareDomain(r.domain); }) : [];
     var posText = kw.organic_rank != null ? 'Platz ' + kw.organic_rank
       : (ownResult && ownResult.rank ? 'Platz ' + ownResult.rank : (checkedAt ? 'nicht in den Top ' + Math.max(results.length, 10) : 'noch nicht geprüft'));
     var pills = [
       { t: 'Eure Position: ' + posText, ok: kw.organic_rank != null && kw.organic_rank <= 10 },
       kw.search_volume != null ? { t: Number(kw.search_volume).toLocaleString('de-DE') + ' Suchen/Monat' } : null,
-      features.indexOf('ai_overview') !== -1 ? { t: aioOwn ? 'In der KI-Übersicht verlinkt' : 'KI-Übersicht ohne euch', ok: aioOwn } : null,
+      features.indexOf('ai_overview') !== -1 ? {
+        t: aioOwn ? (aioOwnByTitle ? 'In der KI-Übersicht (am Titel erkannt)' : 'In der KI-Übersicht verlinkt') : 'KI-Übersicht ohne euch',
+        ok: aioOwn,
+        tip: aioOwnByTitle ? 'Google leitet diesen Link um, die Adresse ist unbekannt. Die Quelle wurde am Absender bzw. Titel als eure Seite erkannt.' : '',
+      } : null,
       kw.gsc_position != null ? { t: 'GSC: Ø Position ' + fmtNum1(Number(kw.gsc_position)) } : null,
     ].filter(Boolean);
     var summary = document.createElement('div');
     summary.className = 'cvz-pv-summary';
     summary.innerHTML = pills.map(function (p, i) {
-      return '<span class="' + (i === 0 ? 'cvz-pv-summary-main' : 'cvz-pv-pill') + (p.ok ? ' cvz-pv-ok' : '') + '">' + escapeHtml(p.t) + '</span>';
+      return '<span class="' + (i === 0 ? 'cvz-pv-summary-main' : 'cvz-pv-pill') + (p.ok ? ' cvz-pv-ok' : '') + '"' +
+        (p.tip ? ' title="' + escapeHtml(p.tip) + '"' : '') + '>' + escapeHtml(p.t) + '</span>';
     }).join('');
     box.appendChild(summary);
 
@@ -10542,13 +10555,21 @@
       aioBox.innerHTML = '<p class="cvz-kv-aio-label">✦ KI-Übersicht</p><div class="cvz-pv-answer cvz-prompt-answer"></div>' +
         ((aio.references || []).length
           ? '<p class="cvz-kv-aio-label" style="margin-top:12px;">Quellen der KI-Übersicht</p><div class="cvz-pv-chips">' +
-              aio.references.map(function (r) {
+              aioRefsKnown.map(function (r) {
                 var bare = pvBareDomain(r.domain);
                 var k = keyOfDomain(bare);
                 var cls = bare === ownBare ? ' cvz-pv-chip-own' : (compBare.indexOf(bare) !== -1 ? ' cvz-pv-chip-comp' : '');
                 return '<a class="cvz-pv-chip' + cls + (focus === k ? ' cvz-pv-chip-focus' : '') + (focus && focus !== k ? ' cvz-kv-dim' : '') + '" href="' + escapeHtml(r.url || '#') + '" target="_blank" rel="noopener" title="' + escapeHtml(r.title || r.url || '') + '">' +
                   pvFavicon(bare, 14) + '<span>' + escapeHtml(bare) + '</span></a>';
-              }).join('') + '</div>'
+              }).join('') +
+              // NEU (23.11.2026): Quellen, deren Website Google per Weiterleitung verbirgt
+              (aioRefsUnknown.length
+                ? '<span class="cvz-pv-chip cvz-kv-aio-unknown" title="' + escapeHtml(
+                    'Google leitet diese Links um, die Website ist nicht bekannt. Titel: ' +
+                    aioRefsUnknown.map(function (r) { return r.title || r.source || '?'; }).join(' · ')) + '">' +
+                  '<span>+ ' + aioRefsUnknown.length + ' ohne erkennbare Website</span></span>'
+                : '') +
+              '</div>'
           : '');
       body.appendChild(aioBox);
       var aioText = aioBox.querySelector('.cvz-pv-answer');
@@ -10623,7 +10644,7 @@
         ww.paa = true;
       });
     }
-    if (aio) (aio.references || []).forEach(function (r) {
+    if (aio) aioRefsKnown.forEach(function (r) {
       var k = keyOfDomain(r.domain);
       var w = who[k] || (who[k] = { key: k, domain: pvBareDomain(r.domain), ranks: [], aio: false, aioText: 0 });
       w.aio = true;
@@ -14336,6 +14357,8 @@
       'a.cvz-pv-chip:hover { border-color: var(--pv-text); }' +
       '.cvz-pv-chip-own { border-color: var(--pv-teal); color: var(--pv-teal); }' +
       '.cvz-pv-chip-comp { border-color: rgba(224,164,88,.6); }' +
+      // NEU (23.11.2026): Quellen der KI-Übersicht ohne erkennbare Website (Google-Weiterleitung)
+      '.cvz-kv-aio-unknown { border-style: dashed; opacity: .75; cursor: help; }' +
       '.cvz-pv-chip-query span { white-space: normal; }' +
       '.cvz-pv-chip img { flex-shrink: 0; }' +
       '.cvz-pv-pill { font-size: 13px; padding: 4px 10px; border: 1px solid var(--pv-border); background: var(--pv-raised); }' +
@@ -14614,6 +14637,7 @@
       '.cvz-journey-aio { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; font-size: 12px; }' +
       '.cvz-journey-aio-value { flex: 1; font-size: 11px; color: var(--cvz-text); cursor: default; white-space: nowrap; }' +
       '.cvz-journey-aio-hit { color: var(--cvz-teal); font-weight: 600; }' +
+      '.cvz-journey-aio-limited { color: var(--cvz-amber); font-weight: 400; }' +
       '.cvz-journey-aio-chip {' +
         'flex: 0 0 auto; font-size: 9px; text-transform: uppercase; letter-spacing: .04em;' +
         'padding: 1px 5px; color: var(--cvz-text-muted); border: 1px solid var(--cvz-border);' +
@@ -16417,6 +16441,19 @@
       var when = aio.last_checked_at ? ' (zuletzt ' + formatShortDate(aio.last_checked_at) + ')' : '';
       tip = 'Bei Google geprüft' + when + ': ' + lines.join('. ') + '. ' +
         (aio.checked > 6 ? 'Und ' + (aio.checked - 6) + ' weitere Keywords. ' : '');
+      // NEU (23.11.2026): Google leitet Links seit Ende Oktober um. Quellen ohne erkennbare Website
+      // können eure eigenen sein, "verlinkt" ist dann eher zu niedrig. Ab 20 % sichtbar markieren.
+      var unresolvedShare = aio.sources ? (aio.unresolved_sources || 0) / aio.sources : 0;
+      if (aio.unresolved_sources > 0) {
+        tip += aio.unresolved_sources + ' von ' + aio.sources + ' Quellen ließen sich keiner Website zuordnen, ' +
+          'weil Google die Links umleitet. Der Wert „verlinkt“ kann deshalb zu niedrig sein. ';
+      }
+      if (unresolvedShare >= 0.2 && aio.with_overview > 0) {
+        var limited = document.createElement('span');
+        limited.className = 'cvz-journey-aio-limited';
+        limited.textContent = ' · eingeschränkt';
+        val.appendChild(limited);
+      }
       if (aio.with_overview > aio.cited) {
         tip += 'Wo ein Overview andere Quellen nutzt, haben Seiten die besten Chancen, die genau diese Suchanfrage kurz und direkt beantworten.';
       } else if (aio.with_overview === 0) {
