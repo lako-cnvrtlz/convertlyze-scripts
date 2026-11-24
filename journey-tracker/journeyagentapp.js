@@ -149,6 +149,7 @@
     rcPhaseByTopic: {},     // NEU (08.11.2026): gewählte Phase im Wettbewerber-Liniendiagramm
     rcInit: {},             // NEU (08.11.2026): Standardauswahl der Linien wurde schon gesetzt
     cpPhaseByTopic: {},     // NEU (14.11.2026): gewählte Phase bei "Welche Seiten der Wettbewerber werden verlinkt?"
+    sovPhaseByTopic: {},    // NEU (24.11.2026): gewählte Phase bei "Share of Voice"
     cpOpen: {},             // NEU (14.11.2026): aufgeklappte Seitenlisten je Thema und Wettbewerber
     // NEU (21.10.2026): Verlauf-Tab, gewählte Phase ('total' = alle Phasen) und
     // ob die Wochentabelle aufgeklappt ist.
@@ -2811,6 +2812,14 @@
     if (rollingPhaseBtn) {
       state.rollingPhaseByTopic[rollingPhaseBtn.getAttribute('data-cvz-rolling-topic')] =
         rollingPhaseBtn.getAttribute('data-cvz-rolling-phase');
+      render();
+      return;
+    }
+
+    // NEU (24.11.2026): Phase bei der Share of Voice.
+    var sovPhaseBtn = event.target.closest('[data-cvz-sov-phase]');
+    if (sovPhaseBtn) {
+      state.sovPhaseByTopic[sovPhaseBtn.getAttribute('data-cvz-sov-topic')] = sovPhaseBtn.getAttribute('data-cvz-sov-phase');
       render();
       return;
     }
@@ -14476,6 +14485,21 @@
       '.cvz-bp-split { display: block; font-size: 11px; }' +
       '.cvz-bp-msg { margin: 8px 0 14px; font-size: 13px; line-height: 1.5; color: var(--cvz-text); }' +
       '.cvz-bp-foot { margin: 12px 0 0; font-size: 11px; line-height: 1.5; color: var(--cvz-text-muted); }' +
+      // NEU (24.11.2026): Share of Voice
+      '.cvz-sov-cols, .cvz-sov-row { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) 72px; gap: 14px; align-items: center; }' +
+      '.cvz-sov-cols { font-size: 11px; color: var(--cvz-text-muted); padding-bottom: 4px; }' +
+      '.cvz-sov-cols span:nth-child(3), .cvz-sov-rate { text-align: right; }' +
+      '.cvz-sov-row { padding: 10px 0; border-bottom: 1px solid var(--cvz-border); }' +
+      '.cvz-sov-row.own { border: 1px solid var(--cvz-teal); background: var(--cvz-navy-raised); padding: 12px 14px; }' +
+      '.cvz-sov-share { display: flex; align-items: center; gap: 10px; min-width: 0; }' +
+      '.cvz-sov-share b { font-size: 14px; white-space: nowrap; min-width: 52px; }' +
+      '.cvz-sov-share-bar { flex: 1; height: 14px; background: var(--cvz-border); }' +
+      '.cvz-sov-share-bar i { display: block; height: 100%; background: #e0a458; }' +
+      '.cvz-sov-row.own .cvz-sov-share-bar i { background: var(--cvz-teal); }' +
+      '.cvz-sov-rate { font-size: 13px; color: var(--cvz-text-muted); white-space: nowrap; }' +
+      '.cvz-sov-pending { margin: 6px 0; font-size: 12px; color: #e0a458; }' +
+      '.cvz-sov-untracked { margin: 12px 0 0; font-size: 13px; line-height: 1.5; }' +
+      '@media (max-width: 640px) { .cvz-sov-cols, .cvz-sov-row { grid-template-columns: minmax(0, 1fr) 72px; } .cvz-sov-cols span:nth-child(2) { display: none; } .cvz-sov-row .cvz-sov-share { grid-column: 1 / -1; grid-row: 2; } }' +
       // NEU (14.11.2026): verlinkte Seiten der Wettbewerber
       '.cvz-cp-comp { padding: 10px 0; border-bottom: 1px solid var(--cvz-border); }' +
       '.cvz-cp-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 4px; }' +
@@ -17202,6 +17226,10 @@
     var vField = renderVisibilityField(_jc, detail);
     if (vField) wrap.appendChild(vField);
 
+    // NEU (24.11.2026): Share of Voice unter den beobachteten Marken (dashboard.py: brand_presence.by_channel[].sov)
+    var sovBlock = renderShareOfVoice(_jc, detail, topicId);
+    if (sovBlock) wrap.appendChild(sovBlock);
+
     // NEU (06.11.2026): zitiert oder im Text genannt? (dashboard.py: brand_presence)
     var bPresence = renderBrandPresence(_jc, detail);
     if (bPresence) wrap.appendChild(bPresence);
@@ -17392,6 +17420,135 @@
     return el;
   }
 
+  // NEU (24.11.2026): Share of Voice. Je Marke (eure + beobachtete Wettbewerber) der Anteil an allen Antworten,
+  // in denen eine dieser Marken vorkommt (genannt oder verlinkt), plus die Präsenzrate ("in X % der Antworten").
+  // Die Präsenzrate hängt nicht von der Wettbewerberliste ab, der Anteil schon. Deshalb stehen beide da, und
+  // häufig genannte, nicht beobachtete Marken werden darunter genannt (nur ChatGPT meldet Marken).
+  // Folgt dem Kanal-Umschalter, Phase über eigene Chips. Daten: journey_comparison.brand_presence (dashboard.py:
+  // _brand_sov, _untracked_brands).
+  function fmtPct(v) {
+    return (Math.round(v * 10) / 10).toString().replace('.', ',') + ' %';
+  }
+
+  function renderShareOfVoice(jc, detail, topicId) {
+    var bp = jc && jc.brand_presence;
+    var ch = activeChannel();
+    var d = bp && bp.by_channel && bp.by_channel[ch];
+    if (!d || !d.sov || !d.sov.total) return null;
+    var phase = state.sovPhaseByTopic[topicId] || 'total';
+    var slice = d.sov[phase] || { runs: 0, brands: [] };
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section cvz-sov';
+
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Share of Voice';
+    head.appendChild(heading);
+    head.appendChild(makeTip(
+      'Anteil: Von allen Antworten, in denen eine eurer beobachteten Marken vorkommt (genannt oder verlinkt), ' +
+      'wie viel entfällt auf welche Marke. Die Anteile ergeben zusammen 100 %. ' +
+      'Präsenz: In wie viel Prozent aller ausgewerteten Antworten die Marke vorkommt. ' +
+      'Der Anteil hängt davon ab, welche Wettbewerber ihr beobachtet. Die Präsenz nicht.'
+    ));
+    section.appendChild(head);
+
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '4px';
+    sub.textContent = 'Wie oft kommt ihr in den Antworten vor, verglichen mit euren beobachteten Wettbewerbern? ' +
+      'Letzte ' + bp.window_days + ' Tage, ' + activeChannelLabel() + '.';
+    section.appendChild(sub);
+
+    if (bp.recompute_pending > 0) {
+      var pend = document.createElement('p');
+      pend.className = 'cvz-sov-pending';
+      pend.textContent = 'Die Markenerkennung wird gerade für ' + bp.recompute_pending + ' ältere Antworten neu berechnet. ' +
+        'Bis dahin können die Werte noch schwanken. Lade die Seite in ein paar Minuten neu.';
+      section.appendChild(pend);
+    }
+
+    var chips = document.createElement('div');
+    chips.className = 'cvz-persona-filter';
+    chips.style.margin = '8px 0 12px';
+    [['total', 'Alle Phasen']].concat(PHASE_ORDER.map(function (ph) { return [ph, PHASE_LABELS[ph]]; })).forEach(function (pair) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cvz-persona-chip' + (phase === pair[0] ? ' cvz-persona-chip-active' : '');
+      if (pair[0] !== 'total') b.style.borderLeftColor = PHASE_COLORS[pair[0]] || '';
+      b.setAttribute('data-cvz-sov-phase', pair[0]);
+      b.setAttribute('data-cvz-sov-topic', topicId);
+      b.setAttribute('aria-pressed', phase === pair[0] ? 'true' : 'false');
+      b.textContent = pair[1];
+      chips.appendChild(b);
+    });
+    section.appendChild(chips);
+
+    var anyPresent = (slice.brands || []).some(function (b) { return b.present > 0; });
+    if (!slice.runs || !anyPresent) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = !slice.runs
+        ? 'Für diese Auswahl liegen noch keine ausgewerteten Antworten vor.'
+        : 'In ' + slice.runs + ' Antworten kommt keine eurer beobachteten Marken vor.';
+      section.appendChild(none);
+    } else {
+      var ownDomain = (detail.topic && detail.topic.own_domain) || 'Eure Domain';
+      var cols = document.createElement('div');
+      cols.className = 'cvz-sov-cols';
+      cols.innerHTML = '<span></span><span>Anteil</span><span>Präsenz</span>';
+      section.appendChild(cols);
+      slice.brands.forEach(function (b) {
+        if (!b.own && !b.present) return;
+        var row = document.createElement('div');
+        row.className = 'cvz-sov-row' + (b.own ? ' own' : '');
+        var name = b.own ? ownDomain : b.domain;
+        var share = b.share || 0;
+        row.innerHTML =
+          '<span class="cvz-bp-name"' + (b.own ? '' : ' title="Beobachteter Wettbewerber"') + '>' +
+            '<img src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(name) +
+            '" width="18" height="18" alt="" onerror="this.style.visibility=\'hidden\'">' +
+            '<span' + (b.own ? '' : ' style="color:#e0a458;"') + '>' + escapeHtml(name) + '</span></span>' +
+          '<span class="cvz-sov-share"><span class="cvz-sov-share-bar" aria-hidden="true"><i style="width:' + share.toFixed(1) + '%"></i></span>' +
+            '<b>' + fmtPct(share) + '</b></span>' +
+          '<span class="cvz-sov-rate" title="' + escapeHtml('In ' + b.present + ' von ' + slice.runs + ' Antworten genannt oder verlinkt') + '">' +
+            fmtPct(b.rate || 0) + '</span>';
+        section.appendChild(row);
+      });
+      var hidden = slice.brands.filter(function (b) { return !b.own && !b.present; }).length;
+      if (hidden) {
+        var zero = document.createElement('p');
+        zero.className = 'cvz-chart-caption';
+        zero.textContent = hidden === 1
+          ? '1 beobachteter Wettbewerber kommt in dieser Auswahl nicht vor.'
+          : hidden + ' beobachtete Wettbewerber kommen in dieser Auswahl nicht vor.';
+        section.appendChild(zero);
+      }
+    }
+
+    var untracked = phase === 'total' ? (d.untracked || []) : [];
+    if (untracked.length) {
+      var un = document.createElement('p');
+      un.className = 'cvz-sov-untracked';
+      un.innerHTML = '<b>Häufig genannt, aber nicht beobachtet:</b> ' + untracked.map(function (u) {
+        return escapeHtml(u.name) + ' (' + fmtPct(u.rate) + ')';
+      }).join(', ') + '. Diese Marken zählen nicht in den Anteil. Sind es Wettbewerber, fügt sie unten unter „Beobachtete Wettbewerber“ hinzu.';
+      section.appendChild(un);
+    }
+
+    var notes = ['Präsenz = genannt oder verlinkt, gezählt je Antwort.'];
+    if (untracked.length) notes.push('Prozentangaben bei nicht beobachteten Marken: Anteil der ChatGPT-Antworten, in denen ChatGPT die Marke selbst meldet.');
+    if (ch !== 'chat_gpt') notes.push('Bei Gemini erkennen wir Nennungen nur im Antworttext, die Werte sind eher eine Untergrenze.');
+    var foot = document.createElement('p');
+    foot.className = 'cvz-bp-foot';
+    foot.textContent = notes.join(' ');
+    section.appendChild(foot);
+    return section;
+  }
+
   function renderBrandPresence(jc, detail) {
     var bp = jc && jc.brand_presence;
     if (!bp || !bp.by_channel) return null;
@@ -17490,7 +17647,8 @@
 
     var foot = document.createElement('p');
     foot.className = 'cvz-bp-foot';
-    var notes = ['Gezeigt werden eure beobachteten Wettbewerber, die vorkommen. Neu hinzugefügte Wettbewerber werden für ältere Antworten erst nach einer Neuberechnung erkannt.'];
+    // GEÄNDERT (24.11.2026): Ältere Antworten werden nach dem Hinzufügen eines Wettbewerbers automatisch neu ausgewertet.
+    var notes = ['Gezeigt werden eure beobachteten Wettbewerber, die vorkommen. Fügt ihr einen Wettbewerber hinzu, werden ältere Antworten beim nächsten Öffnen automatisch nachgerechnet.'];
     if (ch !== 'chat_gpt') {
       notes.push('Bei Gemini erkennen wir Nennungen nur im Antworttext, die Zahlen sind eher eine Untergrenze. ChatGPT meldet genannte Marken selbst.');
     }
