@@ -13980,7 +13980,9 @@
       '.cvz-status-archived { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
       '.cvz-status-queued { color: var(--cvz-text-muted); border-color: var(--cvz-border); }' +
       '.cvz-create-info { width: 100%; font-size: 13px; color: var(--cvz-text-muted); margin: 6px 0 0; }' +
-      '.cvz-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 16px; }' +
+      // GEÄNDERT (24.11.2026): über der Antwort-/Keyword-Ansicht (.cvz-pv-backdrop, z-index 2147483000). Vorher öffneten sich
+      // Rückfragen von dort (z. B. Rolle wechseln, Einstieg vorziehen) unsichtbar dahinter, der Klick schien nichts zu tun.
+      '.cvz-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2147483500; padding: 16px; }' +
       '.cvz-modal-box { background: #141b24; border: 1px solid #232b36; border-radius:0; padding: 20px; max-width: 380px; width: 100%; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }' +
       // GEFIXT (21.09.2026): var(--cvz-text-muted) ohne Fallback zeigte hier
       // hell/weiss statt grau. Grund: die --cvz-*-Variablen sind auf
