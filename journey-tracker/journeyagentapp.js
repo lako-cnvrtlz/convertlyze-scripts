@@ -540,7 +540,9 @@
       // mittig über dem Icon stand und auf dem Handy links oder rechts aus dem
       // Bildschirm lief. Dieses Popup ist position:fixed und bleibt im Bild.
       var el = e.target && e.target.closest ? e.target.closest('[title],[data-cvz-title],[data-cvz-tip]') : null;
-      if (!el || !el.closest('#cvz-visibility-app, .cvz-modal-overlay')) {
+      // GEÄNDERT (24.11.2026): auch in der Antwort-/Keyword-Ansicht (#cvz-pv-root hängt direkt am body,
+      // außerhalb von #cvz-visibility-app). Vorher reagierten die [?] dort gar nicht.
+      if (!el || !el.closest('#cvz-visibility-app, .cvz-modal-overlay, #cvz-pv-root')) {
         // Touch: künstliche mouseover-Events nach dem Antippen schließen das
         // Popup nicht (siehe touchOnly unten), das macht dort nur mousedown.
         if (e.type === 'mouseover' && (touchOnly || Date.now() - lastTouch < 1000)) return;
