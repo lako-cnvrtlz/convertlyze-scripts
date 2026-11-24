@@ -9876,6 +9876,8 @@
   async function openPromptViewer(promptId) {
     var wasOpen = !!state.promptViewer;
     state.keywordViewer = null;
+    // NEU (24.11.2026): ein fehlgeschlagener Abruf (null) wird beim erneuten Öffnen wiederholt
+    if (state.promptCitationsCache[promptId] === null) delete state.promptCitationsCache[promptId];
     if (wasOpen && !(promptId in state.promptCitationsCache)) {
       state.promptViewer.loadingNext = promptId;
       render();
@@ -9885,8 +9887,12 @@
     state.promptViewer = { promptId: promptId, engine: null, runId: null, focus: wasOpen && state.promptViewer ? state.promptViewer.focus : null };
     updateUrlParams({ cvz_prompt: promptId });
     if (!(promptId in state.promptCitationsCache)) {
+      // GEÄNDERT (24.11.2026): erst laden lassen, dann zeichnen. Vorher lief render() vor dem Start
+      // des Abrufs, der Prompt galt weder als "lädt" noch als "geladen", und die Ansicht zeigte
+      // kurz "Für diesen Prompt liegen noch keine Antworten vor".
+      var pending = fetchPromptCitations(promptId);
       render();
-      await fetchPromptCitations(promptId);
+      await pending;
       if (!state.promptViewer || state.promptViewer.promptId !== promptId) return;
     }
     render();
@@ -9980,7 +9986,10 @@
     var pv = state.promptViewer;
     var prompt = (detail.prompts || []).filter(function (p) { return p.id === pv.promptId; })[0] || { id: pv.promptId, prompt_text: '' };
     var data = state.promptCitationsCache[pv.promptId];
-    var loading = !!state.loadingPromptCitations[pv.promptId];
+    // GEÄNDERT (24.11.2026): noch nicht im Zwischenspeicher heißt "lädt", nie "keine Antworten".
+    // null im Zwischenspeicher heißt: der Abruf ist fehlgeschlagen (siehe fetchPromptCitations).
+    var loading = !!state.loadingPromptCitations[pv.promptId] || !(pv.promptId in state.promptCitationsCache);
+    var loadFailed = !loading && data === null;
 
     var order = visiblePromptOrder();
     var pos = order.map(function (p) { return p.id; }).indexOf(pv.promptId);
@@ -10024,7 +10033,9 @@
       ph.className = 'cvz-pv-empty';
       ph.innerHTML = loading
         ? '<span class="cvz-spinner"></span>Antworten werden geladen …'
-        : 'Für diesen Prompt liegen noch keine Antworten vor. Sie erscheinen nach dem nächsten Messlauf.';
+        : loadFailed
+          ? 'Die Antworten konnten gerade nicht geladen werden. Bitte schließe die Ansicht und öffne den Prompt erneut.'
+          : 'Für diesen Prompt liegen noch keine Antworten vor. Sie erscheinen nach dem nächsten Messlauf.';
       box.appendChild(ph);
       mountViewer(root, backdrop, 'p:' + pv.promptId);
       return;
