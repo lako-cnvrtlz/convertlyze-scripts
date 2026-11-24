@@ -12297,8 +12297,10 @@
         a.roles[r.role_id || '__none__'] = true;
       });
     });
+    // GEÄNDERT (24.11.2026): nach Antworten sortiert statt nach Fragen. "Bei 15 von 16 Fragen" zählte eine Frage
+    // schon bei einer einzigen Verlinkung (z. B. 4 von 56 Antworten) und überschätzte Domains, die selten vorkommen.
     return Object.keys(agg).map(function (d) { return agg[d]; }).sort(function (a, b) {
-      return (b.prompts.length - a.prompts.length) || (b.runs - a.runs) || (a.domain < b.domain ? -1 : 1);
+      return (b.runs - a.runs) || (b.prompts.length - a.prompts.length) || (a.domain < b.domain ? -1 : 1);
     });
   }
 
@@ -12336,19 +12338,38 @@
   // Reihenfolge in der Liste: zuerst, wo ein Hebel am nächsten liegt.
   var SM_STATUS_ORDER = { retrieved: 0, cited: 1, not_found: 2, absent: 3, named: 4, unknown: 5 };
 
-  function smStatusChip(r) {
+  // GEÄNDERT (24.11.2026): prefix "Ihr: " in den Fragenlisten der Fremd-Domains. Ohne den Zusatz las sich
+  // "Nicht gefunden" unter semrush.com, als gelte der Status für Semrush. Er gilt immer für eure Marke.
+  function smStatusChip(r, prefix) {
     var st = SM_STATUS[r.status];
     if (!st) return '';
-    return '<span class="cvz-sm-status cvz-sm-status-' + r.status + '" title="' + escapeHtml(st.tip) + '"><i></i>' + escapeHtml(st.label) + '</span>';
+    return '<span class="cvz-sm-status cvz-sm-status-' + r.status + '" title="' + escapeHtml(st.tip) + '"><i></i>' +
+      escapeHtml((prefix || '') + st.label) + '</span>';
   }
 
   // Trichter einer Frage: gefunden (nur ChatGPT), zitiert, genannt, jeweils in Antworten.
+  // GEÄNDERT (24.11.2026): Prozent statt "x von y". Die drei Werte haben verschiedene Bezugsgrößen
+  // (gefunden: nur ChatGPT-Antworten mit Suchergebnissen; genannt: nur ausgewertete Antworten), als
+  // "3 von 18 · 1 von 56 · 0 von 36" waren sie kaum vergleichbar. Die absoluten Zahlen stehen in smFunnelTitle.
+  function smPct(n, total) {
+    var p = total ? (n || 0) / total * 100 : 0;
+    return (p > 0 && p < 1 ? '<1' : String(Math.round(p))) + ' %';
+  }
+
   function smFunnelText(r) {
     var parts = [];
-    if (r.retrieval_known_runs) parts.push('gefunden ' + (r.own_retrieved_runs || 0) + ' von ' + r.retrieval_known_runs);
-    parts.push('verlinkt ' + (r.own_cited_runs || 0) + ' von ' + r.total_runs);
-    if (r.evaluated_runs) parts.push('genannt ' + (r.own_named_runs || 0) + ' von ' + r.evaluated_runs);
+    if (r.retrieval_known_runs) parts.push('gefunden ' + smPct(r.own_retrieved_runs, r.retrieval_known_runs));
+    parts.push('verlinkt ' + smPct(r.own_cited_runs, r.total_runs));
+    if (r.evaluated_runs) parts.push('genannt ' + smPct(r.own_named_runs, r.evaluated_runs));
     return parts.join(' · ');
+  }
+
+  function smFunnelTitle(r) {
+    var parts = [];
+    if (r.retrieval_known_runs) parts.push('Gefunden: in ' + (r.own_retrieved_runs || 0) + ' von ' + r.retrieval_known_runs + ' ChatGPT-Antworten mit Suchergebnissen');
+    parts.push('Verlinkt: in ' + (r.own_cited_runs || 0) + ' von ' + r.total_runs + ' Antworten');
+    if (r.evaluated_runs) parts.push('Genannt: in ' + (r.own_named_runs || 0) + ' von ' + r.evaluated_runs + ' ausgewerteten Antworten');
+    return parts.join('. ') + '.';
   }
 
   function smFanOutLine(r) {
@@ -12400,7 +12421,8 @@
         ? '<span class="cvz-sm-own cvz-sm-own-yes">Ihr: verlinkt (' + r.own_cited_runs + ' von ' + r.total_runs + ' Antworten)</span>'
         : '<span class="cvz-sm-own cvz-sm-own-no">Ihr: nicht verlinkt</span>';
       if (SM_STATUS[r.status]) {
-        ownTag = smStatusChip(r) + '<span class="cvz-sm-funnel">' + escapeHtml(smFunnelText(r)) + '</span>';
+        ownTag = smStatusChip(r, domain ? 'Ihr: ' : '') +
+          '<span class="cvz-sm-funnel" title="' + escapeHtml(smFunnelTitle(r)) + '">' + escapeHtml((domain ? 'ihr ' : '') + smFunnelText(r)) + '</span>';
       }
       var detailLine;
       if (domain) {
@@ -12437,8 +12459,8 @@
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
       'Zeigt, welche Domains in den KI-Antworten der letzten ' + dashWindowDays(dashData) + ' Tage als Quelle auftauchen, und bei welchen Fragen und Rollen. ' +
-      '"Bei 3 von 5 Fragen" heißt: In mindestens einer Antwort auf 3 von 5 Fragen wurde die Domain verlinkt. ' +
-      'So lassen sich auch Domains vergleichen, die nur bei wenigen Fragen vorkommen. ' +
+      'Die Hauptzahl ist der Anteil aller Antworten, in denen die Domain verlinkt wurde. ' +
+      'Darunter steht, bei wie vielen Fragen das mindestens einmal passiert ist. Eine Frage zählt dort schon bei einer einzigen Verlinkung. ' +
       'Zeile anklicken, um die Fragen dahinter zu sehen. Fragen mit "Ihr: nicht verlinkt" sind die konkreten Content-Lücken.'
     ));
     section.appendChild(headRow);
@@ -12484,6 +12506,18 @@
 
     var total = scoped.length;
     var ownCount = scoped.filter(function (r) { return r.own_cited_runs > 0; }).length;
+    // NEU (24.11.2026): Hauptzahl ist der Anteil der Antworten, die Fragen stehen klein darunter.
+    var totalRuns = scoped.reduce(function (n, r) { return n + (r.total_runs || 0); }, 0);
+    var ownRuns = scoped.reduce(function (n, r) { return n + (r.own_cited_runs || 0); }, 0);
+    function citeCell(runs, prompts, own) {
+      var share = totalRuns ? runs / totalRuns * 100 : 0;
+      var shareTxt = share > 0 && share < 1 ? '<1' : String(Math.round(share));
+      return '<td class="cvz-sm-cite"><div class="cvz-sm-cite-inner"><div class="cvz-sm-bar"><div class="cvz-sm-bar-fill' + (own ? ' cvz-sm-bar-own' : '') +
+        '" style="width:' + share.toFixed(1) + '%"></div></div>' +
+        '<span class="cvz-sm-cite-text" title="' + escapeHtml('In ' + runs + ' von ' + totalRuns + ' Antworten verlinkt, bei ' + prompts + ' von ' + total +
+          (total === 1 ? ' Frage' : ' Fragen') + ' mindestens einmal') + '">' + shareTxt + ' % der Antworten' +
+        '<span class="cvz-sm-cite-sub">' + runs + ' von ' + totalRuns + ' · bei ' + prompts + ' von ' + total + (total === 1 ? ' Frage' : ' Fragen') + '</span></span></div></td>';
+    }
     var agg = smAggregate(scoped);
     if (state.sourceOnlyCompetitors) {
       agg = agg.filter(function (a) { return model.profiles[a.domain] && model.profiles[a.domain].marked; });
@@ -12494,20 +12528,18 @@
     html += smStatusSummaryHtml(scoped);
 
     html += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table class="cvz-sm-table"><thead><tr>' +
-      '<th>Domain</th><th>Typ</th><th>Verlinkt bei</th><th>Phasen</th><th>Rollen</th>' +
+      '<th>Domain</th><th>Typ</th><th>Verlinkt in</th><th>Phasen</th><th>Rollen</th>' +
       '</tr></thead><tbody>';
 
     // Erste Zeile: eure Domain
     var ownOpen = !!state.sourceExpanded['__own__'];
-    var ownPct = Math.round(ownCount / total * 100);
     html += '<tr class="cvz-sm-row cvz-sm-row-own" data-cvz-sm-row="__own__">' +
       '<td class="cvz-sm-domain"><span class="cvz-sm-chev">' + (ownOpen ? '▲' : '▼') + '</span>' +
         (model.ownDomain ? smFavicon(model.ownDomain) : '') +
         '<span class="cvz-sm-domain-name">' + escapeHtml(model.ownDomain || 'Eure Domain') + '</span>' +
         '<span class="cvz-sm-badge cvz-sm-badge-own">Ihr</span></td>' +
       '<td><span class="cvz-sm-type">-</span></td>' +
-      '<td class="cvz-sm-cite"><div class="cvz-sm-cite-inner"><div class="cvz-sm-bar"><div class="cvz-sm-bar-fill cvz-sm-bar-own" style="width:' + ownPct + '%"></div></div>' +
-        '<span class="cvz-sm-cite-text">' + ownCount + ' von ' + total + (total === 1 ? ' Frage' : ' Fragen') + '</span></div></td>' +
+      citeCell(ownRuns, ownCount, true) +
       '<td>' + PHASE_ORDER.map(function (ph) {
         var has = scoped.some(function (r) { return r.phase === ph && r.own_cited_runs > 0; });
         return has ? smPhaseDot(ph) : '';
@@ -12524,7 +12556,6 @@
       var prof = model.profiles[a.domain];
       var info = prof ? ((phase && prof.byPhase[phase]) || prof.any) : null;
       var open = !!state.sourceExpanded[a.domain];
-      var pct = Math.round(a.prompts.length / total * 100);
       var typeLabel = info && info.content_type ? (CONTENT_TYPE_LABELS[info.content_type] || info.content_type) : '-';
       var roleKeys = Object.keys(a.roles);
       html += '<tr class="cvz-sm-row" data-cvz-sm-row="' + escapeHtml(a.domain) + '">' +
@@ -12532,8 +12563,7 @@
           smFavicon(a.domain) + '<span class="cvz-sm-domain-name">' + escapeHtml(a.domain) + '</span>' +
           (prof && prof.marked ? '<span class="cvz-sm-badge">Wettbewerber</span>' : '') + '</td>' +
         '<td><span class="cvz-sm-type">' + escapeHtml(typeLabel) + '</span></td>' +
-        '<td class="cvz-sm-cite"><div class="cvz-sm-cite-inner"><div class="cvz-sm-bar"><div class="cvz-sm-bar-fill" style="width:' + pct + '%"></div></div>' +
-          '<span class="cvz-sm-cite-text">' + a.prompts.length + ' von ' + total + (total === 1 ? ' Frage' : ' Fragen') + '</span></div></td>' +
+        citeCell(a.runs, a.prompts.length, false) +
         '<td>' + PHASE_ORDER.filter(function (ph) { return a.phases[ph]; }).map(smPhaseDot).join('') + '</td>' +
         '<td>' + (model.hasRoles ? roleKeys.map(function (k) {
           return '<span class="cvz-sm-role">' + escapeHtml((model.roleMap[k] && model.roleMap[k].label) || 'Rolle') + '</span>';
@@ -12547,8 +12577,9 @@
         if (info && info.differentiation_suggestion) {
           html += '<p class="cvz-sm-tip"><strong>Differenzierung:</strong> ' + escapeHtml(info.differentiation_suggestion) + '</p>';
         }
-        html += '<p class="cvz-sm-expand-head">Verlinkt bei ' + a.prompts.length + (a.prompts.length === 1 ? ' Frage' : ' Fragen') +
-          ', bei ' + gaps + ' davon seid ihr nicht verlinkt (zuerst gelistet):</p>' +
+        html += '<p class="cvz-sm-expand-head">' + escapeHtml(a.domain) + ' wird in ' + a.runs + ' von ' + totalRuns + ' Antworten verlinkt, verteilt auf ' +
+          a.prompts.length + (a.prompts.length === 1 ? ' Frage' : ' Fragen') + '. Bei ' + gaps + ' davon seid ihr nicht verlinkt (zuerst gelistet). ' +
+          'Die Status gelten für eure Marke:</p>' +
           smPromptListHtml(model, a.prompts, a.domain) + '</td></tr>';
       }
     });
@@ -14746,7 +14777,8 @@
       '.cvz-sm-bar { width: 90px; height: 6px; background: var(--cvz-border); flex-shrink: 0; }' +
       '.cvz-sm-bar-fill { height: 100%; background: #8878ca; }' +
       '.cvz-sm-bar-own { background: var(--cvz-teal, #4fd1c5); }' +
-      '.cvz-sm-cite-text { font-weight: 600; font-size: 12px; }' +
+      '.cvz-sm-cite-text { font-weight: 600; font-size: 12px; white-space: nowrap; }' +
+      '.cvz-sm-cite-sub { display: block; font-weight: 400; font-size: 11px; color: var(--cvz-text-muted, #8b98a5); }' +
       '.cvz-sm-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; flex-shrink: 0; }' +
       '.cvz-sm-role { display: inline-block; margin: 0 4px 2px 0; padding: 1px 7px; font-size: 11px; border: 1px solid var(--cvz-border); color: var(--cvz-text-muted); white-space: nowrap; }' +
       '.cvz-sm-expand td { padding: 4px 12px 16px 36px; background: rgba(255,255,255,0.02); }' +
