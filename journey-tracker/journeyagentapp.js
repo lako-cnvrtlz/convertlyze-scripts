@@ -6582,7 +6582,7 @@
 
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
-    heading.textContent = 'Gefunden und verlinkt (ChatGPT)';
+    heading.textContent = 'In der Suche gefunden und verlinkt (ChatGPT)';
     section.appendChild(heading);
 
     var intro = document.createElement('p');
@@ -10099,7 +10099,7 @@
             when.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + '</span>' +
             '<span class="cvz-pv-when-sub">' + when.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr \u00b7 ' +
               (isNewest ? 'neueste' : (runIdx + 1) + ' von ' + eng.runs.length) + (run._old ? ' \u00b7 älter als 28 Tage' : '') + '</span></span>' +
-          '<span class="cvz-pv-status cvz-pv-status-' + st.key + '">' + escapeHtml(st.label) +
+          '<span class="cvz-pv-status cvz-pv-status-' + st.key + '" title="' + escapeHtml(st.key === 'cited' ? GLOSSARY.quelle : st.key === 'mentioned' ? GLOSSARY.genannt + ' Hier ohne Quelle.' : GLOSSARY.praesent) + '">' + escapeHtml(st.label) +
             (run.own_domain_recommended ? ' · empfohlen' : '') + '</span>' +
         '</div>' +
         '<div class="cvz-pv-chat">' +
@@ -10161,17 +10161,18 @@
     side.className = 'cvz-pv-side';
     grid.appendChild(side);
 
-    function card(title, html) {
+    // GEÄNDERT (24.11.2026): optionaler Tooltip je Karte
+    function card(title, html, tip) {
       var c = document.createElement('div');
       c.className = 'cvz-pv-card';
-      c.innerHTML = '<p class="cvz-pv-card-title">' + title + '</p>' + html;
+      c.innerHTML = '<p class="cvz-pv-card-title">' + title + (tip ? ' ' + tipHtml(tip) : '') + '</p>' + html;
       side.appendChild(c);
       return c;
     }
 
 
     if (run) {
-      card('Genannte Anbieter in dieser Antwort',
+      card('Genannte Anbieter in dieser Antwort' + ' ' + tipHtml('Marken, die im Antworttext vorkommen, mit Anzahl der Stellen. ' + GLOSSARY.farben + ' Klick markiert die Stellen im Text.'),
         renderBrandChips(brandIndex, brandCounts, pv.focus || null, 'data-cvz-pv-brand', brandPerAnswer, eng.runs.length, 'in dieser Antwort'));
     }
 
@@ -10189,13 +10190,14 @@
       var srcs = (run.sources || []).filter(function (s) { return s.cited !== false; });
       card('Quellen dieser Antwort (' + srcs.length + ')', srcs.length
         ? '<div class="cvz-pv-chips">' + srcs.map(function (s) { return chip(s.domain, { comp: s.is_competitor }, s.url); }).join('') + '</div>'
-        : '<p class="cvz-pv-muted">Keine Quellen in dieser Antwort.</p>');
+        : '<p class="cvz-pv-muted">Keine Quellen in dieser Antwort.</p>',
+        'Domains, die die KI in dieser Antwort als Quelle verlinkt hat. ' + GLOSSARY.farben + ' Klick öffnet die Seite.');
 
       var mentionedOnly = (run.competitor_mentioned_only || []);
       if (mentionedOnly.length) {
         card('Im Text genannt, ohne Quelle', '<div class="cvz-pv-chips">' + mentionedOnly.map(function (m) {
           return '<span class="cvz-pv-chip cvz-pv-chip-comp"><span>' + escapeHtml(m) + '</span></span>';
-        }).join('') + '</div>');
+        }).join('') + '</div>', 'Beobachtete Wettbewerber, die die KI im Text nennt, ohne ihre Seite als Quelle anzugeben. Das kommt meist aus dem trainierten Wissen des Modells, nicht aus einer Websuche.');
       }
 
       // Häufigste Quellen über alle Antworten dieser KI im Zeitraum
@@ -10220,7 +10222,8 @@
             '<p class="cvz-pv-muted">' + (ownRank === -1
               ? 'Eure Domain war in keiner dieser ' + topRuns.length + ' Antworten Quelle.'
               : 'Eure Domain: Platz ' + (ownRank + 1) + ' von ' + Object.keys(counts).length + ' Quellen.') + '</p>'
-          : '<p class="cvz-pv-muted">Noch keine Quellen.</p>');
+          : '<p class="cvz-pv-muted">Noch keine Quellen.</p>',
+        'Welche Domains diese KI bei dieser Frage im Zeitraum am häufigsten als Quelle verlinkt hat. Die Zahl zählt Antworten, eine Domain je Antwort höchstens einmal.');
 
       // NEU (13.11.2026): Seiten, die ChatGPT bei der Suche gesehen, aber nicht als Quelle genannt hat.
       // retrieved_not_cited ist null, wenn die Antwort keine Suchtreffer hat (Gemini oder keine Websuche).
@@ -10230,21 +10233,22 @@
         var rncByDomain = {};
         rnc.forEach(function (r) { var b = pvBareDomain(r.domain); if (!rncByDomain[b]) rncByDomain[b] = r; });
         var rncDomains = Object.keys(rncByDomain);
-        card('Gefunden, nicht verlinkt (' + rncDomains.length + ')',
+        card('In der Suche gefunden, nicht verlinkt (' + rncDomains.length + ')',
           (rncOwn.length
             ? '<p class="cvz-pv-muted"><strong>Eure Seite war unter den Suchtreffern, wurde aber nicht verlinkt:</strong> ' +
               rncOwn.map(function (r) { return '<a href="' + escapeHtml(r.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(r.title || r.url) + '</a>'; }).join(', ') + '</p>'
             : '') +
           (rncDomains.length
             ? '<div class="cvz-pv-chips">' + rncDomains.map(function (b) { return chip(b, null, rncByDomain[b].url); }).join('') + '</div>' +
-              '<p class="cvz-pv-muted">Diese Seiten standen unter den Suchtreffern von ChatGPT. Ob ChatGPT sie geöffnet hat, ist nicht bekannt.</p>'
-            : '<p class="cvz-pv-muted">ChatGPT hat alle gefundenen Seiten auch verlinkt.</p>'));
+              '<p class="cvz-pv-muted">Diese Seiten standen in ChatGPTs eigenen Suchergebnissen für diese Antwort, wurden aber nicht als Quelle angegeben.</p>'
+            : '<p class="cvz-pv-muted">ChatGPT hat alle gefundenen Seiten auch verlinkt.</p>'),
+          GLOSSARY.gefunden + ' Seiten, die oft gefunden, aber nicht verlinkt werden, passen zur Frage, überzeugen ChatGPT aber nicht als Quelle.');
       }
 
       if (eng.id === 'chat_gpt' && Array.isArray(run.fan_out_queries) && run.fan_out_queries.length) {
         card('Wonach ChatGPT gesucht hat', '<div class="cvz-pv-chips">' + run.fan_out_queries.map(function (q) {
           return '<span class="cvz-pv-chip cvz-pv-chip-query"><span>' + escapeHtml(q) + '</span></span>';
-        }).join('') + '</div>');
+        }).join('') + '</div>', GLOSSARY.fanout + ' Stehen eure Begriffe nicht darin, findet ChatGPT eure Seiten über diesen Weg kaum.');
       }
     }
 
@@ -10253,7 +10257,7 @@
     if (roleHtml || linked.length) {
       card('Rolle und Änderungen', roleHtml + linked.map(function (e) {
         return '<p class="cvz-pv-muted">' + escapeHtml(formatRelativeTime(e.created_at)) + ': ' + escapeHtml(e.entry_text) + '</p>';
-      }).join(''));
+      }).join(''), 'Rolle: für welche Person im Kaufprozess diese Frage steht. Ändert nur die Zuordnung in den Auswertungen, nicht die Frage. Änderungen: eure eingetragenen Maßnahmen, die mit dieser Frage verknüpft sind.');
     }
 
     mountViewer(root, backdrop, 'p:' + pv.promptId);
@@ -10638,10 +10642,11 @@
     var side = document.createElement('div');
     side.className = 'cvz-pv-side';
     grid.appendChild(side);
-    function card(title, html) {
+    // GEÄNDERT (24.11.2026): optionaler Tooltip je Karte
+    function card(title, html, tip) {
       var c = document.createElement('div');
       c.className = 'cvz-pv-card';
-      c.innerHTML = '<p class="cvz-pv-card-title">' + title + '</p>' + html;
+      c.innerHTML = '<p class="cvz-pv-card-title">' + title + (tip ? ' ' + tipHtml(tip) : '') + '</p>' + html;
       side.appendChild(c);
       return c;
     }
@@ -10696,7 +10701,9 @@
             pvFavicon(w.domain, 14) + '<span>' + escapeHtml(w.domain) + '</span><b>' + escapeHtml(badges.join(' ')) + '</b></button>';
         }).join('') + '</div>' +
         '<p class="cvz-pv-muted"># = Platz in den Ergebnissen, ✦ = in der KI-Übersicht.' + (focus ? ' Nochmal klicken hebt die Markierung auf.' : '') + '</p>'
-      : '<p class="cvz-pv-muted" style="margin-top:0;">Noch keine Ergebnisse gespeichert.</p>');
+      : '<p class="cvz-pv-muted" style="margin-top:0;">Noch keine Ergebnisse gespeichert.</p>',
+      'Die Domains auf den ersten Plätzen bei Google und in der KI-Übersicht, aus unserer letzten Abfrage (Google Deutschland, ohne Anmeldung und Personalisierung). ' +
+      'Eure eigene Suche kann anders aussehen, weil Google Ergebnisse an euren Verlauf und Standort anpasst.');
 
     if (features.length) {
       card('Was Google sonst zeigt', '<div class="cvz-pv-chips">' + features.filter(function (f) { return f !== 'organic'; }).map(function (f) {
@@ -10705,13 +10712,15 @@
           escapeHtml(SERP_FEATURE_LABELS[f] || f) + '</span></span>';
       }).join('') + '</div>' +
       (features.some(function (f) { return SERP_ZERO_CLICK_FEATURE_TYPES.indexOf(f) !== -1; })
-        ? '<p class="cvz-pv-muted">Gelb: Elemente, die die Suche oft direkt beantworten. Weniger Klicks auf die Ergebnisse darunter.</p>' : ''));
+        ? '<p class="cvz-pv-muted">Gelb: Elemente, die die Suche oft direkt beantworten. Weniger Klicks auf die Ergebnisse darunter.</p>' : ''),
+        'Weitere Elemente auf der Google-Ergebnisseite neben den normalen Treffern, etwa KI-Übersicht, Fragen-Box oder Videos.');
     }
 
     // GSC-Verlauf (Tageswerte)
     var gscKey = gscHistoryKey(state.activeTopicId, kw.keyword);
     if (gscKey in state.gscHistoryCache || state.loadingGscHistory[gscKey]) {
-      var gscCard = card('Google Search Console', '');
+      var gscCard = card('Google Search Console', '', 'Eure echten Werte aus der Search Console: Klicks, Impressionen und durchschnittliche Position. ' +
+        'Bei wenigen Impressionen ist die Position wenig belastbar, schon eigene Suchen oder personalisierte Ergebnisse können sie prägen.');
       var rolling = state.gscHistoryCache[gscKey];
       if (rolling && rolling.points && rolling.points.length) {
         gscCard.appendChild(renderGscRollingBlock(rolling, state.activeTopicId, { compact: true }));
@@ -12032,6 +12041,22 @@
    * @param {string} text  Der Erklaerungstext der im Hover-Popup erscheint.
    * @param {string} [dir] Optional: 'right' oeffnet den Tooltip nach rechts statt oben.
    */
+  // NEU (24.11.2026): Begriffe an EINER Stelle, damit Tooltips überall dasselbe sagen.
+  var GLOSSARY = {
+    gefunden: 'In der Suche gefunden: Bevor ChatGPT antwortet, sucht es selbst im Web. Gefunden heißt, die Seite stand in diesen Suchergebnissen. ' +
+      'Ob ChatGPT sie gelesen hat, ist nicht sichtbar. Erst wenn sie als Quelle in der Antwort steht, zählt sie als verlinkt. Nur bei ChatGPT messbar, Gemini zeigt seine Suchergebnisse nicht.',
+    quelle: 'Als Quelle verlinkt: Die Domain steht unter den Quellen der Antwort, mit Link. Das heißt nicht, dass die Marke im Text vorkommt.',
+    genannt: 'Genannt: Die Marke steht im Antworttext, mit oder ohne Quelle.',
+    imText: 'Im Text verlinkt: Der Link steht direkt im Antworttext, zum Beispiel auf dem Markennamen, nicht nur als Quellenhinweis am Rand. Solche Links werden eher angeklickt.',
+    praesent: 'Präsent: genannt oder als Quelle verlinkt. Nicht präsent: weder noch.',
+    fanout: 'Bevor ChatGPT antwortet, zerlegt es die Frage in eigene Suchanfragen (Fan-Out) und sucht damit im Web. Diese Suchbegriffe zeigen, wonach ChatGPT für die Antwort tatsächlich gesucht hat.',
+    farben: 'Teal: eure Domain. Gold umrandet: eure beobachteten Wettbewerber.',
+  };
+
+  function tipHtml(text) {
+    return '<span class="cvz-tip" tabindex="0" data-cvz-tip="' + escapeHtml(text) + '" aria-label="' + escapeHtml(text) + '">?</span>';
+  }
+
   function makeTip(text, dir) {
     var span = document.createElement('span');
     span.className = 'cvz-tip' + (dir === 'right' ? ' cvz-tip-right' : '');
@@ -12332,8 +12357,8 @@
     named:     { label: 'Genannt', tip: 'Eure Marke steht in mindestens einer Antwort im Antworttext.' },
     // GEÄNDERT (24.11.2026): Begriffe vereinheitlicht: "als Quelle verlinkt" statt "verlinkt".
     cited:     { label: 'Als Quelle verlinkt, nicht genannt', tip: 'Eine Seite von euch steht unter den Quellen, die Marke steht aber in keiner Antwort im Text.' },
-    retrieved: { label: 'Gefunden, nicht gewählt', tip: 'Eine Seite von euch stand unter den Suchergebnissen von ChatGPT, wurde aber nie verlinkt.' },
-    not_found: { label: 'Nicht gefunden', tip: 'ChatGPT hat Suchergebnisse geliefert, keine Seite von euch war dabei.' },
+    retrieved: { label: 'In der Suche gefunden, nicht verlinkt', tip: 'Eine Seite von euch stand in ChatGPTs eigenen Suchergebnissen, wurde aber nie als Quelle verlinkt.' },
+    not_found: { label: 'In der Suche nicht gefunden', tip: 'ChatGPT hat für diese Frage im Web gesucht, keine Seite von euch war unter den Suchergebnissen.' },
     absent:    { label: 'Nicht präsent', tip: 'Weder als Quelle verlinkt noch genannt. Ob eine Seite gefunden wurde, ist nicht erkennbar (nur bei ChatGPT sichtbar).' },
     unknown:   { label: 'Noch nicht ausgewertet', tip: 'Für diese Antworten liegt die Auswertung „im Text genannt“ noch nicht vor.' }
   };
@@ -14519,6 +14544,11 @@
       '.cvz-bp-msg { margin: 8px 0 14px; font-size: 13px; line-height: 1.5; color: var(--cvz-text); }' +
       '.cvz-bp-foot { margin: 12px 0 0; font-size: 11px; line-height: 1.5; color: var(--cvz-text-muted); }' +
       // NEU (24.11.2026): Präsenz
+      '.cvz-glossary { margin-top: 14px; font-size: 13px; }' +
+      '.cvz-glossary summary { cursor: pointer; color: var(--cvz-teal); min-height: 44px; display: flex; align-items: center; }' +
+      '.cvz-glossary dl { margin: 4px 0 0; display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: 6px 16px; }' +
+      '.cvz-glossary dt { font-weight: 600; } .cvz-glossary dd { margin: 0; color: var(--cvz-text-muted); line-height: 1.5; }' +
+      '@media (max-width: 640px) { .cvz-glossary dl { grid-template-columns: 1fr; } .cvz-glossary dd { margin-bottom: 8px; } }' +
       '.cvz-presence-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; }' +
       '.cvz-presence-kpi { border: 1px solid var(--cvz-border); padding: 16px; display: flex; flex-direction: column; gap: 4px; }' +
       '.cvz-presence-kpi.main { border-color: var(--cvz-teal); background: var(--cvz-navy-raised); }' +
@@ -14876,8 +14906,9 @@
       '.cvz-competitor-url:hover { text-decoration: underline; }' +
 
       /* Tooltip-Popup f\u00fcr alle title-Attribute (siehe initCvzTooltips) */
+      // GEÄNDERT (24.11.2026): über der Antwort-Ansicht (z-index 2147483000), sonst waren Tooltips dort unsichtbar
       '.cvz-float-tip {' +
-        'position:fixed;left:0;top:0;z-index:100000;' +
+        'position:fixed;left:0;top:0;z-index:2147483600;' +
         'min-width:0;max-width:min(300px, calc(100vw - 16px));box-sizing:border-box;' +
         'padding:8px 10px;' +
         'background:#1e2a36;border:1px solid #232b36;border-radius:0;' +
@@ -15996,13 +16027,13 @@
 
     // Eigener Trichter
     var steps = [];
-    if (f.retrieval_known) steps.push(['Gefunden', f.retrieved, f.retrieval_known, presenceCountText(f.retrieved, f.retrieval_known).replace('Antworten', 'ChatGPT-Antworten mit Suchergebnissen') + ' (nur ChatGPT sichtbar)']);
-    steps.push(['Als Quelle verlinkt', f.cited, f.runs, presenceCountText(f.cited, f.runs)]);
-    if (f.text_link_known) steps.push(['Im Text verlinkt', f.text_linked, f.text_link_known, presenceCountText(f.text_linked, f.text_link_known) + ': Link direkt im Antworttext']);
-    steps.push(['Genannt', f.named, f.runs, presenceCountText(f.named, f.runs)]);
+    if (f.retrieval_known) steps.push(['In der Suche gefunden', f.retrieved, f.retrieval_known, presenceCountText(f.retrieved, f.retrieval_known).replace('Antworten', 'ChatGPT-Antworten') + ' mit eurer Seite in den Suchergebnissen', GLOSSARY.gefunden]);
+    steps.push(['Als Quelle verlinkt', f.cited, f.runs, presenceCountText(f.cited, f.runs), GLOSSARY.quelle]);
+    if (f.text_link_known) steps.push(['Im Text verlinkt', f.text_linked, f.text_link_known, presenceCountText(f.text_linked, f.text_link_known) + ': Link direkt im Antworttext', GLOSSARY.imText]);
+    steps.push(['Genannt', f.named, f.runs, presenceCountText(f.named, f.runs), GLOSSARY.genannt]);
     var fun = document.createElement('div');
     fun.innerHTML = '<p class="cvz-presence-sub">Euer Weg in die Antwort</p><div class="cvz-presence-funnel">' + steps.map(function (st, i) {
-      return '<div class="cvz-presence-step"><span class="lbl">' + (i + 1) + ' · ' + escapeHtml(st[0]) + '</span>' +
+      return '<div class="cvz-presence-step"><span class="lbl">' + (i + 1) + ' · ' + escapeHtml(st[0]) + (st[4] ? ' ' + tipHtml(st[4]) : '') + '</span>' +
         '<span class="val">' + fmtPct(st[2] ? st[1] / st[2] * 100 : 0) + '</span><span class="det">' + escapeHtml(st[3]) + '</span></div>';
     }).join('') + '</div>';
     section.appendChild(fun);
@@ -16070,11 +16101,23 @@
     if (trend) section.appendChild(trend);
 
     var notes = ['Gezählt wird je Antwort. Eine Antwort kann eine Marke nennen und als Quelle verlinken, dann zählt sie bei beiden, in der Präsenz aber nur einmal.'];
-    if (ch !== 'chat_gpt') notes.push('Gefunden sehen wir nur bei ChatGPT, Gemini zeigt seine Suchergebnisse nicht.');
+    if (ch !== 'chat_gpt') notes.push('„In der Suche gefunden“ sehen wir nur bei ChatGPT, Gemini zeigt seine Suchergebnisse nicht.');
     var foot = document.createElement('p');
     foot.className = 'cvz-bp-foot';
     foot.textContent = notes.join(' ');
     section.appendChild(foot);
+
+    // NEU (24.11.2026): Begriffe zum Aufklappen
+    var gl = document.createElement('details');
+    gl.className = 'cvz-glossary';
+    gl.innerHTML = '<summary>Begriffe erklärt</summary><dl>' + [
+      ['Präsent', GLOSSARY.praesent], ['Genannt', GLOSSARY.genannt], ['Als Quelle verlinkt', GLOSSARY.quelle],
+      ['Im Text verlinkt', GLOSSARY.imText], ['In der Suche gefunden', GLOSSARY.gefunden], ['Suchanfragen von ChatGPT (Fan-Out)', GLOSSARY.fanout],
+      ['Anteil unter den beobachteten', 'Euer Stück vom Kuchen: Präsenzen eurer Marke geteilt durch die Präsenzen aller beobachteten Marken. Ändert sich, wenn ihr Wettbewerber hinzufügt oder entfernt.'],
+    ].map(function (g) {
+      return '<dt>' + escapeHtml(g[0]) + '</dt><dd>' + escapeHtml(g[1].replace(/^[^:]+: /, '')) + '</dd>';
+    }).join('') + '</dl>';
+    section.appendChild(gl);
     return section;
   }
 
@@ -16976,7 +17019,7 @@
 
     var label = document.createElement('p');
     label.style.cssText = 'display:flex;align-items:center;margin:0 0 4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--cvz-text-muted,#6b7280);';
-    label.appendChild(document.createTextNode('Gefunden, nicht verlinkt · ChatGPT'));
+    label.appendChild(document.createTextNode('In der Suche gefunden, nicht verlinkt · ChatGPT'));
     label.appendChild(makeTip(JOURNEY_RETRIEVED_TIP));
     wrap.appendChild(label);
 
