@@ -4970,8 +4970,8 @@
     var note = document.createElement('p');
     note.className = 'cvz-chart-caption';
     note.style.marginTop = '10px';
-    note.textContent = 'Verlinkt = eure Domain wurde in den letzten ' + winDays + ' Tagen in mindestens einer Antwort (' + activeChannelLabel() +
-      ') verlinkt. Die Prozentzahl in der Tabelle ist der Durchschnitt von "verlinkt in x von y Antworten" über diese Fragen. Fragen ohne Antworten im Zeitraum zählen nicht mit. Rolle einer Frage ändern: im Daten-Tab den Prompt aufklappen.';
+    note.textContent = 'Verlinkt = eure Domain stand in den letzten ' + winDays + ' Tagen in mindestens einer Antwort (' + activeChannelLabel() +
+      ') unter den Quellen. Nennungen der Marke ohne Quelle zählen hier nicht, die zeigt der Block „Präsenz“ im Wettbewerb-Tab. Die Prozentzahl in der Tabelle ist der Durchschnitt von "verlinkt in x von y Antworten" über diese Fragen. Fragen ohne Antworten im Zeitraum zählen nicht mit. Rolle einer Frage ändern: im Daten-Tab den Prompt aufklappen.';
     panel.appendChild(note);
     return panel;
   }
@@ -5003,7 +5003,7 @@
       // Die kleine Fragenzahl je Zelle bleibt über die Zählweise "x von y"
       // sichtbar, wird aber nicht mehr als Schwäche benannt.
       // GEÄNDERT (13.11.2026): Prozent = Zitierrate statt Anteil der Fragen mit mindestens einem Treffer.
-      'Die Prozentzahl ist eure Verlinkungsrate: in welchem Anteil der KI-Antworten der letzten ' + roleWinDays + ' Tage eure Domain verlinkt wurde, ' +
+      'Die Prozentzahl ist eure Verlinkungsrate: in welchem Anteil der KI-Antworten der letzten ' + roleWinDays + ' Tage eure Domain als Quelle verlinkt wurde, ' +
       'als Durchschnitt über die Fragen dieser Rolle in dieser Phase (jede Frage zählt gleich). ' +
       'Darunter steht, bei wie vielen Fragen ihr überhaupt mindestens einmal verlinkt wurdet. ' +
       'Beispiel: 2 von 2 Fragen, aber nur 9 %: Ihr kommt bei beiden Fragen vor, aber nur in jeder elften Antwort. ' +
@@ -5213,7 +5213,7 @@
     caption.className = 'cvz-chart-caption';
     // GEÄNDERT (13.11.2026): beschreibt die Zitierrate statt des Anteils zitierter Fragen.
     caption.textContent = 'Verlinkungsrate je Rolle und Journey-Phase: In welchem Anteil der KI-Antworten (' + activeChannelLabel() + ') der letzten ' + roleWinDays +
-      ' Tage eure Domain verlinkt wurde, Durchschnitt über die Fragen der Zelle. Darunter: bei wie vielen Fragen mindestens einmal. ' +
+      ' Tage eure Domain als Quelle verlinkt wurde (Nennungen ohne Quelle zählen nicht), Durchschnitt über die Fragen der Zelle. Darunter: bei wie vielen Fragen mindestens einmal. ' +
       'Teal: ab 30 %, gelb: 10 bis 29 %, rot: unter 10 %. „Steigt später ein“: Die Rolle recherchiert erst ab ihrer Einstiegsphase mit, änderbar unter „Rollen bearbeiten“. ' +
       '„Nicht gemessen“: Der Prompt für diese Zelle fehlt noch (z. B. keine freien Plätze), über „+ Prompt“ legt ihr ihn selbst an. ' +
       'Ein Klick auf eine Zelle zeigt die Fragen dahinter.' +
@@ -9944,9 +9944,10 @@
   }
 
   function pvRunStatus(run) {
-    if (run.own_domain_cited) return { key: 'cited', label: 'Verlinkt' + (run.own_domain_citation_position ? ' · Quelle ' + run.own_domain_citation_position : '') };
-    if (run.own_domain_mentioned) return { key: 'mentioned', label: 'Erwähnt, nicht verlinkt' };
-    return { key: 'none', label: 'Nicht genannt' };
+    // GEÄNDERT (24.11.2026): Begriffe wie im Präsenz-Block
+    if (run.own_domain_cited) return { key: 'cited', label: 'Als Quelle verlinkt' + (run.own_domain_citation_position ? ' · Quelle ' + run.own_domain_citation_position : '') };
+    if (run.own_domain_mentioned) return { key: 'mentioned', label: 'Genannt, ohne Quelle' };
+    return { key: 'none', label: 'Nicht präsent' };
   }
 
   // Ersetzt den Inhalt von #cvz-pv-root. Beim ersten Öffnen läuft die
@@ -12329,10 +12330,11 @@
   // Gilt je Frage, wenn es in mindestens einer Antwort zutrifft, wie die Zahl "zitiert bei X von Y Fragen".
   var SM_STATUS = {
     named:     { label: 'Genannt', tip: 'Eure Marke steht in mindestens einer Antwort im Antworttext.' },
-    cited:     { label: 'Verlinkt, nicht genannt', tip: 'Eine Seite von euch wird als Quelle genutzt, die Marke steht aber in keiner Antwort im Text.' },
+    // GEÄNDERT (24.11.2026): Begriffe vereinheitlicht: "als Quelle verlinkt" statt "verlinkt".
+    cited:     { label: 'Als Quelle verlinkt, nicht genannt', tip: 'Eine Seite von euch steht unter den Quellen, die Marke steht aber in keiner Antwort im Text.' },
     retrieved: { label: 'Gefunden, nicht gewählt', tip: 'Eine Seite von euch stand unter den Suchergebnissen von ChatGPT, wurde aber nie verlinkt.' },
     not_found: { label: 'Nicht gefunden', tip: 'ChatGPT hat Suchergebnisse geliefert, keine Seite von euch war dabei.' },
-    absent:    { label: 'Nicht verlinkt', tip: 'Weder verlinkt noch genannt. Ob eine Seite gefunden wurde, ist nicht erkennbar (nur bei ChatGPT sichtbar).' },
+    absent:    { label: 'Nicht präsent', tip: 'Weder als Quelle verlinkt noch genannt. Ob eine Seite gefunden wurde, ist nicht erkennbar (nur bei ChatGPT sichtbar).' },
     unknown:   { label: 'Noch nicht ausgewertet', tip: 'Für diese Antworten liegt die Auswertung „im Text genannt“ noch nicht vor.' }
   };
   // Reihenfolge in der Liste: zuerst, wo ein Hebel am nächsten liegt.
@@ -12455,7 +12457,7 @@
     var heading = document.createElement('p');
     heading.className = 'cvz-section-label';
     heading.style.margin = '0';
-    heading.textContent = 'Wer wird verlinkt? Quellen und Wettbewerber';
+    heading.textContent = 'Quellen nach Frage, Phase und Rolle';   // GEÄNDERT (24.11.2026), vorher "Wer wird verlinkt?"
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
       'Zeigt, welche Domains in den KI-Antworten der letzten ' + dashWindowDays(dashData) + ' Tage als Quelle auftauchen, und bei welchen Fragen und Rollen. ' +
@@ -12616,7 +12618,7 @@
     heading.textContent = 'Wer wird stattdessen verlinkt?';
     headRow.appendChild(heading);
     headRow.appendChild(makeTip(
-      'Pro Rolle und Journey-Phase die zwei Domains, die in den KI-Antworten der letzten ' + dashWindowDays(dashData) + ' Tage bei den meisten Fragen verlinkt wurden. ' +
+      'Pro Rolle und Journey-Phase die zwei Domains, die in den KI-Antworten der letzten ' + dashWindowDays(dashData) + ' Tage bei den meisten Fragen als Quelle verlinkt wurden. ' +
       '"2/3" heißt: bei 2 von 3 Fragen. Die vollständige Liste mit den Fragen dahinter steht im Tab Wettbewerb.'
     ));
     var link = document.createElement('button');
@@ -14516,6 +14518,32 @@
       '.cvz-bp-split { display: block; font-size: 11px; }' +
       '.cvz-bp-msg { margin: 8px 0 14px; font-size: 13px; line-height: 1.5; color: var(--cvz-text); }' +
       '.cvz-bp-foot { margin: 12px 0 0; font-size: 11px; line-height: 1.5; color: var(--cvz-text-muted); }' +
+      // NEU (24.11.2026): Präsenz
+      '.cvz-presence-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; }' +
+      '.cvz-presence-kpi { border: 1px solid var(--cvz-border); padding: 16px; display: flex; flex-direction: column; gap: 4px; }' +
+      '.cvz-presence-kpi.main { border-color: var(--cvz-teal); background: var(--cvz-navy-raised); }' +
+      '.cvz-presence-kpi .lbl, .cvz-presence-step .lbl { font-size: 12px; color: var(--cvz-text-muted); }' +
+      '.cvz-presence-kpi .val { font-size: 28px; font-weight: 600; }' +
+      '.cvz-presence-kpi.main .val { color: var(--cvz-teal); font-size: 32px; }' +
+      '.cvz-presence-kpi .det, .cvz-presence-step .det { font-size: 12px; color: var(--cvz-text-muted); line-height: 1.4; }' +
+      '.cvz-presence-gap { margin: 0 0 16px; padding: 12px 14px; border: 1px solid #5a4422; background: rgba(224,164,88,.08); font-size: 13px; line-height: 1.5; }' +
+      '.cvz-presence-sub { margin: 4px 0 8px; font-size: 14px; font-weight: 600; }' +
+      '.cvz-presence-funnel { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }' +
+      '.cvz-presence-step { border: 1px solid var(--cvz-border); padding: 12px; display: flex; flex-direction: column; gap: 3px; }' +
+      '.cvz-presence-step .val { font-size: 20px; font-weight: 600; }' +
+      '.cvz-presence-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }' +
+      '.cvz-presence-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 640px; }' +
+      '.cvz-presence-table th { text-align: left; font-weight: 500; font-size: 11px; color: var(--cvz-text-muted); padding: 6px 8px; }' +
+      '.cvz-presence-table td { padding: 10px 8px; border-top: 1px solid var(--cvz-border); vertical-align: middle; }' +
+      '.cvz-presence-table .num { text-align: right; white-space: nowrap; }' +
+      '.cvz-presence-table .cnt { color: var(--cvz-text-muted); }' +
+      '.cvz-presence-table tr.own td { background: var(--cvz-navy-raised); border-top-color: var(--cvz-teal); }' +
+      '.cvz-presence-table .name { display: flex; align-items: center; gap: 8px; white-space: nowrap; }' +
+      '.cvz-presence-table tr:not(.own) .name span { color: #e0a458; }' +
+      '.cvz-presence-table td b { margin-left: 8px; }' +
+      '.cvz-presence-bar { display: inline-block; vertical-align: middle; width: 160px; max-width: 40vw; height: 10px; background: var(--cvz-border); }' +
+      '.cvz-presence-bar i { display: block; height: 100%; background: #e0a458; }' +
+      '.cvz-presence-table tr.own .cvz-presence-bar i { background: var(--cvz-teal); }' +
       // NEU (24.11.2026): Share of Voice
       '.cvz-sov-cols, .cvz-sov-row { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) 72px; gap: 14px; align-items: center; }' +
       '.cvz-sov-cols { font-size: 11px; color: var(--cvz-text-muted); padding-bottom: 4px; }' +
@@ -15880,6 +15908,174 @@
       '<div class="cvz-ov-kpi-row"><span class="cvz-ov-kpi-value">' + valueHtml + '</span>' + (deltaHtml || '') + '</div>' +
       '<p class="cvz-ov-kpi-note">' + escapeHtml(note) + '</p>' + (extraHtml || '');
     return card;
+  }
+
+  // NEU (24.11.2026): Block "Präsenz in den KI-Antworten". Ersetzt Share of Voice, "Verlinkt oder genannt?"
+  // und "Wettbewerber im Verlauf". Präsent = genannt ODER als Quelle verlinkt, gezählt je Antwort.
+  // Daten: journey_comparison.brand_presence (sov mit named/cited je Marke, own_funnel, untracked) und
+  // competitor_rolling.presence. Ohne own_funnel (altes Backend) gibt die Funktion null zurück, dann zeigt
+  // der Tab die bisherigen Blöcke.
+  function presenceCountText(n, total) {
+    return n + ' von ' + total + (total === 1 ? ' Antwort' : ' Antworten');
+  }
+
+  function renderPresenceSection(jc, dashData, detail, topicId) {
+    var bp = jc && jc.brand_presence;
+    var ch = activeChannel();
+    var d = bp && bp.by_channel && bp.by_channel[ch];
+    if (!d || !d.own_funnel || !d.sov || !d.sov.total) return null;
+    var ownDomain = (detail.topic && detail.topic.own_domain) || 'Eure Domain';
+    var f = d.own_funnel;
+    var total = d.sov.total;
+    var ownRow = (total.brands || []).filter(function (b) { return b.own; })[0] || { present: 0, named: 0, cited: 0, rate: 0, named_rate: 0, cited_rate: 0 };
+
+    var section = document.createElement('div');
+    section.className = 'cvz-section cvz-presence';
+
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Präsenz in den KI-Antworten';
+    head.appendChild(heading);
+    head.appendChild(makeTip(
+      'Präsent heißt: Eure Marke wird in der Antwort genannt oder eure Domain als Quelle verlinkt. Gezählt wird je Antwort. ' +
+      'Genannt: Die Marke steht im Antworttext. Als Quelle verlinkt: Die Domain steht unter den Quellen der Antwort. ' +
+      'Im Text verlinkt: Der Link steht direkt im Antworttext, nicht nur am Rand.'
+    ));
+    section.appendChild(head);
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = 'Letzte ' + bp.window_days + ' Tage, ' + activeChannelLabel() + ', ' + presenceCountText(total.runs, total.runs).replace(/^\d+ von /, '') + ' ausgewertet.';
+    section.appendChild(sub);
+
+    if (bp.recompute_pending > 0) {
+      var pend = document.createElement('p');
+      pend.className = 'cvz-sov-pending';
+      pend.textContent = 'Die Markenerkennung wird gerade für ' + bp.recompute_pending + ' ältere Antworten neu berechnet. ' +
+        'Bis dahin können die Werte noch schwanken. Lade die Seite in ein paar Minuten neu.';
+      section.appendChild(pend);
+    }
+
+    // Vergleich mit vor 4 Wochen aus dem Verlauf (gleiches Fenster, Kanal, alle Phasen)
+    var trendNote = '';
+    var pr = dashData && dashData.competitor_rolling && dashData.competitor_rolling.presence;
+    if (pr && pr.totals && pr.totals[ch] && pr.own && pr.own[ch]) {
+      var tt = pr.totals[ch].total || [], oo = pr.own[ch].total || [];
+      var back = tt.length - 5;
+      if (back >= 0 && tt[back] >= ROLLING_MIN_ANSWERS) trendNote = ' · vor 4 Wochen ' + fmtPct(oo[back] / tt[back] * 100);
+    }
+
+    var kpis = document.createElement('div');
+    kpis.className = 'cvz-presence-kpis';
+    kpis.innerHTML =
+      '<div class="cvz-presence-kpi main"><span class="lbl">Präsenz</span><span class="val">' + fmtPct(ownRow.rate || 0) + '</span>' +
+        '<span class="det">' + escapeHtml(presenceCountText(ownRow.present, total.runs) + trendNote) + '</span></div>' +
+      '<div class="cvz-presence-kpi"><span class="lbl">davon genannt</span><span class="val">' + fmtPct(ownRow.named_rate || 0) + '</span>' +
+        '<span class="det">' + escapeHtml(ownRow.named + (ownRow.named === 1 ? ' Antwort nennt ' : ' Antworten nennen ') + ownDomain.replace(/\.[a-z]+$/, '') + ' im Text') + '</span></div>' +
+      '<div class="cvz-presence-kpi"><span class="lbl">davon als Quelle verlinkt</span><span class="val">' + fmtPct(ownRow.cited_rate || 0) + '</span>' +
+        '<span class="det">' + escapeHtml(presenceCountText(ownRow.cited, total.runs) + (f.text_link_known ? ' · im Text verlinkt: ' + f.text_linked : '')) + '</span></div>';
+    section.appendChild(kpis);
+
+    // Lücke: Quelle ohne Nennung, und der Wettbewerber mit dem umgekehrten Muster
+    var citedOnly = Math.max(0, ownRow.cited - Math.max(0, ownRow.named + ownRow.cited - ownRow.present));
+    var gapParts = [];
+    if (citedOnly >= 3) gapParts.push('In ' + citedOnly + ' Antworten ist eure Seite Quelle, die Marke fällt aber nicht.');
+    var reverse = (total.brands || []).filter(function (b) { return !b.own && b.named >= 5 && b.named >= 2 * b.cited; })
+      .sort(function (a, b) { return (b.named - b.cited) - (a.named - a.cited); })[0];
+    if (reverse) gapParts.push((citedOnly >= 3 ? 'Bei ' + reverse.domain + ' ist es umgekehrt: ' : reverse.domain + ' wird oft ohne Quelle genannt: ') +
+      reverse.named + ' Mal genannt, nur ' + reverse.cited + ' Mal als Quelle verlinkt.');
+    if (gapParts.length) {
+      var gap = document.createElement('p');
+      gap.className = 'cvz-presence-gap';
+      gap.innerHTML = '<b>Lücke:</b> ' + escapeHtml(gapParts.join(' '));
+      section.appendChild(gap);
+    }
+
+    // Eigener Trichter
+    var steps = [];
+    if (f.retrieval_known) steps.push(['Gefunden', f.retrieved, f.retrieval_known, presenceCountText(f.retrieved, f.retrieval_known).replace('Antworten', 'ChatGPT-Antworten mit Suchergebnissen') + ' (nur ChatGPT sichtbar)']);
+    steps.push(['Als Quelle verlinkt', f.cited, f.runs, presenceCountText(f.cited, f.runs)]);
+    if (f.text_link_known) steps.push(['Im Text verlinkt', f.text_linked, f.text_link_known, presenceCountText(f.text_linked, f.text_link_known) + ': Link direkt im Antworttext']);
+    steps.push(['Genannt', f.named, f.runs, presenceCountText(f.named, f.runs)]);
+    var fun = document.createElement('div');
+    fun.innerHTML = '<p class="cvz-presence-sub">Euer Weg in die Antwort</p><div class="cvz-presence-funnel">' + steps.map(function (st, i) {
+      return '<div class="cvz-presence-step"><span class="lbl">' + (i + 1) + ' · ' + escapeHtml(st[0]) + '</span>' +
+        '<span class="val">' + fmtPct(st[2] ? st[1] / st[2] * 100 : 0) + '</span><span class="det">' + escapeHtml(st[3]) + '</span></div>';
+    }).join('') + '</div>';
+    section.appendChild(fun);
+
+    // Phase + Vergleichstabelle
+    var phase = state.sovPhaseByTopic[topicId] || 'total';
+    var slice = d.sov[phase] || { runs: 0, brands: [] };
+    var chips = document.createElement('div');
+    chips.className = 'cvz-persona-filter';
+    chips.style.margin = '18px 0 10px';
+    [['total', 'Alle Phasen']].concat(PHASE_ORDER.map(function (ph) { return [ph, PHASE_LABELS[ph]]; })).forEach(function (pair) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cvz-persona-chip' + (phase === pair[0] ? ' cvz-persona-chip-active' : '');
+      if (pair[0] !== 'total') b.style.borderLeftColor = PHASE_COLORS[pair[0]] || '';
+      b.setAttribute('data-cvz-sov-phase', pair[0]);
+      b.setAttribute('data-cvz-sov-topic', topicId);
+      b.setAttribute('aria-pressed', phase === pair[0] ? 'true' : 'false');
+      b.textContent = pair[1];
+      chips.appendChild(b);
+    });
+    section.appendChild(chips);
+
+    var shown = (slice.brands || []).filter(function (b) { return b.own || b.present > 0; });
+    if (!slice.runs) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = 'Für diese Auswahl liegen noch keine ausgewerteten Antworten vor.';
+      section.appendChild(none);
+    } else {
+      var maxRate = Math.max.apply(null, shown.map(function (b) { return b.rate || 0; }).concat([1]));
+      var html = '<div class="cvz-presence-table-wrap"><table class="cvz-presence-table"><thead><tr>' +
+        '<th scope="col">Marke</th><th scope="col">Präsenz</th><th scope="col" class="num">genannt</th>' +
+        '<th scope="col" class="num">als Quelle verlinkt</th><th scope="col" class="num">Anteil unter den beobachteten</th></tr></thead><tbody>';
+      shown.forEach(function (b) {
+        var name = b.own ? ownDomain : b.domain;
+        html += '<tr' + (b.own ? ' class="own"' : '') + '><td class="name">' +
+          '<img src="https://www.google.com/s2/favicons?sz=32&domain=' + encodeURIComponent(name) + '" width="16" height="16" alt="" onerror="this.style.visibility=\'hidden\'">' +
+          '<span>' + escapeHtml(name) + '</span>' + (b.own ? '<span class="cvz-sm-badge cvz-sm-badge-own">Ihr</span>' : '') + '</td>' +
+          '<td><span class="cvz-presence-bar"><i style="width:' + ((b.rate || 0) / maxRate * 100).toFixed(1) + '%"></i></span><b>' + fmtPct(b.rate || 0) + '</b></td>' +
+          '<td class="num">' + fmtPct(b.named_rate || 0) + ' <span class="cnt">(' + b.named + ')</span></td>' +
+          '<td class="num">' + fmtPct(b.cited_rate || 0) + ' <span class="cnt">(' + b.cited + ')</span></td>' +
+          '<td class="num cnt">' + (b.share == null ? '–' : fmtPct(b.share)) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+      var hiddenComps = (slice.brands || []).filter(function (b) { return !b.own && !b.present; }).map(function (b) { return b.domain; });
+      html += '<p class="cvz-chart-caption">' + (hiddenComps.length ? escapeHtml(hiddenComps.join(', ')) + (hiddenComps.length === 1 ? ' kommt' : ' kommen') + ' in dieser Auswahl nicht vor. ' : '') +
+        'Der Anteil gilt nur unter euren beobachteten Marken und ändert sich, wenn ihr die Wettbewerberliste ändert. Die Präsenz nicht.</p>';
+      var tableBox = document.createElement('div');
+      tableBox.innerHTML = html;
+      section.appendChild(tableBox);
+    }
+
+    var untracked = phase === 'total' ? (d.untracked || []) : [];
+    if (untracked.length) {
+      var un = document.createElement('p');
+      un.className = 'cvz-sov-untracked';
+      un.innerHTML = '<b>Häufig genannt, aber nicht beobachtet:</b> ' + untracked.map(function (u) {
+        return escapeHtml(u.name) + ' (' + fmtPct(u.rate) + ' der ChatGPT-Antworten)';
+      }).join(', ') + '. Diese Marken fehlen im Anteil oben. Sind es Wettbewerber, fügt sie unten unter „Beobachtete Wettbewerber“ hinzu.';
+      section.appendChild(un);
+    }
+
+    var trend = renderCompetitorRolling(topicId, dashData, detail, { presence: true });
+    if (trend) section.appendChild(trend);
+
+    var notes = ['Gezählt wird je Antwort. Eine Antwort kann eine Marke nennen und als Quelle verlinken, dann zählt sie bei beiden, in der Präsenz aber nur einmal.'];
+    if (ch !== 'chat_gpt') notes.push('Gefunden sehen wir nur bei ChatGPT, Gemini zeigt seine Suchergebnisse nicht.');
+    var foot = document.createElement('p');
+    foot.className = 'cvz-bp-foot';
+    foot.textContent = notes.join(' ');
+    section.appendChild(foot);
+    return section;
   }
 
   function fmtPct(v) {
@@ -17254,26 +17450,28 @@
     wrap.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at, 'Quellen und KI-Wissen zuletzt analysiert'));
     wrap.appendChild(renderNextRunNote(detail.topic, 30, 'Nächster Durchlauf (Quellen, KI-Wissen)'));
 
-    // NEU (21.10.2026): Sichtbarkeitsfeld, beantwortet die Tab-Frage auf einen Blick
+    // GEÄNDERT (24.11.2026): Reihenfolge Präsenz > Meistverlinkte Quellen > Quellen nach Frage > Seiten der
+    // Wettbewerber. Der Präsenz-Block ersetzt Share of Voice, "Verlinkt oder genannt?" und den Verlauf der
+    // Verlinkungsrate. Ohne neues Backend (kein own_funnel) bleiben die bisherigen Blöcke.
+    var presence = renderPresenceSection(_jc, data, detail, topicId);
+    if (presence) wrap.appendChild(presence);
+
+    // NEU (21.10.2026): Sichtbarkeitsfeld, seit 24.11.2026 "Meistverlinkte Quellen"
     var vField = renderVisibilityField(_jc, detail);
     if (vField) wrap.appendChild(vField);
 
-    // NEU (24.11.2026): Share of Voice unter den beobachteten Marken (dashboard.py: brand_presence.by_channel[].sov)
-    var sovBlock = renderShareOfVoice(_jc, detail, topicId);
-    if (sovBlock) wrap.appendChild(sovBlock);
-
-    // NEU (06.11.2026): zitiert oder im Text genannt? (dashboard.py: brand_presence)
-    var bPresence = renderBrandPresence(_jc, detail);
-    if (bPresence) wrap.appendChild(bPresence);
-
-    // NEU (14.11.2026): welche Seiten der Wettbewerber verlinkt werden, nach Phase filterbar
-    // (dashboard.py: competitor_pages).
-    var cPages = renderCompetitorPages(topicId, _jc);
-    if (cPages) wrap.appendChild(cPages);
-
-    // NEU (08.11.2026): Liniendiagramm über die Zeit, eure Domain und Wettbewerber, nach Phase filterbar.
-    var cRollingSection = renderCompetitorRolling(topicId, data, detail);
-    if (cRollingSection) wrap.appendChild(cRollingSection);
+    var cPages = null;
+    if (!presence) {
+      var sovBlock = renderShareOfVoice(_jc, detail, topicId);
+      if (sovBlock) wrap.appendChild(sovBlock);
+      var bPresence = renderBrandPresence(_jc, detail);
+      if (bPresence) wrap.appendChild(bPresence);
+      // NEU (14.11.2026): welche Seiten der Wettbewerber verlinkt werden (dashboard.py: competitor_pages).
+      cPages = renderCompetitorPages(topicId, _jc);
+      if (cPages) wrap.appendChild(cPages);
+      var cRollingSection = renderCompetitorRolling(topicId, data, detail);
+      if (cRollingSection) wrap.appendChild(cRollingSection);
+    }
 
     // GEÄNDERT (21.10.2026): Das Liniendiagramm "Sichtbarkeit im Wettbewerbsvergleich"
     // (Domains je Phase) entfällt, das Sichtbarkeitsfeld beantwortet dieselbe
@@ -17295,6 +17493,12 @@
       wrap.appendChild(_smFull);
     } else if (_hasSov || (detail.source_profiles && detail.source_profiles.length > 0)) {
       wrap.appendChild(renderSourceProfilesSection(detail.source_profiles, topicId, _sov));
+    }
+
+    // GEÄNDERT (24.11.2026): Seiten der Wettbewerber stehen jetzt hinter den Quellen.
+    if (presence) {
+      cPages = renderCompetitorPages(topicId, _jc);
+      if (cPages) wrap.appendChild(cPages);
     }
 
     // 3. Welche Domains als Wettbewerber gelten.
@@ -17319,7 +17523,7 @@
     section.className = 'cvz-section cvz-vf';
     var label = document.createElement('p');
     label.className = 'cvz-section-label';
-    label.textContent = 'Sichtbarkeitsfeld';
+    label.textContent = 'Meistverlinkte Quellen';   // GEÄNDERT (24.11.2026), vorher "Sichtbarkeitsfeld"
     section.appendChild(label);
     if (!total) {
       var none = document.createElement('p');
@@ -17333,7 +17537,7 @@
     sub.style.marginBottom = '14px';
     var boxes = Math.min(total, VF_MAX_BOXES);
     sub.textContent = (boxes === total ? 'Ein Kästchen je Antwort' : 'Jedes Kästchen steht für etwa ' + fmtNum1(total / boxes) + ' Antworten') +
-      ' (' + total + ' Antworten, letzte ' + vf.window_days + ' Tage, ' + activeChannelLabel() + '). Ausgefüllt heißt: in dieser Antwort als Quelle verlinkt. ' +
+      ' (' + total + ' Antworten, letzte ' + vf.window_days + ' Tage, ' + activeChannelLabel() + '). Alle Domains, die als Quelle verlinkt werden, auch Ratgeber und Medien. Ausgefüllt heißt: in dieser Antwort als Quelle verlinkt. ' +
       'Gelb: von euch beobachtete Wettbewerber.' +
       (vf.own_trend ? ' Pfeile vergleichen mit den ' + vf.window_days + ' Tagen davor und erscheinen nur bei einer Veränderung, die größer ist als die normale Schwankung.' : '');
     section.appendChild(sub);
@@ -17409,7 +17613,7 @@
     if (vf.other_count) {
       var more = document.createElement('p');
       more.className = 'cvz-chart-caption';
-      more.textContent = 'Daneben wurden ' + vf.other_count + ' weitere Domains verlinkt. Details pro Frage weiter unten unter „Wer wird verlinkt?“.';
+      more.textContent = 'Daneben wurden ' + vf.other_count + ' weitere Domains als Quelle verlinkt. Details pro Frage weiter unten unter „Quellen nach Frage, Phase und Rolle“.';
       section.appendChild(more);
     }
     return section;
@@ -17825,11 +18029,19 @@
   var RC_OWN_KEY = '__own__';
   var RC_COLORS = ['#c98e2a', '#de5b50', '#8878ca', '#4ec68a', '#5aacd2', '#e8855b', '#a3c97a', '#c97ab5', '#7b8794', '#b8a04a', '#6aa6a0', '#d27a9a'];
 
-  function renderCompetitorRolling(topicId, dashData, detail) {
-    var cr = dashData && dashData.competitor_rolling;
+  // GEÄNDERT (24.11.2026): opts.presence = Präsenz (genannt oder als Quelle verlinkt) statt Verlinkungsrate,
+  // für eure Domain und die beobachteten Wettbewerber (dashboard.py: competitor_rolling.presence).
+  function renderCompetitorRolling(topicId, dashData, detail, opts) {
+    var crRaw = dashData && dashData.competitor_rolling;
+    var presenceMode = !!(opts && opts.presence);
+    if (presenceMode && !(crRaw && crRaw.presence)) return null;
+    var cr = presenceMode ? {
+      window_days: crRaw.window_days, points: crRaw.points, totals: crRaw.presence.totals, own: crRaw.presence.own,
+      domains: (crRaw.presence.domains || []).map(function (d) { return { domain: d.domain, is_competitor: true, cited: d.present }; })
+    } : crRaw;
     if (!cr || !cr.points || cr.points.length < 2 || !cr.totals) return null;
 
-    var key = topicId + '#rc';
+    var key = topicId + (presenceMode ? '#rp' : '#rc');
     var ch = activeChannel();
     var phase = state.rcPhaseByTopic[topicId] || 'total';
     var points = cr.points;
@@ -17847,17 +18059,20 @@
 
     var section = document.createElement('div');
     section.className = 'cvz-section';
-    section.style.marginTop = '28px';
+    section.style.marginTop = presenceMode ? '20px' : '28px';
 
     var head = document.createElement('div');
     head.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
     var heading = document.createElement('p');
-    heading.className = 'cvz-section-label';
+    heading.className = presenceMode ? 'cvz-presence-sub' : 'cvz-section-label';
     heading.style.margin = '0';
-    heading.textContent = 'Wettbewerber im Verlauf';
+    heading.textContent = presenceMode ? 'Präsenz im Verlauf' : 'Wettbewerber im Verlauf';
     head.appendChild(heading);
     head.appendChild(makeTip(
-      'Anteil der Antworten, die eine Domain verlinken, jeweils über die ' + cr.window_days + ' Tage bis zum Datum, ein Punkt pro Woche. ' +
+      (presenceMode
+        ? 'Anteil der Antworten, in denen eine Marke genannt oder als Quelle verlinkt wird, '
+        : 'Anteil der Antworten, die eine Domain als Quelle verlinken, ') +
+      'jeweils über die ' + cr.window_days + ' Tage bis zum Datum, ein Punkt pro Woche. ' +
       'Über die Legende blendet ihr Linien aus und ein, um einzelne Verläufe anzusehen. Über die Phase seht ihr, wie sich die Sichtbarkeit in einer Kaufphase entwickelt. ' +
       'Das schattierte Band um eure Linie zeigt, wie weit der Wert allein durch Zufall schwanken kann.'
     ));
@@ -17984,9 +18199,12 @@
 
     var cap = document.createElement('p');
     cap.className = 'cvz-chart-caption';
-    cap.textContent = 'Verlinkungsrate von ' + activeChannelLabel() + (phase === 'total' ? '' : ', Phase ' + (PHASE_LABELS[phase] || phase)) +
+    cap.textContent = (presenceMode ? 'Präsenz (genannt oder als Quelle verlinkt) bei ' : 'Anteil der Antworten mit der Domain als Quelle, ') +
+      activeChannelLabel() + (phase === 'total' ? '' : ', Phase ' + (PHASE_LABELS[phase] || phase)) +
       ', jeweils über die ' + cr.window_days + ' Tage bis zum Datum. Punkte mit weniger als ' + ROLLING_MIN_ANSWERS + ' Antworten werden nicht gezeichnet. ' +
-      'Gezeigt werden die ' + domains.length + ' am häufigsten verlinkten Domains des Zeitraums plus eure beobachteten Wettbewerber, zu Beginn die ersten ' + RC_DEFAULT_VISIBLE + '. ' +
+      (presenceMode
+        ? 'Gezeigt werden eure Domain und eure beobachteten Wettbewerber, zu Beginn die ersten ' + RC_DEFAULT_VISIBLE + '. Gezählt werden nur bereits ausgewertete Antworten. '
+        : 'Gezeigt werden die ' + domains.length + ' am häufigsten verlinkten Domains des Zeitraums plus eure beobachteten Wettbewerber, zu Beginn die ersten ' + RC_DEFAULT_VISIBLE + '. ') +
       'Ändert ihr Prompts oder Rollen, verschieben sich alle Quoten, dann kann ein Knick am neuen Prompt-Set liegen und nicht an der Sichtbarkeit. ' +
       'Gestrichelt: Aufbauphase. Rauten: eingetragene Änderungen.';
     section.appendChild(cap);
