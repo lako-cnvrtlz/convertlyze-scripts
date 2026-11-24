@@ -12348,12 +12348,28 @@
   }
 
   // Trichter einer Frage: gefunden (nur ChatGPT), zitiert, genannt, jeweils in Antworten.
+  // GEÄNDERT (24.11.2026): Prozent statt "x von y". Die drei Werte haben verschiedene Bezugsgrößen
+  // (gefunden: nur ChatGPT-Antworten mit Suchergebnissen; genannt: nur ausgewertete Antworten), als
+  // "3 von 18 · 1 von 56 · 0 von 36" waren sie kaum vergleichbar. Die absoluten Zahlen stehen in smFunnelTitle.
+  function smPct(n, total) {
+    var p = total ? (n || 0) / total * 100 : 0;
+    return (p > 0 && p < 1 ? '<1' : String(Math.round(p))) + ' %';
+  }
+
   function smFunnelText(r) {
     var parts = [];
-    if (r.retrieval_known_runs) parts.push('gefunden ' + (r.own_retrieved_runs || 0) + ' von ' + r.retrieval_known_runs);
-    parts.push('verlinkt ' + (r.own_cited_runs || 0) + ' von ' + r.total_runs);
-    if (r.evaluated_runs) parts.push('genannt ' + (r.own_named_runs || 0) + ' von ' + r.evaluated_runs);
+    if (r.retrieval_known_runs) parts.push('gefunden ' + smPct(r.own_retrieved_runs, r.retrieval_known_runs));
+    parts.push('verlinkt ' + smPct(r.own_cited_runs, r.total_runs));
+    if (r.evaluated_runs) parts.push('genannt ' + smPct(r.own_named_runs, r.evaluated_runs));
     return parts.join(' · ');
+  }
+
+  function smFunnelTitle(r) {
+    var parts = [];
+    if (r.retrieval_known_runs) parts.push('Gefunden: in ' + (r.own_retrieved_runs || 0) + ' von ' + r.retrieval_known_runs + ' ChatGPT-Antworten mit Suchergebnissen');
+    parts.push('Verlinkt: in ' + (r.own_cited_runs || 0) + ' von ' + r.total_runs + ' Antworten');
+    if (r.evaluated_runs) parts.push('Genannt: in ' + (r.own_named_runs || 0) + ' von ' + r.evaluated_runs + ' ausgewerteten Antworten');
+    return parts.join('. ') + '.';
   }
 
   function smFanOutLine(r) {
@@ -12406,7 +12422,7 @@
         : '<span class="cvz-sm-own cvz-sm-own-no">Ihr: nicht verlinkt</span>';
       if (SM_STATUS[r.status]) {
         ownTag = smStatusChip(r, domain ? 'Ihr: ' : '') +
-          '<span class="cvz-sm-funnel">' + escapeHtml((domain ? 'ihr ' : '') + smFunnelText(r)) + '</span>';
+          '<span class="cvz-sm-funnel" title="' + escapeHtml(smFunnelTitle(r)) + '">' + escapeHtml((domain ? 'ihr ' : '') + smFunnelText(r)) + '</span>';
       }
       var detailLine;
       if (domain) {
