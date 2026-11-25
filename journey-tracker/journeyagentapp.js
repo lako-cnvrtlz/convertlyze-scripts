@@ -15303,7 +15303,7 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Welche Arten von Inhalten KI-Systeme in der jeweiligen Journey-Phase verlinken (Anteil an allen Verlinkungen der erfassten Domains, inkl. Wettbewerber). Zeigt, welches Format ihr für eine Phase brauchst.';
+    sub.textContent = 'Welche Arten von Inhalten KI-Systeme in der jeweiligen Journey-Phase verlinken (Anteil an allen Verlinkungen der erfassten Domains, inkl. Wettbewerber). Zeigt, welches Format ihr für eine Phase braucht.';
     section.appendChild(sub);
 
     var legend = document.createElement('div');
