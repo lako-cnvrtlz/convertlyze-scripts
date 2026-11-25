@@ -2422,6 +2422,11 @@
       deactivatePrompt(state.activeTopicId, suggestionDismiss.getAttribute('data-cvz-suggestion-dismiss'));
       return;
     }
+    var promptEdit = event.target.closest('[data-cvz-prompt-edit]');
+    if (promptEdit) {
+      editPromptText(state.activeTopicId, promptEdit.getAttribute('data-cvz-prompt-edit'));
+      return;
+    }
     var promptDelete = event.target.closest('[data-cvz-prompt-delete]');
     if (promptDelete) {
       deactivatePrompt(state.activeTopicId, promptDelete.getAttribute('data-cvz-prompt-delete'));
@@ -3720,6 +3725,53 @@
     } catch (e) {
       console.error('[CVZ Visibility] Prompt konnte nicht deaktiviert werden:', e);
       await showCvzAlert('Prompt konnte nicht deaktiviert werden: ' + (e.message || 'Unbekannter Fehler'));
+    }
+  }
+
+  // NEU (25.11.2026): Prompt-Text bearbeiten. Backend: PATCH /topics/{id}/prompts/{pid}/text. Hat der Prompt
+  // schon Messwerte, legt das Backend eine neue Version mit eigener Messreihe an (wie löschen und neu anlegen),
+  // die bisherigen Werte bleiben bei der alten Frage. Danach wird die Prompt-Liste neu geladen.
+  async function editPromptText(topicId, promptId) {
+    var detail = state.topicDetailCache[topicId];
+    var prompt = detail && (detail.prompts || []).filter(function (p) { return p.id === promptId; })[0];
+    if (!prompt) return;
+    // Nur für den Hinweistext. Ob eine neue Version entsteht, entscheidet das Backend (Messläufe vorhanden?).
+    var hasRuns = (prompt.total_runs || 0) > 0;
+    var text = await showCvzModal(
+      hasRuns
+        ? 'Für die geänderte Frage beginnt eine neue Messreihe. Die bisherigen Werte bleiben bei der alten Frage erhalten.'
+        : 'Formuliere die Frage so, wie jemand sie ChatGPT oder Gemini stellen würde. Ohne deinen Firmennamen.',
+      { title: 'Prompt bearbeiten', confirmLabel: 'Speichern', input: { value: prompt.prompt_text || '', maxLength: 500 } }
+    );
+    if (text === null || text === false) return;
+    text = String(text).replace(/\s+/g, ' ').trim();
+    if (!text || text === prompt.prompt_text) return;
+    if (CONFIG.useMockData) {
+      await showCvzAlert('Im Mock-Modus nicht verfügbar.');
+      return;
+    }
+    var force = false;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        await apiFetch('/topics/' + topicId + '/prompts/' + promptId + '/text', {
+          method: 'PATCH', body: { prompt_text: text, force: force },
+        });
+        if (state.expandedPromptId === promptId) state.expandedPromptId = null;
+        delete state.topicDetailCache[topicId];
+        await openTopicDetail(topicId, false);
+        return;
+      } catch (e) {
+        if (e.status === 422 && !force) {
+          var go = await showCvzConfirm((e.message || '') + '\n\nTrotzdem so speichern?',
+            { title: 'Eher ein Keyword', confirmLabel: 'Trotzdem speichern', preLine: true });
+          if (!go) return;
+          force = true;
+          continue;
+        }
+        console.error('[CVZ Visibility] Prompt konnte nicht bearbeitet werden:', e);
+        await showCvzAlert(e.message || 'Prompt konnte nicht gespeichert werden.', { title: 'Nicht gespeichert' });
+        return;
+      }
     }
   }
 
@@ -11415,6 +11467,8 @@
         '<td class="cvz-pt-meta">' + ((contentTypeBadge || personaBadge || aiSearchVolumeBadge)
           ? '<div class="cvz-pt-meta-stack">' + contentTypeBadge + personaBadge + aiSearchVolumeBadge + '</div>' : '') + '</td>' +
         '<td class="cvz-pt-del" style="white-space:nowrap;text-align:right;">' +
+          // NEU (25.11.2026): Prompt bearbeiten statt löschen und neu anlegen
+          '<button type="button" class="cvz-prompt-edit-btn" data-cvz-prompt-edit="' + prompt.id + '" aria-label="Prompt bearbeiten" title="Prompt bearbeiten">\u270e</button>' +
           '<button type="button" class="cvz-prompt-delete-btn" data-cvz-prompt-delete="' + prompt.id + '" aria-label="Prompt deaktivieren" title="Prompt deaktivieren">\u00d7</button>' +
         '</td>';
       tbody.appendChild(tr);
@@ -11755,10 +11809,23 @@
       if (options.preLine) textEl.style.whiteSpace = 'pre-line';
       box.appendChild(textEl);
 
+      // NEU (25.11.2026): optionales Eingabefeld (options.input = { value, maxLength }). OK liefert dann den Text,
+      // Abbrechen null. Strg/Cmd+Enter speichert.
+      var inputEl = null;
+      if (options.input) {
+        inputEl = document.createElement('textarea');
+        inputEl.className = 'cvz-modal-input';
+        inputEl.rows = 3;
+        inputEl.value = options.input.value || '';
+        if (options.input.maxLength) inputEl.maxLength = options.input.maxLength;
+        box.appendChild(inputEl);
+      }
+
       var actions = document.createElement('div');
       actions.className = 'cvz-modal-actions';
 
       function close(result) {
+        if (inputEl) result = result ? inputEl.value : null;
         overlay.removeEventListener('click', onOverlayClick);
         document.removeEventListener('keydown', onKeyDown);
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
@@ -11786,7 +11853,14 @@
       document.documentElement.appendChild(overlay);
       // NEU (28.09.2026): Bei kostenpflichtigen Aktionen startet der Fokus auf
       // "Abbrechen", damit ein versehentliches Enter nichts bucht.
-      if (options.focusCancel && cancelBtn) cancelBtn.focus();
+      if (inputEl) {
+        inputEl.focus();
+        inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+        inputEl.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); close(true); }
+        });
+      }
+      else if (options.focusCancel && cancelBtn) cancelBtn.focus();
       else okBtn.focus();
 
       function onOverlayClick(e) {
@@ -14236,6 +14310,12 @@
         'cursor: pointer; padding: 0 2px; flex-shrink: 0;' +
       '}' +
       '.cvz-prompt-delete-btn:hover { color: var(--cvz-red); }' +
+      // NEU (25.11.2026): Bearbeiten-Knopf und Eingabefeld im Dialog
+      '.cvz-prompt-edit-btn { background: none; border: none; color: var(--cvz-text-muted); font-size: 14px; line-height: 1; cursor: pointer; padding: 0 6px 0 2px; }' +
+      '.cvz-prompt-edit-btn:hover { color: var(--cvz-teal, #4fd1c5); }' +
+      '.cvz-modal-input { width: 100%; box-sizing: border-box; margin: 4px 0 14px; padding: 10px 12px; font: inherit; font-size: 14px; line-height: 1.5;' +
+        'background: var(--cvz-bg, #0d1117); color: var(--cvz-text, #e6edf3); border: 1px solid var(--cvz-border, #253040); border-radius: 0; resize: vertical; }' +
+      '.cvz-modal-input:focus { outline: none; border-color: var(--cvz-teal, #4fd1c5); }' +
 
       '.cvz-prompt-row-clickable { cursor: pointer; }' +
       '.cvz-prompt-row-clickable:hover { background: rgba(79, 209, 197, 0.06); }' +
