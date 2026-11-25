@@ -15047,6 +15047,143 @@
   // NEU: Welche Arten von Inhalten werden pro Journey-Phase zitiert?
   // Basis: share_of_voice (pro Phase die zitierten Domains inkl. content_type).
   // Gewichtung: cited_count (wie oft zitiert); fehlt er, zählt jede Domain 1.
+  // NEU (25.11.2026): "Marken je Phase". Wie viele Marken nennen die KI-Antworten je Phase, und werden
+  // verlinkte Anbieter auch genannt oder nur als Wissensquelle genutzt? Es geht um den Markt je Phase, nicht um
+  // einzelne Marken. Daten: journey_comparison.brand_phases (visibility-tracker brand_extraction.py),
+  // Stichprobe: eine Antwort je Frage, KI und Woche, letzte 28 Tage. Je Kanal getrennt, weil sich ChatGPT und
+  // Gemini stark unterscheiden (Test 25.11.2026: Gemini nennt 25 von 27 verlinkten Anbietern nicht, ChatGPT
+  // nennt 9 von 12). Kennzahl "Antworten mit Marke" und Median statt Durchschnitt, weil eine einzelne
+  // Aufzählung von 44 Anbietern den Schnitt verzerrt. Ohne Daten vom Backend (null): Block fehlt.
+  var BRAND_PHASE_COLORS = { named: '#4fd1c5', linkedOnly: '#c98e2a' };
+  var BRAND_PHASE_MIN_LINKS = 5;
+
+  function brandPhaseInsight(channelLabel, total) {
+    if (!total || total.vendor_links < BRAND_PHASE_MIN_LINKS) return '';
+    var only = total.vendor_linked_only, all = total.vendor_links;
+    var share = only / all;
+    if (share >= 0.6) {
+      return channelLabel + ' nutzt die Seiten von Anbietern vor allem als Wissensquelle: ' + only + ' von ' + all +
+        ' verlinkten Anbietern werden in der Antwort nicht genannt. Eine Verlinkung bringt hier Traffic-Chancen, aber kaum Markenwirkung.';
+    }
+    if (share <= 0.4) {
+      return channelLabel + ' nennt verlinkte Anbieter meist auch im Text: ' + (all - only) + ' von ' + all +
+        '. Eine Verlinkung bringt hier auch Markenwirkung.';
+    }
+    return channelLabel + ' nennt etwa die Hälfte der verlinkten Anbieter auch im Text (' + (all - only) + ' von ' + all + ').';
+  }
+
+  function brandPhaseOwnText(own) {
+    if (!own) return '';
+    var parts = [];
+    if (own.named_linked) parts.push(own.named_linked + '× genannt und verlinkt');
+    if (own.linked_only) parts.push(own.linked_only + '× nur verlinkt');
+    if (own.named_only) parts.push(own.named_only + '× nur genannt');
+    return parts.length ? 'Deine Marke: ' + parts.join(', ') : '';
+  }
+
+  function renderBrandPhaseChannel(channel, perPhase) {
+    var label = CHANNEL_LABELS[channel] || channel;
+    var card = document.createElement('div');
+    card.className = 'cvz-card cvz-brand-phase-card';
+    card.style.cssText = 'padding:16px 18px;margin-bottom:12px;';
+    var total = perPhase && perPhase.total;
+    var head = document.createElement('p');
+    head.style.cssText = 'margin:0 0 4px;font-size:13px;font-weight:600;color:var(--cvz-text,#e6edf3);';
+    head.textContent = label;
+    card.appendChild(head);
+    if (!total || !total.answers) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = 'Für ' + label + ' liegen noch keine ausgewerteten Antworten vor.';
+      card.appendChild(none);
+      return card;
+    }
+    var insight = brandPhaseInsight(label, total);
+    if (insight) {
+      var ins = document.createElement('p');
+      ins.className = 'cvz-brand-phase-insight';
+      ins.style.cssText = 'margin:0 0 12px;font-size:12px;line-height:1.5;color:var(--cvz-text,#e6edf3);';
+      ins.textContent = insight;
+      card.appendChild(ins);
+    }
+    PHASE_ORDER.forEach(function (phase) {
+      var d = perPhase[phase];
+      if (!d || !d.answers) return;
+      var row = document.createElement('div');
+      row.className = 'cvz-brand-phase-row';
+      row.style.cssText = 'padding:10px 0;border-top:1px solid var(--cvz-border,#253040);';
+      var median = String(Math.round((d.median_brands || 0) * 10) / 10).replace('.', ',');
+      var top = '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px;">' +
+        '<span style="font-size:12px;color:var(--cvz-text,#e6edf3);">' + escapeHtml(PHASE_LABELS[phase] || phase) + '</span>' +
+        '<span style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);">' + d.with_brand + ' von ' + d.answers +
+          (d.answers === 1 ? ' Antwort' : ' Antworten') + ' nennen Marken · Median ' + median + '</span></div>';
+      var bar;
+      if (d.vendor_links > 0) {
+        var pNamed = d.vendor_named / d.vendor_links * 100;
+        var pOnly = 100 - pNamed;
+        bar = '<div style="display:flex;height:12px;overflow:hidden;" title="' +
+          escapeHtml(d.vendor_named + ' genannt und verlinkt, ' + d.vendor_linked_only + ' nur verlinkt') + '">' +
+          '<span style="width:' + pNamed.toFixed(1) + '%;background:' + BRAND_PHASE_COLORS.named + ';"></span>' +
+          '<span style="width:' + pOnly.toFixed(1) + '%;background:' + BRAND_PHASE_COLORS.linkedOnly + ';"></span></div>' +
+          '<div style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);margin-top:4px;">' + d.vendor_links +
+          (d.vendor_links === 1 ? ' verlinkter Anbieter' : ' verlinkte Anbieter') + ': ' + d.vendor_named + ' genannt, ' +
+          d.vendor_linked_only + ' nur verlinkt</div>';
+      } else {
+        bar = '<div style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);">Keine Anbieter verlinkt' +
+          (d.other_links ? ' (nur Behörden, Medien und andere Quellen)' : '') + '</div>';
+      }
+      var ownText = brandPhaseOwnText(d.own);
+      row.innerHTML = top + bar + (ownText ? '<div class="cvz-brand-phase-own" style="font-size:11px;margin-top:4px;color:var(--cvz-text,#e6edf3);">' + escapeHtml(ownText) + '</div>' : '');
+      card.appendChild(row);
+    });
+    return card;
+  }
+
+  function renderBrandsByPhase(dashData) {
+    var jc = dashData && dashData.journey_comparison;
+    var bp = jc && jc.brand_phases;
+    if (!bp || !bp.by_channel) return null;
+    var section = document.createElement('div');
+    section.className = 'cvz-section cvz-brand-phases';
+    section.style.marginTop = '24px';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.textContent = 'Marken je Phase';
+    section.appendChild(heading);
+    var sub = document.createElement('p');
+    sub.className = 'cvz-card-placeholder-text';
+    sub.style.marginBottom = '12px';
+    sub.textContent = 'Wie viele Marken die KI-Antworten je Phase nennen, und ob verlinkte Anbieter auch genannt oder nur als Wissensquelle genutzt werden.';
+    section.appendChild(sub);
+
+    var channels = activeChannel() === 'all' ? ['chat_gpt', 'gemini'] : [activeChannel()];
+    var anyData = channels.some(function (ch) { var t = (bp.by_channel[ch] || {}).total; return t && t.answers; });
+    if (!anyData) {
+      var empty = document.createElement('p');
+      empty.className = 'cvz-card-placeholder-text';
+      empty.textContent = 'Die Markenerkennung läuft mit dem nächsten Wochenlauf. Danach erscheint hier die Auswertung.';
+      section.appendChild(empty);
+      return section;
+    }
+
+    var legend = document.createElement('div');
+    legend.style.cssText = 'display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+    legend.innerHTML =
+      '<span><span style="display:inline-block;width:10px;height:10px;vertical-align:-1px;margin-right:5px;background:' + BRAND_PHASE_COLORS.named + ';"></span>Anbieter genannt und verlinkt</span>' +
+      '<span><span style="display:inline-block;width:10px;height:10px;vertical-align:-1px;margin-right:5px;background:' + BRAND_PHASE_COLORS.linkedOnly + ';"></span>nur verlinkt (Inhalt genutzt, Marke nicht genannt)</span>';
+    section.appendChild(legend);
+
+    channels.forEach(function (ch) { section.appendChild(renderBrandPhaseChannel(ch, bp.by_channel[ch])); });
+
+    var note = document.createElement('p');
+    note.className = 'cvz-card-placeholder-text';
+    note.style.cssText = 'font-size:11px;margin-top:4px;';
+    note.textContent = 'Stichprobe: eine Antwort je Frage, KI und Woche, letzte ' + (bp.window_days || 28) +
+      ' Tage. Als Anbieter zählen Unternehmen und Produkte aus dem Thema, keine Behörden, Medien oder Verzeichnisse.';
+    section.appendChild(note);
+    return section;
+  }
+
   function renderContentTypeByPhase(dashData) {
     if (!dashData || dashData._error || !dashData.share_of_voice) return null;
     // GEÄNDERT (21.10.2026): gewählter Kanal, letzte 28 Tage (wie Journey-Karten).
@@ -17527,6 +17664,10 @@
     // VERSCHOBEN (16.10.2026) aus Situation: welches Format je Phase gebraucht wird.
     var ctChart = renderContentTypeByPhase(data);
     if (ctChart) wrap.appendChild(ctChart);
+
+    // NEU (25.11.2026): Marken je Phase (genannt oder nur als Wissensquelle verlinkt), je Kanal.
+    var brandPhases = renderBrandsByPhase(data);
+    if (brandPhases) wrap.appendChild(brandPhases);
 
     // Content-Lücken aus Gap-Analyse (GEAENDERT 17.09.2026: topicId + Phase-Filter)
     // GEÄNDERT (02.10.2026): Content-Lücken fließen in den Aktionsplan ein.
