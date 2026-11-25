@@ -9493,7 +9493,7 @@
     }
     // NEU (23.09.2026): Rolle zuordnen, steht bewusst vor dem Laden der
     // Antworten, damit es auch ohne Antwortdaten funktioniert.
-    linkedHtml = renderPromptRoleChipsHtml(prompt) + linkedHtml;
+    linkedHtml = renderPromptRoleChipsHtml(prompt) + renderPromptContentTypeMixHtml(prompt) + linkedHtml;
 
     if (state.loadingPromptCitations[prompt.id]) {
       wrap.innerHTML = linkedHtml + loadingTextHtml('Antworten werden geladen \u2026');
@@ -11343,11 +11343,13 @@
         ? '<br><span class="cvz-prompt-citation-count" style="color:var(--cvz-orange,#e0a030);border:1px solid var(--cvz-orange,#e0a030);border-radius:0;padding:1px 6px;" title="Wird verlinkt, aber die KI setzt keinen echten Link. Priorisiert beheben (z.B. Struktur/Schema.org/Crawlability pruefen)">\u26a0 ohne Link verlinkt</span>'
         : '';
 
-      var contentTypeBadge = prompt.top_cited_content_type
-        ? '<span class="cvz-prompt-content-type" title="Typ der meistverlinkten Quelle: ' + escapeHtml(CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || prompt.top_cited_content_type) + ' (' + escapeHtml(prompt.top_cited_domain || '') + ')">' +
-            (CONTENT_TYPE_LABELS[prompt.top_cited_content_type] || escapeHtml(prompt.top_cited_content_type)) +
-          '</span>'
-        : '';
+      // GEÄNDERT (24.11.2026): Statt des Typs der einen meistverlinkten Domain
+      // zeigt das Label den Seitentyp-Mix aller verlinkten Quellen, folgt dem
+      // KI-Umschalter und steht sichtbar mit Präfix "Quellen:" da (Tooltip gibt
+      // es auf dem Handy nicht). Daten: prompt.content_type_mix (Backend,
+      // visibility-tracker content_type_mix.py). Ältere API: altes Feld,
+      // dann aber nur bei "Alle", weil es nicht nach Kanal getrennt ist.
+      var contentTypeBadge = renderPromptContentTypeBadge(prompt);
 
       // GEÄNDERT (21.10.2026): kein führendes <br> mehr. Fehlte der Typ, stand
       // die Rolle dadurch eine Zeile tiefer; lange Rollen liefen wegen
@@ -14303,8 +14305,16 @@
       '.cvz-persona-chip-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
 
       '.cvz-prompt-content-type {' +
-        'font-size: 11px; color: var(--cvz-amber); white-space: nowrap;' +
+        'font-size: 11px; color: var(--cvz-amber); white-space: normal; line-height: 1.35;' +
       '}' +
+      // NEU (24.11.2026): Seitentyp-Mix in der aufgeklappten Prompt-Zeile
+      '.cvz-ctmix { margin: 0 0 14px; max-width: 520px; }' +
+      '.cvz-ctmix-row { display: grid; grid-template-columns: minmax(110px, 180px) 1fr 44px; align-items: center; gap: 8px; margin: 3px 0; font-size: 12px; }' +
+      '.cvz-ctmix-label { color: var(--cvz-text); overflow-wrap: anywhere; }' +
+      '.cvz-ctmix-bar { height: 6px; background: var(--cvz-border); display: block; }' +
+      '.cvz-ctmix-bar > span { display: block; height: 100%; background: var(--cvz-amber); }' +
+      '.cvz-ctmix-val { text-align: right; color: var(--cvz-text-muted); font-variant-numeric: tabular-nums; }' +
+      '.cvz-ctmix-note { font-size: 11px; color: var(--cvz-text-muted); margin: 6px 0 0; line-height: 1.4; }' +
       '.cvz-prompt-persona {' +
         'font-size: 11px; color: var(--cvz-text-muted); white-space: nowrap; border-left: 1px solid var(--cvz-border); padding-left: 8px;' +
       '}' +
@@ -15184,6 +15194,76 @@
       total: p.total_runs || 0,
       status: p.visibility_status || null,
     };
+  }
+
+  // NEU (24.11.2026): Seitentyp-Mix der verlinkten Quellen eines Prompts für
+  // den aktiven Kanal. Erwartet vom Backend:
+  //   prompt.content_type_mix = { all|chat_gpt|gemini: { typed_total, cited_total,
+  //     types: [{ type, count }] } }
+  // Liefert null, wenn keine (oder zu wenige) eingeordneten Quellen vorliegen.
+  var CONTENT_TYPE_MIX_MIN = 5;
+  function promptContentTypeMix(p) {
+    var all = p && p.content_type_mix;
+    if (!all) return null;
+    var m = all[activeChannel()];
+    if (!m || !m.typed_total || m.typed_total < CONTENT_TYPE_MIX_MIN || !Array.isArray(m.types)) return null;
+    var types = m.types
+      .filter(function (t) { return t && t.type && t.count > 0; })
+      .map(function (t) { return { type: t.type, count: t.count, share: Math.round(100 * t.count / m.typed_total) }; })
+      .sort(function (a, b) { return b.count - a.count; });
+    if (types.length === 0) return null;
+    return { types: types, typedTotal: m.typed_total, citedTotal: m.cited_total || m.typed_total };
+  }
+
+  function contentTypeLabel(t) {
+    return CONTENT_TYPE_LABELS[t] || t;
+  }
+
+  // Kurzform für die Prompt-Tabelle. Ab 50 % "überwiegend X", sonst die zwei
+  // größten Typen, damit ein knappes Rennen nicht als eindeutig erscheint.
+  function renderPromptContentTypeBadge(p) {
+    var mix = promptContentTypeMix(p);
+    var title, text;
+    if (mix) {
+      var top = mix.types[0];
+      if (top.share >= 50 || mix.types.length === 1) {
+        text = 'Quellen: überwiegend ' + contentTypeLabel(top.type) + ' (' + top.share + ' %)';
+      } else {
+        var second = mix.types[1];
+        text = 'Quellen: ' + contentTypeLabel(top.type) + ' ' + top.share + ' % · ' +
+          contentTypeLabel(second.type) + ' ' + second.share + ' %';
+      }
+      title = 'Seitentypen der verlinkten Quellen (' + promptWindowLabel(p) + ', ' + activeChannelLabel() + '): ' +
+        mix.types.map(function (t) { return contentTypeLabel(t.type) + ' ' + t.share + ' %'; }).join(', ');
+    } else if (!p.content_type_mix && activeChannel() === 'all' && p.top_cited_content_type) {
+      text = 'Top-Quelle: ' + contentTypeLabel(p.top_cited_content_type);
+      title = 'Typ der meistverlinkten Quelle' + (p.top_cited_domain ? ' (' + p.top_cited_domain + ')' : '');
+    } else {
+      return '';
+    }
+    return '<span class="cvz-prompt-content-type" title="' + escapeHtml(title) + '">' + escapeHtml(text) + '</span>';
+  }
+
+  // Ausführliche Form in der aufgeklappten Zeile (dort auch auf dem Handy lesbar).
+  function renderPromptContentTypeMixHtml(p) {
+    var mix = promptContentTypeMix(p);
+    if (!mix) return '';
+    var rows = mix.types.map(function (t) {
+      return '<div class="cvz-ctmix-row">' +
+          '<span class="cvz-ctmix-label">' + escapeHtml(contentTypeLabel(t.type)) + '</span>' +
+          '<span class="cvz-ctmix-bar"><span style="width:' + t.share + '%"></span></span>' +
+          '<span class="cvz-ctmix-val">' + t.share + ' %</span>' +
+        '</div>';
+    }).join('');
+    var untyped = mix.citedTotal - mix.typedTotal;
+    return '<div class="cvz-ctmix">' +
+        '<p class="cvz-changelog-guided-label">Seitentypen der verlinkten Quellen</p>' +
+        rows +
+        '<p class="cvz-ctmix-note">' + mix.typedTotal + ' verlinkte Quellen eingeordnet' +
+          (untyped > 0 ? ', ' + untyped + ' noch ohne Typ' : '') +
+          ' (' + escapeHtml(promptWindowLabel(p)) + ', ' + escapeHtml(activeChannelLabel()) + '). ' +
+          'Zeigt, welche Art von Seite die KI bei dieser Frage verlinkt, nicht welche Seite du hast.</p>' +
+      '</div>';
   }
 
   function promptWindowLabel(p) {
