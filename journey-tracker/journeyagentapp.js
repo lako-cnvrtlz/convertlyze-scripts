@@ -1734,6 +1734,8 @@
 
   var CONTENT_TYPE_LABELS = {
     review_plattform:  'Review-Plattform',
+    // NEU (25.11.2026): Branchen- und Firmenverzeichnisse (wlw, Gelbe Seiten ...), siehe source_analysis.py.
+    verzeichnis:       'Verzeichnis',
     vergleichsartikel: 'Vergleichsartikel',
     produktseite:      'Produktseite',
     // NEU (18.09.2026): siehe source_analysis.py _ALLOWED_CONTENT_TYPES:
@@ -6152,7 +6154,7 @@
   var RETRIEVED_BUCKET_LABELS = { nie_zitiert: 'Nie verlinkt', selten_zitiert: 'Selten verlinkt', oft_zitiert: 'Oft verlinkt' };
   // Spiegelt TYPE_LABELS in outreach_targets.py (Seitentyp aus der Quellen-Analyse).
   var RETRIEVED_TYPE_LABELS = {
-    review_plattform: 'Bewertungsportal', fachartikel: 'Fachmedium', vergleichsartikel: 'Vergleichsartikel',
+    review_plattform: 'Bewertungsportal', verzeichnis: 'Branchenverzeichnis', fachartikel: 'Fachmedium', vergleichsartikel: 'Vergleichsartikel',
     erklaerseite: 'Erklärseite', dokumentation: 'Dokumentation', forum: 'Forum', video: 'Video',
     social_media: 'Social Media', produktseite: 'Produktseite',
   };
@@ -6183,7 +6185,7 @@
   // NEU (13.11.2026): Art einer Domain (Backend domain_kinds.py). Labels kommen auch vom Backend
   // (kind_labels), diese Liste ist der Rückfall für ältere Backends.
   var DOMAIN_KIND_LABELS = {
-    presseportal: 'Presseportale', bewertungsplattform: 'Bewertungs- und Vergleichsportale', fachmedium: 'Fachmedien und Blogs',
+    presseportal: 'Presseportale', bewertungsplattform: 'Bewertungs-, Vergleichs- und Verzeichnisportale', fachmedium: 'Fachmedien und Blogs',
     unternehmen: 'Unternehmens- und Anbieterseiten', forum: 'Foren und Communities', social_media: 'Social Media', video: 'Video',
     wissen: 'Wissen und Institutionen', wettbewerber: 'Wettbewerber', eigene: 'Eigene Domain', unbekannt: 'Nicht eingeordnet',
   };
@@ -12777,7 +12779,7 @@
     if (!hasAny) {
       var empty = document.createElement('p');
       empty.className = 'cvz-card-placeholder-text';
-      empty.textContent = 'Noch keine Wettbewerber-Analysen verfügbar. Beim nächsten Monatslauf werden neue Domains automatisch analysiert.';
+      empty.textContent = 'Noch keine Wettbewerber-Analysen verfügbar. Beim nächsten Wochenlauf werden neue Domains automatisch analysiert.';
       section.appendChild(empty);
     }
 
@@ -13586,7 +13588,7 @@
   }
 
   var OUTREACH_GROUP_TITLES = {
-    bewertungsportale: 'Bewertungsportale (für Bewertungen und Kundenstimmen)',
+    bewertungsportale: 'Bewertungsportale und Verzeichnisse (für Bewertungen, Kundenstimmen und Firmeneinträge)',
     medien: 'Medien und Fachartikel (für Digital PR, Gastbeiträge, Listungen)',
     community: 'Community und Video (für aktive Beteiligung)',
     // NEU (21.09.2026, siehe Chat-Verlauf 21.09.2026): eigene Gruppe für
@@ -13626,7 +13628,7 @@
     sub.style.marginBottom = '12px';
     sub.textContent = 'Berechnet aus den Quellen der KI-Antworten (' + (o.prompts_gesamt || 0) + ' Prompts) und den Google-Rankings zu ' +
       (o.keywords_mit_serp || 0) + ' Keywords.' +
-      (o.nicht_eingeordnet_anzahl ? ' ' + o.nicht_eingeordnet_anzahl + ' weitere verlinkte Quellen sind noch nicht eingeordnet und werden mit dem nächsten Monatslauf geprüft.' : '');
+      (o.nicht_eingeordnet_anzahl ? ' ' + o.nicht_eingeordnet_anzahl + ' weitere verlinkte Quellen sind noch nicht eingeordnet und werden mit dem nächsten Wochenlauf geprüft.' : '');
     section.appendChild(sub);
     section.appendChild(renderDataFreshnessNote(detail.topic.last_monthly_collection_at));
     section.appendChild(renderNextRunNote(detail.topic, 30));
