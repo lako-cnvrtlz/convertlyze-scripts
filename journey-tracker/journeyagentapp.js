@@ -14310,6 +14310,7 @@
         'cursor: pointer; padding: 0 2px; flex-shrink: 0;' +
       '}' +
       '.cvz-prompt-delete-btn:hover { color: var(--cvz-red); }' +
+      '.cvz-phase-thin { color: var(--cvz-amber, #c98e2a); }' +
       // NEU (25.11.2026): Bearbeiten-Knopf und Eingabefeld im Dialog
       '.cvz-prompt-edit-btn { background: none; border: none; color: var(--cvz-text-muted); font-size: 14px; line-height: 1; cursor: pointer; padding: 0 6px 0 2px; }' +
       '.cvz-prompt-edit-btn:hover { color: var(--cvz-teal, #4fd1c5); }' +
@@ -15196,7 +15197,8 @@
       var top = '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px;">' +
         '<span style="font-size:12px;color:var(--cvz-text,#e6edf3);">' + escapeHtml(PHASE_LABELS[phase] || phase) + '</span>' +
         '<span style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);">' + d.with_brand + ' von ' + d.answers +
-          (d.answers === 1 ? ' Antwort' : ' Antworten') + ' nennen Marken · Median ' + median + '</span></div>';
+          (d.answers === 1 ? ' Antwort' : ' Antworten') + ' nennen Marken · Median ' + median +
+          (d.answers < PHASE_MIN_ANSWERS ? '<span class="cvz-phase-thin"> · wenige Antworten</span>' : '') + '</span></div>';
       var bar;
       if (d.vendor_links > 0) {
         var pNamed = d.vendor_named / d.vendor_links * 100;
@@ -15205,8 +15207,8 @@
           escapeHtml(d.vendor_named + ' genannt und verlinkt, ' + d.vendor_linked_only + ' nur verlinkt') + '">' +
           '<span style="width:' + pNamed.toFixed(1) + '%;background:' + BRAND_PHASE_COLORS.named + ';"></span>' +
           '<span style="width:' + pOnly.toFixed(1) + '%;background:' + BRAND_PHASE_COLORS.linkedOnly + ';"></span></div>' +
-          '<div style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);margin-top:4px;">' + d.vendor_links +
-          (d.vendor_links === 1 ? ' verlinkter Anbieter' : ' verlinkte Anbieter') + ': ' + d.vendor_named + ' genannt, ' +
+          '<div style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);margin-top:4px;">Ø ' + fmtAvg(d.vendor_links / d.answers) +
+          ' verlinkte Anbieter pro Antwort (' + d.vendor_links + ' insgesamt): ' + d.vendor_named + ' genannt, ' +
           d.vendor_linked_only + ' nur verlinkt</div>';
       } else {
         bar = '<div style="font-size:11px;color:var(--cvz-text-muted,#8b98a5);">Keine Anbieter verlinkt' +
@@ -15264,6 +15266,16 @@
     return section;
   }
 
+  // NEU (25.11.2026): Basis je Phase. Unter dieser Zahl an Antworten schwanken Anteile stark.
+  var PHASE_MIN_ANSWERS = 10;
+  function fmtAvg(n) { return String(Math.round(n * 10) / 10).replace('.', ','); }
+  function phaseBaseHtml(answers, avgText) {
+    var txt = 'aus ' + answers + (answers === 1 ? ' Antwort' : ' Antworten') + (avgText ? ' · ' + avgText : '');
+    var thin = answers > 0 && answers < PHASE_MIN_ANSWERS;
+    return '<span class="cvz-phase-base">' + escapeHtml(txt) + '</span>' +
+      (thin ? '<span class="cvz-phase-thin"> · wenige Antworten, Anteile schwanken stark</span>' : '');
+  }
+
   function renderContentTypeByPhase(dashData) {
     if (!dashData || dashData._error || !dashData.share_of_voice) return null;
     // GEÄNDERT (21.10.2026): gewählter Kanal, letzte 28 Tage (wie Journey-Karten).
@@ -15273,7 +15285,20 @@
 
     var rows = [];
     var typeTotals = {};
-    PHASE_ORDER.forEach(function (phase) {
+    // NEU (25.11.2026): Mit phase_links (Backend) zählen ALLE verlinkten Domains, nicht nur die Top 10 je Phase,
+    // und jede Zeile bekommt ihre Basis (Antworten, Ø Verlinkungen pro Antwort). Die absolute Zahl allein wäre
+    // irreführend, weil sie vor allem von der Zahl der Prompts je Phase abhängt.
+    var jcLinks = dashData.journey_comparison && dashData.journey_comparison.phase_links;
+    var links = jcLinks && jcLinks[activeChannel()];
+    if (links) {
+      PHASE_ORDER.forEach(function (phase) {
+        var d = links[phase];
+        if (!d || !d.links) return;
+        Object.keys(d.types || {}).forEach(function (t) { typeTotals[t] = (typeTotals[t] || 0) + d.types[t]; });
+        rows.push({ phase: phase, counts: d.types || {}, total: d.links, answers: d.answers || 0 });
+      });
+    }
+    if (!links) PHASE_ORDER.forEach(function (phase) {
       var entries = sov[phase] || [];
       var counts = {}, total = 0;
       entries.forEach(function (e) {
@@ -15303,7 +15328,9 @@
     var sub = document.createElement('p');
     sub.className = 'cvz-card-placeholder-text';
     sub.style.marginBottom = '14px';
-    sub.textContent = 'Welche Arten von Inhalten KI-Systeme in der jeweiligen Journey-Phase verlinken (Anteil an allen Verlinkungen der erfassten Domains, inkl. Wettbewerber). Zeigt, welches Format ihr für eine Phase braucht.';
+    sub.textContent = links
+      ? 'Welche Arten von Inhalten KI-Systeme in der jeweiligen Journey-Phase verlinken (Anteil an allen Verlinkungen, ohne deine eigene Domain). Zeigt, welches Format du für eine Phase brauchst. Wo die KI im Schnitt kaum verlinkt, bringt Content für Zitierungen wenig.'
+      : 'Welche Arten von Inhalten KI-Systeme in der jeweiligen Journey-Phase verlinken (Anteil an allen Verlinkungen der erfassten Domains, inkl. Wettbewerber). Zeigt, welches Format ihr für eine Phase braucht.';
     section.appendChild(sub);
 
     var legend = document.createElement('div');
@@ -15341,6 +15368,13 @@
       });
       line.appendChild(bar);
       card.appendChild(line);
+      if (row.answers) {
+        var base = document.createElement('div');
+        base.className = 'cvz-phase-base-line';
+        base.style.cssText = 'margin:-6px 0 10px 104px;font-size:11px;color:var(--cvz-text-muted,#8b98a5);';
+        base.innerHTML = phaseBaseHtml(row.answers, 'Ø ' + fmtAvg(row.total / row.answers) + ' Verlinkungen pro Antwort');
+        card.appendChild(base);
+      }
     });
     section.appendChild(card);
     return section;
