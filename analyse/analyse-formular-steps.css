@@ -31,3 +31,9 @@
 .cvz-an-credits{margin-top:14px;font-size:.85rem;color:var(--mut)}
 .cvz-an-credits b{color:var(--teal)}
 @media(max-width:560px){.cvz-an-card{padding:18px}.cvz-an-step{font-size:.7rem}.cvz-an-k{flex-basis:100px}}
+
+.cvz-an-bar{margin:0 0 18px;font-size:.85rem;color:var(--mut)}
+.cvz-an-bar b{font-weight:700}
+.cvz-an-lock{text-align:center;padding:40px 28px}
+.cvz-an-link{display:inline-flex;min-height:48px;font-size:1rem;align-items:center;justify-content:center;text-decoration:none}
+.cvz-an-lock .cvz-an-hint{margin-top:16px}
