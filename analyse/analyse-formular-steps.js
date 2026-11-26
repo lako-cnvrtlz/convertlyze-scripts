@@ -20,6 +20,8 @@
     apiBase:   'https://convertlyze-agent-api-production.up.railway.app',
     workerUrl: 'https://convertlyze-analysis-worker-production.up.railway.app/api/analyze',
     mountId:   'cvz-analyse-app',
+    buyUrl:    '/preise#pay-per-use',   // Kauf weiterer Analysen (Pay-per-Use)
+    dashboardUrl: '/member/dashboard',
     draftKey:  'cvz_analyse_draft_v1',
     // Feldnamen im Body an den Worker (wie im Webflow-Formular "analyzer").
     fields: {
@@ -44,7 +46,7 @@
   ];
 
   var STEPS = ['Seite', 'Ziel', 'Wettbewerber', 'Start'];
-  var state = { step: 0, url: '', keyword: '', goal: '', audience: '', competitor: '', credits: null, busy: false, error: '' };
+  var state = { step: 0, url: '', keyword: '', goal: '', audience: '', competitor: '', credits: null, creditsFailed: false, busy: false, error: '' };
   var member = null;
   var root = null;
 
@@ -99,7 +101,8 @@
     state.busy = true; state.error = ''; render();
     try {
       var credits = await fetchCredits();
-      if (!credits || calcCredits(credits) <= 0) { window.location.href = '/analyse/fehler'; return; }
+      if (!credits) { state.busy = false; state.creditsFailed = true; state.credits = null; render(); return; }
+      if (calcCredits(credits) <= 0) { state.busy = false; state.credits = 0; render(); return; }
       var token = await getToken();
       if (!token) { window.location.href = '/analyse/fehler'; return; }
       var f = CONFIG.fields, payload = { memberstack_id: member.id, email: member.email || '' };
@@ -154,26 +157,40 @@
       field('audience', 'Hauptzielgruppe (Persona), optional', textInput('audience', 'z. B. Marketing-Leiter in KMUs', state.audience), '<a href="https://www.convertlyze.com/content-hub/icp-generator" target="_blank" rel="noopener" style="color:#4fd1c5">Unsicher? Kostenloser ICP- und Persona-Assistent</a>');
     if (state.step === 2) return '<h2>Wer ist dein wichtigster Wettbewerber?</h2><p class="cvz-an-sub">Für die Differenzierungsanalyse.</p>' +
       field('competitor', 'Wettbewerber-URL' + (CONFIG.required.competitor ? '' : ', optional'), textInput('competitor', 'https://dein-wichtigster-wettbewerber.de', state.competitor), 'Die Seite des Wettbewerbers wird mit deiner verglichen.');
-    var c = state.credits;
     return '<h2>Alles bereit?</h2><p class="cvz-an-sub">Die Analyse dauert 8 bis 10 Minuten. Du kannst den Tab schließen.</p><div class="cvz-an-sum">' +
-      row('URL', normalizeUrl(state.url)) + row('Thema', state.keyword) + row('Conversion-Ziel', state.goal) + row('Zielgruppe', state.audience) + row('Wettbewerber', normalizeUrl(state.competitor)) + '</div>' +
-      (c == null ? '' : '<div class="cvz-an-credits">Verfügbare Analysen: <b>' + c + '</b></div>');
+      row('URL', normalizeUrl(state.url)) + row('Thema', state.keyword) + row('Conversion-Ziel', state.goal) + row('Zielgruppe', state.audience) + row('Wettbewerber', normalizeUrl(state.competitor)) + '</div>';
+  }
+
+  function creditsBar() {
+    var c = state.credits;
+    if (c == null) return '';
+    var col = c === 0 ? '#f87171' : c <= 3 ? '#fbbf24' : '#34d399';
+    return '<div class="cvz-an-bar">Verfügbare Analysen: <b style="color:' + col + '">' + c + '</b></div>';
+  }
+  function lockedHtml() {
+    var failed = state.creditsFailed;
+    return '<div class="cvz-an"><div class="cvz-an-card cvz-an-lock"><h2>' + (failed ? 'Analysen konnten nicht geladen werden' : 'Keine Analysen mehr verfügbar') + '</h2>' +
+      '<p class="cvz-an-sub">' + (failed ? 'Bitte lade die Seite neu. Falls das Problem bleibt, melde dich bei uns.' : 'Dein Kontingent ist aufgebraucht. Mit weiteren Analysen kannst du direkt weitermachen. Deine Eingaben bleiben erhalten.') + '</p>' +
+      (failed ? '<button type="button" class="cvz-an-primary" data-act="reload">Seite neu laden</button>'
+              : '<a class="cvz-an-primary cvz-an-link" href="' + CONFIG.buyUrl + '">Weitere Analysen kaufen</a><p class="cvz-an-hint"><a href="' + CONFIG.dashboardUrl + '" style="color:#4fd1c5">Zum Dashboard</a></p>') +
+      '</div></div>';
   }
 
   function render() {
     if (!root) return;
+    if (state.credits === 0 || state.creditsFailed) { root.innerHTML = lockedHtml(); return; }
     var last = state.step === STEPS.length - 1;
-    var noCredits = state.credits != null && state.credits <= 0;
     var steps = STEPS.map(function (s, i) { return '<div class="cvz-an-step ' + (i === state.step ? 'active' : i < state.step ? 'done' : '') + '">' + (i + 1) + ' · ' + s + '</div>'; }).join('');
-    root.innerHTML = '<div class="cvz-an"><div class="cvz-an-card"><div class="cvz-an-steps">' + steps + '</div>' + body() +
+    root.innerHTML = '<div class="cvz-an"><div class="cvz-an-card">' + creditsBar() + '<div class="cvz-an-steps">' + steps + '</div>' + body() +
       '<p class="cvz-an-err" role="alert">' + esc(state.error) + '</p>' +
       '<div class="cvz-an-nav"><button type="button" class="cvz-an-back" data-act="back" style="visibility:' + (state.step === 0 ? 'hidden' : 'visible') + '">← Zurück</button>' +
-      '<button type="button" class="cvz-an-primary" data-act="next"' + ((state.busy || (last && noCredits)) ? ' disabled' : '') + '>' + (state.busy ? 'Wird gestartet ...' : last ? (noCredits ? 'Keine Analysen verfügbar' : 'Analyse starten') : 'Weiter →') + '</button></div></div></div>';
+      '<button type="button" class="cvz-an-primary" data-act="next"' + (state.busy ? ' disabled' : '') + '>' + (state.busy ? 'Wird gestartet ...' : last ? 'Analyse starten' : 'Weiter →') + '</button></div></div></div>';
   }
 
   function onInput(e) { var k = e.target && e.target.getAttribute('data-k'); if (!k) return; state[k] = e.target.value; e.target.classList.remove('cvz-an-bad'); saveDraft(); }
   function onClick(e) {
     var act = e.target && e.target.getAttribute && e.target.getAttribute('data-act'); if (!act || state.busy) return;
+    if (act === 'reload') { window.location.reload(); return; }
     if (act === 'back') { state.step = Math.max(0, state.step - 1); state.error = ''; saveDraft(); render(); return; }
     var v = validate(state.step);
     if (v.msg) { state.error = v.msg; render(); v.bad.forEach(function (k) { var el = document.getElementById('cvz-an-' + k); if (el) { el.classList.add('cvz-an-bad'); } }); var f = document.getElementById('cvz-an-' + v.bad[0]); if (f) f.focus(); return; }
@@ -193,7 +210,8 @@
     root.addEventListener('input', onInput); root.addEventListener('change', onInput);
     root.addEventListener('click', onClick); root.addEventListener('keydown', onKey);
     var c = await fetchCredits();
-    state.credits = c ? calcCredits(c) : 0; render();
+    if (c) { state.credits = calcCredits(c); state.creditsFailed = false; } else { state.creditsFailed = true; }
+    render();
   }
 
   function init() { retry(depsReady, CONFIG.maxInitAttempts, CONFIG.initRetryMs).then(run).catch(function (e) { console.error('[CVZ] Init failed:', e); }); }
