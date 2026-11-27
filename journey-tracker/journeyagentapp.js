@@ -287,6 +287,7 @@
     actionStatusPending: {},
     actionSaving: {},
     ownMeasuresDoneOpen: false,
+    changesTableFilter: { status: 'alle', type: 'alle' },
     discardedOpen: false,
     journeyActivePhase: null,
     // NEU (17.09.2026): Phase-Filter fuer Content-Luecken und Quellen-Analyse
@@ -14732,6 +14733,10 @@
       '.cvz-ac-form { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }' +
       '.cvz-ac-form textarea { font-family: inherit; font-size: 13px; padding: 7px 9px; min-height: 38px; flex: 1 1 240px; min-width: 0; resize: vertical; background: var(--cvz-navy, #0d1117); color: var(--cvz-text); border: 1px solid var(--cvz-border); border-radius: 0; }' +
       '.cvz-am-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 6px; border: 1px solid var(--cvz-border); color: var(--cvz-text-muted); }' +
+      '.cvz-changes-table-wrap > table { min-width: 640px; }' +
+      '.cvz-changes-cell-status { white-space: nowrap; }' +
+      '.cvz-changes-cell-comments { min-width: 160px; }' +
+      '.cvz-changes-filter { font-family: inherit; font-size: 13px; padding: 5px 8px; background: var(--cvz-navy, #0d1117); color: var(--cvz-text); border: 1px solid var(--cvz-border); border-radius: 0; }' +
       '.cvz-own-measure { padding: 0; overflow: hidden; }' +
       '.cvz-own-measure-head { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; padding: 12px 16px; }' +
       '.cvz-own-measure-title { margin: 0; font-weight: 600; line-height: 1.4; word-break: break-word; }' +
@@ -19203,75 +19208,163 @@
     return wrap;
   }
 
-  // Selbst eingetragene Maßnahmen (content_changes ohne Plan-Spiegel) mit Status und Kommentaren.
-  // Laufende oben als Karten, erledigte und verworfene aufklappbar darunter.
-  function renderOwnMeasures(topicId) {
-    var all = (state.contentChangesCache[topicId] || []).filter(function (ch) { return ch.change_type !== 'aktionsplan'; });
-    if (!all.length) return null;
+  // GEÄNDERT (27.11.2026): Alle eingetragenen Änderungen als Tabelle (statt Karten), mit Filter und CSV-Export.
+  // Zeilen: eigene Maßnahmen in jedem Status plus Maßnahmenplan-Einträge, sofern als umgesetzt markiert.
+  function changeRowsForTable(topicId) {
     var act = actionActivity(topicId);
-    var statusAvailable = act.available && all.some(function (ch) { return 'status' in ch; });
-    var running = all.filter(function (ch) { return ch.status && ['offen', 'in_arbeit', 'zurueckgestellt'].indexOf(ch.status) !== -1; });
-    var closed = all.filter(function (ch) { return running.indexOf(ch) === -1; })
-      .sort(function (a, b) { return String(b.changed_at || '').localeCompare(String(a.changed_at || '')); });
+    var rows = [];
+    (state.contentChangesCache[topicId] || []).forEach(function (ch) {
+      var isPlan = ch.change_type === 'aktionsplan';
+      var st = ch.status || 'erledigt';
+      if (isPlan && st !== 'erledigt') return;
+      var ref = 'change:' + ch.id;
+      var comments = isPlan ? [] : ((act.comments || {})[ref] || []).filter(function (c) { return c.kind !== 'status'; });
+      rows.push({
+        ch: ch, ref: ref, isPlan: isPlan, status: st, comments: comments,
+        date: ch.changed_at || '',
+        typeLabel: CONTENT_CHANGE_TYPE_LABELS[ch.change_type] || ch.change_type || '',
+      });
+    });
+    rows.sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
+    return rows;
+  }
+
+  function filteredChangeRows(topicId) {
+    var f = state.changesTableFilter;
+    return changeRowsForTable(topicId).filter(function (r) {
+      return (f.status === 'alle' || r.status === f.status) && (f.type === 'alle' || r.ch.change_type === f.type);
+    });
+  }
+
+  function exportChangesCsv(topicId) {
+    var X = window.CVZExport;
+    if (!X || !X.toCsv) return;
+    var headers = ['Datum', 'Typ', 'Änderung', 'URL', 'Status', 'Grund', 'Kommentare'];
+    var rows = filteredChangeRows(topicId).map(function (r) {
+      var cm = r.comments.map(function (c) {
+        return [c.author_name || 'Unbekannt', formatShortDate(c.created_at)].filter(Boolean).join(', ') + ': ' + (c.body || '');
+      }).join(' | ');
+      return [
+        formatShortDate(r.date) || r.date, r.typeLabel, r.ch.description || '', r.ch.url || '',
+        ACTION_STATUS_LABELS[r.status] || r.status, r.status === 'verworfen' ? (r.ch.status_reason || '') : '', cm,
+      ];
+    });
+    var text = X.toCsv(headers, rows, ';', true);
+    var blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'convertlyze-aenderungen-' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  function renderOwnMeasures(topicId) {
+    var allRows = changeRowsForTable(topicId);
+    if (!allRows.length) return null;
+    var act = actionActivity(topicId);
+    var statusAvailable = act.available && allRows.some(function (r) { return 'status' in r.ch; });
+    var rows = filteredChangeRows(topicId);
+    var f = state.changesTableFilter;
 
     var section = document.createElement('div');
     section.style.cssText = 'margin-top:20px;display:flex;flex-direction:column;gap:10px;';
-    var head = document.createElement('p');
-    head.className = 'cvz-section-label';
-    head.style.margin = '0';
-    head.textContent = 'Eigene Maßnahmen (' + all.length + ')';
+
+    var head = document.createElement('div');
+    head.className = 'cvz-section-head';
+    var label = document.createElement('p');
+    label.className = 'cvz-section-label';
+    label.textContent = 'Alle Änderungen (' + (rows.length === allRows.length ? allRows.length : rows.length + ' von ' + allRows.length) + ')';
+    head.appendChild(label);
+    var tools = document.createElement('div');
+    tools.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;';
+
+    function makeSelect(aria, value, options, onChange) {
+      var sel = document.createElement('select');
+      sel.className = 'cvz-changes-filter';
+      sel.setAttribute('aria-label', aria);
+      options.forEach(function (o) {
+        var opt = document.createElement('option');
+        opt.value = o[0]; opt.textContent = o[1];
+        if (o[0] === value) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', function () { onChange(sel.value); render(); });
+      return sel;
+    }
+    tools.appendChild(makeSelect('Nach Status filtern', f.status, [['alle', 'Alle Status']].concat(
+      Object.keys(ACTION_STATUS_LABELS).map(function (k) { return [k, ACTION_STATUS_LABELS[k]]; })
+    ), function (v) { state.changesTableFilter.status = v; }));
+    tools.appendChild(makeSelect('Nach Typ filtern', f.type, [['alle', 'Alle Typen']].concat(
+      Object.keys(CONTENT_CHANGE_TYPE_LABELS).map(function (k) { return [k, CONTENT_CHANGE_TYPE_LABELS[k]]; })
+    ), function (v) { state.changesTableFilter.type = v; }));
+    if (window.CVZExport && window.CVZExport.toCsv) {
+      var exp = document.createElement('button');
+      exp.type = 'button';
+      exp.className = 'cvz-add-toggle';
+      exp.textContent = 'Als CSV exportieren';
+      exp.addEventListener('click', function () { exportChangesCsv(topicId); });
+      tools.appendChild(exp);
+    }
+    head.appendChild(tools);
     section.appendChild(head);
 
-    function card(ch) {
-      var ref = 'change:' + ch.id;
-      var st = ch.status || 'erledigt';
-      var c = document.createElement('div');
-      c.className = 'cvz-card cvz-own-measure';
-      var h = document.createElement('div');
-      h.className = 'cvz-own-measure-head';
-      var left = document.createElement('div');
-      left.style.cssText = 'min-width:0;flex:1 1 240px;';
-      var t = document.createElement('p');
-      t.className = 'cvz-own-measure-title';
-      t.textContent = ch.description || 'Maßnahme';
-      left.appendChild(t);
-      var meta = document.createElement('p');
-      meta.className = 'cvz-own-measure-meta';
-      meta.textContent = [CONTENT_CHANGE_TYPE_LABELS[ch.change_type] || ch.change_type,
-        (st === 'erledigt' ? 'umgesetzt am ' : 'eingetragen für ') + (formatShortDate(ch.changed_at) || ch.changed_at || '')].join(' · ');
-      left.appendChild(meta);
-      if (st === 'verworfen' && ch.status_reason) {
+    if (!rows.length) {
+      var none = document.createElement('p');
+      none.className = 'cvz-card-placeholder-text';
+      none.textContent = 'Keine Einträge für diesen Filter.';
+      section.appendChild(none);
+      return section;
+    }
+
+    var wrap = document.createElement('div');
+    wrap.className = 'cvz-changelog-table-wrap cvz-changes-table-wrap';
+    var table = document.createElement('table');
+    table.className = 'cvz-changelog-table cvz-changes-table';
+    table.innerHTML = '<thead><tr><th>Datum</th><th>Typ</th><th>Änderung</th><th>Status</th><th>Kommentare</th></tr></thead>';
+    var tbody = document.createElement('tbody');
+    rows.forEach(function (r) {
+      var ch = r.ch;
+      var tr = document.createElement('tr');
+      function td(cls) { var c = document.createElement('td'); if (cls) c.className = cls; tr.appendChild(c); return c; }
+
+      td('cvz-changelog-cell-meta').textContent = formatShortDate(r.date) || r.date || '-';
+      td('cvz-changelog-cell-meta').textContent = r.typeLabel || '-';
+
+      var tText = td('cvz-changelog-cell-text');
+      var title = document.createElement('div');
+      title.style.cssText = 'font-weight:600;word-break:break-word;';
+      title.textContent = ch.description || 'Maßnahme';
+      tText.appendChild(title);
+      if (ch.url) {
+        var link = document.createElement('a');
+        link.href = ch.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        link.style.cssText = 'font-size:12px;color:var(--cvz-teal,#0d9488);word-break:break-all;';
+        link.textContent = ch.url;
+        tText.appendChild(link);
+      }
+      if (r.status === 'verworfen' && ch.status_reason) {
         var rs = document.createElement('p');
         rs.className = 'cvz-ast-reason';
         rs.textContent = 'Grund: ' + ch.status_reason;
-        left.appendChild(rs);
+        tText.appendChild(rs);
       }
-      h.appendChild(left);
-      if (statusAvailable) {
-        h.appendChild(renderActionStatusControl(topicId, { ref: ref, status: st, kind: 'change', available: true }));
-      }
-      c.appendChild(h);
-      var cm = renderActionComments(topicId, ref);
-      if (cm) c.appendChild(cm);
-      return c;
-    }
 
-    running.forEach(function (ch) { section.appendChild(card(ch)); });
-    if (closed.length) {
-      var det = document.createElement('details');
-      det.open = !!state.ownMeasuresDoneOpen;
-      det.addEventListener('toggle', function () { state.ownMeasuresDoneOpen = det.open; });
-      var sum = document.createElement('summary');
-      sum.className = 'cvz-ac-toggle';
-      sum.style.padding = '6px 0';
-      sum.textContent = 'Erledigt und verworfen (' + closed.length + ')';
-      det.appendChild(sum);
-      var inner = document.createElement('div');
-      inner.style.cssText = 'display:flex;flex-direction:column;gap:10px;margin-top:8px;';
-      closed.forEach(function (ch) { inner.appendChild(card(ch)); });
-      det.appendChild(inner);
-      section.appendChild(det);
-    }
+      var tSt = td('cvz-changes-cell-status');
+      if (statusAvailable && !r.isPlan) {
+        tSt.appendChild(renderActionStatusControl(topicId, { ref: r.ref, status: r.status, kind: 'change', available: true }));
+      } else {
+        tSt.textContent = ACTION_STATUS_LABELS[r.status] || r.status;
+      }
+
+      var tCm = td('cvz-changes-cell-comments');
+      var cm = r.isPlan ? null : renderActionComments(topicId, r.ref);
+      if (cm) tCm.appendChild(cm); else tCm.textContent = '-';
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    section.appendChild(wrap);
     return section;
   }
 
