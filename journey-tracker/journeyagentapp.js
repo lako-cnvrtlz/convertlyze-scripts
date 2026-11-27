@@ -19943,7 +19943,7 @@
             evSectionLbl.style.cssText = 'margin:0 0 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--cvz-text-muted,#8b98a5);';
             evSectionLbl.textContent =
               catKey === 'google_ranking' ? 'Ranking-Daten' :
-              catKey === 'content_luecke' ? 'Beispiel-Frage' :
+              catKey === 'content_luecke' ? (ev.example_prompt || !ev.keyword ? 'Beispiel-Frage' : 'Suchanfrage') :
               'Verlinkungsrate';
             evDiv.appendChild(evSectionLbl);
 
@@ -20027,6 +20027,12 @@
                 gapQ.style.cssText = 'background:rgba(136,120,202,.12);border:1px solid rgba(136,120,202,.35);border-radius:0;padding:10px 12px;font-size:13px;color:#8878ca;font-style:italic;line-height:1.55;';
                 gapQ.innerHTML = '„' + promptLinkHtml(null, ev.example_prompt) + '“';
                 evDiv.appendChild(gapQ);
+              } else if (ev.keyword) {
+                // Ohne Beispiel-Frage (z. B. neue Suchanfrage) das Keyword zeigen, damit das Feld nicht leer bleibt.
+                var gapK = document.createElement('div');
+                gapK.style.cssText = 'background:rgba(136,120,202,.12);border:1px solid rgba(136,120,202,.35);border-radius:0;padding:10px 12px;font-size:13px;color:#8878ca;font-style:italic;line-height:1.5;';
+                gapK.textContent = '„' + ev.keyword + '“';
+                evDiv.appendChild(gapK);
               }
             }
             body.appendChild(evDiv);
