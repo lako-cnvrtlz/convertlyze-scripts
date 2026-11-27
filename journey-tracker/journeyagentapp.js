@@ -14354,7 +14354,10 @@
       '.cvz-jc-page-meta { flex: none; color: var(--cvz-text-muted); }' +
       '.cvz-jc-pages-none { margin: 0; font-size: 12px; color: var(--cvz-text-muted); }' +
       '.cvz-jc-more { margin-top: 10px; border-top: 1px solid var(--cvz-border); padding-top: 8px; }' +
-      '.cvz-jc-more > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--cvz-teal); min-height: 28px; display: flex; align-items: center; }' +
+      '.cvz-jc-more > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--cvz-teal); min-height: 28px; display: flex; align-items: center; list-style: none; }' +
+      '.cvz-jc-more > summary::-webkit-details-marker { display: none; }' +
+      '.cvz-jc-more > summary::before { content: "▸"; display: inline-block; width: 16px; flex: none; }' +
+      '.cvz-jc-more[open] > summary::before { content: "▾"; }' +
       '.cvz-own-pages-legend { margin: 0 0 10px; font-size: 12px; color: var(--cvz-text-muted); line-height: 1.6; }' +
       '.cvz-prompt-link { padding: 0; margin: 0; background: none; border: none; font: inherit; color: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: rgba(79,209,197,.45); text-underline-offset: 3px; }' +
       '.cvz-prompt-link:hover, .cvz-prompt-link:focus-visible { color: var(--cvz-teal); text-decoration-color: var(--cvz-teal); }' +
@@ -14975,8 +14978,8 @@
       '.cvz-delta-neutral { color: var(--cvz-text); background: rgba(139,152,165,0.18); }' +
       '.cvz-journey-nodata { color: var(--cvz-text-muted); opacity: .6; cursor: default; }' +
       '.cvz-journey-channel-num[tabindex] { cursor: default; }' +
-      '.cvz-journey-aio { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; font-size: 12px; }' +
-      '.cvz-journey-aio-value { flex: 1; font-size: 11px; color: var(--cvz-text); cursor: default; white-space: nowrap; }' +
+      '.cvz-journey-aio { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 2px 0 8px; font-size: 12px; }' +
+      '.cvz-journey-aio-value { flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--cvz-text); cursor: default; white-space: normal; }' +
       '.cvz-journey-aio-hit { color: var(--cvz-teal); font-weight: 600; }' +
       '.cvz-journey-aio-limited { color: var(--cvz-amber); font-weight: 400; }' +
       '.cvz-journey-aio-chip {' +
