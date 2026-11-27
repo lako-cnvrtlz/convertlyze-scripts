@@ -13213,6 +13213,73 @@
   var KNOWLEDGE_ENGINE_LABELS = { chatgpt: 'ChatGPT', gemini: 'Gemini' };
   var KNOWLEDGE_CHIP_MAX_CHARS = 38;
 
+  // NEU (27.11.2026): Die Wissensbereiche stehen in drei Gruppen nach Käuferfrage
+  // statt als flache Liste von 13 Punkten. Nur Darstellung, die Daten bleiben gleich.
+  // Zuordnung über dimensions[].key. Passt kein Schlüssel (alte Prüfung mit anderen
+  // Bereichen), gibt knowledgeGroupStats null zurück und die flache Liste bleibt.
+  var KNOWLEDGE_GROUPS = [
+    { id: 'angebot',  label: 'Was ihr anbietet',
+      keys: ['angebot', 'kategorie', 'funktionen', 'anwendungsfaelle', 'zielgruppe'] },
+    { id: 'kauf',     label: 'Was die Kaufentscheidung bestimmt',
+      keys: ['preise', 'vertragsbedingungen', 'datenschutz', 'integrationen_support'] },
+    { id: 'vertrauen', label: 'Warum man euch vertraut',
+      keys: ['belege', 'kritik', 'abgrenzung', 'unternehmen'] }
+  ];
+  var KNOWLEDGE_LEVEL_SCORE = { bekannt: 1, teilweise: 0.5 };
+
+  function knowledgeIsConflict(d) {
+    return !!(d && (d.conflict || d.chatgpt === 'widersprüchlich' || d.chatgpt === 'widerspruechlich' ||
+      d.gemini === 'widersprüchlich' || d.gemini === 'widerspruechlich'));
+  }
+
+  // Liefert die Gruppen, die Schwächsten zuerst (Widersprüche, dann niedrigste Abdeckung).
+  function knowledgeGroupStats(dims) {
+    var list = (dims || []).filter(function (d) { return d && d.key; });
+    var byKey = {};
+    list.forEach(function (d) { byKey[d.key] = d; });
+    var used = {};
+    var groups = KNOWLEDGE_GROUPS.map(function (g) {
+      var ds = [];
+      g.keys.forEach(function (key) { if (byKey[key]) { ds.push(byKey[key]); used[key] = true; } });
+      return { id: g.id, label: g.label, dims: ds };
+    });
+    if (!Object.keys(used).length) return null;
+    var rest = list.filter(function (d) { return !used[d.key]; });
+    if (rest.length) groups.push({ id: 'weitere', label: 'Weitere Bereiche', dims: rest });
+    groups = groups.filter(function (g) { return g.dims.length; });
+    groups.forEach(function (g) {
+      g.cov = {};
+      ['chatgpt', 'gemini'].forEach(function (e) {
+        var scored = g.dims.filter(function (d) { return d[e] && d[e] !== 'nicht_geprueft'; });
+        g.cov[e] = scored.length
+          ? Math.round(scored.reduce(function (sum, d) { return sum + (KNOWLEDGE_LEVEL_SCORE[d[e]] || 0); }, 0) / scored.length * 100)
+          : null;
+      });
+      g.conflicts = g.dims.filter(knowledgeIsConflict).length;
+      var vals = [g.cov.chatgpt, g.cov.gemini].filter(function (v) { return v != null; });
+      g.minCov = vals.length ? Math.min.apply(null, vals) : null;
+    });
+    groups.sort(function (a, b) {
+      if (b.conflicts !== a.conflicts) return b.conflicts - a.conflicts;
+      var av = a.minCov == null ? 101 : a.minCov;
+      var bv = b.minCov == null ? 101 : b.minCov;
+      return av - bv;
+    });
+    return groups;
+  }
+
+  function knowledgeGroupCovText(g) {
+    var parts = [];
+    if (g.cov.chatgpt != null) parts.push('ChatGPT ' + g.cov.chatgpt + ' %');
+    if (g.cov.gemini != null) parts.push('Gemini ' + g.cov.gemini + ' %');
+    return parts.join(' · ') || 'noch nicht gemessen';
+  }
+
+  function knowledgeGroupFlagHtml(g) {
+    if (!g.conflicts) return '';
+    return '<span class="cvz-kg-flag">' + g.conflicts + (g.conflicts === 1 ? ' Widerspruch' : ' Widersprüche') + '</span>';
+  }
+
   // escapeHtml maskiert keine Anführungszeichen. Für Attribute (href, title) daher eigene Funktion,
   // sonst könnte eine URL mit " aus dem Attribut ausbrechen.
   function knowledgeAttr(str) {
@@ -13428,7 +13495,7 @@
     // Text und Quellen darunter. Vorher Tabelle, die auf dem Handy abgeschnitten war.
     // Neues Format: Bekannt + Quellen-Chips, darunter "Fehlt" und ggf. Widerspruch.
     // Altes Format (ohne source_registry): wie bisher nur ein Text (missing || conflict || known).
-    var dimsHtml = (k.dimensions || []).map(function (d) {
+    function dimItemHtml(d) {
       var body = '';
       if (sourceIndex) {
         var ids = [];
@@ -13454,12 +13521,41 @@
         '</div>' +
         body +
       '</div>';
-    }).join('');
-    if (dimsHtml) {
-      var dimsWrap = document.createElement('div');
-      dimsWrap.style.marginTop = '14px';
-      dimsWrap.innerHTML = dimsHtml;
-      card.appendChild(dimsWrap);
+    }
+
+    // GEÄNDERT (27.11.2026): drei Gruppen nach Käuferfrage, die Schwächsten zuerst.
+    // Gruppen mit Widerspruch oder Abdeckung unter 50 % sind aufgeklappt.
+    var kGroups = knowledgeGroupStats(k.dimensions);
+    if (kGroups) {
+      state.knowledgeGroupOpen = state.knowledgeGroupOpen || {};
+      var groupsWrap = document.createElement('div');
+      groupsWrap.style.marginTop = '14px';
+      kGroups.forEach(function (g) {
+        var gd = document.createElement('details');
+        gd.className = 'cvz-kgroup';
+        var userChoice = state.knowledgeGroupOpen[g.id];
+        gd.open = userChoice != null ? userChoice : (g.conflicts > 0 || (g.minCov != null && g.minCov < 50));
+        var sum = document.createElement('summary');
+        sum.className = 'cvz-kgroup-head';
+        sum.innerHTML =
+          '<span class="cvz-kg-name">' + escapeHtml(g.label) + '</span>' +
+          '<span class="cvz-kg-nums">' + escapeHtml(knowledgeGroupCovText(g)) + knowledgeGroupFlagHtml(g) + '</span>';
+        gd.appendChild(sum);
+        var inner = document.createElement('div');
+        inner.innerHTML = g.dims.map(dimItemHtml).join('');
+        gd.appendChild(inner);
+        gd.addEventListener('toggle', function () { state.knowledgeGroupOpen[g.id] = gd.open; });
+        groupsWrap.appendChild(gd);
+      });
+      card.appendChild(groupsWrap);
+    } else {
+      var dimsHtml = (k.dimensions || []).map(dimItemHtml).join('');
+      if (dimsHtml) {
+        var dimsWrap = document.createElement('div');
+        dimsWrap.style.marginTop = '14px';
+        dimsWrap.innerHTML = dimsHtml;
+        card.appendChild(dimsWrap);
+      }
     }
     if (!sourceIndex) {
       // Alte Prüfung: macht sichtbar, warum unter den Angaben noch keine Quellen stehen.
@@ -13924,8 +14020,18 @@
       '.cvz-sit-tile-value.cvz-journey-nodata { font-size: 18px; color: var(--cvz-text-muted); }' +
       '.cvz-sit-tile-row .cvz-journey-channel-delta { margin-left: 0; cursor: default; }' +
       '.cvz-sit-tile-meta { margin: 6px 0 0; font-size: 11px; color: var(--cvz-text-muted); }' +
-      '.cvz-sit-knowledge { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; padding: 14px 16px; }' +
-      '.cvz-sit-knowledge-label { font-size: 12px; font-weight: 700; letter-spacing: .06em; color: var(--cvz-text-muted); }' +
+      '.cvz-sit-knowledge { padding: 14px 16px; }' +
+      '.cvz-kg-list { margin-top: 10px; }' +
+      '.cvz-kg-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 14px; padding: 10px 0; border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-kg-name { font-size: 14px; font-weight: 600; color: var(--cvz-text); }' +
+      '.cvz-kg-nums { font-size: 13px; color: var(--cvz-text-muted); }' +
+      '.cvz-kg-flag { margin-left: 10px; color: #8878ca; font-weight: 600; }' +
+      '.cvz-kg-weak { margin-left: 8px; font-size: 11px; font-weight: 600; color: #c98e2a; }' +
+      '.cvz-kgroup { border-top: 1px solid var(--cvz-border); }' +
+      '.cvz-kgroup-head { cursor: pointer; list-style: none; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 14px; padding: 12px 0; }' +
+      '.cvz-kgroup-head::-webkit-details-marker { display: none; }' +
+      '.cvz-kgroup-head .cvz-kg-name::before { content: "▸  "; color: var(--cvz-teal); }' +
+      '.cvz-kgroup[open] > .cvz-kgroup-head .cvz-kg-name::before { content: "▾  "; }' +
       '.cvz-sit-knowledge-text { font-size: 14px; color: var(--cvz-text); }' +
       '.cvz-sit-knowledge .cvz-journey-hint-link { margin: 0 0 0 auto; }' +
       '@media (max-width: 600px) { .cvz-opp-rec-col { display: none; } .cvz-opp-rec-header { display: none; } }' +
@@ -15806,6 +15912,8 @@
 
   // NEU (16.10.2026): KI-Wissens-Check als Einzeiler für den Tab Situation.
   // GEÄNDERT (06.11.2026): Der vollständige Check steht eingeklappt direkt darunter.
+  // GEÄNDERT (27.11.2026): Überschrift wie die anderen Abschnitte (cvz-section-label),
+  // darunter Gesamtabdeckung und die drei Gruppen mit Abdeckung je Modell.
   function renderKnowledgeOneLiner(detail) {
     var k = detail.ai_knowledge;
     if (!k) return null;
@@ -15813,25 +15921,50 @@
     var parts = [];
     if (cov.chatgpt != null) parts.push('ChatGPT ' + cov.chatgpt + ' %');
     if (cov.gemini != null) parts.push('Gemini ' + cov.gemini + ' %');
-    var conflicts = (k.dimensions || []).filter(function (d) { return d && d.conflict; }).length;
-    var wrong = (k.wrong_or_outdated || []).length;
+    var toCheck = (k.wrong_or_outdated || []).length;
+    var groups = knowledgeGroupStats(k.dimensions);
 
     var section = document.createElement('div');
     section.className = 'cvz-section';
+
+    var headRow = document.createElement('div');
+    headRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:10px;';
+    var heading = document.createElement('p');
+    heading.className = 'cvz-section-label';
+    heading.style.margin = '0';
+    heading.textContent = 'Was die KI über euch weiß';
+    headRow.appendChild(heading);
+    headRow.appendChild(makeTip(
+      'Geprüft am ' + (formatShortDate(k.checked_at) || '') + '. Abdeckung: wie vollständig ChatGPT und Gemini eure ' +
+      ((k.dimensions || []).length || 'wichtigsten') + ' Wissensbereiche kennen. Die Bereiche sind nach Käuferfrage gruppiert, die schwächste Gruppe steht oben.'
+    ));
+    section.appendChild(headRow);
+
     var card = document.createElement('div');
     card.className = 'cvz-card cvz-sit-knowledge';
-    var label = document.createElement('span');
-    label.className = 'cvz-sit-knowledge-label';
-    label.textContent = 'Was die KI über euch weiß';
-    card.appendChild(label);
-    var text = document.createElement('span');
+    var text = document.createElement('p');
     text.className = 'cvz-sit-knowledge-text';
-    var facts = parts.length ? 'Abdeckung ' + parts.join(', ') : 'Abdeckung noch nicht gemessen';
-    if (conflicts) facts += ' · ' + conflicts + (conflicts === 1 ? ' Widerspruch' : ' Widersprüche');
-    if (wrong) facts += ' · ' + wrong + ' falsch oder veraltet';
+    text.style.margin = '0';
+    var facts = parts.length ? 'Abdeckung gesamt: ' + parts.join(', ') : 'Abdeckung noch nicht gemessen';
+    if (toCheck) facts += ' · ' + toCheck + (toCheck === 1 ? ' Angabe bitte prüfen' : ' Angaben bitte prüfen');
     text.textContent = facts;
-    text.title = 'Geprüft am ' + (formatShortDate(k.checked_at) || '') + '. Abdeckung: wie vollständig die Modelle eure wichtigsten Wissensbereiche kennen.';
     card.appendChild(text);
+
+    if (groups && groups.length > 1) {
+      var list = document.createElement('div');
+      list.className = 'cvz-kg-list';
+      groups.forEach(function (g, idx) {
+        var row = document.createElement('div');
+        row.className = 'cvz-kg-row';
+        row.innerHTML =
+          '<span class="cvz-kg-name">' + escapeHtml(g.label) +
+            (idx === 0 && (g.conflicts > 0 || (g.minCov != null && g.minCov < 100)) ? ' <span class="cvz-kg-weak">schwächste Gruppe</span>' : '') +
+          '</span>' +
+          '<span class="cvz-kg-nums">' + escapeHtml(knowledgeGroupCovText(g)) + knowledgeGroupFlagHtml(g) + '</span>';
+        list.appendChild(row);
+      });
+      card.appendChild(list);
+    }
     section.appendChild(card);
     return section;
   }
