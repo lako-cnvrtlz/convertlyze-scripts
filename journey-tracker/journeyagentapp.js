@@ -11405,6 +11405,7 @@
       // visibility-tracker content_type_mix.py). Ältere API: altes Feld,
       // dann aber nur bei "Alle", weil es nicht nach Kanal getrennt ist.
       var contentTypeBadge = renderPromptContentTypeBadge(prompt);
+      var sourcesBadge = renderPromptSourcesBadge(prompt);
 
       // GEÄNDERT (21.10.2026): kein führendes <br> mehr. Fehlte der Typ, stand
       // die Rolle dadurch eine Zeile tiefer; lange Rollen liefen wegen
@@ -11465,8 +11466,8 @@
         '</td>' +
         '<td class="cvz-pt-src" data-label="Verlinkte Quellen">' + faviconHtml + '</td>' +
         '<td class="cvz-pt-cite" style="white-space:nowrap;">' + citationBadge + unlinkedBadge + '</td>' +
-        '<td class="cvz-pt-meta">' + ((contentTypeBadge || personaBadge || aiSearchVolumeBadge)
-          ? '<div class="cvz-pt-meta-stack">' + contentTypeBadge + personaBadge + aiSearchVolumeBadge + '</div>' : '') + '</td>' +
+        '<td class="cvz-pt-meta">' + ((sourcesBadge || contentTypeBadge || personaBadge || aiSearchVolumeBadge)
+          ? '<div class="cvz-pt-meta-stack">' + sourcesBadge + contentTypeBadge + personaBadge + aiSearchVolumeBadge + '</div>' : '') + '</td>' +
         '<td class="cvz-pt-del" style="white-space:nowrap;text-align:right;">' +
           // NEU (25.11.2026): Prompt bearbeiten statt löschen und neu anlegen
           '<button type="button" class="cvz-prompt-edit-btn" data-cvz-prompt-edit="' + prompt.id + '" aria-label="Prompt bearbeiten" title="Prompt bearbeiten">\u270e</button>' +
@@ -14388,6 +14389,14 @@
       '}' +
       '.cvz-persona-chip-active { color: var(--cvz-teal); border-color: var(--cvz-teal); }' +
 
+      '.cvz-prompt-sources { font-size: 11px; color: var(--cvz-text-muted); white-space: normal; line-height: 1.35; }' +
+      '.cvz-jc-src { margin: 8px 0 0; }' +
+      '.cvz-jc-src-title { margin: 0 0 3px; font-size: 11px; color: var(--cvz-text-muted); }' +
+      '.cvz-jc-src-row { display: grid; grid-template-columns: 64px 1fr 92px; align-items: center; gap: 8px; margin: 2px 0; font-size: 12px; }' +
+      '.cvz-jc-src-label { color: var(--cvz-text); }' +
+      '.cvz-jc-src-bar { height: 5px; background: var(--cvz-border); display: block; }' +
+      '.cvz-jc-src-bar > span { display: block; height: 100%; background: var(--cvz-teal); }' +
+      '.cvz-jc-src-val { text-align: right; color: var(--cvz-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }' +
       '.cvz-prompt-content-type {' +
         'font-size: 11px; color: var(--cvz-amber); white-space: normal; line-height: 1.35;' +
       '}' +
@@ -15500,6 +15509,28 @@
       return '';
     }
     return '<span class="cvz-prompt-content-type" title="' + escapeHtml(title) + '">' + escapeHtml(text) + '</span>';
+  }
+
+  // NEU (27.11.2026): Antworten mit verlinkten Quellen je Prompt, nach Kanal getrennt.
+  // Daten: prompt.citation_by_channel[ch].with_sources / total_runs (Backend: Antworten mit mindestens
+  // einer verlinkten Quelle). Antworten ohne Quellen kommen aus dem Modellwissen, dort kann kein Content
+  // zitiert werden. Folgt dem KI-Umschalter, bei "Alle" stehen beide Kanäle getrennt.
+  function renderPromptSourcesBadge(p) {
+    var by = p && p.citation_by_channel;
+    if (!by) return '';
+    var ch = activeChannel();
+    var channels = ch === 'all' ? ['chat_gpt', 'gemini'] : [ch];
+    var parts = [], titles = [];
+    channels.forEach(function (c) {
+      var st = by[c];
+      if (!st || !st.total_runs || st.with_sources == null) return;
+      parts.push((CHANNEL_LABELS[c] || c) + ' ' + st.with_sources + ' von ' + st.total_runs);
+      titles.push((CHANNEL_LABELS[c] || c) + ': ' + st.with_sources + ' von ' + st.total_runs + ' Antworten mit verlinkten Quellen');
+    });
+    if (!parts.length) return '';
+    var title = 'Antworten mit verlinkten Quellen (' + promptWindowLabel(p) + '). ' + titles.join('. ') +
+      '. Ohne Quellen antwortet die KI aus ihrem Wissen, dann kann kein Content zitiert werden.';
+    return '<span class="cvz-prompt-sources" title="' + escapeHtml(title) + '">Mit Quellen: ' + escapeHtml(parts.join(' \u00b7 ')) + '</span>';
   }
 
   // Ausführliche Form in der aufgeklappten Zeile (dort auch auf dem Handy lesbar).
@@ -17591,6 +17622,36 @@
 
         chLine.appendChild(row);
       });
+
+      // NEU (27.11.2026): Anteil der Antworten mit verlinkten Quellen je Kanal, getrennt. Zeigt, in welchen
+      // Phasen die KI überwiegend im Web recherchiert (Quellen) und wo sie aus ihrem Wissen antwortet.
+      var srcRows = visibleChannels().filter(function (channel) {
+        var c = jc && jc.source_coverage && jc.source_coverage[channel] && jc.source_coverage[channel][phase];
+        return c && c.runs > 0;
+      });
+      if (srcRows.length) {
+        var srcBlock = document.createElement('div');
+        srcBlock.className = 'cvz-jc-src';
+        var srcTitle = document.createElement('p');
+        srcTitle.className = 'cvz-jc-src-title';
+        srcTitle.textContent = 'Antworten mit Quellen';
+        srcTitle.title = 'Anteil der KI-Antworten, die mindestens eine Quelle verlinken. Ohne Quellen antwortet die KI aus ihrem ' +
+          'Wissen, dann kann kein Content zitiert werden. Je Kanal getrennt, weil ChatGPT und Gemini unterschiedlich oft recherchieren.';
+        srcBlock.appendChild(srcTitle);
+        srcRows.forEach(function (channel) {
+          var c = jc.source_coverage[channel][phase];
+          var pct = Math.round(100 * c.with_sources / c.runs);
+          var r = document.createElement('div');
+          r.className = 'cvz-jc-src-row';
+          r.title = (CHANNEL_LABELS[channel] || channel) + ': ' + c.with_sources + ' von ' + c.runs + ' Antworten mit Quellen. ' +
+            'Prompts mit Quellen: ' + c.prompts_with_sources + ' von ' + c.prompts + '.';
+          r.innerHTML = '<span class="cvz-jc-src-label">' + escapeHtml(CHANNEL_LABELS[channel] || channel) + '</span>' +
+            '<span class="cvz-jc-src-bar"><span style="width:' + pct + '%"></span></span>' +
+            '<span class="cvz-jc-src-val">' + pct + ' % (' + c.with_sources + '/' + c.runs + ')</span>';
+          srcBlock.appendChild(r);
+        });
+        card.appendChild(srcBlock);
+      }
 
       // NEU (06.11.2026): Liefert ein Kanal in dieser Phase selten Quellen (Gemini antwortet auf
       // Wissensfragen oft ohne), sagt ein niedriger Wert wenig über euch. Hinweis nur bei
