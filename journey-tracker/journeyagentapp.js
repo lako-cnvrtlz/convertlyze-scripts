@@ -12980,7 +12980,7 @@
       var hintEl = document.createElement('p');
       hintEl.className = 'cvz-card-placeholder-text';
       hintEl.style.marginTop = '12px';
-      hintEl.textContent = 'Erledigte Einträge erscheinen zusätzlich in der Änderungs-Chronik und als Markierung im Verlauf.';
+      hintEl.textContent = 'Alle Einträge stehen unten in der Tabelle. Erledigte erscheinen zusätzlich als Markierung im Verlauf.';
       section.appendChild(hintEl);
     }
 
@@ -19210,7 +19210,7 @@
 
   // GEÄNDERT (27.11.2026): Alle eingetragenen Änderungen als Tabelle (statt Karten), mit Filter und CSV-Export.
   // Zeilen: eigene Maßnahmen in jedem Status plus Maßnahmenplan-Einträge, sofern als umgesetzt markiert.
-  function changeRowsForTable(topicId) {
+  function changeRowsForTable(topicId, detail) {
     var act = actionActivity(topicId);
     var rows = [];
     (state.contentChangesCache[topicId] || []).forEach(function (ch) {
@@ -19225,22 +19225,31 @@
         typeLabel: CONTENT_CHANGE_TYPE_LABELS[ch.change_type] || ch.change_type || '',
       });
     });
+    // Frühere Protokoll-Einträge (topic_changelog, altes Formular): nur lesbar, ohne Status und Kommentare.
+    ((detail && detail.changelog) || []).forEach(function (e) {
+      rows.push({
+        ch: { id: e.id, description: e.entry_text || '', change_type: 'protokoll', url: null },
+        ref: 'log:' + e.id, isPlan: false, isLegacy: true, status: 'erledigt', comments: [],
+        date: e.created_at ? String(e.created_at).slice(0, 10) : '',
+        typeLabel: 'Früheres Protokoll',
+      });
+    });
     rows.sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
     return rows;
   }
 
-  function filteredChangeRows(topicId) {
+  function filteredChangeRows(topicId, detail) {
     var f = state.changesTableFilter;
-    return changeRowsForTable(topicId).filter(function (r) {
+    return changeRowsForTable(topicId, detail).filter(function (r) {
       return (f.status === 'alle' || r.status === f.status) && (f.type === 'alle' || r.ch.change_type === f.type);
     });
   }
 
-  function exportChangesCsv(topicId) {
+  function exportChangesCsv(topicId, detail) {
     var X = window.CVZExport;
     if (!X || !X.toCsv) return;
     var headers = ['Datum', 'Typ', 'Änderung', 'URL', 'Status', 'Grund', 'Kommentare'];
-    var rows = filteredChangeRows(topicId).map(function (r) {
+    var rows = filteredChangeRows(topicId, detail).map(function (r) {
       var cm = r.comments.map(function (c) {
         return [c.author_name || 'Unbekannt', formatShortDate(c.created_at)].filter(Boolean).join(', ') + ': ' + (c.body || '');
       }).join(' | ');
@@ -19259,12 +19268,12 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
   }
 
-  function renderOwnMeasures(topicId) {
-    var allRows = changeRowsForTable(topicId);
+  function renderOwnMeasures(topicId, detail) {
+    var allRows = changeRowsForTable(topicId, detail);
     if (!allRows.length) return null;
     var act = actionActivity(topicId);
     var statusAvailable = act.available && allRows.some(function (r) { return 'status' in r.ch; });
-    var rows = filteredChangeRows(topicId);
+    var rows = filteredChangeRows(topicId, detail);
     var f = state.changesTableFilter;
 
     var section = document.createElement('div');
@@ -19296,14 +19305,14 @@
       Object.keys(ACTION_STATUS_LABELS).map(function (k) { return [k, ACTION_STATUS_LABELS[k]]; })
     ), function (v) { state.changesTableFilter.status = v; }));
     tools.appendChild(makeSelect('Nach Typ filtern', f.type, [['alle', 'Alle Typen']].concat(
-      Object.keys(CONTENT_CHANGE_TYPE_LABELS).map(function (k) { return [k, CONTENT_CHANGE_TYPE_LABELS[k]]; })
+      Object.keys(CONTENT_CHANGE_TYPE_LABELS).map(function (k) { return [k, CONTENT_CHANGE_TYPE_LABELS[k]]; }).concat([['protokoll', 'Früheres Protokoll']])
     ), function (v) { state.changesTableFilter.type = v; }));
     if (window.CVZExport && window.CVZExport.toCsv) {
       var exp = document.createElement('button');
       exp.type = 'button';
       exp.className = 'cvz-add-toggle';
       exp.textContent = 'Als CSV exportieren';
-      exp.addEventListener('click', function () { exportChangesCsv(topicId); });
+      exp.addEventListener('click', function () { exportChangesCsv(topicId, detail); });
       tools.appendChild(exp);
     }
     head.appendChild(tools);
@@ -19351,14 +19360,14 @@
       }
 
       var tSt = td('cvz-changes-cell-status');
-      if (statusAvailable && !r.isPlan) {
+      if (statusAvailable && !r.isPlan && !r.isLegacy) {
         tSt.appendChild(renderActionStatusControl(topicId, { ref: r.ref, status: r.status, kind: 'change', available: true }));
       } else {
         tSt.textContent = ACTION_STATUS_LABELS[r.status] || r.status;
       }
 
       var tCm = td('cvz-changes-cell-comments');
-      var cm = r.isPlan ? null : renderActionComments(topicId, r.ref);
+      var cm = (r.isPlan || r.isLegacy) ? null : renderActionComments(topicId, r.ref);
       if (cm) tCm.appendChild(cm); else tCm.textContent = '-';
       tbody.appendChild(tr);
     });
@@ -20000,7 +20009,7 @@
     block.style.cssText = 'margin-top:32px;padding-top:20px;border-top:1px solid var(--cvz-border,#232b36);';
     block.appendChild(renderContentChangesSection(state.activeTopicId, detail.search_queries, detail.prompts));
     // NEU (15.11.2026): eingetragene Maßnahmen mit Status und Kommentaren
-    var own = renderOwnMeasures(state.activeTopicId);
+    var own = renderOwnMeasures(state.activeTopicId, detail);
     if (own) block.appendChild(own);
     return block;
   }
@@ -20433,91 +20442,8 @@
     // NEU (21.10.2026): Google-Suche (Search Console) im selben Raster
     wrap.appendChild(renderGscTopicSection(topicId, detail));
 
-    // Timeline: Content-Änderungen (user-logged) + detail.changelog (system)
-    // GEAENDERT (18.09.2026): Eintraege mit change_type 'aktionsplan'
-    // (automatisch beim Erledigen eines Aktionsplan-Items angelegt, siehe
-    // main.py toggle_action_plan_item_endpoint) werden hier bewusst
-    // ausgeblendet. Sie bleiben in "Content-Änderungen & Events" sowie als
-    // Marker im Trend-Chart sichtbar, sollen aber nicht zusätzlich in der
-    // Änderungs-Chronik auftauchen.
-    var combined = [];
-    doneContentChanges(topicId).forEach(function (ch) {
-      if (ch.change_type === 'aktionsplan') return;
-      combined.push({
-        date: ch.changed_at,
-        type: 'change',
-        typeLabel: CONTENT_CHANGE_TYPE_LABELS[ch.change_type] || ch.change_type,
-        text: ch.description,
-        url: ch.url || null,
-        color: '#0d9488',
-      });
-    });
-    (detail.changelog || []).forEach(function (entry) {
-      combined.push({
-        date: entry.created_at ? entry.created_at.slice(0, 10) : '',
-        type: 'system',
-        typeLabel: 'System-Erkennung',
-        text: entry.entry_text || '',
-        url: null,
-        color: '#8878ca',
-      });
-    });
-    // Sort by date descending
-    combined.sort(function (a, b) { return b.date.localeCompare(a.date); });
-
-    if (combined.length > 0) {
-      var timelineSection = document.createElement('div');
-      timelineSection.className = 'cvz-section';
-      var tlHeading = document.createElement('p');
-      tlHeading.className = 'cvz-section-label';
-      tlHeading.textContent = 'Änderungs-Chronik';
-      timelineSection.appendChild(tlHeading);
-      var tlSub = document.createElement('p');
-      tlSub.className = 'cvz-card-placeholder-text';
-      tlSub.style.marginBottom = '12px';
-      tlSub.textContent = 'Alle eingetragenen Content-Änderungen und System-Erkennungen, chronologisch.';
-      timelineSection.appendChild(tlSub);
-
-      var timeline = document.createElement('div');
-      timeline.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
-      combined.forEach(function (item) {
-        var row = document.createElement('div');
-        row.className = 'cvz-card';
-        row.style.cssText = 'display:flex;gap:12px;align-items:flex-start;padding:10px 14px;';
-
-        var dot = document.createElement('div');
-        dot.style.cssText = 'flex-shrink:0;width:10px;height:10px;border-radius:50%;background:' + item.color + ';margin-top:3px;';
-        row.appendChild(dot);
-
-        var inner = document.createElement('div');
-        inner.style.cssText = 'flex:1 1 0;';
-
-        var meta = document.createElement('p');
-        meta.style.cssText = 'margin:0 0 2px;font-size:11px;color:var(--cvz-text-muted,#6b7280);';
-        meta.textContent = item.date + ' · ' + item.typeLabel;
-        inner.appendChild(meta);
-
-        var text = document.createElement('p');
-        text.style.cssText = 'margin:0;font-size:13px;line-height:1.4;';
-        text.textContent = item.text;
-        inner.appendChild(text);
-
-        if (item.url) {
-          var link = document.createElement('a');
-          link.href = item.url;
-          link.target = '_blank';
-          link.rel = 'noopener noreferrer';
-          link.style.cssText = 'font-size:12px;color:var(--cvz-teal,#0d9488);word-break:break-all;';
-          link.textContent = item.url;
-          inner.appendChild(link);
-        }
-
-        row.appendChild(inner);
-        timeline.appendChild(row);
-      });
-      timelineSection.appendChild(timeline);
-      wrap.appendChild(timelineSection);
-    }
+    // ENTFERNT (27.11.2026): Änderungs-Chronik. Alle Änderungen stehen jetzt in der Tabelle "Alle Änderungen"
+    // im Maßnahmenplan (inkl. früherer Protokoll-Einträge aus topic_changelog).
 
     // Visibility trend from prompt data (weekly cite/mention rates)
     // ENTFERNT (21.10.2026): "Sichtbarkeits-Verlauf im Detail". Die Wochen mit
