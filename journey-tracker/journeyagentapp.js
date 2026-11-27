@@ -14091,6 +14091,13 @@
       '.cvz-journey-retrieved-num { color: var(--cvz-text-muted); white-space: nowrap; font-size: 11px; }' +
       '.cvz-journey-retrieved-meta { margin: 0 0 3px; font-size: 10px; color: var(--cvz-text-muted); }' +
       '.cvz-journey-retrieved-more { margin-top: 4px; font-size: 11px; }' +
+      // NEU (27.11.2026): Korrektur-Menü je Treffer ("Passt nicht")
+      '.cvz-jr-fix { display: inline-block; margin-left: 6px; }' +
+      '.cvz-jr-fix > summary { display: inline; cursor: pointer; list-style: none; font-size: 10px; color: var(--cvz-text-muted); text-decoration: underline; }' +
+      '.cvz-jr-fix > summary::-webkit-details-marker { display: none; }' +
+      '.cvz-jr-fix-menu { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: 3px; }' +
+      '.cvz-jr-fix-menu button { background: none; border: 0; padding: 0; cursor: pointer; font-size: 11px; color: var(--cvz-primary, #2563eb); text-align: left; }' +
+      '.cvz-jr-fix-menu button:disabled { opacity: .5; cursor: default; }' +
       // NEU (25.09.2026, Kundenwunsch): Zeitraum-Preset-Picker (4/12/26 Wochen).
       '.cvz-weeks-preset-picker { display: flex; gap: 6px; flex-shrink: 0; }' +
       '.cvz-weeks-preset-btn { padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius:0; ' +
@@ -17504,6 +17511,39 @@
     'aber nicht oder selten verlinkt. Ob ChatGPT sie geöffnet hat, ist nicht bekannt. ' +
     'Kandidaten für eigene Beiträge mit genau passendem Inhalt. Nur ChatGPT, letzte 28 Tage.';
 
+  // NEU (27.11.2026): Korrektur direkt an der Zeile. Wirkt für das ganze Team (wie unter Daten > Quellen),
+  // danach wird die Liste neu geladen, weil die Einordnung im Backend berechnet wird.
+  function buildJourneyFixMenu(topicId, d) {
+    var details = document.createElement('details');
+    details.className = 'cvz-jr-fix';
+    var sum = document.createElement('summary');
+    sum.textContent = 'Passt nicht';
+    details.appendChild(sum);
+    var menu = document.createElement('div');
+    menu.className = 'cvz-jr-fix-menu';
+    var options = [
+      { kind: 'unternehmen', text: 'Ist Anbieter oder Beratung, kein Gastbeitrag' },
+      { kind: 'wettbewerber', text: 'Ist Wettbewerber' }
+    ];
+    if (d.kind_source === 'manuell') options.push({ kind: null, text: 'Korrektur zurücknehmen' });
+    options.forEach(function (o) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = o.text;
+      b.disabled = !!state.savingDomainKind[d.domain];
+      b.addEventListener('click', function () {
+        saveDomainKind(topicId, d.domain, o.kind).then(function () {
+          // Einordnung neu vom Server holen, sie hängt an der gespeicherten Art
+          Object.keys(state.retrievedCache).forEach(function (k) { delete state.retrievedCache[k]; });
+          maybeLoadRetrieved(topicId);
+        });
+      });
+      menu.appendChild(b);
+    });
+    details.appendChild(menu);
+    return details;
+  }
+
   function renderJourneyRetrievedBlock(topicId, phase) {
     var data = state.retrievedCache[retrievedKey(topicId)];
     if (!data || !data.domains) return null;
@@ -17513,7 +17553,9 @@
     var ownGap = own && own.runs_found > own.runs_cited;
     var cands = views.filter(function (d) {
       // GEÄNDERT (13.11.2026): Domains ohne realistische Platzierung (z. B. Firmenblog eines Anbieters) sind hier keine Chance.
-      return !d.is_own && !d.is_competitor && d.bucket !== 'oft_zitiert' && d.runs_found >= 2 && placementOf(d).kind !== 'keine';
+      // GEÄNDERT (27.11.2026): nur sichere Treffer (Gastbeitrag, Eintrag, eigener Beitrag). Unklare und ungeprüfte
+      // Domains stehen weiter unter Daten > Quellen, damit hier keine falsche Chance angezeigt wird.
+      return !d.is_own && !d.is_competitor && d.bucket !== 'oft_zitiert' && d.runs_found >= 2 && PLACEMENT_ACTIONABLE[placementOf(d).kind];
     }).sort(function (a, b) {
       // Domains, bei denen fremde Beiträge laut Seitenanalyse unrealistisch sind (z. B. Hersteller-Doku), nach hinten
       var pa = PLACEMENT_ORDER[placementOf(a).kind] || 0, pb = PLACEMENT_ORDER[placementOf(b).kind] || 0;
@@ -17559,7 +17601,8 @@
       if (metaParts.length) {
         var meta = document.createElement('p');
         meta.className = 'cvz-journey-retrieved-meta';
-        meta.textContent = metaParts.join(' · ');
+        meta.appendChild(document.createTextNode(metaParts.join(' · ')));
+        meta.appendChild(buildJourneyFixMenu(topicId, d));
         wrap.appendChild(meta);
       }
     });
