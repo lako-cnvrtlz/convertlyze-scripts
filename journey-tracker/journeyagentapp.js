@@ -7521,11 +7521,11 @@
       '<div class="cvz-chart-legend">' +
         '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-teal)"></span>Prompts: Verlinkungsrate</span>' +
         '<span class="cvz-chart-legend-item"><span class="cvz-legend-dot" style="background: var(--cvz-amber)"></span>Keywords: Sichtbarkeits-Index</span>' +
-        (markers.length ? '<span class="cvz-chart-legend-item"><span class="cvz-legend-marker"></span>Eure Eintr\u00e4ge im \u00c4nderungsprotokoll</span>' : '') +
+        (markers.length ? '<span class="cvz-chart-legend-item"><span class="cvz-legend-marker"></span>Eure umgesetzten \u00c4nderungen</span>' : '') +
       '</div>' +
       '<p class="cvz-chart-caption">Verlinkungsrate: Anteil ausgewerteter ChatGPT/Gemini-L\u00e4ufe pro Woche, in dem eure Domain verlinkt wurde. ' +
       'Sichtbarkeits-Index: aus Google-Position und GSC-Position abgeleitete Kennzahl (0 bis 100, h\u00f6her ist besser), gemittelt \u00fcber alle ' +
-      'in dieser Woche erfassten Keywords. Gestrichelte Linien markieren eure Eintr\u00e4ge im \u00c4nderungsprotokoll ' +
+      'in dieser Woche erfassten Keywords. Gestrichelte Linien markieren eure umgesetzten \u00c4nderungen aus dem Ma\u00dfnahmenplan ' +
       '(Datum wird auf die n\u00e4chstgelegene Woche gerundet). So seht ihr, welche \u00c4nderungen zeitlich mit einer Entwicklung zusammenfallen. ' +
       'Klickt auf einen Punkt oder eine Markierung f\u00fcr die Details dieser Woche.</p>';
     section.appendChild(card);
@@ -9381,7 +9381,7 @@
           buildLineChartSvg(series, xLabels, { markers: markers }) +
           '<p class="cvz-chart-caption">Position im Verlauf, niedriger ist besser. Historie beginnt mit eurem ersten ' +
           'Monatslauf nach Einf\u00fchrung dieser Auswertung, keine r\u00fcckwirkenden Daten. Gestrichelte Linien sind ' +
-          'Eintr\u00e4ge im \u00c4nderungsprotokoll, die ihr explizit mit diesem Keyword verkn\u00fcpft habt.</p>';
+          'umgesetzte \u00c4nderungen, die ihr explizit mit diesem Keyword verkn\u00fcpft habt.</p>';
         wrap.appendChild(chartWrap);
       }
     } else if (snapshots && snapshots.length === 1) {
